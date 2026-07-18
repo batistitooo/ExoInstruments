@@ -135,14 +135,26 @@ namespace ExoInstruments
         private StarTarget forecastAppliedStar;
         private int forecastAppliedInstrumentIndex = -1;
         private double forecastComputedUt = double.NaN;
+        // Set when a heatmap click issues a warp, cleared once it lands --
+        // the only on-screen sign a click actually did something, since the
+        // heatmap itself only refreshes every ForecastRefreshUtSeconds and
+        // gave no feedback that a warp was even running.
+        private double forecastWarpTargetUt = double.NaN;
         private const int ForecastNights = 12;
         private const int ForecastColumns = 128;
         private const int ForecastWidth = 640;
         private const int ForecastRowPixels = 14;
         private const int ForecastHeight = ForecastNights * ForecastRowPixels;
-        // Recompute once the clock has moved a quarter-night past the last compute:
-        // sooner is wasted work (the grid barely changes), later leaves stale rows.
-        private const double ForecastRefreshUtSeconds = 0.25 * 21600.0;
+        // Recompute once the clock has moved one column-width past the last
+        // compute. Tied to the actual cell resolution (nightSeconds / columns,
+        // matching ObservingForecast.Compute's cellSeconds with its default
+        // fallback body-rotation length) rather than a fraction of a whole
+        // night: the previous quarter-night threshold (5400s) was ~32 columns
+        // coarser than the grid it gated, so the "now" edge and the highlighted
+        // cell sat frozen for up to 1.5 in-game hours -- highly visible during
+        // any warp faster than a few hundred x -- then jumped a third of a
+        // night in one frame.
+        private const double ForecastRefreshUtSeconds = 21600.0 / ForecastColumns;
 
         // Eyepiece mode (roadmap): static RA/Dec field view around the selected
         // star, drawn in the right column while no observation is running. The
@@ -169,6 +181,8 @@ namespace ExoInstruments
         private GUIStyle axisLabelRightStyle;
         private GUIStyle axisLabelLeftStyle;
         private GUIStyle smallCaptionStyle;
+        private GUIStyle wrappedLabelStyle;
+        private GUIStyle sectionHeaderStyle;
         private bool stylesInitialized = false;
 
         // Stand-in for clicking a not-yet-built observatory building: type this
@@ -281,6 +295,7 @@ namespace ExoInstruments
             PollForecastRenderTask();
             PollTransitAnalysisTask();
             PollRvAnalysisTask();
+            BetterTimeWarpIntegration.PollRestore();
 
             if (session == null && rvSession == null && imagingSession == null)
             {
@@ -411,6 +426,8 @@ namespace ExoInstruments
             axisLabelRightStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleRight };
             axisLabelLeftStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleLeft };
             smallCaptionStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Italic, wordWrap = true };
+            wrappedLabelStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
+            sectionHeaderStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
             stylesInitialized = true;
         }
 
@@ -487,8 +504,6 @@ namespace ExoInstruments
                     DrawStartObservationButton();
                     DrawForecastPanel();
                 }
-                GUILayout.Space(14);
-                DrawProgramPanel();
             }
             else
             {
@@ -551,7 +566,7 @@ namespace ExoInstruments
                 }
             }
 
-            GUILayout.Label(SelectedInstrument.Citation, smallCaptionStyle);
+            DrawInstrumentPresentation(SelectedInstrument);
 
             if (CareerFogActive)
             {
@@ -564,7 +579,7 @@ namespace ExoInstruments
             // would leak whether it's a known host before any data is taken.
             if (IsIdentityHidden(selectedStar))
             {
-                GUILayout.Label("No prior data on this target -- feasibility can't be estimated before a first identification scan.", smallCaptionStyle);
+                GUILayout.Label("No prior data on this target. Feasibility can't be estimated before a first identification scan.", smallCaptionStyle);
                 return;
             }
 
@@ -575,13 +590,13 @@ namespace ExoInstruments
 
                 if (rvDetectableCount == 0)
                 {
-                    GUILayout.Label("(no planet mass on record anywhere in this system -- expect a null result)");
+                    GUILayout.Label("No planet mass on record anywhere in this system. Expect a null result.", smallCaptionStyle);
                 }
                 else
                 {
                     if (rvDetectableCount > 1)
                     {
-                        GUILayout.Label($"{rvDetectableCount} known planets orbit this host -- their reflex signals superpose, so one campaign samples them all.", smallCaptionStyle);
+                        GUILayout.Label($"{rvDetectableCount} known planets orbit this host. Their reflex signals superpose, so one campaign samples them all.", smallCaptionStyle);
                     }
                     double neededDays = RvDetector.EstimateRequiredBaselineDays(LongestRvPeriodDays(systemPlanets), SelectedInstrument.CadenceSeconds);
                     GUILayout.Label($"Estimated baseline needed: ~{ToDisplayDays(neededDays * 86400.0):F1} days at this cadence to resolve the longest catalog period in the system.", smallCaptionStyle);
@@ -591,25 +606,25 @@ namespace ExoInstruments
             {
                 if (!selectedStar.HasPlanet)
                 {
-                    GUILayout.Label("No catalogued companion here -- imaging will still characterize the star itself.", smallCaptionStyle);
+                    GUILayout.Label("No catalogued companion here. Imaging will still characterize the star itself.", smallCaptionStyle);
                     return;
                 }
                 var assessment = DirectImagingSimulator.Assess(selectedStar, SelectedInstrument);
                 if (!assessment.HasRequiredData)
                 {
-                    GUILayout.Label($"({assessment.MissingDataReason} -- companion search will be inconclusive; " +
-                                     (selectedStar.EffectiveTempK.HasValue ? "stellar characterization still possible)" : "no color data for characterization either)"));
+                    GUILayout.Label($"{assessment.MissingDataReason}: companion search will be inconclusive. " +
+                                     (selectedStar.EffectiveTempK.HasValue ? "Stellar characterization still possible." : "No color data for characterization either."), smallCaptionStyle);
                 }
                 else if (!assessment.Resolvable)
                 {
-                    GUILayout.Label($"Separation {assessment.SeparationArcsec * 1000.0:F1} mas is inside the {assessment.DiffractionLimitArcsec * 1000.0:F1} mas diffraction limit -- " +
-                                     "not resolvable at any exposure.", smallCaptionStyle);
+                    GUILayout.Label($"Separation {assessment.SeparationArcsec * 1000.0:F1} mas is inside the {assessment.DiffractionLimitArcsec * 1000.0:F1} mas diffraction limit. " +
+                                     "Not resolvable at any exposure.", smallCaptionStyle);
                 }
                 else
                 {
                     double neededSeconds = DirectImagingSimulator.RequiredExposureSeconds(assessment);
                     string exposureNote = double.IsInfinity(neededSeconds)
-                        ? "below the deep contrast limit -- not detectable"
+                        ? "below the deep contrast limit, not detectable"
                         : neededSeconds < 3600.0 * 24.0
                             ? $"~{neededSeconds / 3600.0:F1} h of integration to reach 5-sigma"
                             : $"~{ToDisplayDays(neededSeconds):F1} days of integration to reach 5-sigma";
@@ -621,9 +636,82 @@ namespace ExoInstruments
                 int transitingCount = CountTransiting(GetSystemPlanets(selectedStar));
                 if (transitingCount > 1)
                 {
-                    GUILayout.Label($"{transitingCount} known transiting planets orbit this host -- their transits superpose on one light curve; the analysis separates them by iterative masking.", smallCaptionStyle);
+                    GUILayout.Label($"{transitingCount} known transiting planets orbit this host. Their transits superpose on one light curve; the analysis separates them by iterative masking.", smallCaptionStyle);
                 }
             }
+        }
+
+        // Which instrument's presentation card is currently expanded; toggled by
+        // clicking the card header. Starts expanded the first time an instrument
+        // is selected so a new player sees the explanation at least once.
+        private string presentationOpenFor;
+        private bool presentationInitialized;
+
+        /// <summary>
+        /// Short presentation card for the selected instrument: a plain-language
+        /// description of what the device physically is plus its key working
+        /// numbers, so the player knows what they're about to point at the sky.
+        /// Collapsible so veterans can fold it away.
+        /// </summary>
+        void DrawInstrumentPresentation(InstrumentSpec instrument)
+        {
+            if (!presentationInitialized)
+            {
+                presentationInitialized = true;
+                presentationOpenFor = instrument.Name;
+            }
+
+            bool open = presentationOpenFor == instrument.Name;
+            string toggleLabel = (open ? "▲ " : "▼ ") + $"About {instrument.Name}";
+            if (GUILayout.Button(toggleLabel, GUILayout.Height(22)))
+            {
+                presentationOpenFor = open ? null : instrument.Name;
+                open = !open;
+            }
+            if (!open) return;
+
+            GUILayout.BeginVertical(GUI.skin.box);
+            if (!string.IsNullOrEmpty(instrument.Description))
+            {
+                GUILayout.Label(instrument.Description, wrappedLabelStyle);
+                GUILayout.Space(4);
+            }
+
+            GUILayout.Label($"Method: {DescribeMethod(instrument.Method)}", smallCaptionStyle);
+            if (instrument.IsSpaceBased)
+            {
+                GUILayout.Label("Platform: space-based. Observes continuously, unaffected by daylight, weather or moonlight.", smallCaptionStyle);
+            }
+            else
+            {
+                GUILayout.Label($"Platform: ground-based, {instrument.ApertureMeters:0.##} m aperture at {instrument.SiteAltitudeMeters:N0} m altitude. " +
+                                 "Observes only at night with the target above the horizon.", smallCaptionStyle);
+            }
+            GUILayout.Label($"Cadence: one measurement every {DescribeDuration(instrument.CadenceSeconds)}.", smallCaptionStyle);
+            GUILayout.Label($"Reference: {instrument.Citation}", smallCaptionStyle);
+            GUILayout.EndVertical();
+        }
+
+        private static string DescribeMethod(DetectionMethod method)
+        {
+            switch (method)
+            {
+                case DetectionMethod.Transit:
+                    return "transit photometry. Watches the star's brightness for the periodic dip of a planet crossing its disk.";
+                case DetectionMethod.RadialVelocity:
+                    return "radial velocity. Measures the star's wobble through Doppler shifts of its spectral lines.";
+                case DetectionMethod.DirectImaging:
+                    return "direct imaging. Blocks the starlight and integrates on the planet's own faint glow.";
+                default:
+                    return method.ToString();
+            }
+        }
+
+        private static string DescribeDuration(double seconds)
+        {
+            if (seconds < 120.0) return $"{seconds:F0} s";
+            if (seconds < 7200.0) return $"{seconds / 60.0:F0} min";
+            return $"{seconds / 3600.0:F0} h";
         }
 
         /// <summary>
@@ -743,7 +831,7 @@ namespace ExoInstruments
                 return;
             }
 
-            GUILayout.Label($"{target.Name}  [{target.Status}]");
+            GUILayout.Label($"{target.Name}  [{target.Status}]", sectionHeaderStyle);
             if (!string.IsNullOrEmpty(target.DetectionType))
             {
                 string yearSuffix = target.DiscoveryYear.HasValue ? $" ({target.DiscoveryYear})" : "";
@@ -775,8 +863,8 @@ namespace ExoInstruments
             {
                 GUILayout.Label($"Position: RA {target.RaDeg.Value:F3} deg   Dec {target.DecDeg.Value:F3} deg");
             }
-            GUILayout.Label("Not yet surveyed. Position and brightness are all the sky gives away -- " +
-                             "complete an observation and run the analysis to identify this star.", smallCaptionStyle);
+            GUILayout.Label("Not yet surveyed. Position and brightness are all the sky gives away. " +
+                             "Complete an observation and run the analysis to identify this star.", smallCaptionStyle);
         }
 
         /// <summary>
@@ -794,7 +882,7 @@ namespace ExoInstruments
                 GUILayout.Label($"Color temperature: ~{target.EffectiveTempK.Value:F0} K " +
                                  $"(class {StellarColor.SpectralClass(target.EffectiveTempK.Value)}, from B-V)");
             }
-            GUILayout.Label("No catalogued companion here -- imaging will still characterize the star itself.", smallCaptionStyle);
+            GUILayout.Label("No catalogued companion here. Imaging will still characterize the star itself.", smallCaptionStyle);
         }
 
         void DrawHabitableZoneLines(StarTarget target)
@@ -819,7 +907,7 @@ namespace ExoInstruments
             double aAU = target.EstimatedSemiMajorAxisAU;
             if (aAU <= 0)
             {
-                GUILayout.Label("Planet orbit: unknown -- can't place it relative to the HZ.", smallCaptionStyle);
+                GUILayout.Label("Planet orbit: unknown, so it can't be placed relative to the habitable zone.", smallCaptionStyle);
                 return;
             }
 
@@ -832,10 +920,10 @@ namespace ExoInstruments
                     GUILayout.Label($"Planet at {aAU:F2} AU: in the optimistic band only (Recent Venus / Early Mars limits).", smallCaptionStyle);
                     break;
                 case HzVerdict.TooHot:
-                    GUILayout.Label($"Planet at {aAU:F2} AU: too close -- inside even the optimistic inner edge.", smallCaptionStyle);
+                    GUILayout.Label($"Planet at {aAU:F2} AU: too close, inside even the optimistic inner edge.", smallCaptionStyle);
                     break;
                 default:
-                    GUILayout.Label($"Planet at {aAU:F2} AU: too far -- beyond even the optimistic outer edge.", smallCaptionStyle);
+                    GUILayout.Label($"Planet at {aAU:F2} AU: too far, beyond even the optimistic outer edge.", smallCaptionStyle);
                     break;
             }
         }
@@ -843,7 +931,7 @@ namespace ExoInstruments
         void DrawStarSelection()
         {
             GUILayout.Label($"Select target star: ({catalog.Count} loaded)");
-            GUILayout.Label("Filter by name -- matches are highlighted and clickable on the sky chart:");
+            GUILayout.Label("Filter by name (matches are highlighted and clickable on the sky chart):");
 
             string newFilter = GUILayout.TextField(searchFilter, GUILayout.Height(28));
             if (newFilter != searchFilter)
@@ -1096,7 +1184,7 @@ namespace ExoInstruments
             HandleEyepieceZoom(viewRect);
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Field of view: {eyepieceFovDeg:F0} deg -- scroll over the view to zoom. North up, East left.", smallCaptionStyle);
+            GUILayout.Label($"Field of view: {eyepieceFovDeg:F0} deg. Scroll over the view to zoom. North up, East left.", smallCaptionStyle);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Wider", GUILayout.Width(70)))
                 eyepieceFovDeg = Mathf.Min(EyepieceMaxFovDeg, eyepieceFovDeg * 1.4f);
@@ -1262,7 +1350,7 @@ namespace ExoInstruments
             }
             GUILayout.Label(lastScanScienceAwarded > 0f
                 ? $"+{lastScanScienceAwarded:F0} Science"
-                : "Already surveyed -- no new Science.");
+                : "Already surveyed. No new Science.");
             GUILayout.Space(6);
         }
 
@@ -1270,8 +1358,9 @@ namespace ExoInstruments
         // Sandbox/science-sandbox: every instrument is available from the start
         // and scans are free, same as before this feature existed -- gated on the
         // same CareerFogActive check as the star fog above, no separate setting.
-
-        private bool programPanelOpen = false;
+        // Unlocking happens exclusively through the locked rows inside the
+        // observatory selector: a separate bottom-of-column "program" table
+        // duplicated the same rows and was removed as redundant.
 
         /// <summary>
         /// Start Observation with the career telescope-time cost attached:
@@ -1304,43 +1393,6 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// Career program overview: current Funds, cumulative survey Science,
-        /// and every still-locked instrument with exactly what's missing to get
-        /// it -- the "you need N more Science for ESPRESSO" answer, always visible
-        /// instead of buried in the observatory dropdown.
-        /// </summary>
-        void DrawProgramPanel()
-        {
-            if (!CareerFogActive) return;
-
-            string arrow = programPanelOpen ? "▲ " : "▼ ";
-            if (GUILayout.Button(arrow + "Observatory program -- funding & upgrades", GUILayout.Height(26)))
-            {
-                programPanelOpen = !programPanelOpen;
-            }
-            if (!programPanelOpen) return;
-
-            ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
-            double funds = Funding.Instance != null ? Funding.Instance.Funds : 0.0;
-            double earned = scenario?.TotalScienceEarned ?? 0.0;
-            GUILayout.Label($"Funds: {funds:N0}   Survey Science earned to date: {earned:N0}");
-            GUILayout.Label("Instrument unlocks need both the Funds and a Science track record from your own scans.", smallCaptionStyle);
-            GUILayout.Space(4);
-
-            bool anyLocked = false;
-            foreach (var instrument in Observatories.All)
-            {
-                if (IsInstrumentUnlocked(instrument)) continue;
-                anyLocked = true;
-                DrawLockedInstrumentRow(instrument);
-            }
-            if (!anyLocked)
-            {
-                GUILayout.Label("Every instrument is unlocked -- the program is fully equipped.");
-            }
-        }
-
         private static bool IsInstrumentUnlocked(InstrumentSpec instrument)
         {
             if (!CareerFogActive) return true;
@@ -1363,15 +1415,21 @@ namespace ExoInstruments
             bool scienceMet = earnedScience >= instrument.UnlockScienceThreshold;
             bool fundsMet = funds >= instrument.UnlockCostFunds;
 
-            string scienceNote = scienceMet
-                ? "Science requirement met"
-                : $"{instrument.UnlockScienceThreshold - earnedScience:N0} more Science needed";
-            string fundsNote = fundsMet
-                ? ""
-                : $", {instrument.UnlockCostFunds - funds:N0} more Funds needed";
+            string requirement;
+            if (scienceMet && fundsMet)
+            {
+                requirement = "ready to unlock";
+            }
+            else
+            {
+                var missing = new List<string>(2);
+                if (!scienceMet) missing.Add($"{instrument.UnlockScienceThreshold - earnedScience:N0} more Science");
+                if (!fundsMet) missing.Add($"{instrument.UnlockCostFunds - funds:N0} more Funds");
+                requirement = "needs " + string.Join(" and ", missing);
+            }
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"[LOCKED] {instrument.DisplayName} -- {instrument.UnlockCostFunds:N0} Funds -- {scienceNote}{fundsNote}");
+            GUILayout.Label($"Locked: {instrument.DisplayName} ({instrument.UnlockCostFunds:N0} Funds, {requirement})");
             GUILayout.FlexibleSpace();
             GUI.enabled = scienceMet && fundsMet && scenario != null;
             if (GUILayout.Button("Unlock", GUILayout.Width(70), GUILayout.Height(22)))
@@ -1445,7 +1503,9 @@ namespace ExoInstruments
                 GUI.enabled = true;
                 if (transitAnalysisTask != null)
                 {
-                    GUILayout.Label("Searching the light curve for transits -- this can take a moment on a long baseline.", smallCaptionStyle);
+                    float elapsed = Time.realtimeSinceStartup - transitAnalysisStartRealtime;
+                    GUILayout.Label($"Searching {transitAnalysisSampleCount} points for transits, still running ({elapsed:F0}s elapsed). " +
+                                     "A large dataset can legitimately take several minutes; the game itself isn't frozen.", smallCaptionStyle);
                 }
 
                 if (GUILayout.Button("New Observation"))
@@ -1463,7 +1523,7 @@ namespace ExoInstruments
                 // seeing residual points fold into nothing is the visual proof the
                 // masking search bottomed out, same idiom as the RV stages.
                 string plotTitle = lastTransitStages.Count > 1
-                    ? $"{GetDisplayName(session.Target)} -- signal {i + 1}" + (i > 0 ? " (masked residual search)" : "")
+                    ? $"{GetDisplayName(session.Target)}: signal {i + 1}" + (i > 0 ? " (masked residual search)" : "")
                     : GetDisplayName(session.Target);
                 DrawPlot(transitPhaseFoldedTextures[i], transitPhaseFoldedRanges[i], 0.0, stageResult.BestPeriodDays, "phase", plotTitle);
             }
@@ -1505,11 +1565,19 @@ namespace ExoInstruments
         // Observation" and started a fresh session while this one was still
         // computing) gets discarded instead of overwriting the new session.
         private ObservationSession transitAnalysisSession;
+        // Real time and sample count captured at task start, purely to give
+        // the "Analyzing..." label something concrete to say -- a box search
+        // over thousands of samples can legitimately run for minutes, and a
+        // static caption with no elapsed time reads exactly like a freeze.
+        private float transitAnalysisStartRealtime;
+        private int transitAnalysisSampleCount;
 
         void StartTransitAnalysis()
         {
             if (transitAnalysisTask != null || session == null) return;
             var samples = session.Samples;
+            transitAnalysisStartRealtime = Time.realtimeSinceStartup;
+            transitAnalysisSampleCount = samples.Count;
             transitAnalysisSession = session;
 
             transitAnalysisTask = Task.Run(() =>
@@ -1614,7 +1682,7 @@ namespace ExoInstruments
             if (lastTtvResult == null) return;
 
             GUILayout.Space(10);
-            GUILayout.Label("-- Transit timing (O-C) --");
+            GUILayout.Label("Transit timing (O-C)", sectionHeaderStyle);
 
             if (lastTtvResult.EpochCount < TransitTimingVariations.MinMeasuredEpochs)
             {
@@ -1644,7 +1712,7 @@ namespace ExoInstruments
             else
             {
                 GUILayout.Label($"No periodic timing signal above SNR {TransitTimingVariations.DetectionSnrThreshold:F0} " +
-                                 $"(best candidate SNR {lastTtvResult.Snr:F1}) -- mid-times consistent with a linear ephemeris.", smallCaptionStyle);
+                                 $"(best candidate SNR {lastTtvResult.Snr:F1}). Mid-times are consistent with a linear ephemeris.", smallCaptionStyle);
             }
         }
 
@@ -1680,7 +1748,7 @@ namespace ExoInstruments
                     // exactly the information a blind survey doesn't have. The
                     // player samples as long as they judge useful, like a real
                     // blind RV campaign.
-                    GUILayout.Label("Unidentified target -- no catalog period to plan a baseline against. Sample as long as you judge useful.");
+                    GUILayout.Label("Unidentified target: no catalog period to plan a baseline against. Sample as long as you judge useful.");
                     if (GUILayout.Button($"Warp +{ToDisplayDays(RvTopUpRealDays * 86400.0):F0} days"))
                     {
                         BetterTimeWarpIntegration.WarpTo(ut + RvTopUpRealDays * 86400.0);
@@ -1737,7 +1805,9 @@ namespace ExoInstruments
                 GUI.enabled = true;
                 if (rvAnalysisTask != null)
                 {
-                    GUILayout.Label("Searching the RV series for periodic signals -- this can take a moment on a long baseline.", smallCaptionStyle);
+                    float elapsed = Time.realtimeSinceStartup - rvAnalysisStartRealtime;
+                    GUILayout.Label($"Searching {rvAnalysisSampleCount} points for periodic signals, still running ({elapsed:F0}s elapsed). " +
+                                     "A large dataset can legitimately take several minutes; the game itself isn't frozen.", smallCaptionStyle);
                 }
 
                 if (GUILayout.Button("New Observation"))
@@ -1758,7 +1828,7 @@ namespace ExoInstruments
                     ? GetDisplayName(rvSession.Target)
                     : rvSession.Target.HostStarName ?? rvSession.Target.Name;
                 string plotTitle = lastRvStages.Count > 1
-                    ? $"{hostLabel} -- signal {i + 1}" + (i > 0 ? " (residuals)" : "")
+                    ? $"{hostLabel}: signal {i + 1}" + (i > 0 ? " (residuals)" : "")
                     : GetDisplayName(rvSession.Target);
                 DrawRvPlot(rvPhaseFoldedTextures[i], rvPhaseFoldedRanges[i], 0.0, stageResult.BestPeriodDays, "phase", plotTitle);
             }
@@ -1811,14 +1881,14 @@ namespace ExoInstruments
 
             if (rvSession.InTransitBurst)
             {
-                GUILayout.Label("TRANSIT SEQUENCE in progress -- sampling the transit window at " +
+                GUILayout.Label("TRANSIT SEQUENCE in progress: sampling the transit window at " +
                                  $"{RvObservationSession.RmBurstCadenceSeconds / 60.0:F0}-min cadence for the Rossiter-McLaughlin anomaly.");
                 return;
             }
             if (double.IsNaN(rmNextTransitUt)) return;
             if (double.IsPositiveInfinity(rmNextTransitUt))
             {
-                GUILayout.Label("No fully observable transit window found in the transits ahead -- " +
+                GUILayout.Label("No fully observable transit window found in the transits ahead. " +
                                  "Rossiter-McLaughlin scheduling is off the table from this site for now.", smallCaptionStyle);
                 return;
             }
@@ -1826,7 +1896,7 @@ namespace ExoInstruments
             double halfWindowSeconds = (rmNextTransitPlanet.EstimatedTransitDurationHours ?? 3.0) * 3600.0;
             // Land one burst epoch before the window opens so ingress is covered.
             double warpTargetUt = rmNextTransitUt - halfWindowSeconds - RvObservationSession.RmBurstCadenceSeconds;
-            GUILayout.Label($"Next observable transit of {rmNextTransitPlanet.Name} in {(rmNextTransitUt - ut) / 3600.0:F1} h -- " +
+            GUILayout.Label($"Next observable transit of {rmNextTransitPlanet.Name} in {(rmNextTransitUt - ut) / 3600.0:F1} h. " +
                              "epochs through its window are taken at high cadence (Rossiter-McLaughlin sequence).", smallCaptionStyle);
             if (warpTargetUt > ut)
             {
@@ -1856,6 +1926,8 @@ namespace ExoInstruments
         // RossiterMcLaughlin.Fit themselves touch no UnityEngine.Object API.
         private Task<RvAnalysisPayload> rvAnalysisTask;
         private RvObservationSession rvAnalysisSession;
+        private float rvAnalysisStartRealtime;
+        private int rvAnalysisSampleCount;
 
         void StartRvAnalysis()
         {
@@ -1864,6 +1936,8 @@ namespace ExoInstruments
             var target = rvSession.Target;
             List<StarTarget> rmSchedulable = IsIdentityHidden(target) ? new List<StarTarget>() : GetRmSchedulablePlanets(target);
             rvAnalysisSession = rvSession;
+            rvAnalysisStartRealtime = Time.realtimeSinceStartup;
+            rvAnalysisSampleCount = samples.Count;
 
             rvAnalysisTask = Task.Run(() =>
             {
@@ -1965,7 +2039,7 @@ namespace ExoInstruments
             if (lastRmResult == null || lastRmPlanet == null) return;
 
             GUILayout.Space(10);
-            GUILayout.Label("-- Rossiter-McLaughlin (spin-orbit geometry) --");
+            GUILayout.Label("Rossiter-McLaughlin (spin-orbit geometry)", sectionHeaderStyle);
 
             if (lastRmResult.InsufficientData)
             {
@@ -1982,8 +2056,8 @@ namespace ExoInstruments
                 GUILayout.Label($"Projected spin-orbit angle: lambda = {lastRmResult.MeasuredLambdaDeg:F0} +/- {lastRmResult.LambdaUncertaintyDeg:F0} deg   " +
                                  $"v sin(i) = {lastRmResult.MeasuredVsiniMps:F0} m/s");
                 GUILayout.Label(Math.Abs(lastRmResult.MeasuredLambdaDeg) < 30.0
-                    ? "The orbit is prograde and roughly aligned with the stellar spin -- consistent with quiet disk migration."
-                    : "The orbit is significantly misaligned with the stellar spin -- fossil evidence of a violent dynamical history.",
+                    ? "The orbit is prograde and roughly aligned with the stellar spin, consistent with quiet disk migration."
+                    : "The orbit is significantly misaligned with the stellar spin: fossil evidence of a violent dynamical history.",
                     smallCaptionStyle);
                 if (lastRmScienceAwarded > 0f)
                 {
@@ -1992,7 +2066,7 @@ namespace ExoInstruments
             }
             else
             {
-                GUILayout.Label($"Anomaly below SNR {RossiterMcLaughlin.DetectionSnrThreshold:F0} -- more transit sequences " +
+                GUILayout.Label($"Anomaly below SNR {RossiterMcLaughlin.DetectionSnrThreshold:F0}. More transit sequences " +
                                  "(or a slower-rotating star's smaller anomaly is simply beyond this precision).", smallCaptionStyle);
             }
         }
@@ -2029,7 +2103,7 @@ namespace ExoInstruments
                 {
                     if (double.IsInfinity(imagingNextWindowUt))
                     {
-                        GUILayout.Label("This target is never observable from KSC -- it either stays below the " +
+                        GUILayout.Label("This target is never observable from KSC: it either stays below the " +
                                          $"{ImagingObservingConditions.MinTelescopeAltitudeDeg:F0} deg telescope limit or never shares the sky with darkness.");
                     }
                     else if (!double.IsNaN(imagingNextWindowUt) && imagingNextWindowUt > ut)
@@ -2047,7 +2121,7 @@ namespace ExoInstruments
                     // (contrast, separation, or their absence) -- withheld on an
                     // unidentified target. Blind imaging means deciding yourself
                     // when the frame has gone deep enough.
-                    GUILayout.Label("Unidentified target -- required integration can't be predicted without prior data. " +
+                    GUILayout.Label("Unidentified target: required integration can't be predicted without prior data. " +
                                      "Integrate until you're convinced either way.");
                     if (GUILayout.Button("Warp +6 h"))
                     {
@@ -2061,8 +2135,8 @@ namespace ExoInstruments
                     if (double.IsInfinity(neededSeconds))
                     {
                         GUILayout.Label(assessment.Resolvable
-                            ? "No detectable signal at any exposure -- stop whenever you're convinced."
-                            : "Target is inside the diffraction limit -- no exposure can resolve it.");
+                            ? "No detectable signal at any exposure. Stop whenever you're convinced."
+                            : "Target is inside the diffraction limit. No exposure can resolve it.");
                     }
                     else
                     {
@@ -2072,7 +2146,7 @@ namespace ExoInstruments
                         GUILayout.BeginHorizontal();
                         if (double.IsInfinity(imagingDetectionUt))
                         {
-                            GUILayout.Label($"5-sigma needs {neededSeconds / 3600.0:F0} h on-sky -- not reachable in any sane campaign from this site.");
+                            GUILayout.Label($"5-sigma needs {neededSeconds / 3600.0:F0} h on-sky. Not reachable in any sane campaign from this site.");
                         }
                         else
                         {
@@ -2147,7 +2221,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
             if (imagingSession.EffectiveExposureSeconds < DirectImagingTexture.MinStarlightExposureSeconds)
             {
-                GUILayout.Label("Detector readout only -- shutter closed, no photons collected yet. " +
+                GUILayout.Label("Detector readout only: shutter closed, no photons collected yet. " +
                                  "The frame builds up once night-time integration begins.", smallCaptionStyle);
             }
             else
@@ -2163,18 +2237,18 @@ namespace ExoInstruments
         {
             if (!c.IsNight)
             {
-                return $"Dome closed -- daytime (Sun at {c.SunAltitudeDeg:F0} deg; science resumes below " +
+                return $"Dome closed for daytime (Sun at {c.SunAltitudeDeg:F0} deg; science resumes below " +
                        $"{ImagingObservingConditions.TwilightSunAltitudeDeg:F0} deg twilight).";
             }
             if (!c.TargetUp)
             {
-                return $"Night, but target at {c.TargetAltitudeDeg:F0} deg altitude -- below the " +
+                return $"Night, but target at {c.TargetAltitudeDeg:F0} deg altitude, below the " +
                        $"{ImagingObservingConditions.MinTelescopeAltitudeDeg:F0} deg telescope limit. Waiting for it to rise.";
             }
             string coordNote = c.HasTargetCoordinates
                 ? $"target at {c.TargetAltitudeDeg:F0} deg altitude"
                 : $"no sky coordinates on record, assuming {ImagingObservingConditions.FallbackAltitudeDeg:F0} deg altitude";
-            return $"Integrating -- {coordNote}, airmass {c.Airmass:F2}, efficiency {c.Efficiency * 100.0:F0}% of zenith.";
+            return $"Integrating: {coordNote}, airmass {c.Airmass:F2}, efficiency {c.Efficiency * 100.0:F0}% of zenith.";
         }
 
         /// <summary>
@@ -2241,19 +2315,19 @@ namespace ExoInstruments
             }
             else if (cond.Observable)
             {
-                GUILayout.Label($"On sky -- airmass {cond.Airmass:F2}{DescribeMoonNote(instrument, cond)}");
+                GUILayout.Label($"On sky. Airmass {cond.Airmass:F2}{DescribeMoonNote(instrument, cond)}");
             }
             else if (!cond.IsNight)
             {
-                GUILayout.Label("Daylight -- dome closed, waiting for night. Warp ahead.");
+                GUILayout.Label("Daylight. Dome closed, waiting for night. Warp ahead.");
             }
             else if (cond.OccultedByMoon)
             {
-                GUILayout.Label($"Target occulted by the {cond.OccultingMoonName} -- nothing gets through a moon. Waiting for it to move on.");
+                GUILayout.Label($"Target occulted by the {cond.OccultingMoonName}. Nothing gets through a moon; waiting for it to move on.");
             }
             else
             {
-                GUILayout.Label($"Target below the {ImagingObservingConditions.MinTelescopeAltitudeDeg:F0} deg telescope limit -- waiting for it to rise.");
+                GUILayout.Label($"Target below the {ImagingObservingConditions.MinTelescopeAltitudeDeg:F0} deg telescope limit. Waiting for it to rise.");
             }
         }
 
@@ -2269,12 +2343,12 @@ namespace ExoInstruments
             bool paysNoise = instrument.Method == DetectionMethod.Transit && !instrument.IsSpaceBased;
             if (paysNoise && cond.MoonSkyFactor >= 0.2)
             {
-                return $" -- {cond.DominantMoon.Name} up ({cond.DominantMoon.IlluminatedFraction * 100.0:F0}% lit, " +
+                return $". {cond.DominantMoon.Name} up ({cond.DominantMoon.IlluminatedFraction * 100.0:F0}% lit, " +
                        $"{cond.DominantMoon.SeparationFromTargetDeg:F0} deg away): moonlit sky raising the noise floor";
             }
             if (cond.MoonSkyFactor >= 1.0)
             {
-                return $" -- {cond.DominantMoon.Name} bright nearby (no effect on this method)";
+                return $". {cond.DominantMoon.Name} bright nearby (no effect on this method)";
             }
             return "";
         }
@@ -2312,7 +2386,7 @@ namespace ExoInstruments
             StarTarget target = imagingSession.Target;
 
             GUILayout.Space(10);
-            GUILayout.Label("--- Scan Report ---");
+            GUILayout.Label("Scan Report", sectionHeaderStyle);
             DrawCareerScanOutcome(target);
 
             GUILayout.Label(CatalogStatusLine(target));
@@ -2320,13 +2394,13 @@ namespace ExoInstruments
 
             // A resolved AO image characterizes the star whether or not any
             // companion turns up -- this section is the scan's guaranteed yield.
-            GUILayout.Label("-- Stellar characterization --");
+            GUILayout.Label("Stellar characterization", sectionHeaderStyle);
             if (target.EffectiveTempK.HasValue)
             {
                 string tempSourceNote = target.EffectiveTempDerivedFromColor
                     ? "photometric estimate from the star's B-V color (Ballesteros 2012)"
                     : "catalog spectroscopy";
-                GUILayout.Label($"Effective temperature: {target.EffectiveTempK.Value:F0} K -- " +
+                GUILayout.Label($"Effective temperature: {target.EffectiveTempK.Value:F0} K, " +
                                  $"spectral class {StellarColor.SpectralClass(target.EffectiveTempK.Value)} ({tempSourceNote})");
             }
             else
@@ -2336,10 +2410,10 @@ namespace ExoInstruments
             GUILayout.Label($"Apparent magnitude: {target.ApparentMagnitude:F1}");
             GUILayout.Space(6);
 
-            GUILayout.Label("-- Companion search --");
+            GUILayout.Label("Companion search", sectionHeaderStyle);
             if (!target.HasPlanet)
             {
-                GUILayout.Label("No companion in the catalog for this star -- the frame shows the stellar PSF and residual speckle only.");
+                GUILayout.Label("No companion in the catalog for this star. The frame shows the stellar PSF and residual speckle only.");
                 return;
             }
             if (!a.HasRequiredData)
@@ -2364,11 +2438,11 @@ namespace ExoInstruments
 
             if (result.Detected)
             {
-                GUILayout.Label($"DETECTED at {result.Snr:F1} sigma -- companion visible at {a.SeparationArcsec * 1000.0:F0} mas.");
+                GUILayout.Label($"DETECTED at {result.Snr:F1} sigma. Companion visible at {a.SeparationArcsec * 1000.0:F0} mas.");
             }
             else if (!a.SignalPresent)
             {
-                GUILayout.Label("No companion detected -- consistent with the retracted/absent-planet status above.");
+                GUILayout.Label("No companion detected, consistent with the retracted/absent-planet status above.");
             }
             else
             {
@@ -2447,7 +2521,7 @@ namespace ExoInstruments
         void DrawRvScanReport(List<RvDetectionStage> stages)
         {
             GUILayout.Space(10);
-            GUILayout.Label("--- Scan Report ---");
+            GUILayout.Label("Scan Report", sectionHeaderStyle);
 
             RvDetectionResult first = stages[0].Result;
             if (first.InsufficientData)
@@ -2497,8 +2571,8 @@ namespace ExoInstruments
 
                 if (r.LikelyHarmonicOfPeriodDays.HasValue)
                 {
-                    GUILayout.Label($"    Caution: near-integer period ratio with the {r.LikelyHarmonicOfPeriodDays.Value:F2} d signal -- " +
-                                     "possibly a harmonic of that (eccentric) orbit rather than a distinct planet.", smallCaptionStyle);
+                    GUILayout.Label($"    Caution: near-integer period ratio with the {r.LikelyHarmonicOfPeriodDays.Value:F2} d signal. " +
+                                     "Possibly a harmonic of that (eccentric) orbit rather than a distinct planet.", smallCaptionStyle);
                 }
                 GUILayout.Space(4);
             }
@@ -2519,7 +2593,7 @@ namespace ExoInstruments
         void DrawTransitScanReport(List<TransitDetectionStage> stages)
         {
             GUILayout.Space(10);
-            GUILayout.Label("--- Scan Report ---");
+            GUILayout.Label("Scan Report", sectionHeaderStyle);
 
             DetectionResult first = stages[0].Result;
             if (first.InsufficientData)
@@ -2571,8 +2645,8 @@ namespace ExoInstruments
                 double? harmonicOf = FindTransitHarmonicParent(stages, i);
                 if (harmonicOf.HasValue)
                 {
-                    GUILayout.Label($"    Caution: near-integer period ratio with the {harmonicOf.Value:F2} d signal -- " +
-                                     "possibly a masking residual of that transit rather than a distinct planet.", smallCaptionStyle);
+                    GUILayout.Label($"    Caution: near-integer period ratio with the {harmonicOf.Value:F2} d signal. " +
+                                     "Possibly a masking residual of that transit rather than a distinct planet.", smallCaptionStyle);
                 }
                 GUILayout.Space(4);
             }
@@ -2909,7 +2983,7 @@ namespace ExoInstruments
             GUILayout.Space(10);
             if (SelectedInstrument.IsSpaceBased)
             {
-                GUILayout.Label("Observing forecast: unnecessary -- space-based coverage is continuous, airmass-free and moon-proof. That is what the capital bought.", smallCaptionStyle);
+                GUILayout.Label("Observing forecast: unnecessary. Space-based coverage is continuous, airmass-free and moon-proof. That is what the capital bought.", smallCaptionStyle);
                 return;
             }
             if (!selectedStar.RaDeg.HasValue || !selectedStar.DecDeg.HasValue)
@@ -2929,13 +3003,13 @@ namespace ExoInstruments
                 return;
             }
 
-            GUILayout.Label($"Observing forecast -- next {ForecastNights} nights (top row = tonight, left edge = now+0h):");
+            GUILayout.Label($"Observing forecast, next {ForecastNights} nights (top row = tonight, left edge = now+0h):");
             Rect rect = GUILayoutUtility.GetRect(ForecastWidth, ForecastHeight,
                 GUILayout.Width(ForecastWidth), GUILayout.Height(ForecastHeight));
             GUI.DrawTexture(rect, forecastTexture);
 
             double nowUt = Planetarium.GetUniversalTime();
-            string hoverLine = "Hover a cell for details -- click to warp to that moment.";
+            string hoverLine = "Hover a cell for details. Click to warp to that moment.";
             Event e = Event.current;
             if (rect.Contains(e.mousePosition)
                 && ForecastTexture.TryHitCell(forecastResult, ForecastWidth, ForecastHeight,
@@ -2946,12 +3020,22 @@ namespace ExoInstruments
                 double hoursAway = (cellUt - nowUt) / 3600.0;
                 hoverLine = quality <= 0.0
                     ? $"+{hoursAway:F1} h: unobservable (day, below the telescope limit, or a moon in the way)"
-                    : $"+{hoursAway:F1} h: {quality * 100.0:F0}% of this target's best upcoming window -- click to warp";
+                    : $"+{hoursAway:F1} h: {quality * 100.0:F0}% of this target's best upcoming window. Click to warp.";
                 if (e.type == EventType.MouseDown && e.button == 0)
                 {
-                    if (cellUt > nowUt) BetterTimeWarpIntegration.WarpTo(cellUt);
+                    if (cellUt > nowUt)
+                    {
+                        BetterTimeWarpIntegration.WarpTo(cellUt);
+                        forecastWarpTargetUt = cellUt;
+                    }
                     e.Use();
                 }
+            }
+
+            if (!double.IsNaN(forecastWarpTargetUt))
+            {
+                if (nowUt >= forecastWarpTargetUt) forecastWarpTargetUt = double.NaN;
+                else hoverLine = $"Warping... +{(forecastWarpTargetUt - nowUt) / 3600.0:F1} h to go.";
             }
             GUILayout.Label(hoverLine, smallCaptionStyle);
 
@@ -2977,10 +3061,10 @@ namespace ExoInstruments
                     methodInputs = "twilight, target altitude, airmass scintillation, Mün/Minmus moonlit-sky pollution and occultation";
                     break;
                 case DetectionMethod.DirectImaging:
-                    methodInputs = "twilight, target altitude, AO airmass efficiency (1/X^2) and lunar occultation -- H-band imaging shrugs off moonlight itself";
+                    methodInputs = "twilight, target altitude, AO airmass efficiency (1/X^2) and lunar occultation. H-band imaging shrugs off moonlight itself";
                     break;
                 default:
-                    methodInputs = "twilight, target altitude and lunar occultation -- spectrograph line positions don't care about airmass or moonlight";
+                    methodInputs = "twilight, target altitude and lunar occultation. Spectrograph line positions don't care about airmass or moonlight";
                     break;
             }
             return $"Compiles: {methodInputs}. No weather term: stock KSP has no weather to read.";

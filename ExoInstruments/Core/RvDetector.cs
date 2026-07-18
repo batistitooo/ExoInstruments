@@ -24,6 +24,18 @@ namespace ExoInstruments.Core
         public const int MaxPlanetsPerSearch = 4;
 
         /// <summary>
+        /// Physical sanity cap on a fitted semi-amplitude: a real periodic signal
+        /// present in the data can't legitimately carry an amplitude many times
+        /// the data's own total scatter (a sinusoid of amplitude A contributes
+        /// ~A^2/2 to the variance, so A can't cleanly exceed stdV*sqrt(2) without
+        /// something being numerically wrong). This is the second, independent
+        /// line of defense against the near-singular-fit failure this class's
+        /// own header already warns about -- FitSinusoid's determinant guard
+        /// alone wasn't catching it at large sample counts (see there).
+        /// </summary>
+        private const double MaxPlausibleAmplitudeFactor = 8.0;
+
+        /// <summary>
         /// Minimum observation baseline for a period to even be testable by Detect --
         /// mirrors the baselineDaysForSearch/2 clamp below, floored by whatever
         /// MinSampleCount needs at this instrument's cadence. Lets the GUI tell the
@@ -84,6 +96,7 @@ namespace ExoInstruments.Core
                     continue;
 
                 double amplitude = Math.Sqrt(a * a + b * b);
+                if (amplitude > MaxPlausibleAmplitudeFactor * stdV) continue; // see MaxPlausibleAmplitudeFactor
                 double sigmaAmplitude = residualStd * Math.Sqrt(2.0 / n);
                 if (sigmaAmplitude < 1e-9) sigmaAmplitude = 1e-9;
                 double snr = amplitude / sigmaAmplitude;
@@ -120,6 +133,7 @@ namespace ExoInstruments.Core
                         continue;
 
                     double amplitude = Math.Sqrt(a * a + b * b);
+                    if (amplitude > MaxPlausibleAmplitudeFactor * stdV) continue;
                     double sigmaAmplitude = residualStd * Math.Sqrt(2.0 / n);
                     if (sigmaAmplitude < 1e-9) sigmaAmplitude = 1e-9;
                     double snr = amplitude / sigmaAmplitude;
@@ -252,7 +266,17 @@ namespace ExoInstruments.Core
             }
 
             double det = Determinant3(sCC, sCS, sC, sCS, sSS, sS, sC, sS, n);
-            if (Math.Abs(det) < 1e-12) return false;
+            // A well-conditioned fit (full phase coverage) has sCC ~ sSS ~ n/2 and
+            // sCS ~ sC ~ sS ~ 0, so det scales like n^3/4. The old fixed 1e-12
+            // absolute floor only rejected fits that were essentially exactly
+            // singular; at the sample counts a long baseline produces (n in the
+            // thousands, ideal det ~1e9-1e10), a trial period with poor phase
+            // coverage could land many orders of magnitude below that scale --
+            // ill-conditioned, not truly singular -- and still clear 1e-12,
+            // producing the wildly inflated amplitude/SNR this class's header
+            // already warned about. Reject relative to the ideal scale instead.
+            double idealDetScale = Math.Max(1.0, n) * Math.Max(1.0, n) * Math.Max(1.0, n) / 4.0;
+            if (Math.Abs(det) < Math.Max(1e-12, 1e-6 * idealDetScale)) return false;
 
             a = Determinant3(sCV, sCS, sC, sSV, sSS, sS, sV, sS, n) / det;
             b = Determinant3(sCC, sCV, sC, sCS, sSV, sS, sC, sV, n) / det;

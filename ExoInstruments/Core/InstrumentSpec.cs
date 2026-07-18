@@ -27,6 +27,14 @@ namespace ExoInstruments.Core
         public double CadenceSeconds { get; set; }       // exposure interval (Transit) or epoch spacing (RV)
         public string Citation { get; set; }
 
+        /// <summary>
+        /// Short plain-language presentation of the real instrument, shown in
+        /// the observatory selector when the player picks it: what the device
+        /// physically is, what it measures, and what it is good at. Written for
+        /// a player who has never heard of it.
+        /// </summary>
+        public string Description { get; set; }
+
         // --- Site & platform: ground-based observing reality ----------------
 
         /// <summary>

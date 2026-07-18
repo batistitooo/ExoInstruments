@@ -50,7 +50,15 @@ namespace ExoInstruments.Core
         private const double DutyEnvelopeCoeff = 0.23;
 
         private const int MinPhaseBins = 50;
-        private const int MaxPhaseBins = 400;
+        // 400 -> 320: the box-slide cost scales roughly with bins^2 (bins x
+        // maxWidth, and maxWidth itself scales with bins), so this alone cuts
+        // it to ~(320/400)^2 = 64% -- on a long baseline with thousands of
+        // samples this search was legitimately taking minutes with nothing on
+        // screen but a static "Analyzing..." label (see the elapsed-time
+        // readout added where this button is drawn). Still well above
+        // MinPhaseBins, so short-period, short-duration transits keep plenty
+        // of phase resolution.
+        private const int MaxPhaseBins = 320;
         private const double BinsPerCadence = 4.0;
 
         // Auto period grid (periodSteps = 0): uniform in frequency, not period.
@@ -62,8 +70,16 @@ namespace ExoInstruments.Core
         // BLS implementation (Kovacs 2002; astropy BLS) walks a uniform
         // frequency grid that grows finer as the baseline grows.
         private const double TypicalTransitDuty = 0.03;   // duration/period of a close-in transit
-        private const double FrequencyOverSampling = 3.0;
-        private const int MaxAutoPeriodSteps = 4000;      // caps the O(steps * bins^2/4) search cost
+        // 3.0 -> 2.0: still comfortably above the ~1x oversampling the dP
+        // requirement itself demands (2x is the conventional floor cited
+        // alongside Kovacs 2002 / astropy's BLS docs); trims ~a third of the
+        // period grid's cost for the safety margin it wasn't using.
+        private const double FrequencyOverSampling = 2.0;
+        // 4000 -> 3000: long-baseline, many-sample sessions (exactly the slow
+        // case) hit this cap rather than the formula above, so it's the term
+        // that actually bounds worst-case runtime; -25% here on top of the
+        // phase-bin and oversampling trims roughly halves total search cost.
+        private const int MaxAutoPeriodSteps = 3000;      // caps the O(steps * bins^2/4) search cost
         private const int MinAutoPeriodSteps = 200;
 
         public static DetectionResult Detect(
