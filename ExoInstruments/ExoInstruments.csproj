@@ -58,4 +58,19 @@
               DestinationFolder="$(OutputPath)..\Textures\%(RecursiveDir)"
               SkipUnchangedFiles="true" />
     </Target>
+
+    <!--
+        Same idea as CopyTextures: mirrors the repo's PluginData/ (the exoplanet and
+        background-star catalogs ExoplanetCsvLoader/BackgroundStarCatalogLoader read at
+        runtime) to GameData/ExoInstruments/PluginData/ on every build. Without this the
+        mod builds and loads but has zero targets to observe.
+    -->
+    <Target Name="CopyPluginData" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <PluginDataToCopy Include="$(ProjectDir)PluginData\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(PluginDataToCopy)"
+              DestinationFolder="$(OutputPath)..\PluginData\%(RecursiveDir)"
+              SkipUnchangedFiles="true" />
+    </Target>
 </Project>
