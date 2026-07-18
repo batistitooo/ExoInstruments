@@ -1,0 +1,255 @@
+using System;
+using System.Collections.Generic;
+
+namespace ExoInstruments.Core
+{
+    /// <summary>
+    /// Generates synthetic flux measurements. Pure function of (star, UT) plus
+    /// an injected RNG.
+    ///
+    /// The model, term by term:
+    /// - Baseline: 1.0 plus the star's own spot-rotation modulation
+    ///   (StellarActivity) -- real light curves are never flat, and the
+    ///   detector has to dig the transit out of that astrophysical trend.
+    /// - Transit: limb-darkened shape with proper ingress/egress geometry
+    ///   (small-planet approximation of Mandel &amp; Agol 2002), replacing the
+    ///   old box model. A real transit is round-bottomed -- the planet crosses
+    ///   brighter disk center and dimmer limb -- and V-shaped grazing events
+    ///   look different from central ones, exactly the diagnostics real
+    ///   vetting pipelines use.
+    /// - Noise: instrument photon-noise term, plus (ground-based photometry
+    ///   only) the airmass-dependent scintillation excess (AtmosphericNoise),
+    ///   in quadrature.
+    /// </summary>
+    public static class LightCurveSimulator
+    {
+        private const double SecondsPerDay = 86400.0;
+
+        public static double GenerateFluxAtTime(StarTarget star, InstrumentSpec instrument, double ut, Random rng, double airmass = 1.0)
+        {
+            double baseline = 1.0 + StellarActivity.SpotModulationFlux(star, ut);
+            double noise = GaussianNoise(rng, TotalNoiseSigma(star, instrument, airmass));
+            double dip = ComputeTransitDip(star, ut);
+            return baseline - dip + noise;
+        }
+
+        /// <summary>
+        /// Combined flux from every planet orbiting the same host: transits of a
+        /// compact system superpose on one light curve (TRAPPIST-1's is the
+        /// canonical example), over a single shared stellar baseline -- the host
+        /// star and its spots belong to the system, not to any one planet.
+        /// ttvSignals runs parallel to systemPlanets (null = strict linear
+        /// ephemerides): each planet's transit is displaced by its own
+        /// timing-variation term, which is what the O-C analysis digs back out.
+        /// </summary>
+        public static double GenerateSystemFluxAtTime(
+            IList<StarTarget> systemPlanets,
+            TransitTimingVariations.TtvSignal[] ttvSignals,
+            InstrumentSpec instrument, double ut, Random rng,
+            double airmass = 1.0, double moonSkyFactor = 0.0)
+        {
+            StarTarget host = systemPlanets[0];
+            double baseline = 1.0 + StellarActivity.SpotModulationFlux(host, ut);
+            double totalDip = 0.0;
+            for (int i = 0; i < systemPlanets.Count; i++)
+            {
+                double shiftSeconds = ttvSignals != null ? ttvSignals[i].ShiftSeconds(ut) : 0.0;
+                totalDip += ComputeTransitDip(systemPlanets[i], ut - shiftSeconds);
+            }
+            double noise = GaussianNoise(rng, TotalNoiseSigma(host, instrument, airmass, moonSkyFactor));
+            return baseline - totalDip + noise;
+        }
+
+        /// <summary>
+        /// 1-sigma fractional-flux noise for one exposure: instrument precision,
+        /// the scintillation excess above zenith, and (when the moon is up and
+        /// bright near the target) the moonlit-sky excess, in quadrature. This is
+        /// both what the noise draw uses and what gets reported as the sample
+        /// uncertainty -- photometric pipelines do know their per-point error
+        /// budget, including the airmass and sky terms.
+        /// </summary>
+        public static double TotalNoiseSigma(StarTarget star, InstrumentSpec instrument, double airmass, double moonSkyFactor = 0.0)
+        {
+            double instrumentSigma = instrument.EstimatePrecision(star.ApparentMagnitude) / 1_000_000.0;
+            double scintillationSigma = AtmosphericNoise.ScintillationExcessSigma(instrument, airmass);
+            double moonSigma = MoonlightPollution.ExcessNoiseSigma(instrument, star.ApparentMagnitude, moonSkyFactor);
+            return Math.Sqrt(instrumentSigma * instrumentSigma + scintillationSigma * scintillationSigma + moonSigma * moonSigma);
+        }
+
+        public static List<FluxSample> GenerateSamples(StarTarget star, InstrumentSpec instrument, double startUt, double endUt, double cadenceSeconds, Random rng)
+        {
+            double uncertaintyFlux = TotalNoiseSigma(star, instrument, 1.0);
+            var samples = new List<FluxSample>();
+            for (double t = startUt; t <= endUt; t += cadenceSeconds)
+            {
+                samples.Add(new FluxSample(t, GenerateFluxAtTime(star, instrument, t, rng), uncertaintyFlux));
+            }
+            return samples;
+        }
+
+        /// <summary>
+        /// Instantaneous transit chord state, for callers that need the planet's
+        /// projected position as well as the dip (the Rossiter-McLaughlin anomaly
+        /// is dip times the local rotation velocity at that position). Returns
+        /// false when the full geometry (a/R_star and impact parameter) isn't on
+        /// record -- RM needs real geometry, the box-model fallback won't do.
+        /// xStellarRadii is the position along the transit chord (0 at mid-transit,
+        /// negative approaching), dipFraction is 0 outside transit.
+        /// </summary>
+        public static bool TryGetTransitChordState(StarTarget star, double ut, out double xStellarRadii, out double dipFraction)
+        {
+            xStellarRadii = 0.0;
+            dipFraction = 0.0;
+            if (!star.IsTransiting) return false;
+
+            double depthFraction = star.TransitDepthPpm / 1_000_000.0;
+            double p = Math.Sqrt(depthFraction);
+            if (p <= 0) return false;
+
+            double aRs = star.ScaledSemiMajorAxis;
+            double? b = star.ImpactParameter;
+            if (aRs <= 1.0 || !b.HasValue) return false;
+
+            double periodSeconds = star.PlanetPeriodDays * SecondsPerDay;
+            double phase = (ut / periodSeconds + star.PlanetPhaseOffset01) % 1.0;
+            if (phase < 0) phase += 1.0;
+            double phaseCentered = phase > 0.5 ? phase - 1.0 : phase;
+            if (Math.Abs(phaseCentered) > 0.25) return true; // far side: valid geometry, no transit right now
+
+            xStellarRadii = aRs * Math.Sin(2.0 * Math.PI * phaseCentered);
+            double z = Math.Sqrt(xStellarRadii * xStellarRadii + b.Value * b.Value);
+            QuadraticLimbDarkening(star.EffectiveTempK, out double u1, out double u2);
+            dipFraction = LimbDarkenedDip(z, p, u1, u2);
+            return true;
+        }
+
+        private static double ComputeTransitDip(StarTarget star, double ut)
+        {
+            if (!star.IsTransiting) return 0.0;
+
+            double depthFraction = star.TransitDepthPpm / 1_000_000.0;
+            double p = Math.Sqrt(depthFraction);  // Rp/R_star
+            if (p <= 0) return 0.0;
+
+            double periodSeconds = star.PlanetPeriodDays * SecondsPerDay;
+            double phase = (ut / periodSeconds + star.PlanetPhaseOffset01) % 1.0;
+            if (phase < 0) phase += 1.0;
+            double phaseCentered = phase > 0.5 ? phase - 1.0 : phase;
+
+            double aRs = star.ScaledSemiMajorAxis;
+            double? b = star.ImpactParameter;
+            if (aRs > 1.0 && b.HasValue)
+            {
+                // Far side of the orbit: no transit (the secondary eclipse is
+                // orders of magnitude below these instruments' noise floors).
+                if (Math.Abs(phaseCentered) > 0.25) return 0.0;
+
+                // Projected star-planet separation in stellar radii, circular
+                // chord -- same approximation EstimatedTransitDurationHours uses.
+                double x = aRs * Math.Sin(2.0 * Math.PI * phaseCentered);
+                double z = Math.Sqrt(x * x + b.Value * b.Value);
+
+                QuadraticLimbDarkening(star.EffectiveTempK, out double u1, out double u2);
+                return LimbDarkenedDip(z, p, u1, u2);
+            }
+
+            // Incomplete geometry (e.g. measured impact parameter but no usable
+            // a/R_star): fall back to the duration-based box model.
+            double? durationHours = star.EstimatedTransitDurationHours;
+            if (!durationHours.HasValue || durationHours.Value <= 0) return 0.0;
+            double halfDurationPhase = (durationHours.Value * 3600.0) / periodSeconds / 2.0;
+            return Math.Abs(phaseCentered) <= halfDurationPhase ? depthFraction : 0.0;
+        }
+
+        /// <summary>
+        /// Fractional flux deficit for a planet of radius ratio p at projected
+        /// separation z (stellar radii), quadratic limb darkening
+        /// I(mu) = 1 - u1*(1-mu) - u2*(1-mu)^2. Small-planet approximation
+        /// (Mandel &amp; Agol 2002, sec. 5): the obscured intensity is the local
+        /// intensity at the planet's position times the covered area, good to
+        /// well under the instruments' noise for p up to hot-Jupiter sizes.
+        /// </summary>
+        private static double LimbDarkenedDip(double z, double p, double u1, double u2)
+        {
+            if (z >= 1.0 + p) return 0.0;
+
+            // Disk-averaged intensity, normalizing local intensity to total flux.
+            double meanIntensity = 1.0 - u1 / 3.0 - u2 / 6.0;
+
+            if (z <= 1.0 - p)
+            {
+                // Fully on the disk: full planet area times local intensity.
+                double mu = Math.Sqrt(Math.Max(0.0, 1.0 - z * z));
+                return p * p * LocalIntensity(mu, u1, u2) / meanIntensity;
+            }
+
+            // Ingress/egress: exact circle-overlap area, intensity evaluated at
+            // the limb region being covered (mu -> 0 there, hence the smooth,
+            // shallow shoulders real light curves show).
+            double coveredFraction = CircleOverlapArea(z, p) / (Math.PI * p * p);
+            double rEdge = Math.Min(1.0, z);
+            double muEdge = Math.Sqrt(Math.Max(0.0, 1.0 - rEdge * rEdge));
+            return coveredFraction * p * p * LocalIntensity(muEdge, u1, u2) / meanIntensity;
+        }
+
+        private static double LocalIntensity(double mu, double u1, double u2)
+        {
+            double oneMinusMu = 1.0 - mu;
+            return 1.0 - u1 * oneMinusMu - u2 * oneMinusMu * oneMinusMu;
+        }
+
+        /// <summary>Intersection area of the stellar disk (radius 1) and the planet disk (radius p) at center separation d.</summary>
+        private static double CircleOverlapArea(double d, double p)
+        {
+            if (d >= 1.0 + p) return 0.0;
+            if (d <= 1.0 - p) return Math.PI * p * p;
+            if (d <= p - 1.0) return Math.PI;  // planet larger than star -- not physical here, completeness only
+
+            double d2 = d * d;
+            double cosHalf1 = Clamp((d2 + 1.0 - p * p) / (2.0 * d), -1.0, 1.0);
+            double cosHalf2 = Clamp((d2 + p * p - 1.0) / (2.0 * d * p), -1.0, 1.0);
+            double kernel = (-d + 1.0 + p) * (d + 1.0 - p) * (d - 1.0 + p) * (d + 1.0 + p);
+            return Math.Acos(cosHalf1)
+                 + p * p * Math.Acos(cosHalf2)
+                 - 0.5 * Math.Sqrt(Math.Max(0.0, kernel));
+        }
+
+        /// <summary>
+        /// Quadratic limb-darkening coefficients vs effective temperature:
+        /// piecewise-linear interpolation through representative dwarf-star
+        /// values from the Claret &amp; Bloemen 2011 tables (Kepler band).
+        /// Cooler photospheres darken more steeply toward the limb. Unknown
+        /// Teff falls back to solar coefficients.
+        /// </summary>
+        private static void QuadraticLimbDarkening(double? effectiveTempK, out double u1, out double u2)
+        {
+            double teff = effectiveTempK ?? 5800.0;
+            double[] teffGrid = { 3500.0, 4500.0, 5000.0, 5800.0, 6500.0, 7500.0 };
+            double[] u1Grid = { 0.56, 0.57, 0.51, 0.41, 0.31, 0.22 };
+            double[] u2Grid = { 0.19, 0.16, 0.20, 0.26, 0.30, 0.32 };
+
+            if (teff <= teffGrid[0]) { u1 = u1Grid[0]; u2 = u2Grid[0]; return; }
+            int last = teffGrid.Length - 1;
+            if (teff >= teffGrid[last]) { u1 = u1Grid[last]; u2 = u2Grid[last]; return; }
+
+            int i = 1;
+            while (teff > teffGrid[i]) i++;
+            double f = (teff - teffGrid[i - 1]) / (teffGrid[i] - teffGrid[i - 1]);
+            u1 = u1Grid[i - 1] + f * (u1Grid[i] - u1Grid[i - 1]);
+            u2 = u2Grid[i - 1] + f * (u2Grid[i] - u2Grid[i - 1]);
+        }
+
+        private static double Clamp(double v, double min, double max)
+        {
+            return v < min ? min : (v > max ? max : v);
+        }
+
+        private static double GaussianNoise(Random rng, double sigma)
+        {
+            double u1 = 1.0 - rng.NextDouble();
+            double u2 = 1.0 - rng.NextDouble();
+            double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+            return sigma * randStdNormal;
+        }
+    }
+}
