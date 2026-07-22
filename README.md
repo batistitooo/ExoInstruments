@@ -21,7 +21,7 @@ https://youtu.be/bYpLWqeNQds
 
 <p align="center"><img src="images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
 
-- **Photon-noise-limited instrumental precision.** Every instrument's achievable precision scales with target magnitude via the same photon-noise relation used in the observational literature -- fainter stars are always harder, no instrument cheats the trade-off.
+- **Photon-noise-limited instrumental precision.** Every instrument's achievable precision scales with target magnitude via the same photon-noise relation used in the observational literature; fainter stars are always harder, no instrument cheats the trade-off.
 
 - **Three independent detection pipelines.**
   - **Transit photometry**: box-least-squares-style period search over a simulated light curve, with moving-median detrending and a physical duty-cycle envelope against starspot false positives.
@@ -32,11 +32,11 @@ https://youtu.be/bYpLWqeNQds
 
 - **Simultaneous multi-planet transit modeling.** Compact systems (TRAPPIST-1 style) superpose every transiting member on one light curve; the detector separates them by iterative in-transit masking, and a multi-planet campaign pays a jackpot bonus.
 
-- **Transit Timing Variations (TTV).** Mutual gravitational perturbation shifts each transit early or late against a linear ephemeris (Lithwick, Xie & Wu 2012); the analysis re-fits the ephemeris from measured mid-transit times and searches the residuals for the perturber's signature -- pure-gravity evidence of a companion even if it never transits.
+- **Transit Timing Variations (TTV).** Mutual gravitational perturbation shifts each transit early or late against a linear ephemeris (Lithwick, Xie & Wu 2012); the analysis re-fits the ephemeris from measured mid-transit times and searches the residuals for the perturber's signature; pure-gravity evidence of a companion even if it never transits.
 
-- **The Rossiter-McLaughlin effect.** A transiting planet crossing its rotating star imprints a characteristic in-transit RV anomaly (Ohta, Taruya & Suto 2005), the real measurement of spin-orbit alignment -- the one mechanic where the photometric ephemeris automatically schedules the spectroscopic campaign.
+- **The Rossiter-McLaughlin effect.** A transiting planet crossing its rotating star imprints a characteristic in-transit RV anomaly (Ohta, Taruya & Suto 2005), the real measurement of spin-orbit alignment; the one mechanic where the photometric ephemeris automatically schedules the spectroscopic campaign.
 
-- **The Mün and Minmus as observing constraints.** Both moons occult targets outright and raise the sky background with a real separation-dependent brightness law (Krisciunas & Schaefer 1991) -- full-Mün nights push faint targets off the schedule the way they do at real observatories.
+- **The Mün and Minmus as observing constraints.** Both moons occult targets outright and raise the sky background with a real separation-dependent brightness law (Krisciunas & Schaefer 1991); full-Mün nights push faint targets off the schedule the way they do at real observatories.
 
 - **Observing-quality forecast heatmap.** A porkchop-style color calendar per target/instrument (rows = nights ahead, columns = time of night) folding in twilight, altitude, airmass scintillation, and lunar occultation/moonlight. The RC20's solar-system forecast additionally factors in real EVE cloud cover over KSC. Click any cell, or the "best window" button, to warp straight there.
 
@@ -44,21 +44,21 @@ https://youtu.be/bYpLWqeNQds
 
 <p align="center"><img src="images/wasp14ab-lightcurve.png" alt="WASP-14 Ab light curve: raw time series and phase-folded transit" width="520"></p>
 
-- **Ground-based observing windows.** Every ground-based instrument only collects data when the Sun is below twilight and the target is above the telescope's altitude limit -- real diurnal gaps and window-function aliases, the same artifact real BLS searches fight.
+- **Ground-based observing windows.** Every ground-based instrument only collects data when the Sun is below twilight and the target is above the telescope's altitude limit; real diurnal gaps and window-function aliases, the same artifact real BLS searches fight.
 
 <p align="center"><img src="images/ObservationSchedule.png" alt="Observation schedule: live table of ideal observation time" width="480"></p>
 
 - **Stellar activity as the true noise floor.** Every star carries persistent RV jitter (Wright 2005) and quasi-periodic starspot modulation (McQuillan et al. 2014; Basri et al. 2013) that the instruments have to see past.
 
-- **Limb-darkened transit shapes.** Transits follow the small-planet approximation of Mandel & Agol (2002) with quadratic limb darkening interpolated against stellar temperature (Claret & Bloemen 2011) -- round-bottomed central transits, V-shaped grazing ones.
+- **Limb-darkened transit shapes.** Transits follow the small-planet approximation of Mandel & Agol (2002) with quadratic limb darkening interpolated against stellar temperature (Claret & Bloemen 2011); round-bottomed central transits, V-shaped grazing ones.
 
 - **Atmospheric scintillation.** Ground-based photometry pays the Young (1967) airmass tax, scaled by each instrument's real aperture and site altitude.
 
 - **Realistic stellar color.** Every star's tint comes from its own effective temperature through a real blackbody-to-sRGB mapping.
 
-- **Solar-system amateur astrograph (RC20).** A separate, non-exoplanet instrument: a real live-rendered photo of any Kerbol-system body, clicked directly on the sky chart (planets and moons plot there at their real size/color, right alongside the stars). A genuine timed exposure -- nothing renders until the shutter time you set has actually elapsed -- with exposure, ISO, a filter wheel (L/R/G/B/Hα), manual focus, and optional autoguiding (off by default; without it, an un-recentered target drifts between shots exactly like an untracked real mount). Every frame runs through a full sensor noise chain -- shot noise, dark current, read noise, a fixed hot/dead pixel map, atmospheric extinction and scintillation, seeing-driven blur that worsens with airmass -- plus real cloud cover and haze read live from EVE (Environmental Visual Enhancements) when it's installed. Monochrome and grainy on purpose: a single unprocessed sensor frame, not a stretched, denoised final image.
+- **Solar-system amateur astrograph (RC20).** A separate, non-exoplanet instrument: a real live-rendered photo of any Kerbol-system body, clicked directly on the sky chart (planets and moons plot there at their real size/color, right alongside the stars). A genuine timed exposure (nothing renders until the shutter time you set has actually elapsed), with exposure, ISO, a filter wheel (L/R/G/B/Hα), manual focus, and optional autoguiding (off by default; without it, an un-recentered target drifts between shots exactly like an untracked real mount). Every frame runs through a full sensor noise chain - shot noise, dark current, read noise, a fixed hot/dead pixel map, atmospheric extinction and scintillation, seeing-driven blur that worsens with airmass - plus real cloud cover and haze read live from EVE (Environmental Visual Enhancements) when it's installed. Monochrome and grainy on purpose: a single unprocessed sensor frame, not a stretched, denoised final image.
 
-- **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail -- the same reason real astrophotographers shoot many short exposures instead of one long one.
+- **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail; the same reason real astrophotographers shoot many short exposures instead of one long one.
 
 <p align="center">
   <img src="images/minmus-before-stack.png" alt="Minmus: single raw sub, before stacking" width="360">
@@ -87,7 +87,7 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 | **HARPS** | 3.6 m ESO telescope (La Silla) | Radial Velocity | Low (~1.0 m/s) | Long-baseline RV workhorse; the field's historical benchmark |
 | **ESPRESSO** | VLT-fed ultra-stable spectrograph | Radial Velocity | Ultra-Low (~0.15 m/s) | The RV path's capstone; sub-10 cm/s, resolving Earth-mass reflex signals |
 | **ELT** | 39.3 m Extremely Large Telescope (Cerro Armazones) | Direct Imaging | Contrast-limited (~10⁻⁴ at 1 λ/D) | Flagship direct-imaging capability, independent of transit or RV geometry |
-| **RC20** | PlaneWave 20" astrograph | Solar-System Photography | N/A -- not an exoplanet detector | A real backyard-class scope: point-and-shoot photos of planets and moons in the Kerbol system |
+| **RC20** | PlaneWave 20" astrograph | Solar-System Photography | N/A; not an exoplanet detector | A real backyard-class scope: point-and-shoot photos of planets and moons in the Kerbol system |
 
 ## Future Roadmap
 
@@ -100,11 +100,11 @@ Not yet implemented in the current build:
 - **A proper in-world observatory building** at the KSC (Kerbal Konstructs), replacing the current toolbar-button placeholder.
 - **Space-based telescope facilities**, modeled after concept missions like ESA's LIFE, with atmospheric/biosignature classification as a further scientific payoff.
 - **Deeper catalog integration** and an **extended instrument roster** (more real-world facilities as further progression rungs).
-- **Economy rebalance** -- current career Funds/Science values are still placeholders pending playtesting.
+- **Economy rebalance**; current career Funds/Science values are still placeholders pending playtesting.
 
 ## Acknowledgments & Scientific Inspiration
 
-This project's detection pipelines and instrumental modeling are directly inspired by the historic 1995 discovery of 51 Pegasi b by Michel Mayor and Didier Queloz -- the intellectual origin point for this entire codebase. 51 Pegasi's exact physical parameters are integrated directly into the mod's stellar catalog.
+This project's detection pipelines and instrumental modeling are directly inspired by the historic 1995 discovery of 51 Pegasi b by Michel Mayor and Didier Queloz; the intellectual origin point for this entire codebase. 51 Pegasi's exact physical parameters are integrated directly into the mod's stellar catalog.
 
 Special thanks to the following institutions at ETH Zürich whose research and vision fueled the logic of this mod:
 *   **The Queloz Group**, for pioneering the radial velocity and transit precision standards modeled in this simulation.
