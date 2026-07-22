@@ -60,6 +60,12 @@ https://youtu.be/bYpLWqeNQds
 
 - **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail -- the same reason real astrophotographers shoot many short exposures instead of one long one.
 
+<p align="center">
+  <img src="images/minmus-before-stack.png" alt="Minmus: single raw sub, before stacking" width="360">
+  <img src="images/minmus-after-stack.png" alt="Minmus: composite after LRGB stacking" width="360">
+</p>
+<p align="center"><em>Minmus: a single raw L sub (left) vs. the stacked LRGB composite (right).</em></p>
+
 - **A meaningful instrument-acquisition economy.** Career-mode progression gates each observatory behind an acquisition cost and a cumulative Science-earned threshold, so higher-precision instruments represent a genuine capital investment, not a flat tech tree.
 
 - **Career-mode discovery loop ("fog of war").** A star's identity and catalog status stay hidden until actually observed. A large real background-star catalog is blended in as camouflage, so anything discovered is a genuinely real system.
