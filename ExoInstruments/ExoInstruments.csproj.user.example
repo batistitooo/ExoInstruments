@@ -1,0 +1,50 @@
+<Project>
+    <!--
+        Copy this file to ExoInstruments.csproj.user (same folder) and fill in the
+        paths for your own machine. That file is git-ignored — it never gets committed,
+        so everyone's local KSP install path stays out of the shared project.
+
+        MSBuild loads *.csproj.user automatically if present, no other wiring needed.
+
+        macOS example:
+          <OutputPath>/Users/you/Library/Application Support/Steam/steamapps/common/Kerbal Space Program/GameData/ExoInstruments/Plugins/</OutputPath>
+          HintPath root: .../Kerbal Space Program/KSP.app/Contents/Resources/Data/Managed/
+
+        Windows example:
+          <OutputPath>D:\SteamLibrary\steamapps\common\Kerbal Space Program\GameData\ExoInstruments\Plugins\</OutputPath>
+          HintPath root: ...\Kerbal Space Program\KSP_x64_Data\Managed\
+    -->
+    <PropertyGroup>
+        <OutputPath>PATH_TO_KSP\GameData\ExoInstruments\Plugins\</OutputPath>
+    </PropertyGroup>
+    <ItemGroup>
+        <Reference Update="Assembly-CSharp">
+            <HintPath>PATH_TO_KSP_MANAGED\Assembly-CSharp.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.CoreModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.CoreModule.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.PhysicsModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.PhysicsModule.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.IMGUIModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.IMGUIModule.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.AnimationModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.AnimationModule.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.ImageConversionModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.ImageConversionModule.dll</HintPath>
+        </Reference>
+        <Reference Update="UnityEngine.TextRenderingModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.TextRenderingModule.dll</HintPath>
+        </Reference>
+        <!-- KerbalKonstructs.dll lives in GameData/KerbalKonstructs/, not the Managed folder. -->
+        <Reference Update="KerbalKonstructs">
+            <HintPath>PATH_TO_KSP\GameData\KerbalKonstructs\KerbalKonstructs.dll</HintPath>
+        </Reference>
+    </ItemGroup>
+</Project>

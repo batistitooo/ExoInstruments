@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        OutputPath and the Reference HintPaths below are intentionally left unset here.
+        Each developer's local KSP install path is machine-specific (and differs between
+        macOS and Windows setups) — set it in a local ExoInstruments.csproj.user file,
+        which is git-ignored. See ExoInstruments.csproj.user.example for the template.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net472</TargetFramework>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+    </ItemGroup>
+    <ItemGroup>
+        <Reference Include="Assembly-CSharp">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.CoreModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.PhysicsModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.IMGUIModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.AnimationModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.ImageConversionModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.TextRenderingModule">
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="KerbalKonstructs">
+            <Private>false</Private>
+        </Reference>
+    </ItemGroup>
+
+    <!--
+        OutputPath points at GameData/ExoInstruments/Plugins/, so its parent directory
+        is GameData/ExoInstruments/ itself. Mirror the repo's Textures/ folder there on
+        every build so installing the built DLL also deploys the toolbar icon (and any
+        other texture) to the exact path GameDatabase.GetTexture expects.
+    -->
+    <Target Name="CopyTextures" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <TexturesToCopy Include="$(ProjectDir)Textures\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(TexturesToCopy)"
+              DestinationFolder="$(OutputPath)..\Textures\%(RecursiveDir)"
+              SkipUnchangedFiles="true" />
+    </Target>
+
+    <!--
+        Same idea as CopyTextures: mirrors the repo's PluginData/ (the exoplanet and
+        background-star catalogs ExoplanetCsvLoader/BackgroundStarCatalogLoader read at
+        runtime) to GameData/ExoInstruments/PluginData/ on every build. Without this the
+        mod builds and loads but has zero targets to observe.
+    -->
+    <Target Name="CopyPluginData" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <PluginDataToCopy Include="$(ProjectDir)PluginData\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(PluginDataToCopy)"
+              DestinationFolder="$(OutputPath)..\PluginData\%(RecursiveDir)"
+              SkipUnchangedFiles="true" />
+    </Target>
+</Project>
