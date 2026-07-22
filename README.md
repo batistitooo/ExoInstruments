@@ -38,7 +38,7 @@ https://youtu.be/bYpLWqeNQds
 
 - **The Mün and Minmus as observing constraints.** Both moons occult targets outright and raise the sky background with a real separation-dependent brightness law (Krisciunas & Schaefer 1991) -- full-Mün nights push faint targets off the schedule the way they do at real observatories.
 
-- **Observing-quality forecast heatmap.** A porkchop-style color calendar per target/instrument (rows = nights ahead, columns = time of night) folding in twilight, altitude, airmass scintillation, and lunar occultation/moonlight. Click any cell, or the "best window" button, to warp straight there.
+- **Observing-quality forecast heatmap.** A porkchop-style color calendar per target/instrument (rows = nights ahead, columns = time of night) folding in twilight, altitude, airmass scintillation, and lunar occultation/moonlight. The RC20's solar-system forecast additionally factors in real EVE cloud cover over KSC. Click any cell, or the "best window" button, to warp straight there.
 
 - **BetterTimeWarp integration (soft dependency).** When [BetterTimeWarpContinued](https://github.com/linuxgurugamer/BetterTimeWarpContinued) is installed, every "Warp to..." button in the mod uses it to lift stock KSP's silent 100,000x warp cap; without it, everything falls back to stock behavior untouched.
 
@@ -56,7 +56,9 @@ https://youtu.be/bYpLWqeNQds
 
 - **Realistic stellar color.** Every star's tint comes from its own effective temperature through a real blackbody-to-sRGB mapping.
 
-- **Solar-system amateur astrograph (RC20).** A separate, non-exoplanet instrument: a real live-rendered photo of any Kerbol-system body, clicked directly on the sky chart (planets and moons plot there at their real size/color, right alongside the stars). A genuine timed exposure -- nothing renders until the shutter time you set has actually elapsed -- with exposure, ISO, a filter wheel (L/R/G/B/Hα), manual focus, and optional autoguiding (off by default; without it, an un-recentered target drifts between shots exactly like an untracked real mount). Monochrome and grainy on purpose: a single unprocessed sensor frame, not a stretched, denoised final image.
+- **Solar-system amateur astrograph (RC20).** A separate, non-exoplanet instrument: a real live-rendered photo of any Kerbol-system body, clicked directly on the sky chart (planets and moons plot there at their real size/color, right alongside the stars). A genuine timed exposure -- nothing renders until the shutter time you set has actually elapsed -- with exposure, ISO, a filter wheel (L/R/G/B/Hα), manual focus, and optional autoguiding (off by default; without it, an un-recentered target drifts between shots exactly like an untracked real mount). Every frame runs through a full sensor noise chain -- shot noise, dark current, read noise, a fixed hot/dead pixel map, atmospheric extinction and scintillation, seeing-driven blur that worsens with airmass -- plus real cloud cover and haze read live from EVE (Environmental Visual Enhancements) when it's installed. Monochrome and grainy on purpose: a single unprocessed sensor frame, not a stretched, denoised final image.
+
+- **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail -- the same reason real astrophotographers shoot many short exposures instead of one long one.
 
 - **A meaningful instrument-acquisition economy.** Career-mode progression gates each observatory behind an acquisition cost and a cumulative Science-earned threshold, so higher-precision instruments represent a genuine capital investment, not a flat tech tree.
 
@@ -85,11 +87,10 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 
 Not yet implemented in the current build:
 
-- **Image stacking** for the RC20 -- combining several short exposures into one clean, low-noise frame (the real reason astrophotographers expose repeatedly rather than once).
 - **Autoguiding as a paid career upgrade** for the RC20, rather than a free toggle.
-- **Further real astrograph features** surveyed but not built: sensor binning, plate-solving, dark/flat-frame calibration, meridian flip, dithering.
+- **Further real astrograph features** surveyed but not built: sensor binning, plate-solving, flat-frame calibration, meridian flip, dithering.
 - **Naming rights & a discovery archive.** Player-named planets on confirmation, plus an auto-generated logbook entry (light curve, date, instrument) per detection.
-- **Weather in the observing forecast**, via a hook into a weather mod (stock KSP has no weather system of its own to read).
+- **Weather in the generic instrument forecast.** EVE cloud cover is already hooked into the RC20's solar-system forecast; extending it to the exoplanet-instrument heatmap (SPECULOOS, ELT, and the other ground-based facilities) is still open.
 - **A proper in-world observatory building** at the KSC (Kerbal Konstructs), replacing the current toolbar-button placeholder.
 - **Space-based telescope facilities**, modeled after concept missions like ESA's LIFE, with atmospheric/biosignature classification as a further scientific payoff.
 - **Deeper catalog integration** and an **extended instrument roster** (more real-world facilities as further progression rungs).
