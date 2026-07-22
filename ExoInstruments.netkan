@@ -14,10 +14,12 @@
     },
     "depends": [
         { "name": "ModuleManager" },
-        { "name": "KerbalKonstructs" }
+        { "name": "KerbalKonstructs" },
+        { "name": "BetterTimeWarpCont" }
     ],
     "recommends": [
-        { "name": "BetterTimeWarpCont" }
+        { "name": "EnvironmentalVisualEnhancements" },
+        { "name": "Spectra" }
     ],
     "install": [
         {
