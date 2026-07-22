@@ -110,5 +110,4 @@ This repository is offered as an independent demonstration of scientific outreac
 > ### A Personal Note
 >
 > *"This project is my tribute to the human curiosity, that refuses to let us be lonely in the dark. My only hope is that this mod can spark a passion for astronomy, and perhaps inspire others to follow the path of scientific studies."*
->
-> **Baptiste Gress**
+
