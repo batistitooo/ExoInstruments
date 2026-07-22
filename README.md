@@ -12,8 +12,6 @@ This project uses a proprietary license. It is not a Creative Commons license: r
 
 **ExoInstruments** is an independent mod for *Kerbal Space Program 1* that replaces the game's fictional science-experiment loop with a ground-based exoplanet survey built on real observational astrophysics. Rather than abstracting "science points" from generic biome scans, the mod asks the player to run an actual survey program: select a star from a real catalog, choose an instrument appropriate to its brightness and the physics of the detection method, and extract a signal from simulated, noise-limited data exactly the way an observational astronomer would.
 
-Demonstration and small tutorial of RV and direct imaging:
-https://youtu.be/bYpLWqeNQds
 
 ## Key Features
 
