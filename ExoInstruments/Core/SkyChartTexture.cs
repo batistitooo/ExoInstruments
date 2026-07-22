@@ -64,28 +64,16 @@ namespace ExoInstruments.Visualization
         // neutral blue-white rather than a color that implies a spectral class.
         private static readonly Color UnknownTeffTint = new Color(0.85f, 0.85f, 0.92f, 1f);
 
-        // Ring drawn around clickable (search-matched) stars so interactivity
-        // stays unambiguous even though the fill color is now the star's real
-        // hue, not a flat highlight color. Flat, fully opaque, matte gray --
-        // the old semi-transparent alpha-blended ring read as a soft glow/halo
-        // ("game HUD" look); a real finder chart circles its target star with a
-        // plain solid ink ring, so this is drawn as a direct pixel replace, not
-        // a blend, per the roadmap's "flat, matte-colored... calmer" ask.
+        // Flat opaque ring (not alpha-blended): matches a real finder chart's ink circle rather
+        // than the soft HUD-glow look the old semi-transparent version had.
         private static readonly Color HighlightRingColor = new Color(0.72f, 0.72f, 0.76f, 1f);
 
-        // Perceived-brightness display heuristic (not a real flux-ratio
-        // computation -- same order of approximation as ComputeMarkerRadius's
-        // magnitude<6 size threshold below): a linear ramp between a bright and
-        // a faint reference magnitude, so dim stars visually fade toward the
-        // night sky instead of just shrinking, the way they do to the naked eye.
-        private const double BrightReferenceMagnitude = -1.5; // ~Sirius -- maps to full brightness
-        private const double FaintReferenceMagnitude = 12.0;  // display floor -- catalog goes fainter, but the map compresses there
+        // Brightness ramp: dim stars fade toward the sky rather than just shrinking, like the naked eye.
+        private const double BrightReferenceMagnitude = -1.5; // ~Sirius → full brightness
+        private const double FaintReferenceMagnitude = 12.0;  // display floor
         private const float MinBrightnessFraction = 0.16f;
 
-        // Non-highlighted (unclickable) points fade further and desaturate
-        // toward gray so they read as background clutter -- same intent as the
-        // old flat DimmedPointColor, but keeping a hint of real color instead of
-        // erasing it, per Baptiste's "faithful color/opacity" request.
+        // Unclickable stars desaturate toward gray — same intent as the old flat color but keeps a hint of real tint.
         private const float DimmedDesaturation = 0.55f;
         private const float DimmedBrightnessFactor = 0.6f;
         private const float MinHighlightedBrightnessFraction = 0.75f;
@@ -119,23 +107,10 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Pure computation: fills a fresh Color[] buffer for the whole chart --
-        /// background, reference rings, and every catalog point (a real catalog
-        /// runs into the thousands once background stars are merged in). Touches
-        /// nothing Unity considers main-thread-only (Color/Mathf are plain managed
-        /// structs), so it's safe to call from a background Task (see
-        /// ExoInstrumentsGUI's async refresh) instead of stalling the frame that's
-        /// rendering the game for this loop's actual run time.
-        ///
-        /// <paramref name="searchActive"/> distinguishes "no search typed, so every
-        /// point counts as a click target" (SkyChartPoint.IsHighlighted is true for
-        /// everything in that case, by MatchesFilter's own empty-string rule) from
-        /// an actual name match. Only an actual match should draw the ring / get the
-        /// brightness floor -- without this flag, an empty search box painted a
-        /// visible ring on literally every star on the chart, a blanket-halo look
-        /// far from the "calm finder chart" this rendering aims for. Click/hover
-        /// hit-testing (HitTest, elsewhere) is unaffected either way -- every point
-        /// stays clickable when no search is active, only the visual cue is gated.
+        /// Pure computation — safe to call from a background Task. Fills the full chart buffer
+        /// (background, rings, all catalog points). searchActive gates the highlight ring: without
+        /// it, an empty search box would draw a ring on every star — not the calm finder-chart look we want.
+        /// Click hit-testing is unaffected; every point stays clickable when no search is active.
         /// </summary>
         public static Color[] ComputePixels(List<SkyChartPoint> points, int width, int height, SkyChartView view, bool searchActive)
         {
@@ -180,13 +155,7 @@ namespace ExoInstruments.Visualization
             return tex;
         }
 
-        /// <summary>
-        /// Finds the highlighted point nearest a click/hover position, within
-        /// ComputeHitRadius. Dimmed (non-matching) points are never clickable,
-        /// by design -- narrows candidates the same way the search filter
-        /// narrows the list view. Also used every frame for hover preview, not
-        /// just on click -- it's a cheap O(n) loop, no texture work involved.
-        /// </summary>
+        /// <summary>Nearest highlighted point within ComputeHitRadius. Dimmed (non-search-matching) points are never clickable. O(n) loop, called every frame for hover preview.</summary>
         public static StarTarget HitTest(List<SkyChartPoint> points, int width, int height, SkyChartView view, int clickX, int clickY)
         {
             if (points == null) return null;
@@ -216,11 +185,7 @@ namespace ExoInstruments.Visualization
 
             if (p.IsBody)
             {
-                // A solar-system body: a bigger disc than any star, sized to the
-                // body (BodyMarkerRadiusPx, precomputed from its real radius),
-                // growing a little with zoom like the stars do. Only the
-                // currently-selected photography target gets the ring -- every
-                // other body is just its plain colored disc.
+                // Solar-system body: bigger disc, grows with zoom. Only the selected photography target gets the ring.
                 float bodyRadius = Mathf.Min(p.BodyMarkerRadiusPx + (view.Zoom - 1f) * 0.9f, 20f);
                 DrawFilledCircle(pixels, width, height, px.x, px.y, bodyRadius, p.BodyColor);
                 if (p.IsSelectedTarget)
@@ -239,17 +204,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// A star's chart color, roughly the way it would actually look through
-        /// a telescope: real hue from its effective temperature (the same
-        /// blackbody mapping the ELT frame uses, StellarColor.BlackbodyRgb), real
-        /// brightness from apparent magnitude. Pre-composited against the
-        /// night-sky background in this CPU pixel buffer (not left as alpha for
-        /// the GPU to blend at draw time) -- GUI.DrawTexture would otherwise
-        /// blend a translucent pixel against whatever's behind the whole chart
-        /// rect on screen (the IMGUI panel box), not against our own painted sky
-        /// elsewhere in this same texture.
-        /// </summary>
+        /// <summary>Star color from blackbody temperature + apparent brightness, pre-composited against the sky background. Pre-compositing is required: GUI.DrawTexture would otherwise blend against the IMGUI panel box, not our own sky pixels.</summary>
         private static Color ComputeStarDisplayColor(StarTarget target, bool highlighted)
         {
             float r, g, b;

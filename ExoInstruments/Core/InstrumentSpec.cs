@@ -76,33 +76,13 @@ namespace ExoInstruments.Core
         /// <summary>One-time Funds cost to unlock this instrument in career mode.</summary>
         public double UnlockCostFunds { get; set; }
 
-        /// <summary>
-        /// Cumulative Science earned through this mod's own scans (tracked
-        /// separately from the player's current, spendable R&amp;D balance -- see
-        /// ExoInstrumentsScenario.TotalScienceEarned) required before the
-        /// instrument becomes purchasable. Represents needing a track record of
-        /// survey results before the observatory can justify a bigger telescope,
-        /// not "afford it outright on day one."
-        /// </summary>
+        /// <summary>Cumulative Science this mod has awarded (see ExoInstrumentsScenario.TotalScienceEarned) needed before the instrument is purchasable — a track record gate, not an immediate affordability check.</summary>
         public double UnlockScienceThreshold { get; set; }
 
-        /// <summary>
-        /// Funds charged every time an observation is started with this
-        /// instrument in career mode -- telescope time is the scarce commodity of
-        /// real astronomy, and it's what keeps scans from being free spam.
-        /// Scales with the instrument's class: flagship time costs flagship money.
-        /// </summary>
+        /// <summary>Funds charged per observation in career mode — keeps scans from being free spam. Scales with instrument class.</summary>
         public double ScanCostFunds { get; set; }
 
-        /// <summary>
-        /// Multiplier on the detection Science award when the discovery is made
-        /// with this instrument. An explicit balance number set alongside the
-        /// unlock cost (bigger investment, bigger payoff per detection), NOT
-        /// derived from ReferencePrecision: per-point precision inverts the
-        /// intended incentive within the transit class (SPECULOOS, the free
-        /// starter, is the most precise transit instrument per point -- a
-        /// precision-derived multiplier would pay it 7x more than TESS).
-        /// </summary>
+        /// <summary>Multiplier on the detection Science award. Set explicitly alongside unlock cost — NOT derived from precision, which would perversely make the free starter (SPECULOOS) pay more than TESS.</summary>
         public double ScienceRewardMultiplier { get; set; } = 1.0;
 
         /// <summary>1-sigma measurement precision at the given apparent magnitude, in this instrument's native unit.</summary>

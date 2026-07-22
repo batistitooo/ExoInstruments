@@ -5,18 +5,10 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Session
 {
     /// <summary>
-    /// Mirrors ObservationSession for the RV path. Cadence comes from the chosen
-    /// Instrument, not a fixed constant. The session observes the host star, not a
-    /// single planet: the measured reflex velocity carries every catalog companion's
-    /// signal superposed (see RvSimulator.GenerateSystemVelocityAtTime).
-    ///
-    /// All the registry's spectrographs are ground-based, so epochs are only
-    /// taken when the site can see the target (night + above the telescope
-    /// limit -- same gate as the other paths). No scintillation term here: a
-    /// spectrograph measures line positions, not integrated flux. The reported
-    /// per-epoch uncertainty stays instrument-only while the generated scatter
-    /// includes the star's activity jitter -- the observer discovers an active
-    /// star the way real surveys do, as unexplained excess residuals.
+    /// RV analog of ObservationSession. Observes the host star, so the reflex signal from
+    /// every companion superpose on the same measurement. Ground-based: epochs only when the
+    /// target is up at night. No scintillation (spectrograph measures line positions, not flux).
+    /// Per-epoch uncertainty is instrument-only; stellar jitter shows up as excess residuals.
     /// </summary>
     public class RvObservationSession
     {
@@ -31,14 +23,7 @@ namespace ExoInstruments.Session
         public List<RvSample> Samples { get; private set; }
         public bool IsRunning { get; private set; }
 
-        /// <summary>
-        /// Transiting system members with a usable photometric ephemeris, whose
-        /// transit windows this session samples at RmBurstCadenceSeconds instead
-        /// of the regular epoch cadence. Empty = no scheduling (the physics stays
-        /// in the signal regardless): a real observatory can only schedule an RM
-        /// sequence around an ephemeris it actually knows, so career mode passes
-        /// this only for identified targets.
-        /// </summary>
+        /// <summary>Transiting planets this session schedules an RM burst around — sampled at RmBurstCadenceSeconds during transit windows. Empty means no scheduling (RM is always in the physics, but a real observatory can only plan around a known ephemeris).</summary>
         public List<StarTarget> TransitBurstPlanets { get; private set; }
 
         /// <summary>True while the current epoch spacing is the high-cadence RM sequence, for the UI status line.</summary>
@@ -73,14 +58,8 @@ namespace ExoInstruments.Session
             CurrentConditions = SnapshotAt(startUt);
         }
 
-        // See ObservationSession.MaxStepsPerTick for why this cap exists: without
-        // it, a big warp-driven jump in currentUt combined with a long
-        // unobservable stretch forces this loop to grind through the whole gap
-        // in 60s-minimum steps in a single frame -- a multi-second hitch that
-        // looks like "elapsed stopped, no new points" until the frame finally
-        // finishes (stopping/restarting warp doesn't fix anything, it just gives
-        // the stalled frame a chance to complete). Catch-up spreads across
-        // however many Update() frames it takes instead.
+        // Same reasoning as ObservationSession.MaxStepsPerTick: prevents a single frame from
+        // grinding the whole warp gap in 60s steps. Catch-up spreads across Update() frames.
         private const int MaxStepsPerTick = 20000;
 
         public void Tick(double currentUt)
@@ -100,10 +79,7 @@ namespace ExoInstruments.Session
                     Samples.Add(new RvSample(nextSampleUt, velocity, uncertaintyMps));
                     LastSampleUt = nextSampleUt;
 
-                    // Step by the local cadence, but never leap over an upcoming
-                    // transit window: an 8h epoch spacing would skip a 3h transit
-                    // entirely, and the whole point of scheduling is to be on sky
-                    // when ingress starts.
+                    // Never leap over an upcoming transit window: an 8h cadence would otherwise skip a 3h transit entirely.
                     double step = CadenceSecondsAt(nextSampleUt);
                     double burstStart = NextBurstWindowStartUt(nextSampleUt);
                     if (burstStart > nextSampleUt && burstStart < nextSampleUt + step)

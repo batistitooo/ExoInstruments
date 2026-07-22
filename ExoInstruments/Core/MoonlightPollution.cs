@@ -22,31 +22,14 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Moonlight as an observing constraint, two faces:
-    ///
-    /// - Occultation: the Mün subtends about a degree of sky from Kerbin
-    ///   (~15x the solid angle of Earth's Moon) -- when it crosses the line of
-    ///   sight the target is simply gone, for every ground-based method at once.
-    ///
-    /// - Sky-background pollution: scattered moonlight raises the sky surface
-    ///   brightness, and sky photon noise eats faint-target *photometry*.
-    ///   Separation dependence follows the Krisciunas &amp; Schaefer (1991)
-    ///   scattering shape (Rayleigh + Mie forward-scatter lobe); source
-    ///   brightness scales with illuminated fraction, albedo, and apparent
-    ///   solid angle. RV spectrographs measure line positions, not integrated
-    ///   flux, and the ELT images in H band where scattered moonlight is
-    ///   negligible against the OH airglow -- so only transit photometry pays,
-    ///   the same scoping logic as AtmosphericNoise.
-    ///
-    /// Sky-noise magnitude scaling: instrument precision already scales as
-    /// 10^(0.2*dm) (source photon noise); a sky-dominated term scales as
-    /// 10^(0.4*dm) (fixed sky variance under the aperture, shrinking source
-    /// flux) -- which is exactly why moonlight is what drives faint targets off
-    /// the schedule around full moon while bright ones barely notice.
+    /// Moonlight as an observing constraint: occultation (moon disk over the target —
+    /// target simply gone) and sky-background pollution (Krisciunas &amp; Schaefer 1991
+    /// scattering shape). Only transit photometry pays the sky-noise penalty —
+    /// RV and H-band imaging are immune.
     /// </summary>
     public static class MoonlightPollution
     {
-        /// <summary>Reference source strength: a full Mün (albedo 0.12, 200 km radius at 12,000 km) -- MoonSkyFactor is sqrt(skyExcess) relative to this at the reference separation.</summary>
+        /// <summary>Reference flux for a full Mün at zenith (albedo 0.12, 200 km at 12,000 km).</summary>
         private const double ReferenceMoonFlux = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
 
         /// <summary>Separation at which a full Mün yields MoonSkyFactor = 1 -- i.e. doubles the variance of an observation at the instrument's reference magnitude.</summary>
@@ -68,12 +51,9 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Sky position of a moon in the fictional RA/Dec frame: its orbital
-        /// angle around the home body, seen *from* the home body (no +180 flip --
-        /// that flip is for the Sun, which sits opposite the home body's own
-        /// orbital position). Dec 0: the Mün orbits in Kerbin's equatorial plane
-        /// exactly; Minmus' 6 deg inclination is neglected, same order of
-        /// approximation as the mod's no-axial-tilt Sun.
+        /// RA of a moon in the fictional sky frame. No +180 flip (that's only for the Sun,
+        /// which sits opposite the home body's orbit). Dec 0 for all moons — Minmus' 6 deg
+        /// inclination is neglected, same approximation as the no-axial-tilt Sun.
         /// </summary>
         public static double ComputeMoonRaDeg(double ut, MoonContext moon)
         {
@@ -83,7 +63,7 @@ namespace ExoInstruments.Core
             return NormalizeDegrees(meanAnomalyRad * 180.0 / Math.PI + moon.LanPlusArgPeDeg);
         }
 
-        /// <summary>Apparent angular radius from the surface; distance approximated by the orbit's semi-major axis (the observer's 600 km offset is a few percent).</summary>
+        /// <summary>Apparent angular radius from the surface (semi-major axis as distance approximation).</summary>
         public static double AngularRadiusDeg(MoonContext moon)
         {
             if (moon.SemiMajorAxisMeters <= 0) return 0.0;
@@ -91,11 +71,7 @@ namespace ExoInstruments.Core
             return Math.Asin(ratio) * 180.0 / Math.PI;
         }
 
-        /// <summary>
-        /// Illuminated fraction from solar elongation: (1 - cos(elongation))/2.
-        /// Both the Sun and the moons ride Dec 0 in this frame, so elongation is
-        /// just the RA difference -- new moon near the Sun, full moon opposite it.
-        /// </summary>
+        /// <summary>Illuminated fraction from solar elongation: (1 - cos(elongation))/2. Elongation is simply the RA difference since both sun and moons are at Dec 0.</summary>
         public static double IlluminatedFraction(double moonRaDeg, double sunRaDeg)
         {
             double elongationRad = (moonRaDeg - sunRaDeg) * Math.PI / 180.0;
@@ -112,12 +88,7 @@ namespace ExoInstruments.Core
             return Math.Acos(cosSep) * 180.0 / Math.PI;
         }
 
-        /// <summary>
-        /// Krisciunas &amp; Schaefer (1991) scattering shape vs. moon-target
-        /// separation rho: Rayleigh term (1.06 + cos^2 rho) plus the Mie
-        /// forward-scatter lobe 10^(6.15 - rho/40). Returned normalized to the
-        /// reference separation so the calibration constant lives in one place.
-        /// </summary>
+        /// <summary>Krisciunas &amp; Schaefer (1991) scattering kernel: Rayleigh + Mie forward-scatter lobe, normalized to the reference separation.</summary>
         public static double ScatteringKernel(double separationDeg)
         {
             double rho = Math.Max(0.5, separationDeg);  // kernel diverges into the moon's own disk; occultation handles that region
@@ -162,16 +133,14 @@ namespace ExoInstruments.Core
 
                 double angularRadiusDeg = AngularRadiusDeg(moon);
                 double separationDeg = SeparationDeg(raDeg, targetRaDeg, targetDecDeg);
-                // A new moon still blocks the sky behind it -- occultation is
-                // geometry, not illumination.
+                // Occultation is geometry, not illumination — a new moon still blocks the sky.
                 if (separationDeg < angularRadiusDeg)
                 {
                     occulted = true;
                     occultingMoonName = moon.Name;
                 }
 
-                // No Sun on record means no phase to compute -- treat as full
-                // (bright-sky-conservative), matching the evaluator's permanent-night fallback.
+                // No Sun on record: treat as full moon (conservative), matching the permanent-night fallback.
                 double illuminated = hasSun ? IlluminatedFraction(raDeg, sunRaDeg) : 1.0;
                 double sizeRatio = moon.BodyRadiusMeters / moon.SemiMajorAxisMeters;
                 double moonFlux = Math.Max(0.0, moon.Albedo) * illuminated * sizeRatio * sizeRatio;
@@ -200,14 +169,7 @@ namespace ExoInstruments.Core
             moonSkyFactor = Math.Sqrt(totalExcess);
         }
 
-        /// <summary>
-        /// 1-sigma fractional-flux noise excess from moonlit sky, to add in
-        /// quadrature with instrument precision and scintillation. Zero for
-        /// space-based instruments and non-photometric methods (see class
-        /// comment). Scales as 10^(0.4*dm): sky noise, not source noise.
-        /// Calibration: MoonSkyFactor 1 (full Mün at the reference separation)
-        /// doubles the noise variance at the instrument's reference magnitude.
-        /// </summary>
+        /// <summary>Sky-noise excess (sigma) from moonlight, to add in quadrature. Zero for space-based instruments and non-transit methods. Scales as 10^(0.4*dm).</summary>
         public static double ExcessNoiseSigma(InstrumentSpec instrument, double apparentMagnitude, double moonSkyFactor)
         {
             if (moonSkyFactor <= 0.0) return 0.0;

@@ -5,21 +5,10 @@ using System.Linq;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Real exoplanet surveys are extremely non-uniform on the sky -- Kepler's single
-    /// ~115 deg^2 field alone contributed thousands of confirmed/candidate hosts,
-    /// producing a dense, visually obvious clump on the sky chart. In career mode
-    /// that clump is a giveaway in itself: a player could infer "something's here"
-    /// from the pattern alone, before ever scanning a star, undermining the
-    /// fog-of-war design (see project memory).
-    ///
-    /// This is a purely cosmetic declutter pass, not a scientific correction: it
-    /// caps how many real planet hosts survive in any one coarse sky cell. Selection
-    /// within an over-full cell is by a stable hash of the star's own CatalogKey --
-    /// deterministic and independent of catalog file order (so it doesn't just keep
-    /// "the first N Kepler entries alphabetically", which would reintroduce a
-    /// pattern) and independent of System.Random (so a star's presence/absence never
-    /// changes between sessions -- required since career-mode scan state persists
-    /// per CatalogKey).
+    /// Cosmetic declutter pass: caps how many planet hosts survive in each coarse sky cell.
+    /// Without it the Kepler field (~115 deg²) forms an obvious clump that breaks fog-of-war.
+    /// Selection within an over-full cell is by a stable hash of CatalogKey — deterministic
+    /// and independent of file order, so a star's presence never changes between sessions.
     /// </summary>
     public static class CatalogDensityThinner
     {

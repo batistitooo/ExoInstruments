@@ -5,26 +5,16 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Session
 {
     /// <summary>
-    /// Transit photometry campaign. Ground-based instruments only expose while
-    /// their site can actually see the target -- Sun below twilight, target
-    /// above the telescope limit (ImagingObservingConditions, the same gate the
-    /// imaging path uses) -- and their per-point noise carries the
-    /// airmass-dependent scintillation excess. Space-based instruments (TESS)
-    /// keep the continuous coverage that is precisely their real-world selling
-    /// point. The resulting diurnal gaps give ground-based data an honest
-    /// window function, aliases and all, exactly the artifact real BLS searches
-    /// fight.
+    /// Transit photometry campaign. Ground-based instruments only expose at night with the
+    /// target above the altitude limit; noise carries airmass scintillation. Space-based
+    /// (TESS) observes continuously. The diurnal gaps give ground data an honest window
+    /// function — exactly the aliasing real BLS searches have to deal with.
     /// </summary>
     public class ObservationSession
     {
         public StarTarget Target { get; private set; }
 
-        /// <summary>
-        /// Every catalog planet sharing this target's host, target first --
-        /// photometry observes the star, so a compact system's transits
-        /// superpose on the one light curve whether the player asked or not
-        /// (same reasoning as RvObservationSession.SystemPlanets).
-        /// </summary>
+        /// <summary>Every planet sharing this host, target first. Photometry observes the star, so all transits superpose on the same light curve whether or not the player knew about them.</summary>
         public List<StarTarget> SystemPlanets { get; private set; }
 
         public InstrumentSpec Instrument { get; private set; }
@@ -71,17 +61,9 @@ namespace ExoInstruments.Session
             CurrentConditions = SnapshotAt(startUt);
         }
 
-        // Caps how many search/sample steps a single Tick can process. High time
-        // warp can advance currentUt by days or years between consecutive Update()
-        // calls; without a cap, a target with long unobservable stretches (daytime,
-        // below the altitude limit) forces this loop to grind through millions of
-        // 60s-minimum search steps synchronously on the main thread in one frame --
-        // a multi-second hitch that reads as "the game froze, no new points, elapsed
-        // stopped" (exactly what stopping and restarting warp "fixes": it's not
-        // fixing anything, it's just giving the stalled frame a chance to finish).
-        // Instead, catch-up work is spread across as many Update() frames as it
-        // takes -- nextSampleUt is left wherever the budget ran out, and the next
-        // Tick call picks up right there.
+        // Prevents a single Tick from grinding through millions of 60s search steps on a
+        // long warp jump across an unobservable stretch — that stalls the main thread for seconds.
+        // Catch-up spreads across multiple Update() frames; nextSampleUt tracks where we left off.
         private const int MaxStepsPerTick = 20000;
 
         public void Tick(double currentUt)

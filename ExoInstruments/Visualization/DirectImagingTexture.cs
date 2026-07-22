@@ -5,41 +5,11 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Visualization
 {
     /// <summary>
-    /// Renders a simulated high-contrast image: stellar PSF with approximated
-    /// diffraction rings and the six spider-diffraction spikes of the ELT's
-    /// segmented pupil, a speckle-noise halo whose amplitude falls as integration
-    /// accumulates (sqrt(t_eff), matching DirectImagingSimulator), and the planet
-    /// as a faint point source at its real separation/contrast. Like every other
-    /// plot in the mod this is physics painted into a Texture2D, not a real
-    /// photograph. Log-stretched intensity (standard for high-contrast imaging
-    /// displays -- linear scale would show nothing but the star).
-    ///
-    /// Realism details, each deterministic per target so refreshes don't strobe:
-    /// - The star is NOT centered: a per-target pointing offset of up to ~12% of
-    ///   the field displaces it, the way real acquisition frames land.
-    /// - Six diffraction spikes at the pupil's spider angles, falling off as
-    ///   (lambda/D / r)^2 along each vane axis.
-    /// - The speckle halo is anisotropic: a two-lobed wind-driven-halo modulation
-    ///   (the classic butterfly of extreme-AO residuals) along a per-target wind
-    ///   position angle.
-    /// - A uniform sky+detector background noise floor, independent of the star's
-    ///   brightness, that averages down as sqrt(t_eff).
-    /// - A handful of hot pixels at fixed detector positions -- uncorrected bad
-    ///   pixels survive real pipelines too.
-    ///
-    /// Every star renders differently, driven by its own measured properties:
-    /// - Apparent magnitude scales the whole starlight field (PSF, rings, spikes,
-    ///   speckle halo), so a V=1 giant blooms across the frame while a V=6
-    ///   target is a modest core -- the dynamic range above the display floor is
-    ///   genuinely larger for brighter stars.
-    /// - Effective temperature (catalog star_teff, or derived from the BSC B-V
-    ///   color) tints the starlight via its blackbody color (StellarColor).
-    ///   An H-band frame is monochromatic in reality -- the tint is false
-    ///   color encoding the star's measured color temperature, and the caption
-    ///   says so. Stars with no temperature data keep the old neutral
-    ///   black-orange-white heat ramp.
-    /// - The companion, when present, is tinted by its own temperature
-    ///   (typically a deep ember red against a hotter star's field).
+    /// Simulated high-contrast image: log-stretched stellar PSF with diffraction rings,
+    /// six spider spikes (ELT pupil), a wind-driven anisotropic speckle halo that fades
+    /// as sqrt(t_eff), sky+detector background, hot pixels, and the planet as a faint PSF
+    /// at real separation/contrast. All parameters deterministic per target so refreshes
+    /// don't strobe. Star magnitude scales the whole starlight field; temperature false-colors it.
     /// </summary>
     public static class DirectImagingTexture
     {
@@ -94,16 +64,7 @@ namespace ExoInstruments.Visualization
             public double FovArcsec;
         }
 
-        /// <summary>
-        /// Pure computation: fills a fresh Color[] buffer and returns it alongside
-        /// the field of view, touching nothing Unity considers main-thread-only
-        /// (Color/Mathf are plain managed structs, safe from a background thread).
-        /// The 400x400 raster with several transcendental calls per pixel is the
-        /// single most expensive thing this mod does per refresh -- calling this
-        /// from a background Task (see ExoInstrumentsGUI's async refresh) keeps
-        /// that cost off the frame that's rendering the game, instead of stalling
-        /// it for the tens of milliseconds the loop below actually takes.
-        /// </summary>
+        /// <summary>Pure computation — safe to call off the main thread. The 400×400 raster with per-pixel transcendentals is the mod's most expensive refresh; running it in a background Task (see ExoInstrumentsGUI's async refresh) keeps it off the game frame.</summary>
         public static PixelResult ComputePixels(StarTarget star, DirectImagingAssessment assessment, double effectiveExposureSeconds, int size)
         {
             double thetaDiff = assessment.DiffractionLimitArcsec;
@@ -119,10 +80,7 @@ namespace ExoInstruments.Visualization
                 : 12.0 * lambdaOverD;
             double arcsecPerPixel = fovArcsec / size;
 
-            // No photons yet (session opened during the day, dome closed): the
-            // detector shows readout noise and its bad pixels, nothing else. No
-            // PSF, no speckle, no planet, no diffraction ring -- there is no
-            // light to render. The star appears once integration actually starts.
+            // Session just opened (dome closed, daytime): only readout noise and hot pixels — no photons yet.
             if (effectiveExposureSeconds < MinStarlightExposureSeconds)
             {
                 var darkPixels = new Color[size * size];
@@ -194,10 +152,7 @@ namespace ExoInstruments.Visualization
                     double dys = yArc - starY;
                     double r = Math.Sqrt(dxs * dxs + dys * dys);
 
-                    // Stellar PSF: Gaussian core + rings under a (theta/r)^3 envelope
-                    // (the Airy pattern's asymptotic falloff), cos^2-modulated at the
-                    // real ~lambda/D ring spacing. Not exact Bessel math -- deliberately
-                    // the same order of approximation as the rest of the mod.
+                    // Stellar PSF: Gaussian core + Airy-like ring envelope. Same order of approximation as the rest of the mod, not exact Bessel math.
                     double starIntensity = Math.Exp(-r * r / (2.0 * psfSigma * psfSigma));
                     if (r > lambdaOverD)
                     {
@@ -208,8 +163,7 @@ namespace ExoInstruments.Visualization
 
                     double theta = Math.Atan2(dys, dxs);
 
-                    // Spider diffraction spikes: Gaussian in azimuth around each of
-                    // the pupil's 6 vane axes, 1/r^2 along them.
+                    // Spider spikes: Gaussian in azimuth around each of 6 ELT vane axes, 1/r^2 along them.
                     if (r > 0.7 * lambdaOverD)
                     {
                         double azOffset = (theta - spikeBaseRad) % spikeSectorRad;
@@ -222,12 +176,8 @@ namespace ExoInstruments.Visualization
                         }
                     }
 
-                    // Speckle halo: positive-intensity grain at the current 1-sigma
-                    // residual level for this radius. Fades as integration deepens --
-                    // this is what visually "uncovers" the planet over a session.
-                    // It's residual starlight, so it carries the star's tint and
-                    // brightness scale. The cos^2 factor is the wind-driven-halo
-                    // butterfly: AO residuals pile up along the wind direction.
+                    // Speckle halo: fades as sqrt(t_eff) — what visually uncovers the planet over a session.
+                    // cos^2 modulation = the classic AO wind-butterfly (residuals pile along the wind axis).
                     double floorHere = DirectImagingSimulator.SpeckleFloorAtSeparation(assessment.BaseFloor5Sigma1Hr, Math.Max(r, lambdaOverD));
                     double sigmaNow = floorHere / 5.0 / sqrtHours;
                     double windCos = Math.Cos(theta - windPaRad);
@@ -255,8 +205,7 @@ namespace ExoInstruments.Visualization
                         ? MapIntensityTinted(planetIntensity, planetR, planetG, planetB)
                         : Color.clear;
 
-                    // Additive: the companion is extra light on top of the stellar
-                    // field, exactly as it is on a detector.
+                    // Additive: companion is extra light on top of the stellar field, as on a real detector.
                     pixels[py * size + px] = new Color(
                         Mathf.Clamp01(starColor.r + planetColor.r),
                         Mathf.Clamp01(starColor.g + planetColor.g),

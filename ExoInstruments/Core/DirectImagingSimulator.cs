@@ -3,24 +3,10 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Physics for ELT-class high-contrast direct imaging. Pure C#, mirrors the
-    /// other pipelines' honesty about approximation:
-    ///
-    /// - Angular separation: theta(arcsec) = a(AU) / d(pc) (small-angle/parallax).
-    /// - Diffraction limit: theta = 1.22 lambda/D (H band, 1.6 um, D = 39.3 m).
-    /// - Planet flux: blackbody at the catalog's planet temperature when available
-    ///   (temp_measured/temp_calculated -- the right driver for young self-luminous
-    ///   giants, whose near-IR light is internal heat), else the irradiation
-    ///   equilibrium temperature Teq = Teff*sqrt(R*/2a)*(1-A)^(1/4) with an assumed
-    ///   Bond albedo of 0.3 (Earth-like; no catalog column for it).
-    /// - Contrast: Planck ratio at 1.6 um times (Rp/R*)^2. Blackbodies underestimate
-    ///   the H-band flux of young giants somewhat (non-equilibrium chemistry) --
-    ///   order-of-magnitude honest, same caveat class as the BLS/sinusoid detectors.
-    /// - Speckle floor: post-processed 5-sigma contrast limit modeled as
-    ///   base * (theta_diff/theta)^2, clamped at a 1e-8 deep limit, improving as
-    ///   sqrt(integration time). Order-of-magnitude for ELT extreme-AO predictions
-    ///   (Kasper et al. 2021, PCS); the base at 1 lambda/D and its magnitude scaling
-    ///   come from the InstrumentSpec (see Observatories.Elt).
+    /// ELT high-contrast direct imaging in H band (1.6 µm, D=39.3 m). Planet flux
+    /// uses the catalog temperature when available, else equilibrium Teq with Bond
+    /// albedo 0.3. Contrast = Planck ratio × (Rp/R*)². Speckle floor scales as
+    /// base × (λ/D / θ)², improving as sqrt(time). Order-of-magnitude estimates.
     /// </summary>
     public static class DirectImagingSimulator
     {
@@ -88,7 +74,7 @@ namespace ExoInstruments.Core
             return a;
         }
 
-        /// <summary>Teq = Teff * sqrt(R*/(2a)) * (1-A)^(1/4), the standard zero-redistribution-free equilibrium estimate.</summary>
+        /// <summary>Teq = Teff × sqrt(R*/(2a)) × (1-A)^(1/4). Zero-redistribution equilibrium estimate.</summary>
         public static double EquilibriumTempK(double starTeffK, double starRadiusSolar, double semiMajorAxisAU)
         {
             double starRadiusAU = starRadiusSolar / SolarRadiiPerAU;
@@ -108,12 +94,7 @@ namespace ExoInstruments.Core
             return (Math.Exp(xStar) - 1.0) / (Math.Exp(xPlanet) - 1.0);
         }
 
-        /// <summary>
-        /// 5-sigma contrast floor after 1 hour at a given separation: quadratic
-        /// improvement with separation (speckle halo falls off), clamped at the
-        /// deep post-processing limit. Inside the diffraction limit the floor is
-        /// meaningless (nothing is resolvable there) -- returns the base value.
-        /// </summary>
+        /// <summary>5-sigma contrast floor after 1 hour at a given separation. Improves quadratically with separation; returns the base value inside the diffraction limit.</summary>
         public static double SpeckleFloorAtSeparation(double baseFloor1LambdaD, double separationArcsec)
         {
             double thetaDiff = DiffractionLimitArcsec;
@@ -122,11 +103,7 @@ namespace ExoInstruments.Core
             return Math.Max(DeepContrastLimit, baseFloor1LambdaD * ratio * ratio);
         }
 
-        /// <summary>
-        /// SNR after a given integration: (contrast / 5-sigma 1-hr floor) * 5 * sqrt(hours).
-        /// exposureSeconds is EFFECTIVE on-sky time (zenith-equivalent, airmass-weighted,
-        /// night-only -- see ImagingObservationSession), not wall-clock time.
-        /// </summary>
+        /// <summary>SNR after a given integration. exposureSeconds is effective on-sky time (airmass-weighted, night-only), not wall clock.</summary>
         public static double ComputeSnr(DirectImagingAssessment a, double exposureSeconds)
         {
             if (!a.HasRequiredData || !a.Resolvable || !a.SignalPresent) return 0.0;
@@ -135,7 +112,7 @@ namespace ExoInstruments.Core
             return 5.0 * (a.ContrastRatio / a.SpeckleFloor5Sigma1Hr) * Math.Sqrt(hours);
         }
 
-        /// <summary>Effective on-sky integration needed to reach the detection threshold; PositiveInfinity when nothing can ever be detected.</summary>
+        /// <summary>Effective on-sky time to reach the detection threshold; PositiveInfinity if undetectable.</summary>
         public static double RequiredExposureSeconds(DirectImagingAssessment a, double snrThreshold = DetectionSnrThreshold)
         {
             if (!a.HasRequiredData || !a.Resolvable || !a.SignalPresent) return double.PositiveInfinity;

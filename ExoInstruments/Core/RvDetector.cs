@@ -4,18 +4,10 @@ using System.Collections.Generic;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Simplified Lomb-Scargle-style period search: for each trial period, fits
-    /// v(t) = A*cos(wt) + B*sin(wt) + C by linear least squares and scores it by
-    /// semi-amplitude / fit uncertainty. Not a full generalized Lomb-Scargle
-    /// (Zechmeister &amp; Kurster 2009) — no proper false-alarm probability
-    /// calibration, no aliasing/window-function handling. Treat SNR as relative
-    /// confidence, not a calibrated statistic — same caveat as TransitDetector.
-    ///
-    /// Known bias: a single-harmonic sinusoid fit systematically underestimates K
-    /// for eccentric orbits (a Keplerian RV curve has real power at the 2nd/3rd
-    /// harmonics once e is non-trivial) — period recovery stays accurate, but the
-    /// reported semi-amplitude runs low with increasing eccentricity. A full
-    /// nonlinear Keplerian fit would fix this; out of scope for this pass.
+    /// Simplified Lomb-Scargle-style period search: fits v(t) = A*cos(wt) + B*sin(wt) + C
+    /// for each trial period. No false-alarm calibration; treat SNR as relative confidence.
+    /// Known bias: single-harmonic fit underestimates K on eccentric orbits (real power in
+    /// 2nd/3rd harmonics). Period recovery stays accurate; amplitude runs low with eccentricity.
     /// </summary>
     public static class RvDetector
     {
@@ -23,41 +15,18 @@ namespace ExoInstruments.Core
         public const int MinSampleCount = 10;
         public const int MaxPlanetsPerSearch = 4;
 
-        /// <summary>
-        /// Physical sanity cap on a fitted semi-amplitude: a real periodic signal
-        /// present in the data can't legitimately carry an amplitude many times
-        /// the data's own total scatter (a sinusoid of amplitude A contributes
-        /// ~A^2/2 to the variance, so A can't cleanly exceed stdV*sqrt(2) without
-        /// something being numerically wrong). This is the second, independent
-        /// line of defense against the near-singular-fit failure this class's
-        /// own header already warns about -- FitSinusoid's determinant guard
-        /// alone wasn't catching it at large sample counts (see there).
-        /// </summary>
+        // Second defense against near-singular fits: a real signal can't carry amplitude
+        // many times the data's own scatter. FitSinusoid's determinant guard alone wasn't
+        // enough at large sample counts.
         private const double MaxPlausibleAmplitudeFactor = 8.0;
 
-        /// <summary>
-        /// Trial periods within this fraction of an exact small-integer multiple
-        /// of the data's own sampling cadence are skipped. At a perfectly regular
-        /// cadence, a trial period of exactly 2x that cadence makes
-        /// sin(omega*t_i) vanish at every sample (omega*t_i = pi*i), collapsing
-        /// the cos/sin design matrix onto a near-degenerate axis that noise can
-        /// fit with a deceptively plausible amplitude and SNR -- reproduced with
-        /// a clean single-planet 51 Peg b simulation (real period correctly
-        /// recovered at SNR ~110, but a phantom second "planet" also detected at
-        /// P = 2x the RV cadence, SNR ~33, on every run). Real periodogram
-        /// practice excludes exactly these cadence aliases rather than trying to
-        /// out-threshold them statistically. Checked against k = 1..6.
-        /// </summary>
+        // Periods near an integer multiple of the sampling cadence make sin(ωt_i) vanish at
+        // every sample — the fit goes degenerate and produces phantom high-SNR signals. Skip them.
+        // (Verified with a 51 Peg b simulation: real period at SNR ~110, phantom at 2× cadence SNR ~33.)
         private const double CadenceAliasToleranceFraction = 0.03;
         private const int MaxCadenceAliasMultiple = 6;
 
-        /// <summary>
-        /// Minimum observation baseline for a period to even be testable by Detect --
-        /// mirrors the baselineDaysForSearch/2 clamp below, floored by whatever
-        /// MinSampleCount needs at this instrument's cadence. Lets the GUI tell the
-        /// player up front how long a target/instrument pairing will realistically take,
-        /// instead of them finding out only after warping blind for a while.
-        /// </summary>
+        /// <summary>Minimum baseline before a given period is testable — mirrors the effectiveMaxPeriodDays/2 clamp in Detect. Lets the GUI estimate observing time before the player commits.</summary>
         public static double EstimateRequiredBaselineDays(double catalogPeriodDays, double cadenceSeconds)
         {
             double periodBaseline = catalogPeriodDays > 0 ? catalogPeriodDays * 2.0 : 0.0;
@@ -92,11 +61,7 @@ namespace ExoInstruments.Core
             double baselineDaysForSearch = (samples[n - 1].Ut - samples[0].Ut) / 86400.0;
             double medianCadenceSeconds = ComputeMedianCadenceSeconds(samples);
 
-            // A period can't be meaningfully constrained unless the baseline covers
-            // at least a couple of cycles of it -- past that, cos(wt)/sin(wt) barely
-            // vary over the observed window, the fit becomes numerically near-singular,
-            // and it "fits" pure noise with a spuriously huge amplitude and SNR. Cap the
-            // search so it never trusts periods the data genuinely can't distinguish.
+            // Cap at baseline/2: longer periods aren't constrained and the fit goes spurious.
             double effectiveMaxPeriodDays = Math.Min(maxPeriodDays, Math.Max(minPeriodDays, baselineDaysForSearch / 2.0));
 
             double minPeriodSec = minPeriodDays * 86400.0;
@@ -130,12 +95,9 @@ namespace ExoInstruments.Core
                 }
             }
 
-            // Local refinement around the coarse-grid peak. The coarse step can be off
-            // by a fractional period error that, integrated over many cycles of
-            // baseline, leaves a large coherent residual after subtraction -- enough
-            // for DetectMultiple's next prewhitening pass to re-detect the same planet
-            // as a phantom signal. One fine scan (+/- one coarse step) fixes both the
-            // reported period and the subtraction quality.
+            // Fine refinement: the coarse grid can leave a fractional period error that,
+            // over many baseline cycles, creates a large coherent residual and fools
+            // the next prewhitening pass into a phantom re-detection.
             if (bestPeriodDays > 0)
             {
                 double coarseStepDays = (maxPeriodSec - minPeriodSec) / 86400.0 / Math.Max(1, periodSteps - 1);
@@ -187,16 +149,10 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Iterative prewhitening for multi-planet systems, the standard RV-survey
-        /// procedure: detect the strongest periodic signal, subtract its best-fit
-        /// sinusoid from the data, search the residuals for the next signal, repeat
-        /// until nothing clears the SNR threshold or MaxPlanetsPerSearch is reached.
-        ///
-        /// Every attempted stage is returned (the final, below-threshold one included,
-        /// so the report can show what the residual search bottomed out at). Each stage
-        /// carries the residual series it searched — that's the series its phase-folded
-        /// plot should display, otherwise the stronger planets' signals visually swamp
-        /// the weaker ones.
+        /// Iterative prewhitening: detect the strongest signal, subtract it, repeat on
+        /// residuals until nothing clears the threshold. Returns all stages including
+        /// the final below-threshold one, each carrying the series it was searched in
+        /// (needed for phase-folded plots so stronger signals don't swamp weaker ones).
         /// </summary>
         public static List<RvDetectionStage> DetectMultiple(
             List<RvSample> samples,
@@ -233,11 +189,7 @@ namespace ExoInstruments.Core
             return stages;
         }
 
-        /// <summary>
-        /// Returns the period of an earlier detection this one sits at a near-integer
-        /// ratio of (within 5%, ratios 1:1 to 3:1), else null. See
-        /// RvDetectionResult.LikelyHarmonicOfPeriodDays for why this matters.
-        /// </summary>
+        /// <summary>Prior detection whose period this one sits within 5% of a 1:1–3:1 ratio with; null otherwise.</summary>
         private static double? FindHarmonicParentPeriodDays(double periodDays, List<RvDetectionStage> priorStages)
         {
             if (periodDays <= 0) return null;
@@ -278,11 +230,7 @@ namespace ExoInstruments.Core
             return gaps.Length % 2 == 0 ? (gaps[mid - 1] + gaps[mid]) / 2.0 : gaps[mid];
         }
 
-        /// <summary>
-        /// Least-squares fit of v(t) = A*cos(wt) + B*sin(wt) + C via the 3x3 normal
-        /// equations, solved directly with Cramer's rule (cheap at this size, no
-        /// matrix library needed).
-        /// </summary>
+        /// <summary>Least-squares fit of v(t) = A*cos(wt) + B*sin(wt) + C via the 3x3 normal equations (Cramer's rule).</summary>
         private static bool FitSinusoid(List<RvSample> samples, double omega, out double a, out double b, out double c, out double residualStd)
         {
             a = b = c = 0.0;
@@ -310,15 +258,8 @@ namespace ExoInstruments.Core
             }
 
             double det = Determinant3(sCC, sCS, sC, sCS, sSS, sS, sC, sS, n);
-            // A well-conditioned fit (full phase coverage) has sCC ~ sSS ~ n/2 and
-            // sCS ~ sC ~ sS ~ 0, so det scales like n^3/4. The old fixed 1e-12
-            // absolute floor only rejected fits that were essentially exactly
-            // singular; at the sample counts a long baseline produces (n in the
-            // thousands, ideal det ~1e9-1e10), a trial period with poor phase
-            // coverage could land many orders of magnitude below that scale --
-            // ill-conditioned, not truly singular -- and still clear 1e-12,
-            // producing the wildly inflated amplitude/SNR this class's header
-            // already warned about. Reject relative to the ideal scale instead.
+            // Reject relative to the ideal det scale (~n^3/4): an absolute 1e-12 floor misses
+            // ill-conditioned fits at large n, letting them return spuriously large amplitude/SNR.
             double idealDetScale = Math.Max(1.0, n) * Math.Max(1.0, n) * Math.Max(1.0, n) / 4.0;
             if (Math.Abs(det) < Math.Max(1e-12, 1e-6 * idealDetScale)) return false;
 

@@ -4,22 +4,9 @@ using System.Collections.Generic;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Generates synthetic flux measurements. Pure function of (star, UT) plus
-    /// an injected RNG.
-    ///
-    /// The model, term by term:
-    /// - Baseline: 1.0 plus the star's own spot-rotation modulation
-    ///   (StellarActivity) -- real light curves are never flat, and the
-    ///   detector has to dig the transit out of that astrophysical trend.
-    /// - Transit: limb-darkened shape with proper ingress/egress geometry
-    ///   (small-planet approximation of Mandel &amp; Agol 2002), replacing the
-    ///   old box model. A real transit is round-bottomed -- the planet crosses
-    ///   brighter disk center and dimmer limb -- and V-shaped grazing events
-    ///   look different from central ones, exactly the diagnostics real
-    ///   vetting pipelines use.
-    /// - Noise: instrument photon-noise term, plus (ground-based photometry
-    ///   only) the airmass-dependent scintillation excess (AtmosphericNoise),
-    ///   in quadrature.
+    /// Generates synthetic flux measurements: stellar spot baseline (StellarActivity) +
+    /// limb-darkened transit (Mandel &amp; Agol 2002 small-planet approximation) +
+    /// instrument/scintillation noise in quadrature.
     /// </summary>
     public static class LightCurveSimulator
     {
@@ -34,13 +21,9 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Combined flux from every planet orbiting the same host: transits of a
-        /// compact system superpose on one light curve (TRAPPIST-1's is the
-        /// canonical example), over a single shared stellar baseline -- the host
-        /// star and its spots belong to the system, not to any one planet.
-        /// ttvSignals runs parallel to systemPlanets (null = strict linear
-        /// ephemerides): each planet's transit is displaced by its own
-        /// timing-variation term, which is what the O-C analysis digs back out.
+        /// Combined flux from all planets on a shared stellar baseline. ttvSignals is
+        /// parallel to systemPlanets (null = strict ephemerides): each transit is shifted
+        /// by its own TTV term, which the O-C analysis later recovers.
         /// </summary>
         public static double GenerateSystemFluxAtTime(
             IList<StarTarget> systemPlanets,
@@ -60,14 +43,7 @@ namespace ExoInstruments.Core
             return baseline - totalDip + noise;
         }
 
-        /// <summary>
-        /// 1-sigma fractional-flux noise for one exposure: instrument precision,
-        /// the scintillation excess above zenith, and (when the moon is up and
-        /// bright near the target) the moonlit-sky excess, in quadrature. This is
-        /// both what the noise draw uses and what gets reported as the sample
-        /// uncertainty -- photometric pipelines do know their per-point error
-        /// budget, including the airmass and sky terms.
-        /// </summary>
+        /// <summary>1-sigma noise for one exposure: instrument precision + scintillation + moonlit-sky excess in quadrature. Also reported as the per-sample uncertainty.</summary>
         public static double TotalNoiseSigma(StarTarget star, InstrumentSpec instrument, double airmass, double moonSkyFactor = 0.0)
         {
             double instrumentSigma = instrument.EstimatePrecision(star.ApparentMagnitude) / 1_000_000.0;
@@ -88,13 +64,9 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Instantaneous transit chord state, for callers that need the planet's
-        /// projected position as well as the dip (the Rossiter-McLaughlin anomaly
-        /// is dip times the local rotation velocity at that position). Returns
-        /// false when the full geometry (a/R_star and impact parameter) isn't on
-        /// record -- RM needs real geometry, the box-model fallback won't do.
-        /// xStellarRadii is the position along the transit chord (0 at mid-transit,
-        /// negative approaching), dipFraction is 0 outside transit.
+        /// Transit chord state for RM calculations. Returns false when a/R_star or impact
+        /// parameter is missing (the box-model fallback isn't good enough for RM).
+        /// xStellarRadii is 0 at mid-transit (negative approaching); dipFraction is 0 outside transit.
         /// </summary>
         public static bool TryGetTransitChordState(StarTarget star, double ut, out double xStellarRadii, out double dipFraction)
         {
@@ -161,31 +133,20 @@ namespace ExoInstruments.Core
             return Math.Abs(phaseCentered) <= halfDurationPhase ? depthFraction : 0.0;
         }
 
-        /// <summary>
-        /// Fractional flux deficit for a planet of radius ratio p at projected
-        /// separation z (stellar radii), quadratic limb darkening
-        /// I(mu) = 1 - u1*(1-mu) - u2*(1-mu)^2. Small-planet approximation
-        /// (Mandel &amp; Agol 2002, sec. 5): the obscured intensity is the local
-        /// intensity at the planet's position times the covered area, good to
-        /// well under the instruments' noise for p up to hot-Jupiter sizes.
-        /// </summary>
+        /// <summary>Fractional flux deficit for planet radius ratio p at separation z, with quadratic limb darkening. Mandel &amp; Agol 2002 small-planet approximation.</summary>
         private static double LimbDarkenedDip(double z, double p, double u1, double u2)
         {
             if (z >= 1.0 + p) return 0.0;
 
-            // Disk-averaged intensity, normalizing local intensity to total flux.
             double meanIntensity = 1.0 - u1 / 3.0 - u2 / 6.0;
 
             if (z <= 1.0 - p)
             {
-                // Fully on the disk: full planet area times local intensity.
                 double mu = Math.Sqrt(Math.Max(0.0, 1.0 - z * z));
                 return p * p * LocalIntensity(mu, u1, u2) / meanIntensity;
             }
 
-            // Ingress/egress: exact circle-overlap area, intensity evaluated at
-            // the limb region being covered (mu -> 0 there, hence the smooth,
-            // shallow shoulders real light curves show).
+            // Ingress/egress: circle-overlap area × limb intensity (mu → 0 at the limb, giving the smooth shallow shoulders).
             double coveredFraction = CircleOverlapArea(z, p) / (Math.PI * p * p);
             double rEdge = Math.Min(1.0, z);
             double muEdge = Math.Sqrt(Math.Max(0.0, 1.0 - rEdge * rEdge));
@@ -214,13 +175,7 @@ namespace ExoInstruments.Core
                  - 0.5 * Math.Sqrt(Math.Max(0.0, kernel));
         }
 
-        /// <summary>
-        /// Quadratic limb-darkening coefficients vs effective temperature:
-        /// piecewise-linear interpolation through representative dwarf-star
-        /// values from the Claret &amp; Bloemen 2011 tables (Kepler band).
-        /// Cooler photospheres darken more steeply toward the limb. Unknown
-        /// Teff falls back to solar coefficients.
-        /// </summary>
+        /// <summary>Quadratic limb-darkening coefficients vs Teff, interpolated from Claret &amp; Bloemen 2011. Falls back to solar values for unknown Teff.</summary>
         private static void QuadraticLimbDarkening(double? effectiveTempK, out double u1, out double u2)
         {
             double teff = effectiveTempK ?? 5800.0;

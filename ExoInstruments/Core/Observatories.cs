@@ -1,19 +1,10 @@
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Registry of real instruments the player can observe with. Reference
-    /// precision/magnitude/cadence figures are drawn from each instrument's own
-    /// papers -- see Citation on each entry. Adding another observatory (DUET,
-    /// SPIRIT, WASP's northern/southern successor, ...) is just another entry here.
-    ///
-    /// UnlockCostFunds/UnlockScienceThreshold/ScanCostFunds/ScienceRewardMultiplier
-    /// are career-mode progression knobs (ExoInstrumentsGUI's unlock and scan-cost
-    /// UI, ExoInstrumentsScenario's persistence) -- ALL VALUES ARE PLACEHOLDERS,
-    /// balance à valider avec Baptiste. The only real constraint honored here is
-    /// relative ordering: cost, per-scan operating cost, and reward multiplier
-    /// all track each instrument's real-world budget class, so a bigger
-    /// investment really does buy scans that cost more but pay more. Ignored
-    /// entirely outside career mode.
+    /// Registry of real instruments the player can observe with. Precision/cadence from each
+    /// instrument's own papers (see Citation). Career economy fields are ALL PLACEHOLDERS —
+    /// balance à valider avec Baptiste; relative ordering (bigger investment → bigger payoff)
+    /// is the only constraint honored here.
     /// </summary>
     public static class Observatories
     {
@@ -58,12 +49,6 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 0.111,        // Canon 200mm f/1.8 lens: 111mm entrance pupil -- scintillation-limited on bright stars, WASP's real noise regime
             SiteAltitudeMeters = 2400.0,   // Roque de los Muchachos, La Palma (SuperWASP-North)
-            // Cheapest purchasable upgrade: real WASP hardware was off-the-shelf
-            // camera lenses, far below SPECULOOS's four 1m robotic domes -- worse
-            // per-point precision, but immediately affordable, no track record
-            // needed, and the cheapest telescope time in the registry: its niche
-            // is burning down the fog on bright easy targets without draining
-            // the budget.
             UnlockCostFunds = 10_000.0,
             UnlockScienceThreshold = 0.0,
             ScanCostFunds = 250.0,
@@ -85,8 +70,6 @@ namespace ExoInstruments.Core
                           "It watches each patch of sky continuously for weeks, which is exactly what catching repeated transits demands. " +
                           "The aperture is tiny (10.5 cm), so it favors bright stars, but the uninterrupted coverage is something no ground telescope can offer.",
             IsSpaceBased = true,           // Earth-orbiting: observes around the clock, no atmosphere in the way
-            // A NASA Explorer-class space mission, several orders of magnitude
-            // above ground-based WASP/SPECULOOS -- priced and gated accordingly.
             UnlockCostFunds = 300_000.0,
             UnlockScienceThreshold = 100.0,
             ScanCostFunds = 2_500.0,
@@ -133,9 +116,6 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 8.2,          // one VLT unit telescope
             SiteAltitudeMeters = 2635.0,   // Paranal
-            // The RV ceiling: VLT-class aperture plus the best achieved long-term
-            // precision of any instrument in this registry -- priced as the RV
-            // path's capstone, just under ELT's imaging capstone.
             UnlockCostFunds = 900_000.0,
             UnlockScienceThreshold = 400.0,
             ScanCostFunds = 8_000.0,
@@ -159,8 +139,6 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 1.93,
             SiteAltitudeMeters = 650.0,    // Observatoire de Haute-Provence
-            // The RV path's entry point: smaller aperture than HARPS, cheapest
-            // way into radial-velocity detection.
             UnlockCostFunds = 60_000.0,
             UnlockScienceThreshold = 30.0,
             ScanCostFunds = 1_500.0,
@@ -191,13 +169,6 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 39.3,
             SiteAltitudeMeters = 3046.0,   // Cerro Armazones
-            // The registry's most expensive instrument by a wide margin, matching
-            // the ELT's real ~39m-class flagship-observatory budget tier --
-            // deliberately the last thing a career playthrough unlocks. Flagship
-            // telescope time is priced to make each pointing a real decision, but
-            // an ELT campaign can also characterize the star itself (see
-            // ScienceRewards.ScienceRewardStellarCharacterization), so even a
-            // null companion search isn't a total write-off.
             UnlockCostFunds = 4_000_000.0,
             UnlockScienceThreshold = 900.0,
             ScanCostFunds = 25_000.0,
@@ -209,10 +180,7 @@ namespace ExoInstruments.Core
             Name = "RC20",
             DisplayName = "PlaneWave RC20 (Amateur Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // None of the exoplanet-detection fields below apply to this
-            // instrument (see DetectionMethod.SolarSystemPhotography) -- left
-            // at 0 rather than omitted so nothing here can be silently reused
-            // by a session type that isn't checking Method first.
+            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,
@@ -227,11 +195,7 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 0.51,
             SiteAltitudeMeters = 560.0,    // ETH Zurich's own observatory site
-            // Placeholders -- balance à valider avec Baptiste. Priced as the
-            // second-cheapest entry in the registry: a real step up from the
-            // free SPECULOOS starter, but far below anything that does
-            // exoplanet science, since this instrument does not contribute to
-            // that progression at all.
+            // Placeholders -- balance à valider avec Baptiste.
             UnlockedByDefault = false,
             UnlockCostFunds = 15_000.0,
             UnlockScienceThreshold = 5.0,

@@ -4,18 +4,10 @@ using System.Collections.Generic;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Simplified Box Least Squares (BLS) transit search. Not a full
-    /// implementation of Kovacs et al. 2002 — no proper false-alarm
-    /// probability calibration, no ingress/egress shape, no detrending.
-    /// Treat SNR as relative confidence, not a calibrated statistic.
-    ///
-    /// Phase resolution is adaptive (see <see cref="ComputeAdaptivePhaseBins"/>):
-    /// a fixed bin count is coarse relative to short transits at long trial
-    /// periods (bin width = period / phaseBins grows with period), which
-    /// mixes in-transit and out-of-transit flux in the boundary bins and
-    /// dilutes the recovered depth/SNR. Tying bin width to the data's own
-    /// sampling cadence keeps resolution physically meaningful — finer than
-    /// the native cadence buys nothing, coarser than it re-introduces dilution.
+    /// Simplified BLS transit search (Kovacs et al. 2002). No false-alarm calibration
+    /// or ingress/egress shape — treat SNR as relative confidence. Phase bins are
+    /// adaptive: tied to the data cadence so the bin width stays physically meaningful
+    /// across the full range of trial periods.
     /// </summary>
     public static class TransitDetector
     {

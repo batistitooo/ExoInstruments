@@ -3,50 +3,21 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Astrophysical noise from the star itself -- the thing no instrument
-    /// upgrade can buy away, and the actual precision floor of modern RV and
-    /// photometric surveys. Two faces of the same magnetic activity:
-    ///
-    /// - RV "jitter": stochastic line-profile distortions from spots, plage,
-    ///   granulation and p-mode oscillations. Modeled as a white-noise term
-    ///   added in quadrature with instrument precision, the standard treatment
-    ///   in RV orbit fitting (Wright 2005; Saar, Butler &amp; Marcy 1998).
-    ///   Baselines follow the observed Teff trend: F stars are jitter-loud
-    ///   (shallow convective envelopes, fast rotation), K stars are the
-    ///   quietest, M dwarfs climb again through flaring and spot coverage.
-    ///
-    /// - Photometric spot modulation: dark spots rotating across the visible
-    ///   disk imprint a quasi-periodic signal at the stellar rotation period
-    ///   (fundamental + first harmonic, the classic two-spot-group light
-    ///   curve). Rotation-period bands per spectral type follow the Kepler
-    ///   rotation catalog (McQuillan, Mazeh &amp; Aigrain 2014); variability
-    ///   amplitudes span the quiet-Sun-to-active-dwarf range observed by
-    ///   Kepler (Basri et al. 2013).
-    ///
-    /// The catalog carries no activity indicators (log R'HK, S-index), so each
-    /// star draws a persistent activity level from a deterministic hash of its
-    /// identity: the same star is always the same star, across sessions and
-    /// saves, without storing anything. That unknown-until-observed scatter is
-    /// itself realistic -- target lists get built before anyone knows which
-    /// stars will turn out too active to be useful.
+    /// Astrophysical noise intrinsic to the star: RV jitter (spots, granulation,
+    /// p-modes) and photometric spot modulation. Each star gets a persistent
+    /// activity level from a deterministic hash — same star, same noise, every session,
+    /// without storing anything. The catalog carries no activity indicators, so
+    /// you don't know which targets are quiet until you observe them.
     /// </summary>
     public static class StellarActivity
     {
-        /// <summary>
-        /// Persistent per-star activity multiplier, log-uniform in [0.5, 2.5].
-        /// Applied to both the RV jitter and the spot amplitude -- an active
-        /// star is loud in both observables at once, as in reality.
-        /// </summary>
+        /// <summary>Persistent activity multiplier, log-uniform in [0.5, 2.5]. Applied to both RV jitter and spot amplitude — an active star is loud in both.</summary>
         public static double ActivityFactor(StarTarget star)
         {
             return LogUniform(Hash01(star, "activity"), 0.5, 2.5);
         }
 
-        /// <summary>
-        /// White RV jitter (m/s, 1-sigma) to add in quadrature with instrument
-        /// precision. Teff-band baselines after Wright 2005 (median jitter of
-        /// inactive field dwarfs), scaled by the star's activity factor.
-        /// </summary>
+        /// <summary>White RV jitter (m/s, 1-sigma) to add in quadrature with instrument precision. Teff-banded baselines, scaled by activity factor.</summary>
         public static double RvJitterMps(StarTarget star)
         {
             double teff = star.EffectiveTempK ?? 5500.0; // unknown: assume solar-ish
@@ -58,11 +29,7 @@ namespace ExoInstruments.Core
             return baseline * ActivityFactor(star);
         }
 
-        /// <summary>
-        /// Stellar rotation period (days): Teff-banded ranges from the Kepler
-        /// rotation-period catalog (McQuillan et al. 2014), position within the
-        /// band fixed by the star's hash.
-        /// </summary>
+        /// <summary>Stellar rotation period (days), drawn from Teff-banded ranges based on the Kepler rotation catalog.</summary>
         public static double RotationPeriodDays(StarTarget star)
         {
             double teff = star.EffectiveTempK ?? 5500.0;
@@ -74,23 +41,13 @@ namespace ExoInstruments.Core
             return lo + Hash01(star, "rotation") * (hi - lo);
         }
 
-        /// <summary>
-        /// Peak spot-modulation amplitude (ppm). Log-uniform across the range
-        /// Kepler observed for dwarfs -- quiet-Sun ~100 ppm up to low-mmag
-        /// active stars (Basri et al. 2013) -- times the activity factor.
-        /// </summary>
+        /// <summary>Peak spot-modulation amplitude (ppm), log-uniform in the range Kepler observed, scaled by activity factor.</summary>
         public static double SpotAmplitudePpm(StarTarget star)
         {
             return LogUniform(Hash01(star, "spots"), 120.0, 1200.0) * ActivityFactor(star);
         }
 
-        /// <summary>
-        /// Fractional flux offset from spot rotation at time ut: fundamental at
-        /// the rotation period plus a half-amplitude first harmonic (two spot
-        /// groups on opposite hemispheres -- the shape real Kepler rotators show).
-        /// Deterministic in (star, ut): the light curve is repeatable, only the
-        /// measurement noise is random.
-        /// </summary>
+        /// <summary>Fractional flux offset from spot rotation: fundamental + half-amplitude first harmonic (the classic two-spot-group shape). Deterministic in (star, ut).</summary>
         public static double SpotModulationFlux(StarTarget star, double ut)
         {
             double amplitude = SpotAmplitudePpm(star) / 1_000_000.0;
@@ -100,11 +57,7 @@ namespace ExoInstruments.Core
             return amplitude * (Math.Sin(omega + phase1) + 0.5 * Math.Sin(2.0 * omega + phase2));
         }
 
-        /// <summary>
-        /// Deterministic uniform draw in [0,1) from the star's stable identity
-        /// plus a per-quantity salt. FNV-1a: tiny, stable across runtimes, and
-        /// well-mixed enough for game-noise purposes.
-        /// </summary>
+        /// <summary>Deterministic uniform draw in [0,1) from the star's identity + a salt string. FNV-1a hash, stable across runtimes.</summary>
         private static double Hash01(StarTarget star, string salt)
         {
             string identity = (star.CatalogKey ?? star.HostStarName ?? star.Name ?? "") + "|" + salt;

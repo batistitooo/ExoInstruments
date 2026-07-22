@@ -3,33 +3,18 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Pure-C# physics for the RC20 amateur astrograph's image-quality
-    /// pipeline: atmospheric extinction and CCD sensor noise (photon shot
-    /// noise, dark current). Kept separate from SolarSystemCameraTexture
-    /// (which owns the Unity-side pixel buffer and this mod's game-specific
-    /// brightness scale) so the underlying physics is self-contained and
-    /// testable the same way as the rest of Core.
-    ///
-    /// Cloud cover is NOT modeled here at all -- stock KSP has no weather
-    /// system of its own, so real cloud data (when available) comes only
-    /// from an installed EVE cloud config, read directly off its own painted
-    /// textures by EveCloudIntegration (Visualization). No procedural
-    /// stand-in is used when EVE isn't installed/configured: the frame
-    /// simply has no cloud effect, rather than a fabricated one.
+    /// Physics for the RC20 camera pipeline: atmospheric extinction (Bouguer's law)
+    /// and CCD sensor noise (shot noise, dark current). Pure C#, no Unity dependency.
+    /// Cloud cover is handled separately by EveCloudIntegration — no procedural fallback.
     /// </summary>
     public static class AtmosphericImagingNoise
     {
-        // --- Atmospheric extinction (Bouguer's law) --------------------------
-        // Typical broadband atmospheric extinction coefficient at a decent
-        // mid-altitude site (Sterken & Manfroid, "Astronomical Photometry",
-        // typical range ~0.1-0.3 mag/airmass depending on site/wavelength/
-        // aerosol load) -- 0.20 is a representative average. This is a
-        // genuine dimming of the target itself, separate from
-        // ImagingObservingConditions (which only gates whether an
-        // observation is *allowed*, never how bright the result looks).
+        // Broadband extinction at a decent mid-altitude site — 0.20 mag/airmass is a
+        // representative average. Separate from ImagingObservingConditions (which only
+        // gates whether imaging is allowed, not how bright the result looks).
         public const double ExtinctionMagPerAirmass = 0.20;
 
-        /// <summary>Fraction of zenith-equivalent flux transmitted at the given airmass: 1 at airmass 1, falling toward the horizon. 0/1-safe for non-finite or sub-1 airmass.</summary>
+        /// <summary>Fraction of flux transmitted at the given airmass (1 at zenith, falling toward horizon).</summary>
         public static double ExtinctionTransmission(double airmass)
         {
             if (double.IsNaN(airmass)) return 0.0;
@@ -38,13 +23,10 @@ namespace ExoInstruments.Core
             return Math.Pow(10.0, -0.4 * ExtinctionMagPerAirmass * (airmass - 1.0));
         }
 
-        // --- Scintillation reuse ---------------------------------------------
         /// <summary>
-        /// Excess (above-zenith) Young (1967) scintillation sigma for a given
-        /// aperture/site/airmass/exposure, independent of any InstrumentSpec --
-        /// lets non-photometric ground-based imaging (this camera) reuse the
-        /// exact real formula AtmosphericNoise already uses for the transit
-        /// photometers, without going through that Transit-only-gated API.
+        /// Scintillation sigma above the zenith value, for a given aperture/airmass/exposure.
+        /// Lets the camera reuse the same Young formula as the transit photometers
+        /// without going through the Transit-only API.
         /// </summary>
         public static double ScintillationExcessSigma(double apertureMeters, double siteAltitudeMeters, double airmass, double exposureSeconds)
         {
@@ -54,25 +36,17 @@ namespace ExoInstruments.Core
             return Math.Sqrt(Math.Max(0.0, atAirmass * atAirmass - atZenith * atZenith));
         }
 
-        // --- Sensor noise physics ---------------------------------------------
-        // A real amateur CCD/CMOS's noise budget, given real signal-dependent
-        // (Poisson) shape and a genuine constant read-noise floor, expressed
-        // in the SAME abstract [0,1]-ish signal units the rest of the RC20
-        // pipeline already uses (the underlying scene render isn't
-        // radiometrically calibrated to real photon counts, so claiming a
-        // literal electron-count calibration here would be dishonest --
-        // what's physically real and worth getting right is the *shape*:
-        // shot/dark noise growing as sqrt(signal)/sqrt(exposure), i.e.
-        // proportionally noisier in the shadows and cleaner in the
-        // highlights, exactly like a real sensor).
+        // Sensor noise: Poisson shot noise + dark current, in the same abstract [0,1]
+        // signal units the RC20 pipeline uses. The *shape* is real (sqrt(signal),
+        // shadows noisier than highlights) even if the units aren't photon counts.
         private const double ShotNoiseCoefficient = 0.55;
         private const double DarkCurrentRatePerSecond = 0.01; // abstract units/sec -- negligible on short subs, real on long ones
         private const double DarkNoiseCoefficient = 0.55;
 
-        /// <summary>1-sigma photon shot-noise amplitude for a pixel carrying the given (pre-gain) signal fraction. sqrt(signal) shape -- the real Poisson-noise behavior.</summary>
+        /// <summary>1-sigma shot noise for a pixel at the given (pre-gain) signal fraction.</summary>
         public static double ShotNoiseSigma(double signalFraction) => ShotNoiseCoefficient * Math.Sqrt(Math.Max(0.0, signalFraction));
 
-        /// <summary>Dark-current pedestal + its own shot noise, both pre-gain, for the given exposure time -- accumulates independent of ISO/gain (real thermal electrons build up in the well regardless of amplifier setting).</summary>
+        /// <summary>Dark-current pedestal + noise for the given exposure. Pre-gain — accumulates regardless of gain setting.</summary>
         public static void DarkCurrent(double exposureSeconds, out double pedestalFraction, out double sigmaFraction)
         {
             double darkUnits = DarkCurrentRatePerSecond * Math.Max(0.0, exposureSeconds);

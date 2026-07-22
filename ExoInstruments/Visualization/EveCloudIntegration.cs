@@ -6,36 +6,10 @@ using UnityEngine;
 namespace ExoInstruments.Visualization
 {
     /// <summary>
-    /// Reads REAL cloud-cover data painted by an installed EVE (Environmental
-    /// Visual Enhancements) cloud config -- e.g. the classic BoulderCo stock
-    /// config's Kerbin cubemap -- instead of any procedurally simulated cloud
-    /// field. Stock KSP has no weather system, and EVE is the only visual
-    /// weather mod, so this is the only source of real cloud data available;
-    /// if it isn't installed/configured, the RC20 simply doesn't model clouds
-    /// at all (zero coverage), never a fake substitute.
-    ///
-    /// Soft dependency, resolved entirely by reflection (same posture as
-    /// BetterTimeWarpIntegration): the mod builds and runs with no reference
-    /// to any EVE assembly, and any reflection surprise (EVE not installed, a
-    /// future EVE version renaming internals) disables this permanently for
-    /// the session rather than throwing.
-    ///
-    /// API surface verified by decompiling the actually-installed EVE-Redux
-    /// 1.11.7.2 (Atmosphere.dll / EVEManager.dll / Utils.dll) with ilspycmd,
-    /// per this project's established practice -- not guessed from names:
-    /// - Atmosphere.CloudsManager : EVEManager.GenericEVEManager&lt;CloudsObject&gt;,
-    ///   whose PROTECTED STATIC "ObjectList" (declared on the generic base,
-    ///   not CloudsManager itself) holds every loaded per-body cloud layer.
-    /// - Atmosphere.CloudsObject has a PUBLIC "Body" property (celestial body
-    ///   name) and a PRIVATE "settings" field (Atmosphere.CloudsMaterial).
-    /// - CloudsMaterial's PRIVATE "_MainTex" field (Utils.TextureWrapper) is
-    ///   the coverage-equivalent texture for this classic (non-raymarched --
-    ///   that variant is Patreon-only, not in any public EVE release) cloud
-    ///   system. TextureWrapper.Name (PUBLIC) gives its config path string.
-    /// - Utils.CubemapWrapper.fetchCubeMap(TextureWrapper) is PUBLIC STATIC
-    ///   and returns the already-assembled 6-face (or 2-face "RGB2") cubemap
-    ///   EVE itself loaded at startup -- this integration never loads or
-    ///   decodes a texture file itself, only reads what EVE already built.
+    /// Reads real cloud cover from an installed EVE (Environmental Visual Enhancements)
+    /// cloud config via reflection. Soft dependency — builds and runs without EVE;
+    /// returns 0 when EVE isn't installed. Never falls back to procedural clouds.
+    /// API verified by decompiling EVE-Redux 1.11.7.2 with ilspycmd.
     /// </summary>
     public static class EveCloudIntegration
     {
@@ -62,24 +36,10 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Real cloud coverage in [0,1] at a BODY-FIXED direction (e.g. the
-        /// observer's local "up", transformed into bodyName's own rotating
-        /// frame via CelestialBody.bodyTransform -- NOT world space, since
-        /// EVE's cloud texture rotates with the planet). Returns 0 (no
-        /// clouds modeled) whenever EVE isn't installed, this body has no
-        /// configured cloud layer, its main texture isn't a cubemap (a
-        /// handful of EVE configs use a flat 2D layer instead -- not handled
-        /// here), or the texture turns out not to be CPU-readable. Never
-        /// throws.
-        ///
-        /// Known, disclosed approximation: EVE additionally rotates this
-        /// texture slowly over time (a configurable "wind speed" on top of
-        /// the body's own rotation, which bodyTransform already cancels out)
-        /// to simulate drifting weather -- replicating that exact rotation
-        /// would require matching EVE's internal quaternion composition with
-        /// no way to verify it visually against the real render, so it is
-        /// deliberately not attempted. What's sampled is the real painted
-        /// cloud pattern in the body-fixed frame, just not wind-advected.
+        /// Cloud coverage [0,1] at a body-fixed direction (EVE's texture rotates with the
+        /// planet, so pass the direction in bodyTransform space, not world space). Returns 0
+        /// when EVE isn't installed, no cloud layer is configured for the body, or the read
+        /// fails. Known approximation: EVE's wind-drift rotation isn't replicated.
         /// </summary>
         public static float SampleCoverage(string bodyName, Vector3 bodyFixedDirection)
         {
@@ -167,7 +127,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>(Re)resolves the 6 cube faces for bodyName's first configured cloud layer, caching until the body changes.</summary>
+        /// <summary>Loads (and caches) the 6 cubemap faces for the body's first cloud layer.</summary>
         private static void EnsureFacesForBody(string bodyName)
         {
             if (cacheValid && string.Equals(cachedBodyName, bodyName, StringComparison.OrdinalIgnoreCase)) return;
@@ -212,16 +172,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// Standard cube-face/UV selection from a direction vector: index
-        /// 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z, matching the face order
-        /// CubemapWrapper.ApplyCubeMap binds (xp/xn/yp/yn/zp/zn). The exact
-        /// per-face U/V sign convention is a defensible standard unfolding,
-        /// not independently verified against EVE's own shader -- what
-        /// matters for this use (a single coarse coverage sample, not a
-        /// pixel-aligned render) is landing on the broadly correct face and
-        /// region, which this guarantees regardless of convention details.
-        /// </summary>
+        /// <summary>Standard cube-face/UV selection from a direction vector: index 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.</summary>
         private static void SelectCubeFace(Vector3 dir, out int face, out float u, out float v)
         {
             float ax = Mathf.Abs(dir.x), ay = Mathf.Abs(dir.y), az = Mathf.Abs(dir.z);

@@ -65,47 +65,21 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Ground-based observing constraints, shared by every ground-based
-    /// instrument: the imaging session integrates through them continuously,
-    /// and the transit/RV sessions gate their exposures on the same
-    /// Observable flag (space-based instruments skip the gate entirely):
-    ///
-    /// - Night only: science integration requires the Sun below -12 deg (nautical
-    ///   twilight -- near-IR AO genuinely starts earlier than visible-light work,
-    ///   so -12 rather than the astronomical -18).
-    /// - Altitude limit: AO needs the target above ~20 deg (airmass < 3); below
-    ///   that the wavefront correction collapses. Real ELT-class AO proposals are
-    ///   typically capped near airmass 2.
-    /// - Airmass weighting: the Fried parameter degrades as r0 ~ X^(-3/5)
-    ///   (Kolmogorov turbulence along a slanted path), so the post-AO residual
-    ///   wavefront variance -- and with it the speckle-halo contrast floor --
-    ///   scales roughly linearly with airmass X. SNR goes as contrast/floor, so
-    ///   the SNR^2 accumulation rate scales as X^-2: one hour at airmass 2 is
-    ///   worth 15 minutes at zenith. Effective time dt_eff = dt / X^2.
-    /// - Weather is deliberately excluded (design decision: random dome closures
-    ///   are frustration, not education).
-    ///
-    /// The Sun's sky position reuses the mod's fictional RA/Dec frame: the home
-    /// body's orbital angle (circular approximation -- exact for stock Kerbin,
-    /// e = 0) plus 180 deg gives the Sun's RA; declination is 0 because stock
-    /// bodies have no axial tilt. Both the Sun and the star catalog then go
-    /// through the same SkyCoordinates meridian, so sunset here is consistent
-    /// with the sky chart, and -- since initialRotation and the orbital elements
-    /// share KSP's inertial reference frame -- with the rendered lighting too.
+    /// Ground-based observing gates used by all sessions:
+    /// - Night: Sun below -12 deg (nautical twilight).
+    /// - Altitude: target above 20 deg (airmass below ~3).
+    /// - Airmass weighting: SNR^2 accumulates at 1/X^2 (one hour at X=2 ≈ 15 min at zenith).
+    /// Weather is excluded by design — random dome closures are frustrating, not educational.
     /// </summary>
     public static class ImagingObservingConditions
     {
         public const double TwilightSunAltitudeDeg = -12.0;
         public const double MinTelescopeAltitudeDeg = 20.0;
 
-        /// <summary>
-        /// Targets with no catalog RA/Dec can't be tracked across the sky --
-        /// they integrate at this assumed altitude whenever it's night, rather
-        /// than being unobservable (the catalog gap is ours, not the player's).
-        /// </summary>
+        /// <summary>Fallback altitude for targets with no catalog RA/Dec — the catalog gap is ours, not the player's fault.</summary>
         public const double FallbackAltitudeDeg = 45.0;
 
-        /// <summary>Sun's RA in the fictional sky frame: orbital angle of the home body + 180 deg. Circular-orbit approximation (exact for stock Kerbin).</summary>
+        /// <summary>Sun's RA in the fictional sky frame (home body orbital angle + 180 deg). Circular orbit — exact for stock Kerbin.</summary>
         public static double ComputeSunRaDeg(double ut, ImagingObserverContext ctx)
         {
             double meanAnomalyRad = ctx.SunMeanAnomalyAtEpochRad
@@ -125,16 +99,14 @@ namespace ExoInstruments.Core
             if (hasSun)
             {
                 sunRaDeg = ComputeSunRaDeg(ut, ctx);
-                // Dec 0: stock KSP bodies have no axial tilt, so the Sun rides the
-                // celestial equator all year -- no seasons in the day/night cycle.
+                // Dec 0: stock KSP bodies have no axial tilt, so no seasons.
                 var sun = SkyCoordinates.EquatorialToHorizontal(sunRaDeg, 0.0, meridianRaDeg, ctx.LatitudeDeg);
                 s.SunAltitudeDeg = sun.AltitudeDeg;
                 s.IsNight = sun.AltitudeDeg < TwilightSunAltitudeDeg;
             }
             else
             {
-                // No orbit on record for the home body: can't place the Sun, so
-                // don't pretend to -- permanent night, the old idealization.
+                // No orbit on record: can't place the Sun, so default to permanent night.
                 s.SunAltitudeDeg = -90.0;
                 s.IsNight = true;
             }
@@ -153,16 +125,8 @@ namespace ExoInstruments.Core
 
             s.TargetUp = s.TargetAltitudeDeg >= MinTelescopeAltitudeDeg;
 
-            // Moon geometry (occultation + sky-pollution kernel, a handful of
-            // trig/Pow calls per moon) only ever changes the outcome when the
-            // other two gates already pass -- daytime or below-the-limit
-            // candidates are unobservable regardless of the Mun's position.
-            // Sessions probe thousands of candidate instants per Tick while
-            // searching through an unobservable stretch under time warp, so
-            // skipping this block there (instead of paying it on every single
-            // candidate) is what keeps that search loop from falling behind
-            // the warp clock -- previously it didn't, and long warps could
-            // starve sample collection.
+            // Moon geometry is only evaluated when both other gates pass — it's expensive
+            // enough per frame to stall sample collection under time warp otherwise.
             if (s.IsNight && s.TargetUp && targetRaDeg.HasValue && targetDecDeg.HasValue)
             {
                 MoonlightPollution.Evaluate(
@@ -183,18 +147,14 @@ namespace ExoInstruments.Core
             return s;
         }
 
-        /// <summary>
-        /// Plane-parallel airmass sec(z). Diverges at the horizon where the real
-        /// curved-atmosphere value stays finite (~38), but the telescope limit
-        /// keeps us above 20 deg where sec(z) is accurate to better than 1%.
-        /// </summary>
+        /// <summary>Plane-parallel airmass sec(z). Accurate to &lt;1% above 20 deg, which is our telescope floor.</summary>
         public static double AirmassAt(double altitudeDeg)
         {
             if (altitudeDeg <= 0.0) return double.PositiveInfinity;
             return 1.0 / Math.Sin(altitudeDeg * Math.PI / 180.0);
         }
 
-        /// <summary>Highest altitude this declination ever reaches from this latitude (at meridian transit).</summary>
+        /// <summary>Maximum altitude this declination ever reaches from this latitude (at meridian transit).</summary>
         public static double MaxTargetAltitudeDeg(double targetDecDeg, double observerLatitudeDeg)
         {
             return 90.0 - Math.Abs(targetDecDeg - observerLatitudeDeg);

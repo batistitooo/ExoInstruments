@@ -199,6 +199,14 @@ namespace ExoInstruments
 
         private ObservatoryBuilding observatoryBuilding;
         private readonly SolarSystemCameraTexture solarSystemCamera = new SolarSystemCameraTexture();
+        private readonly AstroImageStack astroStack = new AstroImageStack();
+        private int stackBatchSize = 5;
+        private int stackBatchRemaining = 0;
+        private bool stackAlignSubs = true;
+        private float haBlendStrength = 0.5f;
+        private Texture2D stackedCompositeTexture;
+        private string stackComposeError;
+        private string stackBatchInterruptedMessage;
         private CelestialBody selectedPhotographyBody;
         // Mirrors session/rvSession/imagingSession's role for photography: set
         // by "Start Observation" once a body is selected AND the RC20 is the
@@ -310,6 +318,46 @@ namespace ExoInstruments
             if (windowVisible && SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography)
             {
                 solarSystemCamera.TickCapture(Time.deltaTime);
+
+                // Stacking batch: grab the sub that just finished, then chain
+                // into the next exposure until the batch is done or capture
+                // conditions changed out from under it (body set, twilight
+                // ended, ...). Filter and FOV are locked (their GUI controls
+                // are disabled) for the duration of a batch, so every sub
+                // added here is guaranteed to share the filter/FOV of the
+                // first one -- AddSub's FOV check is a defensive backstop,
+                // not the primary guarantee.
+                if (stackBatchRemaining > 0 && solarSystemCamera.HasCapturedPhoto && !solarSystemCamera.IsCapturing)
+                {
+                    AstroSubResult subResult = astroStack.AddSub(
+                        solarSystemCamera.Filter, solarSystemCamera.GetLastCaptureGray(),
+                        solarSystemCamera.FovDeg, solarSystemCamera.ExposureSeconds);
+                    solarSystemCamera.ConsumeCapturedPhoto();
+
+                    if (subResult == AstroSubResult.FilterFull)
+                    {
+                        stackBatchInterruptedMessage = $"Stack {FilterLabel(solarSystemCamera.Filter)} full ({AstroImageStack.MaxSubsPerFilter} subs). Compose or clear the stack before capturing more.";
+                        stackBatchRemaining = 0;
+                    }
+                    else if (subResult == AstroSubResult.FovMismatch)
+                    {
+                        stackBatchInterruptedMessage = $"FOV changed since earlier {FilterLabel(solarSystemCamera.Filter)} subs -- clear the stack or match the original FOV.";
+                        stackBatchRemaining = 0;
+                    }
+                    else
+                    {
+                        stackBatchRemaining--;
+                        if (stackBatchRemaining > 0 && CanExposePhotography())
+                        {
+                            solarSystemCamera.BeginExposure(selectedPhotographyBody);
+                        }
+                        else if (stackBatchRemaining > 0)
+                        {
+                            stackBatchInterruptedMessage = "Series stopped: it must be night and the body above the horizon.";
+                            stackBatchRemaining = 0;
+                        }
+                    }
+                }
             }
 
             if (session == null && rvSession == null && imagingSession == null)
@@ -382,6 +430,7 @@ namespace ExoInstruments
             ClearTextures();
             if (skyChartTexture != null) { Destroy(skyChartTexture); skyChartTexture = null; }
             if (forecastTexture != null) { Destroy(forecastTexture); forecastTexture = null; }
+            if (stackedCompositeTexture != null) { Destroy(stackedCompositeTexture); stackedCompositeTexture = null; }
         }
 
         void AddButton()
@@ -1033,13 +1082,8 @@ namespace ExoInstruments
         /// body becomes a SkyChartPoint with IsBody set and a marker radius sized
         /// to the body's real physical radius (log-compressed), so a big planet
         /// plots as a bigger dot than a small moon -- just larger than any star.
-        ///
-        /// Bodies intentionally use the RC20's geometric-horizon threshold
-        /// (altitude > 0 deg), rather than SkyCoordinates.DefaultMinAltitudeDeg
-        /// (10 deg). The camera and the body forecast can expose as soon as the
-        /// body clears the horizon, so hiding it from the chart until 10 deg
-        /// would make a body forecast window appear to start before the target
-        /// exists on the chart.
+        /// Uses the same 0-deg geometric horizon as stars, matching the RC20
+        /// capture gate and the body forecast.
         ///
         /// Also emits the parallel identity list used for click hit-testing.
         /// </summary>
@@ -1059,8 +1103,7 @@ namespace ExoInstruments
                     continue;
 
                 // Must match the RC20 capture gate and ComputeBodyForecast:
-                // a body is observable as soon as it is geometrically above
-                // the horizon. Stars retain their separate 10-degree chart gate.
+                // a body is observable as soon as it is geometrically above the horizon.
                 if (alt <= 0.0)
                     continue;
 
@@ -1125,6 +1168,22 @@ namespace ExoInstruments
         }
 
         /// <summary>
+        /// Whether the RC20 can start an exposure on the currently selected
+        /// body right now: night, and the body above the horizon. Shared by
+        /// the Capture button's enabled state and the stacking batch driver
+        /// in Update() (which needs the same check outside of GUI draw code
+        /// to know whether to chain into the next sub of a batch).
+        /// </summary>
+        bool CanExposePhotography()
+        {
+            if (selectedPhotographyBody == null) return false;
+            var conditions = ImagingObservingConditions.Evaluate(
+                Planetarium.GetUniversalTime(), null, null, BuildImagingObserverContext());
+            TryComputeBodyAltAz(selectedPhotographyBody, out double bodyAlt, out _);
+            return conditions.IsNight && bodyAlt > 0.0;
+        }
+
+        /// <summary>
         /// Timed-exposure capture for the amateur astrograph. A robotic scope,
         /// so there is NO live preview: you commit the settings (zoom, exposure,
         /// ISO, filter, focus, guiding), press Capture, and the finished frame
@@ -1142,12 +1201,6 @@ namespace ExoInstruments
 
             // Observability strip: always visible.
             DrawPhotographyObservability();
-
-            var conditions = ImagingObservingConditions.Evaluate(
-                Planetarium.GetUniversalTime(), null, null, BuildImagingObserverContext());
-            bool night = conditions.IsNight;
-            TryComputeBodyAltAz(selectedPhotographyBody, out double bodyAlt, out _);
-            bool bodyUp = bodyAlt > 0.0;
 
             if (!solarSystemCamera.IsAvailable)
             {
@@ -1187,7 +1240,8 @@ namespace ExoInstruments
                     "No frame yet -- set up and press Capture.", plotTitleStyle);
             }
 
-            DrawCameraControls(night && bodyUp);
+            DrawCameraControls(CanExposePhotography());
+            DrawStackingControls(CanExposePhotography());
         }
 
         /// <summary>Zoom / exposure / ISO / filter / focus / guiding controls + the Capture and Save buttons.</summary>
@@ -1195,12 +1249,20 @@ namespace ExoInstruments
         {
             GUILayout.BeginVertical(GUI.skin.box);
 
+            // Zoom and filter are locked for the duration of a stacking batch
+            // (see DrawStackingControls / the Update() batch driver): every
+            // sub of a batch must share the same FOV and filter, or the stack
+            // it feeds would be garbage.
+            bool stackBatchRunning = stackBatchRemaining > 0;
+
             // Zoom (FOV): left = wide, right = tight. Smaller FOV = more zoom.
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Zoom (FOV {solarSystemCamera.FovDeg:F1} deg)", GUILayout.Width(150));
+            GUI.enabled = !stackBatchRunning;
             float invFov = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - solarSystemCamera.FovDeg;
             invFov = GUILayout.HorizontalSlider(invFov, SolarSystemCameraTexture.MinFovDeg, SolarSystemCameraTexture.MaxFovDeg);
             solarSystemCamera.FovDeg = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - invFov;
+            GUI.enabled = true;
             GUILayout.EndHorizontal();
 
             // Exposure time.
@@ -1222,12 +1284,14 @@ namespace ExoInstruments
             // Filter wheel.
             GUILayout.BeginHorizontal();
             GUILayout.Label("Filter", GUILayout.Width(150));
+            GUI.enabled = !stackBatchRunning;
             foreach (CameraFilter f in (CameraFilter[])Enum.GetValues(typeof(CameraFilter)))
             {
                 bool sel = solarSystemCamera.Filter == f;
                 if (GUILayout.Toggle(sel, " " + FilterLabel(f), GUILayout.Width(58)) && !sel)
                     solarSystemCamera.Filter = f;
             }
+            GUI.enabled = true;
             GUILayout.EndHorizontal();
 
             // Focus: autofocus toggle + manual slider.
@@ -1274,6 +1338,7 @@ namespace ExoInstruments
             {
                 photographySessionActive = false;
                 solarSystemCamera.CancelExposure();
+                stackBatchRemaining = 0; // stop a batch mid-flight too, but keep the subs already captured
             }
             GUILayout.EndHorizontal();
 
@@ -1282,6 +1347,128 @@ namespace ExoInstruments
                 GUILayout.Label("Can't expose right now: it must be night and the body above the horizon.", smallCaptionStyle);
             }
             GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// Real astrophotography stacking workflow: capture N subs on the
+        /// current filter in one batch (see the Update() batch driver), stack
+        /// each filter's subs (optionally aligned by brightness centroid),
+        /// then compose an LRGB image -- the stacked Luminance supplies detail
+        /// via chrominance-preserving scaling of the stacked RGB color (see
+        /// AstroImageStack.ComposeLRGB), and the stacked Halpha optionally
+        /// boosts the red channel (HaRGB). Separate from the single-shot
+        /// Capture/Save above, which is unaffected.
+        /// </summary>
+        void DrawStackingControls(bool canExpose)
+        {
+            GUILayout.BeginVertical(GUI.skin.box);
+            GUILayout.Label("<b>Stacking</b>", plotTitleStyle);
+
+            bool batchRunning = stackBatchRemaining > 0;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"Subs per batch ({stackBatchSize})", GUILayout.Width(150));
+            GUI.enabled = !batchRunning;
+            stackBatchSize = Mathf.RoundToInt(GUILayout.HorizontalSlider(stackBatchSize, 1, 20));
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !batchRunning && canExpose && !solarSystemCamera.IsCapturing;
+            if (GUILayout.Button($"Capture series ({FilterLabel(solarSystemCamera.Filter)}, {stackBatchSize})", GUILayout.Height(26), GUILayout.Width(220)))
+            {
+                stackBatchInterruptedMessage = null;
+                stackBatchRemaining = stackBatchSize;
+                solarSystemCamera.BeginExposure(selectedPhotographyBody);
+            }
+            GUI.enabled = true;
+            if (batchRunning && GUILayout.Button("Cancel series", GUILayout.Height(26), GUILayout.Width(120)))
+            {
+                stackBatchRemaining = 0;
+            }
+            GUILayout.EndHorizontal();
+
+            if (batchRunning)
+            {
+                GUILayout.Label($"Capturing series... {stackBatchSize - stackBatchRemaining}/{stackBatchSize}", smallCaptionStyle);
+            }
+            else if (!string.IsNullOrEmpty(stackBatchInterruptedMessage))
+            {
+                GUILayout.Label(stackBatchInterruptedMessage, smallCaptionStyle);
+            }
+
+            GUILayout.Label(
+                $"Stacked subs -- L {astroStack.SubCount(CameraFilter.Luminance)} ({astroStack.TotalExposureSeconds(CameraFilter.Luminance):F1}s) | " +
+                $"R {astroStack.SubCount(CameraFilter.Red)} ({astroStack.TotalExposureSeconds(CameraFilter.Red):F1}s) | " +
+                $"G {astroStack.SubCount(CameraFilter.Green)} ({astroStack.TotalExposureSeconds(CameraFilter.Green):F1}s) | " +
+                $"B {astroStack.SubCount(CameraFilter.Blue)} ({astroStack.TotalExposureSeconds(CameraFilter.Blue):F1}s) | " +
+                $"Ha {astroStack.SubCount(CameraFilter.HAlpha)} ({astroStack.TotalExposureSeconds(CameraFilter.HAlpha):F1}s)", smallCaptionStyle);
+
+            GUILayout.BeginHorizontal();
+            stackAlignSubs = GUILayout.Toggle(stackAlignSubs, " Align subs (brightness centroid)", GUILayout.Width(220));
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"Ha blend strength ({haBlendStrength:F2})", GUILayout.Width(150));
+            haBlendStrength = GUILayout.HorizontalSlider(haBlendStrength, 0f, 1f);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(4);
+            GUILayout.BeginHorizontal();
+            GUI.enabled = astroStack.HasAnySubs;
+            if (GUILayout.Button("Compose LRGB", GUILayout.Height(26), GUILayout.Width(150)))
+                ComposeAstroStack();
+            GUI.enabled = stackedCompositeTexture != null;
+            if (GUILayout.Button("Save composite", GUILayout.Height(26), GUILayout.Width(150)))
+                SaveStackedComposite();
+            GUI.enabled = astroStack.HasAnySubs;
+            if (GUILayout.Button("Clear stack", GUILayout.Height(26), GUILayout.Width(110)))
+                ClearAstroStack();
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            if (!string.IsNullOrEmpty(stackComposeError))
+            {
+                GUILayout.Label(stackComposeError, smallCaptionStyle);
+            }
+
+            if (stackedCompositeTexture != null)
+            {
+                GUILayout.Space(6);
+                GUILayout.Label("Composite preview:", smallCaptionStyle);
+                Rect compositeRect = GUILayoutUtility.GetRect(
+                    SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight,
+                    GUILayout.Width(SolarSystemCameraTexture.TextureWidth), GUILayout.Height(SolarSystemCameraTexture.TextureHeight));
+                GUI.DrawTexture(compositeRect, stackedCompositeTexture);
+            }
+
+            GUILayout.EndVertical();
+        }
+
+        /// <summary>Runs AstroImageStack.ComposeLRGB and refreshes (or builds) stackedCompositeTexture from the result.</summary>
+        void ComposeAstroStack()
+        {
+            Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, haBlendStrength, out stackComposeError);
+            if (pixels == null) return;
+
+            if (stackedCompositeTexture == null)
+            {
+                stackedCompositeTexture = new Texture2D(
+                    SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, TextureFormat.RGB24, false);
+            }
+            stackedCompositeTexture.SetPixels(pixels);
+            stackedCompositeTexture.Apply();
+        }
+
+        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG -- same scheme as SaveSolarSystemPhoto.</summary>
+        void SaveStackedComposite()
+        {
+            if (stackedCompositeTexture == null) return;
+            string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
+            System.IO.Directory.CreateDirectory(dir);
+            string fileName = $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            byte[] data = stackedCompositeTexture.EncodeToPNG();
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, fileName), data);
         }
 
         static string FilterLabel(CameraFilter f)
@@ -1520,7 +1707,22 @@ namespace ExoInstruments
             selectedStar = null;
             solarSystemCamera.DiscardCapturedPhoto();
             photographySessionActive = false;
+            ClearAstroStack();
             UpdateBodySelectionRingAndRerender();
+        }
+
+        /// <summary>Drops all stacked subs and the composite preview -- the stack is specific to one target, it must not survive a target switch.</summary>
+        void ClearAstroStack()
+        {
+            astroStack.ClearAll();
+            stackBatchRemaining = 0;
+            stackComposeError = null;
+            stackBatchInterruptedMessage = null;
+            if (stackedCompositeTexture != null)
+            {
+                Destroy(stackedCompositeTexture);
+                stackedCompositeTexture = null;
+            }
         }
 
         /// <summary>Refreshes IsSelectedTarget on the cached body points to match selectedPhotographyBody and re-rasters -- so the ring appears/moves the instant a body is (de)selected, without waiting for the next full catalog refresh.</summary>
@@ -3335,7 +3537,7 @@ namespace ExoInstruments
                 {
                     var horizontal = SkyCoordinates.TryComputeHorizontal(star, localMeridianRaDeg, SkyCoordinates.KscLatitudeDeg);
                     if (!horizontal.HasValue) continue;
-                    if (!horizontal.Value.IsAboveHorizon(SkyCoordinates.DefaultMinAltitudeDeg)) continue;
+                    if (!horizontal.Value.IsAboveHorizon(0.0)) continue;
 
                     points.Add(new SkyChartPoint
                     {
@@ -3614,8 +3816,11 @@ namespace ExoInstruments
         ///
         /// Ici Quality01 est donc une qualité absolue :
         ///   0       = fermé / sous l'horizon / jour
-        ///   1 / X²  = efficacité de seeing à l'airmass X
-        ///   1       = zénith
+        ///   1 / X²  = efficacité de seeing à l'airmass X, multipliée par la
+        ///             transmission nuageuse EVE (couverture actuelle sur KSC,
+        ///             appliquée à toutes les cellules -- pas de simulation du
+        ///             déplacement futur des nuages)
+        ///   1       = zénith, ciel dégagé
         /// </summary>
         ObservingForecast.ForecastResult ComputeBodyForecast(
             CelestialBody body,
@@ -3662,6 +3867,12 @@ namespace ExoInstruments
              * test précédent.
              */
             double nowUt = Planetarium.GetUniversalTime();
+
+            // EVE clouds aren't a time simulation -- this samples the current sky over KSC
+            // and applies it to every future cell, same "clouds persist" approximation the
+            // live RC20 camera already makes for wind drift.
+            float cloudCoverage = SolarSystemCameraTexture.ComputeCloudCoverage();
+            double cloudTransmission = 1.0 - cloudCoverage * SolarSystemCameraTexture.CloudMaxAttenuation;
 
             Vector3d observerNow = home.GetWorldSurfacePosition(
                 SkyCoordinates.KscLatitudeDeg,
@@ -3736,7 +3947,7 @@ namespace ExoInstruments
                         // Valeur absolue, déjà dans [0, 1].
                         // Pas de normalisation ultérieure : c'est ce qui rend le
                         // déplacement du forecast stable pendant le time warp.
-                        quality = 1.0 / (airmass * airmass);
+                        quality = 1.0 / (airmass * airmass) * cloudTransmission;
                     }
                 }
 

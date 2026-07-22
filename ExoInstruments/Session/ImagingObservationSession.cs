@@ -4,32 +4,18 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Session
 {
     /// <summary>
-    /// Direct-imaging campaign. Like every ground-based session, integration
-    /// accrues only when the target is observable (night + above the telescope's
-    /// altitude limit -- see ImagingObservingConditions), weighted by airmass.
-    /// The accumulating quantity is EffectiveExposureSeconds: on-sky integration
-    /// normalized to zenith conditions, the number DirectImagingSimulator's
-    /// sqrt(t) SNR relation consumes.
-    ///
-    /// Ticks arrive with arbitrary UT gaps (time warp jumps hours per frame), so
-    /// each tick integrates the observable fraction over [LastUt, currentUt] by
-    /// midpoint subsampling. Conditions are a deterministic function of UT, which
-    /// also makes forward prediction (next observing window, UT of 5-sigma) a
-    /// straight re-run of the same integrator.
+    /// Direct-imaging campaign. Accumulates EffectiveExposureSeconds: on-sky integration
+    /// normalized to zenith conditions (what DirectImagingSimulator's sqrt(t) consumes).
+    /// Each tick integrates by midpoint subsampling over [LastUt, currentUt] — conditions
+    /// are deterministic in UT, so the same integrator also drives forward prediction.
     /// </summary>
     public class ImagingObservationSession
     {
-        // Subsampling: the fastest-changing gate is the Sun crossing twilight
-        // (1 deg of altitude per minute of Kerbin's 6-hour day), so a 120 s step
-        // mislocates a window edge by at most ~2 minutes. The step only widens
-        // when a single tick spans more than MaxSubsteps * 120 s (~5.5 Kerbin
-        // days), where per-window precision stops mattering.
+        // 120 s step: the Sun crosses twilight at ~1°/min on Kerbin's 6-hour day, so window
+        // edges are mislocated by at most ~2 minutes. Step widens automatically beyond 4000 substeps.
         private const double IntegrationStepSeconds = 120.0;
         private const int MaxSubstepsPerTick = 4000;
 
-        // Prediction horizons. A target whose RA sits near the Sun's is simply
-        // out of season -- with no axial tilt the geometry repeats once per home
-        // body orbit, so scanning one full orbit decides observability for good.
         private const double PredictionStepSeconds = 120.0;
 
         public StarTarget Target { get; private set; }
@@ -97,13 +83,7 @@ namespace ExoInstruments.Session
             return accumulated;
         }
 
-        /// <summary>
-        /// UT at which EffectiveExposureSeconds will reach the given value,
-        /// simulating the upcoming nights from the session's current state.
-        /// PositiveInfinity when it won't happen within maxWallSeconds of
-        /// additional wall-clock time (target effectively unobservable, or the
-        /// requirement is beyond any sane campaign).
-        /// </summary>
+        /// <summary>UT at which EffectiveExposureSeconds will reach targetEffectiveSeconds. PositiveInfinity when it won't happen within maxWallSeconds (target unobservable or requirement unreachable).</summary>
         public double PredictUtForEffectiveExposure(double targetEffectiveSeconds, double maxWallSeconds)
         {
             if (targetEffectiveSeconds <= EffectiveExposureSeconds) return LastUt;
@@ -125,12 +105,7 @@ namespace ExoInstruments.Session
             return double.PositiveInfinity;
         }
 
-        /// <summary>
-        /// Next UT at which the target becomes observable, scanning one full home
-        /// body orbit (the seasonal repeat period). PositiveInfinity means the
-        /// target is never observable from this site -- circumpolar-low, or pinned
-        /// to the daytime sky year-round.
-        /// </summary>
+        /// <summary>Next UT when the target becomes observable, scanning up to one home body orbit. PositiveInfinity means it's never visible from this site.</summary>
         public double PredictNextObservableUt()
         {
             if (CurrentConditions.Observable) return LastUt;

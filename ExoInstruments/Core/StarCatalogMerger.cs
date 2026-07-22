@@ -41,50 +41,18 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Merges the exoplanet.eu catalog with the Bright Star Catalogue into one
-    /// duplicate-free target list. Pure C#.
-    ///
-    /// The invariant this file exists to protect: a star that hosts a known
-    /// planet must never also appear as a planet-less decoy. A missed match here
-    /// would let the player scan (say) the BSC copy of 51 Peg, get a null
-    /// result, and walk away believing a famous planet host is empty -- worse
-    /// than any crash. So matching is layered, strongest evidence first:
-    ///
-    ///   1. HD number -- present in BSC for nearly every star and extractable
-    ///      from exoplanet.eu's star_name / alternate-name columns. Immune to
-    ///      naming-convention drift, and disambiguates visual-binary components
-    ///      (16 Cyg A = HD 186408 vs 16 Cyg B = HD 186427) that share a name.
-    ///   2. HR number -- for hosts exoplanet.eu itself calls by their Bright
-    ///      Star designation (HR 8799, HR 2562).
-    ///   3. Normalized name (StarNames.Normalize) -- Bayer/Flamsteed forms:
-    ///      "beta Pic" = "Bet Pic", "51 Pegasi" = "51 Peg". Refused when the key
-    ///      is ambiguous (two BSC components sharing one designation).
-    ///   4. Position -- nearest BSC star within PositionalToleranceArcsec, with
-    ///      a magnitude sanity check. Last resort for hosts with no usable
-    ///      designation overlap at all (AF Lep, b Cen); the tolerance covers
-    ///      exoplanet.eu's coordinate rounding (~15 arcsec in RA) while staying
-    ///      below typical BSC double-star separations, and nearest-neighbor
-    ///      selection (not first-hit) keeps close pairs like 16 Cyg A/B from
-    ///      cross-matching.
+    /// Merges exoplanet.eu with the Bright Star Catalogue into one duplicate-free list.
+    /// Key invariant: a known planet host must never appear as a decoy. Matching is
+    /// layered strongest-first: (1) HD number, (2) HR number, (3) normalized Bayer/Flamsteed
+    /// name (refused if ambiguous), (4) positional fallback within PositionalToleranceArcsec
+    /// with a magnitude sanity check.
     /// </summary>
     public static class StarCatalogMerger
     {
-        /// <summary>
-        /// exoplanet.eu positions are rounded (observed up to ~13 arcsec of
-        /// effective drift on 51 Peg vs. BSC's proper-motion-corrected J2000,
-        /// from RA truncated to 1s of time); 20 arcsec absorbs that while
-        /// rejecting real resolved binaries -- verified against 83 Leo A/B, a
-        /// 27 arcsec pair where the planet host (HD 99492 = 83 Leo B, V=7.4) is
-        /// NOT the BSC star (HR 4414 = HD 99491 = 83 Leo A, V=6.5): at 30 arcsec
-        /// this tolerance wrongly consumed the A component.
-        /// </summary>
+        /// <summary>Positional match radius (20 arcsec). Absorbs exoplanet.eu's RA rounding (~13 arcsec drift on 51 Peg) while staying below resolved binary separations — verified against 83 Leo A/B (27 arcsec apart).</summary>
         public const double PositionalToleranceArcsec = 20.0;
 
-        /// <summary>
-        /// A positional candidate must also roughly agree in brightness. Loose on
-        /// purpose: exoplanet.eu's magnitude may be a different band than BSC's V
-        /// for red stars, but a decoy 3 magnitudes off is a different star.
-        /// </summary>
+        /// <summary>Magnitude sanity check on positional matches — loose because exoplanet.eu may report a different band for red stars, but 3 magnitudes off is a different star.</summary>
         public const double MagnitudeSanityTolerance = 1.5;
 
         /// <summary>BSC is nominally complete to V = 6.5 with stragglers slightly fainter; review unmatched hosts up to here.</summary>
@@ -122,10 +90,7 @@ namespace ExoInstruments.Core
                 }
             }
 
-            // --- Group planets by host ----------------------------------------
-            // All identifier evidence of every planet in the system counts toward
-            // the one host-star match (tau Cet's HD number only appears on its
-            // planets' alternate-name lists, not the star's).
+            // Group planets by host: all identifier evidence counts (tau Cet's HD only appears on planet alternate names).
             var hosts = new Dictionary<string, List<StarTarget>>();
             var hostOrder = new List<string>();
             foreach (var target in exoplanetTargets)
@@ -196,12 +161,9 @@ namespace ExoInstruments.Core
                     }
                 }
 
-                // Positional fallback is forbidden for hosts that explicitly name
-                // a non-primary component ("83 Leo B", "GJ 338 B"): the nearby BSC
-                // entry is almost certainly the *primary* of the pair, a different
-                // star. A B component that really is in BSC has its own HD number
-                // there and must match through identifier evidence instead
-                // (16 Cyg B does, via HD 186427).
+                // Positional fallback forbidden for non-primary components ("83 Leo B"): the BSC
+                // entry there is the primary, not the planet host. A B component in BSC has its
+                // own HD number and must match through identifiers (16 Cyg B → HD 186427).
                 if (match == null && !IsNonPrimaryComponent(planets))
                 {
                     match = NearestWithinTolerance(backgroundStars, planets[0]);
@@ -217,12 +179,8 @@ namespace ExoInstruments.Core
                     result.MatchLog.Add($"{hostKey} -> HR {match.HrNumber} ({match.Target.Name}) via {via}");
                     consumed.Add(match);
 
-                    // The planet catalog occasionally forgets a bright host's
-                    // temperature (HR 8799 in the current export) while BSC knows
-                    // its B-V color. Backfilling here is what makes such systems
-                    // assessable by the direct-imaging pipeline at all -- without a
-                    // Teff, contrast can't be computed and the scan reports
-                    // missing data forever.
+                    // Backfill Teff from BSC B-V when exoplanet.eu forgot it (HR 8799) — without a
+                    // temperature the direct-imaging pipeline can't compute contrast and reports missing data.
                     if (match.DerivedTeffK.HasValue)
                     {
                         bool backfilled = false;
@@ -269,13 +227,7 @@ namespace ExoInstruments.Core
             return designations.ToArray();
         }
 
-        /// <summary>
-        /// Normalized name variants the host answers to: its own name, its
-        /// alternate names, and -- for each of those -- a variant with a trailing
-        /// " a" stripped ("tau boo a" also tries "tau boo": BSC lists the primary
-        /// under the bare designation). Never strips " b"/" c": those are distinct
-        /// companion stars that may have their own BSC entry (16 Cyg B).
-        /// </summary>
+        /// <summary>Normalized name variants for the host: own name + alternate names, with trailing " a" stripped ("tau boo a" → "tau boo"). Never strips " b"/" c" — those may be distinct BSC entries.</summary>
         private static List<string> CollectNameKeys(List<StarTarget> planets, string hostKey)
         {
             var keys = new List<string> { hostKey };
@@ -352,11 +304,7 @@ namespace ExoInstruments.Core
             return best;
         }
 
-        /// <summary>
-        /// Small-angle separation with the standard cos(dec) foreshortening on the
-        /// RA axis and wraparound handling -- exact enough at arcsecond scales for
-        /// the tolerances used here (a full spherical formula would change nothing).
-        /// </summary>
+        /// <summary>Small-angle separation with cos(dec) RA foreshortening and wraparound — exact enough for the arcsecond tolerances here.</summary>
         private static double SeparationArcsec(StarTarget a, StarTarget b)
         {
             if (!a.RaDeg.HasValue || !a.DecDeg.HasValue || !b.RaDeg.HasValue || !b.DecDeg.HasValue)

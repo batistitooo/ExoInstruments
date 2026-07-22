@@ -16,16 +16,7 @@ namespace ExoInstruments.Core
             return signal + noise;
         }
 
-        /// <summary>
-        /// 1-sigma scatter of one epoch: instrument precision and the star's own
-        /// activity jitter (spots, granulation, p-modes -- see StellarActivity)
-        /// in quadrature. This is the real noise floor of RV work: past ~1 m/s
-        /// the star, not the spectrograph, sets what is detectable. Note the
-        /// asymmetry with the reported per-sample uncertainty (sessions report
-        /// the instrument term only): an observer knows their instrument's error
-        /// bar, but the star's jitter only shows up as excess scatter in the
-        /// residuals -- exactly how it bites real surveys.
-        /// </summary>
+        /// <summary>1-sigma scatter per epoch: instrument precision and stellar activity jitter added in quadrature. Sessions report only the instrument term — the jitter shows up as excess residuals, exactly as in real surveys.</summary>
         public static double TotalNoiseSigmaMps(StarTarget star, InstrumentSpec instrument)
         {
             double instrumentSigma = instrument.EstimatePrecision(star.ApparentMagnitude);
@@ -33,18 +24,7 @@ namespace ExoInstruments.Core
             return Math.Sqrt(instrumentSigma * instrumentSigma + jitterSigma * jitterSigma);
         }
 
-        /// <summary>
-        /// Combined reflex velocity from every planet orbiting the same host, plus a
-        /// single instrument-noise draw for the epoch. Keplerian signals superpose
-        /// linearly -- planet-planet interactions sit far below instrument precision
-        /// on campaign timescales -- which is why one RV campaign constrains a whole
-        /// system at once rather than one planet at a time.
-        ///
-        /// On top of the Keplerian sum rides the Rossiter-McLaughlin anomaly of any
-        /// transiting companion caught in transit at this epoch (see
-        /// RossiterMcLaughlin) -- always in the physics, whether or not the observer
-        /// scheduled for it, exactly like the real sky.
-        /// </summary>
+        /// <summary>Keplerian reflex from every system planet (signals superpose linearly) plus the RM anomaly of any transiting companion that happens to be in transit at this epoch — always in the physics whether the observer planned for it or not.</summary>
         public static double GenerateSystemVelocityAtTime(IList<StarTarget> systemPlanets, InstrumentSpec instrument, double ut, Random rng)
         {
             double signal = RossiterMcLaughlin.SystemAnomalyMps(systemPlanets, ut);
@@ -78,9 +58,7 @@ namespace ExoInstruments.Core
             double omegaRad = (star.ArgumentOfPeriastronDeg ?? 0.0) * Math.PI / 180.0;
             double periodSeconds = star.PlanetPeriodDays * 86400.0;
 
-            // Reuses PlanetPhaseOffset01 as the periastron-passage reference epoch --
-            // same "arbitrary zero point, no real ephemeris to align with KSP's clock"
-            // reasoning already used for the transit phase.
+            // PlanetPhaseOffset01 as the periastron epoch: same arbitrary-zero-point logic as transit phase.
             double meanAnomaly = 2.0 * Math.PI * ((ut / periodSeconds + star.PlanetPhaseOffset01) % 1.0);
             double eccentricAnomaly = SolveKeplerEquation(meanAnomaly, e);
             double trueAnomaly = TrueAnomalyFromEccentric(eccentricAnomaly, e);

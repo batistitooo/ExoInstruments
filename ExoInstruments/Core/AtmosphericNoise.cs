@@ -3,39 +3,16 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Atmospheric scintillation for ground-based photometry: high-altitude
-    /// turbulence focuses and defocuses the incoming wavefront, making the
-    /// whole star twinkle in integrated flux. It is the dominant noise source
-    /// for bright stars on small apertures (exactly WASP's regime) and it
-    /// grows steeply toward the horizon.
-    ///
-    /// Young's (1967) empirical relation, as standardized in Osborn et al.
-    /// 2015 (MNRAS 452, 1707):
-    ///
-    ///   sigma = 0.09 * D^(-2/3) * X^(7/4) * exp(-h/8000) / sqrt(2*t_exp)
-    ///
-    /// with D the aperture diameter in cm, X the airmass, h the site altitude
-    /// in meters (8000 m atmospheric scale height), t_exp the exposure in
-    /// seconds, and sigma the fractional flux RMS.
-    ///
-    /// Each instrument's ReferencePrecision is an as-achieved, on-sky figure,
-    /// so typical-conditions scintillation is already inside it. What that
-    /// figure cannot contain is the airmass dependence -- so only the excess
-    /// above the zenith value is added here, in quadrature: observing at
-    /// airmass 1 changes nothing, chasing a target down toward the telescope
-    /// limit costs real precision. RV spectrographs measure line positions,
-    /// not integrated flux, so scintillation does not apply to them.
+    /// Atmospheric scintillation for ground-based photometry (Young 1967).
+    /// ReferencePrecision already bakes in typical-conditions scintillation,
+    /// so only the excess above the zenith value is added here in quadrature —
+    /// airmass 1 changes nothing, low targets get penalized. RV instruments excluded.
     /// </summary>
     public static class AtmosphericNoise
     {
         private const double AtmosphericScaleHeightMeters = 8000.0;
 
-        /// <summary>
-        /// Fractional-flux scintillation RMS above the zenith value at the
-        /// given airmass, i.e. sqrt(sigma(X)^2 - sigma(1)^2). Zero for
-        /// space-based instruments, non-photometric methods, unknown aperture,
-        /// or airmass at/below 1.
-        /// </summary>
+        /// <summary>Scintillation RMS above the zenith value at the given airmass: sqrt(sigma(X)^2 - sigma(1)^2). Zero for space-based or non-transit instruments.</summary>
         public static double ScintillationExcessSigma(InstrumentSpec instrument, double airmass)
         {
             if (instrument.IsSpaceBased) return 0.0;
@@ -55,15 +32,9 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// The raw Young (1967) scintillation formula (see class doc),
-        /// independent of any InstrumentSpec -- lets non-photometric
-        /// ground-based imaging (e.g. the RC20 astrograph's frame-to-frame
-        /// flux flicker, see AtmosphericImagingNoise) reuse the exact same
-        /// real physics without going through the Transit-only-gated API
-        /// above. Exposure is floored at 0.01s rather than the 1s the
-        /// photometric API uses -- real sub-second planetary imaging
-        /// exposures are physically meaningful here, unlike a photometric
-        /// instrument's multi-second-plus cadence.
+        /// Raw Young scintillation formula, instrument-independent. Reused by
+        /// AtmosphericImagingNoise for the RC20 camera. Exposure floored at 0.01s
+        /// (sub-second imaging is valid here, unlike the photometric cadence).
         /// </summary>
         public static double YoungSigmaRaw(double apertureMeters, double siteAltitudeMeters, double airmass, double exposureSeconds)
         {

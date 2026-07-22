@@ -48,16 +48,10 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Places the building once and keeps exactly one instance around. Never
-        /// reassigns an existing instance's Group -- KK's group-reassignment path
-        /// ("EditorGUI: SetGroup", whether triggered by code or by hand in the KK
-        /// editor) corrupts the instance's internal name lookup ("SetNewName: ...
-        /// cannot find at least ourself in our own group"). That corruption is what
-        /// was causing duplicates: a corrupted instance can drop out of
-        /// StaticDatabase.GetAllStatics() lookups, so the next load doesn't find it
-        /// and places a second one. Don't reassign the Group from the KK editor either
-        /// -- it triggers the same corruption. Matching by model identity AND
-        /// position (not Group) is what keeps clicking working regardless.
+        /// Places the building once and keeps exactly one instance. Never reassigns the KK Group —
+        /// doing so corrupts the internal name lookup ("SetNewName: cannot find at least ourself"),
+        /// which drops the instance from GetAllStatics() and causes a duplicate on the next load.
+        /// Match by model + position, not Group, to stay robust.
         /// </summary>
         private void EnsurePlaced()
         {

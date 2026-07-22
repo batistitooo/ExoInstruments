@@ -34,10 +34,6 @@ namespace ExoInstruments.Core
         public const double KscLatitudeDeg = -0.0972;
         public const double KscLongitudeDeg = -74.6002;
 
-        // Below this altitude a target is treated as below the horizon --
-        // a rough stand-in for terrain/buildings blocking the view.
-        public const double DefaultMinAltitudeDeg = 10.0;
-
         /// <summary>
         /// The right ascension currently sitting on the observer's meridian.
         /// Feed this bodyRotationPeriodSeconds/bodyInitialRotationDeg from
