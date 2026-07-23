@@ -20,7 +20,9 @@ namespace ExoInstruments.Visualization
     /// points them at a solar-system body from KSC. Same technique as Tarsier Space
     /// Technology's TSTCameraModule, reimplemented here to avoid the dependency.
     /// Outputs a monochrome, noisy "single raw CCD frame" through a full physics
-    /// pipeline (extinction, shot noise, seeing, EVE cloud cover).
+    /// pipeline (extinction, shot noise, seeing, EVE cloud cover, moon scattering,
+    /// persistence ghosting, cosmic rays, full-well blooming, charge-transfer smear,
+    /// astigmatism) -- see ProcessFrame for the per-effect citations.
     /// </summary>
     public class SolarSystemCameraTexture : IDisposable
     {
@@ -57,6 +59,97 @@ namespace ExoInstruments.Visualization
         // Reference flux for a full Mün at zenith: albedo * (radius/distance)^2.
         private const double MunReferenceFluxUnits = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
 
+        // Zodiacal light, relative to AirglowBaselinePerSecond via the real Pogson magnitude-
+        // ratio relation (already how MoonlightPollution converts magnitudes to flux elsewhere
+        // in this mod): Leinert et al. (1998, A&AS 127, 1) give V=23.3 mag/arcsec^2 zodiacal
+        // light at the ecliptic pole (its faintest, most conservative value); Patat (2003, A&A
+        // 400, 1183) gives V~21.7 mag/arcsec^2 for typical new-moon zenith dark-sky brightness
+        // at a dark site (dominated by airglow, the same phenomenon AirglowBaselinePerSecond
+        // represents). ratio = 10^(-0.4*(23.3-21.7)) = 10^-0.64 = 0.229, so zodiacal = 0.229 *
+        // AirglowBaselinePerSecond. The mod has no real ecliptic geometry for Kerbol, so this
+        // stays a fixed baseline rather than a position-dependent term.
+        private const double ZodiacalBaselineRatePerSecond = AirglowBaselinePerSecond * 0.229;
+
+        // Full-well overflow ("blooming"): Pyxel only hard-clips at full well and ships no
+        // redistribution model to port. Real CCD full-well overflow is described in Janesick
+        // (2001, "Scientific Charge-Coupled Devices", SPIE Press) as charge spilling along the
+        // column (parallel/vertical shift-register) direction; absent a specific device's
+        // anti-blooming-gate asymmetry data, the textbook default is a charge-conserving,
+        // symmetric split between the two vertical neighbors -- 0.5 to each means all of the
+        // excess is conserved, none invented or discarded.
+        private const float FullWellValue = 1.0f;
+        private const float BloomingSpillFraction = 0.5f;
+
+        // Numerical convergence cap for the cascading overflow above (a spilled-over pixel can
+        // itself overflow into the next), not a physical quantity -- same role as the 50-
+        // iteration cap on RvSimulator's Kepler-equation solver elsewhere in this codebase.
+        private const int BloomingMaxIterations = 4;
+
+        // Charge-transfer smear along the readout (vertical) direction: a simplified,
+        // single-trap-species version of Short et al. (2010)'s CDM model used by Pyxel's CTI
+        // simulation (pyxel/models/charge_transfer/cdm.py). The real model computes capture via
+        // SRH physics (trap density, thermal velocity, electron-cloud volume) in real electron
+        // counts; those don't exist in this abstract [0,1] pipeline, so capture/release are
+        // constant fractions per row instead, applied with the same nc/nr structure:
+        // nc (captured) leaves the pixel and enters the trap state; nr (released) does the reverse.
+        // Capture fraction is calibrated to real measured CTI (charge transfer INefficiency, not
+        // efficiency): a fresh, undamaged CCD sits near 1e-6/transfer; even HST's ACS/WFC at
+        // severely radiation-damaged end-of-life reaches only ~1e-4-1e-3/transfer (Massey,
+        // Stoughton & Rhodes 2010, PASP 122, 1035). 1e-4 sits at that damaged-device ceiling,
+        // the conservative (most-visible) end of the real documented range for a healthy sensor.
+        // Release fraction represents the fast-trap species real CDM models always include
+        // alongside slow traps (Short et al. 2010): a trap species whose release time is
+        // comparable to the pixel transfer period empties most of its charge within the first
+        // few subsequent transfers, which is what produces the short, only-just-visible trail
+        // immediately below a bright source in real CCD frames, rather than a long faint one.
+        private const float CtiCaptureFraction = 1.0e-4f;
+        private const float CtiReleaseFraction = 0.35f;
+
+        // Cosmic ray hits: Pyxel's CosmiX/TARS model (pyxel/models/charge_generation/cosmix)
+        // samples a track length and deposits ionization energy along it; its own angle
+        // sampling is an unused stub in the shipped source, so an isotropic incidence angle
+        // here is no less physical than upstream. Rate is derived, not tuned: sea-level cosmic
+        // ray (mostly muon) flux is ~1 cm^-2 min^-1 (Particle Data Group, "Passage of Particles
+        // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"). Sensor area uses the
+        // ZWO ASI294MM Pro's published 4.63 um pixel pitch (a real, commercially available
+        // monochrome astronomy camera) applied to the 480x480 frame: side = 480*4.63e-4 cm =
+        // 0.2222 cm, area = 0.04939 cm^2. Rate = 1 cm^-2 min^-1 * 0.04939 cm^2 / 60 s =
+        // 8.23e-4 hits/s -- genuinely rare for a short amateur exposure, matching real amateur
+        // imaging experience (cosmic ray hits are a long-exposure/large-sensor phenomenon).
+        private const float CosmicRayHitsPerSecond = 8.23e-4f;
+        private const int CosmicRayMinTrackPx = 2;
+        private const int CosmicRayMaxTrackPx = 14;
+        private const float CosmicRayDepositValue = 0.85f;
+
+        // Persistence/ghosting: real default trap time constants and species proportions from
+        // Pyxel's persistence model (pyxel/models/charge_collection/persistence.py), which are
+        // themselves in the spirit of Fixsen, Offenberg, Hanisch et al. (2000, PASP 112, 1350)
+        // for HgCdTe-style trap persistence. Pyxel's own model uses ONE time constant per
+        // species for both capture (approach to an equilibrium fill level) and release, so this
+        // does the same rather than inventing a separate capture-rate parameter: each species
+        // relaxes exponentially toward an equilibrium level set by the current signal and that
+        // species' share of total trap capacity (PersistenceProportions), using the same
+        // Q(t)=Q0*exp(-t/tau) relation as the release side. Real time between two RC20 shots
+        // can be minutes, where Pyxel's own small-step linearized form would blow up, so the
+        // true exponential is used throughout instead of their per-tick linear approximation.
+        private static readonly float[] PersistenceTauSeconds = { 1f, 10f, 100f, 1000f, 10000f };
+        private static readonly float[] PersistenceProportions = { 0.307f, 0.175f, 0.188f, 0.136f, 0.194f };
+
+        // Astigmatism: for a true Ritchey-Chretien (what the RC20 is, per Observatories.cs),
+        // third-order coma is corrected to zero by the RC hyperbolic-mirror design itself --
+        // that is the entire reason the RC form exists (Ritchey & Chretien 1922). The dominant
+        // remaining off-axis third-order (Seidel) aberration for this telescope class is
+        // astigmatism, whose transverse blur scales with the SQUARE of the field angle (Seidel
+        // aberration theory: S_II/coma scales linearly with field, S_III/astigmatism
+        // quadratically -- see Schroeder, "Astronomical Optics" 2nd ed. 2000, Ch. 6, or Rutten &
+        // van Venrooij, "Telescope Optics"), directed radially outward from the optical axis.
+        // The absolute amplitude depends on the telescope's actual optical prescription (focal
+        // ratio, field curvature radius), which no published PlaneWave RC20 datasheet specifies
+        // to the precision an aberration coefficient would need -- the radial-quadratic FORM is
+        // the literature-sourced part; the pixel amplitude at the frame corner is a display
+        // calibration, not a measured quantity, same category as e.g. ExposureGainPerSecond.
+        private const float AstigmatismStrengthPxAtCorner = 3.0f;
+
         private bool builtOnce;
         private bool available;
 
@@ -69,6 +162,13 @@ namespace ExoInstruments.Visualization
         private Texture2D capturedTexture;
         private Color[] pixelScratch;
         private Color[] blurScratch;
+        private float[] rawScratch;
+        private float[] astigmatismScratch;
+
+        // Persistence trap state, one array per species (see PersistenceTauSeconds), surviving
+        // between exposures so a bright target leaves a fading ghost in the next shot.
+        private float[][] persistenceTraps;
+        private double lastPersistenceUt = double.NaN;
 
         private Renderer[] skyboxRenderers;
         private ScaledSpaceFader[] scaledSpaceFaders;
@@ -369,13 +469,18 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Converts the raw rendered frame into a monochrome CCD-frame look through the
         /// physics pipeline: filter throughput, atmospheric extinction, EVE cloud cover,
-        /// sky glow (twilight + moon + airglow), scintillation, shot/dark/read noise,
-        /// hot/dead pixels, optional drift trail, and combined defocus/seeing blur.
+        /// sky glow (twilight + moon scattering + airglow + zodiacal), scintillation,
+        /// shot/dark/read noise, persistence ghosting, cosmic ray hits, full-well blooming,
+        /// charge-transfer smear, hot/dead pixels, optional drift trail, and combined
+        /// defocus/seeing/astigmatism blur.
         /// </summary>
         private void ProcessFrame(int targetSeed, CelestialBody targetBody)
         {
             Color[] src = readbackTexture.GetPixels();
             EnsureDefectMap();
+
+            int n = TextureWidth * TextureHeight;
+            if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
 
             float exposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             float isoGain = Mathf.Clamp(Gain, MinGain, MaxGain);
@@ -394,10 +499,11 @@ namespace ExoInstruments.Visualization
             double twilightRamp = haveSunAlt
                 ? Clamp01((sunAltDeg - AstronomicalTwilightSunAltitudeDeg) / (ImagingObservingConditions.TwilightSunAltitudeDeg - AstronomicalTwilightSunAltitudeDeg))
                 : 0.0;
-            double moonGlowUnits = ComputeMoonGlow(targetBody);
+            double moonSkyExcess = ComputeMoonSkyExcess(targetBody);
             float skyBackground = (float)((TwilightSkyBackgroundRatePerSecond * twilightRamp
-                                          + MoonGlowRatePerSecond * moonGlowUnits
-                                          + AirglowBaselinePerSecond) * exposureSeconds * filterThroughput);
+                                          + MoonGlowRatePerSecond * moonSkyExcess
+                                          + AirglowBaselinePerSecond
+                                          + ZodiacalBaselineRatePerSecond) * exposureSeconds * filterThroughput);
 
             // Single EVE sample for the whole frame: at 0.08–8 deg FOV, the cloud ray
             // barely moves from KSC's own position, so per-pixel variation would be invented.
@@ -432,20 +538,21 @@ namespace ExoInstruments.Visualization
                     float preGainValue = totalPhoton + darkPedestal + NextGaussian(rng, combinedPreGainSigma);
                     float postGain = preGainValue * isoGain + NextGaussian(rng, ReadNoiseSigmaValue);
 
-                    float value = Mathf.Clamp01(postGain);
-                    pixelScratch[i] = new Color(value, value, value, 1f);
+                    // Left unclamped here — blooming/CTI below need to see genuine
+                    // above-full-well values before the sensor's own clipping applies.
+                    rawScratch[i] = postGain;
                 }
             }
 
-            // Defect overlay: second pass over a handful of indices avoids a per-pixel branch in the main loop.
-            foreach (int idx in hotPixelIndices)
+            ApplyPersistence(rawScratch, ut);
+            ApplyCosmicRays(rawScratch, exposureSeconds, rng);
+            ApplyBlooming(rawScratch);
+            ApplyChargeTransferSmear(rawScratch);
+
+            for (int i = 0; i < n; i++)
             {
-                float v = Mathf.Clamp01(0.9f + NextGaussian(rng, 0.05f));
-                pixelScratch[idx] = new Color(v, v, v, 1f);
-            }
-            foreach (int idx in deadPixelIndices)
-            {
-                pixelScratch[idx] = new Color(0f, 0f, 0f, 1f);
+                float value = Mathf.Clamp01(rawScratch[i]);
+                pixelScratch[i] = new Color(value, value, value, 1f);
             }
 
             // Diurnal drift: 360 deg per Kerbin rotation, converted to pixels by the FOV.
@@ -463,6 +570,28 @@ namespace ExoInstruments.Visualization
             if (blurRadius >= 0.5f)
             {
                 ApplyBoxBlur(pixelScratch, Mathf.RoundToInt(blurRadius));
+            }
+
+            // Field-dependent astigmatism, applied after the uniform blur so it reads as a distinct
+            // off-axis smear rather than blending into the seeing/defocus radius.
+            ApplyAstigmatismBlur(pixelScratch);
+
+            // Defect overlay last: hot/dead pixels are a detector read-out artifact, not an
+            // optical one, so they shouldn't be softened by the seeing/defocus/astigmatism blur the
+            // way real scene light is. This is genuinely raw, uncorrected sensor output --
+            // the same raw frame is what AstroImageStack.AddSub receives and cosmetically
+            // corrects using this same known, fixed defect map before it ever gets aligned
+            // and stacked (see AstroImageStack.CosmeticCorrect), the same order real
+            // calibration pipelines (PixInsight, IRAF/ccdproc, ESO Reflex) use: raw frame ->
+            // bad-pixel-map correction -> registration -> stacking.
+            foreach (int idx in hotPixelIndices)
+            {
+                float v = Mathf.Clamp01(0.9f + NextGaussian(rng, 0.05f));
+                pixelScratch[idx] = new Color(v, v, v, 1f);
+            }
+            foreach (int idx in deadPixelIndices)
+            {
+                pixelScratch[idx] = new Color(0f, 0f, 0f, 1f);
             }
 
             outputTexture.SetPixels(pixelScratch);
@@ -497,21 +626,33 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Sky-glow from the home body's moons, in "1.0 = full Mün at zenith" units.
-        /// Uses live 3D positions (not the RA/Dec catalog frame). Uniform glow over
-        /// the whole frame — no directional scattering. A moon being imaged is excluded.
+        /// Sky-glow from the home body's moons, in "1.0 = full Mün at zenith, 30 deg away"
+        /// units. Uses live 3D positions (not the RA/Dec catalog frame) and the same
+        /// Krisciunas &amp; Schaefer (1991) forward-scattering kernel MoonlightPollution uses for
+        /// the exoplanet instruments, weighted by each moon's real angular separation from the
+        /// imaged body (closer moons pollute the frame far more than distant ones at the same
+        /// altitude). A moon being imaged is excluded from its own sky background.
         /// </summary>
-        private static double ComputeMoonGlow(CelestialBody targetBody)
+        private static double ComputeMoonSkyExcess(CelestialBody targetBody)
         {
             CelestialBody home = FlightGlobals.GetHomeBody();
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || home.orbitingBodies == null) return 0.0;
 
+            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d toTarget = targetBody != null ? (targetBody.position - obsPos) : Vector3d.zero;
+            bool haveTarget = toTarget.sqrMagnitude > 1e-6;
+            if (haveTarget) toTarget = toTarget.normalized;
+
+            double kernelAtReference = MoonlightPollution.ScatteringKernel(30.0);
             double total = 0.0;
             foreach (CelestialBody moon in home.orbitingBodies)
             {
                 if (moon == null || moon == targetBody) continue;
                 if (!TryComputeAltitudeDeg(moon, out double altDeg) || altDeg <= 0.0) continue;
+
+                Vector3d toMoon = (moon.position - obsPos).normalized;
+                double separationDeg = haveTarget ? Vector3d.Angle(toTarget, toMoon) : 90.0;
 
                 Vector3d toSunFromMoon = (sun.position - moon.position).normalized;
                 Vector3d toHomeFromMoon = (home.position - moon.position).normalized;
@@ -522,10 +663,203 @@ namespace ExoInstruments.Visualization
                 double sizeRatio = moon.Radius / distance;
                 double moonFlux = Math.Max(0.0, moon.albedo) * illuminated * sizeRatio * sizeRatio;
                 double altitudeRamp = Math.Min(1.0, altDeg / 10.0);
+                double scatterWeight = MoonlightPollution.ScatteringKernel(separationDeg) / kernelAtReference;
 
-                total += (moonFlux / MunReferenceFluxUnits) * altitudeRamp;
+                total += (moonFlux / MunReferenceFluxUnits) * altitudeRamp * scatterWeight;
             }
             return total;
+        }
+
+        /// <summary>
+        /// Full-well overflow: any pixel above FullWellValue spills the excess into its
+        /// vertical neighbors (the CCD column/shift-register direction), which can themselves
+        /// overflow in turn -- producing the familiar bloom trail through a saturated star or
+        /// planet limb instead of a hard-clipped blob. Operates in place, pre-clamp.
+        /// </summary>
+        private void ApplyBlooming(float[] raw)
+        {
+            int w = TextureWidth, h = TextureHeight;
+            for (int iter = 0; iter < BloomingMaxIterations; iter++)
+            {
+                bool anyOverflow = false;
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        int i = row + x;
+                        float overflow = raw[i] - FullWellValue;
+                        if (overflow <= 0f) continue;
+                        anyOverflow = true;
+                        raw[i] = FullWellValue;
+                        float share = overflow * BloomingSpillFraction;
+                        if (y > 0) raw[i - w] += share;
+                        if (y < h - 1) raw[i + w] += share;
+                    }
+                }
+                if (!anyOverflow) break;
+            }
+        }
+
+        /// <summary>
+        /// Charge-transfer smear along the vertical (readout) direction: walks each column
+        /// top to bottom, capturing a fraction of every pixel's signal into a per-column trap
+        /// state and releasing a fraction of what's trapped back into the next pixel down --
+        /// the nc/nr structure of Short et al. (2010)'s CDM, simplified to constant per-row
+        /// capture/release fractions (see CtiCaptureFraction/CtiReleaseFraction). Reads as a
+        /// faint trailing streak below anything bright, the classic CTI signature.
+        /// </summary>
+        private void ApplyChargeTransferSmear(float[] raw)
+        {
+            int w = TextureWidth, h = TextureHeight;
+            for (int x = 0; x < w; x++)
+            {
+                float trapped = 0f;
+                for (int y = 0; y < h; y++)
+                {
+                    int i = y * w + x;
+                    float captured = raw[i] * CtiCaptureFraction;
+                    raw[i] -= captured;
+                    trapped += captured;
+
+                    float released = trapped * CtiReleaseFraction;
+                    trapped -= released;
+                    raw[i] += released;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Cosmic ray hits: a flat Poisson process over the exposure deposits short, randomly
+        /// angled bright tracks (Pyxel's CosmiX/TARS approach, minus the angle model -- see
+        /// CosmicRayHitsPerSecond), distinct from the fixed hot-pixel map since a real muon/proton
+        /// strike lands anywhere, at a random angle, on every exposure independently.
+        /// </summary>
+        private void ApplyCosmicRays(float[] raw, float exposureSeconds, System.Random rng)
+        {
+            int w = TextureWidth, h = TextureHeight;
+            double expectedHits = CosmicRayHitsPerSecond * exposureSeconds;
+            int hits = SamplePoisson(rng, expectedHits);
+
+            for (int n = 0; n < hits; n++)
+            {
+                int x0 = rng.Next(w);
+                int y0 = rng.Next(h);
+                double angle = rng.NextDouble() * 2.0 * Math.PI; // isotropic incidence in the sensor plane
+                int length = CosmicRayMinTrackPx + rng.Next(CosmicRayMaxTrackPx - CosmicRayMinTrackPx);
+                double dx = Math.Cos(angle), dy = Math.Sin(angle);
+
+                for (int s = 0; s < length; s++)
+                {
+                    int x = x0 + (int)Math.Round(dx * s);
+                    int y = y0 + (int)Math.Round(dy * s);
+                    if (x < 0 || x >= w || y < 0 || y >= h) break;
+                    int i = y * w + x;
+                    if (raw[i] < CosmicRayDepositValue) raw[i] = CosmicRayDepositValue;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Persistence ghosting: each trap species relaxes exponentially toward an equilibrium
+        /// fill level set by the current signal and that species' share of trap capacity
+        /// (PersistenceProportions), using the same real time constant (PersistenceTauSeconds)
+        /// for both directions -- Pyxel's own persistence model uses one tau per species for
+        /// both capture and release, so this does too rather than inventing a separate capture
+        /// rate. When the equilibrium is above the trap's current level the trap fills (capture,
+        /// pulling charge out of the pixel); when a previously bright frame's trap sits above the
+        /// new, dimmer equilibrium it drains back into the pixel (release) -- the mechanism
+        /// behind a fading afterimage bleeding into the next shot. A true exponential relaxation
+        /// is used rather than Pyxel's own small-step linear form, since a real UT gap between
+        /// two RC20 shots can be minutes rather than a simulation tick; it is also naturally
+        /// bounded (converges toward the equilibrium at rate dt/tau), so unlike a fixed-rate
+        /// capture with no cap, a fast capture batch can't accumulate an ever-growing ghost.
+        /// </summary>
+        private void ApplyPersistence(float[] raw, double ut)
+        {
+            int n = TextureWidth * TextureHeight;
+            if (persistenceTraps == null)
+            {
+                persistenceTraps = new float[PersistenceTauSeconds.Length][];
+                for (int k = 0; k < persistenceTraps.Length; k++) persistenceTraps[k] = new float[n];
+                lastPersistenceUt = ut;
+                return; // nothing accumulated yet on the very first exposure
+            }
+
+            double dt = Math.Max(0.0, ut - lastPersistenceUt);
+            lastPersistenceUt = ut;
+
+            for (int k = 0; k < persistenceTraps.Length; k++)
+            {
+                float[] trap = persistenceTraps[k];
+                float approach = (float)(1.0 - Math.Exp(-dt / PersistenceTauSeconds[k]));
+                float proportion = PersistenceProportions[k];
+                for (int i = 0; i < n; i++)
+                {
+                    float equilibrium = raw[i] * proportion;
+                    float delta = (equilibrium - trap[i]) * approach; // positive = net capture, negative = net release
+                    trap[i] += delta;
+                    raw[i] -= delta;
+                }
+            }
+        }
+
+        /// <summary>Knuth's algorithm: exact Poisson sample, fine for the small lambda cosmic rays use.</summary>
+        private static int SamplePoisson(System.Random rng, double lambda)
+        {
+            if (lambda <= 0.0) return 0;
+            double l = Math.Exp(-lambda);
+            int k = 0;
+            double p = 1.0;
+            do
+            {
+                k++;
+                p *= rng.NextDouble();
+            } while (p > l);
+            return k - 1;
+        }
+
+        /// <summary>
+        /// Third-order astigmatism: transverse blur scaling with the square of the normalized
+        /// field radius, smeared radially outward from frame center -- a simplified stand-in
+        /// for the radially-elongated star image real astigmatism produces at one of its two
+        /// focus positions in an off-axis RC/Ritchey-Chretien field. Zero at the target itself
+        /// (centered by definition), worst for background stars near the corners.
+        /// </summary>
+        private void ApplyAstigmatismBlur(Color[] buffer)
+        {
+            int w = TextureWidth, h = TextureHeight;
+            int n = w * h;
+            if (astigmatismScratch == null || astigmatismScratch.Length != n) astigmatismScratch = new float[n];
+            for (int i = 0; i < n; i++) astigmatismScratch[i] = buffer[i].r;
+
+            float cx = w / 2f, cy = h / 2f;
+            float maxR = Mathf.Sqrt(cx * cx + cy * cy);
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    float dx = x - cx, dy = y - cy;
+                    float r = Mathf.Sqrt(dx * dx + dy * dy);
+                    float rNorm = r / maxR;
+                    float smear = AstigmatismStrengthPxAtCorner * rNorm * rNorm;
+                    int steps = Mathf.CeilToInt(smear);
+                    if (steps < 1) continue;
+
+                    float nx = dx / Mathf.Max(1e-4f, r);
+                    float ny = dy / Mathf.Max(1e-4f, r);
+                    float sum = 0f;
+                    for (int s = 0; s <= steps; s++)
+                    {
+                        int sx = Mathf.Clamp(x + Mathf.RoundToInt(nx * s), 0, w - 1);
+                        int sy = Mathf.Clamp(y + Mathf.RoundToInt(ny * s), 0, h - 1);
+                        sum += astigmatismScratch[sy * w + sx];
+                    }
+                    float v = sum / (steps + 1);
+                    buffer[y * w + x] = new Color(v, v, v, 1f);
+                }
+            }
         }
 
         /// <summary>Cloud coverage over KSC from EVE, or 0 if EVE isn't installed or has no cloud layer for the home body.</summary>
@@ -541,6 +875,20 @@ namespace ExoInstruments.Visualization
                 : (Vector3)worldUp;
 
             return EveCloudIntegration.SampleCoverage(home.bodyName, bodyFixedUp);
+        }
+
+        /// <summary>
+        /// The sensor's known, fixed bad-pixel map (hot + dead indices combined) -- the same
+        /// list a real calibration workflow would have from a dark-frame characterization,
+        /// used by AstroImageStack to cosmetically correct each sub before stacking.
+        /// </summary>
+        public int[] GetDefectPixelIndices()
+        {
+            EnsureDefectMap();
+            var combined = new int[hotPixelIndices.Length + deadPixelIndices.Length];
+            hotPixelIndices.CopyTo(combined, 0);
+            deadPixelIndices.CopyTo(combined, hotPixelIndices.Length);
+            return combined;
         }
 
         /// <summary>Builds the hot/dead pixel index lists once from a constant seed (same defects every session).</summary>

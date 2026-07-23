@@ -203,6 +203,7 @@ namespace ExoInstruments
         private int stackBatchSize = 5;
         private int stackBatchRemaining = 0;
         private bool stackAlignSubs = true;
+        private bool stackLuckyImaging = false;
         private float haBlendStrength = 0.5f;
         private Texture2D stackedCompositeTexture;
         private string stackComposeError;
@@ -331,7 +332,8 @@ namespace ExoInstruments
                 {
                     AstroSubResult subResult = astroStack.AddSub(
                         solarSystemCamera.Filter, solarSystemCamera.GetLastCaptureGray(),
-                        solarSystemCamera.FovDeg, solarSystemCamera.ExposureSeconds);
+                        solarSystemCamera.FovDeg, solarSystemCamera.ExposureSeconds,
+                        solarSystemCamera.GetDefectPixelIndices());
                     solarSystemCamera.ConsumeCapturedPhoto();
 
                     if (subResult == AstroSubResult.FilterFull)
@@ -1406,6 +1408,7 @@ namespace ExoInstruments
 
             GUILayout.BeginHorizontal();
             stackAlignSubs = GUILayout.Toggle(stackAlignSubs, " Align subs (brightness centroid)", GUILayout.Width(220));
+            stackLuckyImaging = GUILayout.Toggle(stackLuckyImaging, " Lucky imaging (keep sharpest 30%)", GUILayout.Width(240));
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
@@ -1448,7 +1451,7 @@ namespace ExoInstruments
         /// <summary>Runs AstroImageStack.ComposeLRGB and refreshes (or builds) stackedCompositeTexture from the result.</summary>
         void ComposeAstroStack()
         {
-            Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, haBlendStrength, out stackComposeError);
+            Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, stackLuckyImaging, haBlendStrength, out stackComposeError);
             if (pixels == null) return;
 
             if (stackedCompositeTexture == null)
