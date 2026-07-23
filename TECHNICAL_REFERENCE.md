@@ -1,6 +1,6 @@
 # ExoInstruments — Technical Reference
 
-Exhaustive technical record of every mechanic, formula, data source, and known simplification in the mod. Written to be pasted whole into a new AI conversation (ChatGPT/Claude) or read as source material for the scientific paper. Kept inside the repo (`TECHNICAL_REFERENCE.md`) so `git pull` carries it between machines — no separate file to lose track of.
+Exhaustive technical record of every mechanic, formula, data source, and known simplification in the mod, kept as source material for the scientific paper. Kept inside the repo (`TECHNICAL_REFERENCE.md`) so `git pull` carries it between machines — no separate file to lose track of.
 
 **How to keep this current:** when a mechanic changes, update the matching section here in the same commit. The README is player-facing marketing copy and drifts out of sync on purpose (readability over precision); this document is the opposite — precision over readability, so treat any conflict between the two as this document being right.
 
