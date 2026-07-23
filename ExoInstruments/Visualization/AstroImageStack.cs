@@ -33,11 +33,29 @@ namespace ExoInstruments.Visualization
     /// </summary>
     public class AstroImageStack
     {
-        // 30 subs × 480×480 × 5 filters ≈ 330 MB in the worst case — capped per filter to stay reasonable.
-        public const int MaxSubsPerFilter = 30;
+        // Resolution-aware cap: a fixed ~30 subs/filter was fine at the old 480x480 abstract
+        // frame (~330 MB worst case across 5 filters), but at real sensor resolution (up to the
+        // native 4144x2822) that same constant would reach several GB and risk exhausting the
+        // managed heap. Instead this targets a fixed total memory budget across all 5 filters,
+        // divided evenly, so the effective cap shrinks automatically as resolution goes up.
+        private const long TotalStackMemoryBudgetBytes = 1_000_000_000L; // ~1 GB across all filters
+        private const int FilterCount = 5;
+        private const int MinSubsPerFilter = 3;
+        private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning -- diminishing returns past this many subs
+
+        public static int MaxSubsPerFilter
+        {
+            get
+            {
+                long bytesPerSub = (long)SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight * sizeof(float);
+                long perFilterBudget = TotalStackMemoryBudgetBytes / FilterCount;
+                int bySize = (int)Math.Max(MinSubsPerFilter, perFilterBudget / Math.Max(1, bytesPerSub));
+                return Math.Min(MaxSubsPerFilterCeiling, bySize);
+            }
+        }
 
         private const float CentroidThreshold = 0.1f; // ignore background/noise pixels when locating the target
-        private const int MaxAlignShiftPx = SolarSystemCameraTexture.TextureWidth / 2;
+        private static int MaxAlignShiftPx => SolarSystemCameraTexture.TextureWidth / 2; // TextureWidth varies with the camera's binning factor
         private const float FovMatchToleranceDeg = 0.01f; // subs of the same filter must share (near enough) the same FOV, or a pixel means a different angle in each and stacking would just blur the target
 
         // Strength of the display-only asinh stretch applied to the finished
@@ -73,6 +91,14 @@ namespace ExoInstruments.Visualization
         // spike) would inflate the variance enough to make a contaminated frame look
         // like the sharpest one, exactly backwards from what the metric is for.
         private const float SharpnessTrimFraction = 0.02f;
+
+        // At real sensor resolution the scoring region can hold millions of pixels; sorting all
+        // of them for every captured sub would be the single slowest operation in the stacking
+        // pipeline. Sharpness/focus is a spatially broad property (real focus operators are
+        // routinely evaluated on a representative sub-sample rather than every pixel), so this
+        // strides through the region to keep the sample count roughly constant regardless of
+        // resolution -- statistically equivalent, orders of magnitude cheaper to sort.
+        private const int SharpnessTargetSampleCount = 50_000;
 
         private readonly Dictionary<CameraFilter, List<AstroSub>> rawSubs = new Dictionary<CameraFilter, List<AstroSub>>();
 
@@ -157,11 +183,14 @@ namespace ExoInstruments.Visualization
             int yLo = Mathf.Max(1, marginY), yHi = Mathf.Min(h - 2, h - 1 - marginY);
             if (xHi <= xLo || yHi <= yLo) return 0f;
 
-            var laplacians = new List<float>((xHi - xLo + 1) * (yHi - yLo + 1));
-            for (int y = yLo; y <= yHi; y++)
+            long regionPixels = (long)(xHi - xLo + 1) * (yHi - yLo + 1);
+            int stride = Math.Max(1, (int)Math.Sqrt(regionPixels / (double)SharpnessTargetSampleCount));
+
+            var laplacians = new List<float>(SharpnessTargetSampleCount + 64);
+            for (int y = yLo; y <= yHi; y += stride)
             {
                 int row = y * w;
-                for (int x = xLo; x <= xHi; x++)
+                for (int x = xLo; x <= xHi; x += stride)
                 {
                     int i = row + x;
                     float lap = -4f * gray[i] + gray[i - 1] + gray[i + 1] + gray[i - w] + gray[i + w];

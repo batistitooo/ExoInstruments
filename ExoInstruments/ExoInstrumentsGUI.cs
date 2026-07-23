@@ -1211,10 +1211,13 @@ namespace ExoInstruments
             }
 
             // The frame area: the finished photo, or a placeholder while exposing
-            // / before the first capture. No live feed.
+            // / before the first capture. No live feed. Displayed at a fixed on-screen size
+            // regardless of the camera's actual (possibly multi-megapixel) native resolution --
+            // GUI.DrawTexture scales to the target Rect, so this never tries to lay out an
+            // IMGUI window at native sensor size.
             Rect rect = GUILayoutUtility.GetRect(
-                SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight,
-                GUILayout.Width(SolarSystemCameraTexture.TextureWidth), GUILayout.Height(SolarSystemCameraTexture.TextureHeight));
+                PreviewDisplaySize, PreviewDisplaySize,
+                GUILayout.Width(PreviewDisplaySize), GUILayout.Height(PreviewDisplaySize));
             Color prevBg = GUI.color;
             GUI.color = Color.black;
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
@@ -1236,14 +1239,45 @@ namespace ExoInstruments
                 GUI.Label(new Rect(rect.x, rect.center.y - 34, rect.width, 20),
                     $"Exposing... {solarSystemCamera.CaptureProgress * 100f:F0}%", plotTitleStyle);
             }
+            else if (solarSystemCamera.IsProcessing)
+            {
+                GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 20),
+                    "Processing exposure (real sensor resolution takes a moment)...", plotTitleStyle);
+            }
             else if (!solarSystemCamera.HasCapturedPhoto)
             {
                 GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 20),
                     "No frame yet -- set up and press Capture.", plotTitleStyle);
             }
 
+            DrawResolutionControls();
             DrawCameraControls(CanExposePhotography());
             DrawStackingControls(CanExposePhotography());
+        }
+
+        // Fixed on-screen preview size -- independent of the camera's real, possibly much
+        // larger, native sensor resolution (see SolarSystemCameraTexture.BinningFactor).
+        private const int PreviewDisplaySize = 480;
+
+        /// <summary>Real sensor binning selector (1x1 native ZWO ASI294MM Pro resolution down to 4x4) -- the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
+        void DrawResolutionControls()
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Binning:", GUILayout.Width(60));
+            int current = SolarSystemCameraTexture.BinningFactor;
+            foreach (int factor in new[] { 1, 2, 3, 4 })
+            {
+                bool selected = current == factor;
+                GUI.enabled = !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
+                if (GUILayout.Toggle(selected, $" {factor}x{factor}", GUILayout.Width(60)) && !selected)
+                {
+                    SolarSystemCameraTexture.BinningFactor = factor;
+                }
+                GUI.enabled = true;
+            }
+            int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            GUILayout.Label($"({w}x{h})", smallCaptionStyle);
+            GUILayout.EndHorizontal();
         }
 
         /// <summary>Zoom / exposure / ISO / filter / focus / guiding controls + the Capture and Save buttons.</summary>
@@ -1325,6 +1359,12 @@ namespace ExoInstruments
                 if (GUILayout.Button("Cancel exposure", GUILayout.Height(28), GUILayout.Width(180)))
                     solarSystemCamera.CancelExposure();
             }
+            else if (solarSystemCamera.IsProcessing)
+            {
+                GUI.enabled = false;
+                GUILayout.Button("Processing...", GUILayout.Height(28), GUILayout.Width(180));
+                GUI.enabled = true;
+            }
             else
             {
                 GUI.enabled = canExpose;
@@ -1333,7 +1373,7 @@ namespace ExoInstruments
                 GUI.enabled = true;
             }
             GUI.enabled = solarSystemCamera.HasCapturedPhoto;
-            if (GUILayout.Button("Save Photo", GUILayout.Height(28), GUILayout.Width(140)))
+            if (GUILayout.Button("Save Photo (.png + .fits)", GUILayout.Height(28), GUILayout.Width(180)))
                 SaveSolarSystemPhoto();
             GUI.enabled = true;
             if (GUILayout.Button("Stop", GUILayout.Height(28), GUILayout.Width(90)))
@@ -1376,7 +1416,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
-            GUI.enabled = !batchRunning && canExpose && !solarSystemCamera.IsCapturing;
+            GUI.enabled = !batchRunning && canExpose && !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
             if (GUILayout.Button($"Capture series ({FilterLabel(solarSystemCamera.Filter)}, {stackBatchSize})", GUILayout.Height(26), GUILayout.Width(220)))
             {
                 stackBatchInterruptedMessage = null;
@@ -1440,8 +1480,8 @@ namespace ExoInstruments
                 GUILayout.Space(6);
                 GUILayout.Label("Composite preview:", smallCaptionStyle);
                 Rect compositeRect = GUILayoutUtility.GetRect(
-                    SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight,
-                    GUILayout.Width(SolarSystemCameraTexture.TextureWidth), GUILayout.Height(SolarSystemCameraTexture.TextureHeight));
+                    PreviewDisplaySize, PreviewDisplaySize,
+                    GUILayout.Width(PreviewDisplaySize), GUILayout.Height(PreviewDisplaySize));
                 GUI.DrawTexture(compositeRect, stackedCompositeTexture);
             }
 
@@ -1454,24 +1494,41 @@ namespace ExoInstruments
             Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, stackLuckyImaging, haBlendStrength, out stackComposeError);
             if (pixels == null) return;
 
-            if (stackedCompositeTexture == null)
+            int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            if (stackedCompositeTexture == null || stackedCompositeTexture.width != w || stackedCompositeTexture.height != h)
             {
-                stackedCompositeTexture = new Texture2D(
-                    SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, TextureFormat.RGB24, false);
+                if (stackedCompositeTexture != null) UnityEngine.Object.Destroy(stackedCompositeTexture);
+                stackedCompositeTexture = new Texture2D(w, h, TextureFormat.RGB24, false);
             }
             stackedCompositeTexture.SetPixels(pixels);
             stackedCompositeTexture.Apply();
         }
 
-        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG -- same scheme as SaveSolarSystemPhoto.</summary>
+        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file -- same scheme as SaveSolarSystemPhoto.</summary>
         void SaveStackedComposite()
         {
             if (stackedCompositeTexture == null) return;
             string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
             System.IO.Directory.CreateDirectory(dir);
-            string fileName = $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-            byte[] data = stackedCompositeTexture.EncodeToPNG();
-            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, fileName), data);
+            string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
+
+            byte[] pngData = stackedCompositeTexture.EncodeToPNG();
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.png"), pngData);
+
+            var fitsInfo = new FitsWriter.FitsHeaderInfo
+            {
+                ExposureSeconds = astroStack.TotalExposureSeconds(solarSystemCamera.Filter),
+                PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
+                FullWellElectrons = AtmosphericImagingNoise.SensorFullWellElectrons,
+                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                Gain = solarSystemCamera.Gain,
+                FilterName = "LRGB",
+                ObjectName = selectedPhotographyBody.bodyName,
+                UtcTimestamp = DateTime.UtcNow,
+            };
+            FitsWriter.WriteGrayscale(
+                System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.fits"),
+                stackedCompositeTexture.GetPixels(), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
         }
 
         static string FilterLabel(CameraFilter f)
@@ -1503,16 +1560,32 @@ namespace ExoInstruments
             GUILayout.Label(sky + "  " + bodyLine, smallCaptionStyle);
         }
 
-        /// <summary>Writes the finished captured photo to KSP's screenshot folder as a PNG.</summary>
+        /// <summary>Writes the finished captured photo to KSP's screenshot folder as a PNG (quick preview) and a real 16-bit FITS file (the same format a real RC20+camera would actually produce).</summary>
         void SaveSolarSystemPhoto()
         {
             Texture2D frame = solarSystemCamera.CapturedPhoto;
             if (frame == null) return;
             string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
             System.IO.Directory.CreateDirectory(dir);
-            string fileName = $"ExoInstruments_{selectedPhotographyBody.bodyName}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-            byte[] data = frame.EncodeToPNG();
-            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, fileName), data);
+            string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
+
+            byte[] pngData = frame.EncodeToPNG();
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.png"), pngData);
+
+            var fitsInfo = new FitsWriter.FitsHeaderInfo
+            {
+                ExposureSeconds = solarSystemCamera.ExposureSeconds,
+                PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
+                FullWellElectrons = AtmosphericImagingNoise.SensorFullWellElectrons,
+                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                Gain = solarSystemCamera.Gain,
+                FilterName = FilterLabel(solarSystemCamera.Filter),
+                ObjectName = selectedPhotographyBody.bodyName,
+                UtcTimestamp = DateTime.UtcNow,
+            };
+            FitsWriter.WriteGrayscale(
+                System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.fits"),
+                frame.GetPixels(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
         }
 
         void DrawStarSelection()

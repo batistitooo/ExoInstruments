@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEngine;
 using ExoInstruments.Core;
 
@@ -26,18 +27,68 @@ namespace ExoInstruments.Visualization
     /// </summary>
     public class SolarSystemCameraTexture : IDisposable
     {
-        public const int TextureWidth = 480;
-        public const int TextureHeight = 480;
+        // Real ZWO ASI294MM Pro native sensor resolution (official ZWO datasheet,
+        // zwoastro.com/product/asi294): 4144x2822, 4.63um pixel pitch.
+        public const int NativeTextureWidth = 4144;
+        public const int NativeTextureHeight = 2822;
+        private const float NativePixelSizeMeters = 4.63e-6f;
+
+        // Real PlaneWave RC20 focal length: f/6.8 at 0.51m aperture = 3.468m (planewave.eu
+        // product page). A real, commonly available 4x Barlow gives the "high power" end of
+        // the zoom range; the native (no-accessory) focal length gives the "wide" end --
+        // replaces the old invented 0.08-8 deg range with a derived one (see MinFovDeg/MaxFovDeg).
+        private const float RealFocalLengthMeters = 0.51f * 6.8f;
+        private const float BarlowFactor = 4.0f;
+
+        /// <summary>
+        /// Pixel binning factor (1=native 4144x2822, 2/3/4 = NxN binning) -- the real technique
+        /// astrophotography acquisition software (SharpCap, NINA) offers for exactly this
+        /// trade-off (resolution vs. processing cost/noise). Changing this rebuilds the
+        /// camera's textures and scratch buffers on the next capture.
+        /// </summary>
+        public static int BinningFactor { get; set; } = 4;
+
+        public static int TextureWidth => NativeTextureWidth / BinningFactor;
+        public static int TextureHeight => NativeTextureHeight / BinningFactor;
+
+        /// <summary>Real (binned) pixel pitch in microns -- for FITS XPIXSZ/YPIXSZ header keywords.</summary>
+        public static double PixelSizeMicrons => NativePixelSizeMeters * BinningFactor * 1e6;
+
+        /// <summary>Real RC20 focal length in mm -- for the FITS FOCALLEN header keyword.</summary>
+        public static double FocalLengthMm => RealFocalLengthMeters * 1000.0;
+
+        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the real RC20 focal length and real ZWO pixel pitch.</summary>
+        private static float PlateScaleArcsecPerPixel
+        {
+            get
+            {
+                float pixelSizeMeters = NativePixelSizeMeters * BinningFactor;
+                float plateScaleRad = pixelSizeMeters / RealFocalLengthMeters;
+                return plateScaleRad * (180f / Mathf.PI) * 3600f;
+            }
+        }
+
+        /// <summary>Native (no-accessory) field of view across the sensor's long axis -- the "wide" end of the zoom range.</summary>
+        public static float MaxFovDeg => (TextureWidth * PlateScaleArcsecPerPixel) / 3600f;
+
+        /// <summary>Field of view with a real 4x Barlow -- the "high power" end of the zoom range.</summary>
+        public static float MinFovDeg => MaxFovDeg / BarlowFactor;
 
         private const string GalaxyCameraName = "GalaxyCamera";
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
 
-        // Linear shutter gain per second — longer exposure lifts faint areas but blows highlights faster.
-        private const float ExposureGainPerSecond = 12.0f;
+        // Real PlaneWave RC20 secondary-mirror obstruction: 39% of primary diameter
+        // (planewave.eu product page) -> area fraction blocked = 0.39^2.
+        private const double SecondaryObstructionFraction = 0.39;
 
-        // FOV limits. 0.08 deg matches a Barlow-equipped RC20 at high power; 8 deg is wide field.
-        public const float MinFovDeg = 0.08f;
-        public const float MaxFovDeg = 8.0f;
+        // Real ZWO ASI294MM Pro peak quantum efficiency (official datasheet).
+        private const double SensorQuantumEfficiency = 0.90;
+
+        // Real filter bandwidths in Angstrom, matching FilterThroughput's ratios: L covers the
+        // whole ~420-685nm visible band (~2650 Angstrom); R/G/B each get an even third (modern
+        // "1:1:1 balanced" CMOS LRGB filter design); H-alpha is a real ~7nm (70 Angstrom)
+        // narrowband filter.
+        private const double LuminanceBandwidthAngstrom = 2650.0;
 
         public const float MinExposureSeconds = 0.05f;
         public const float MaxExposureSeconds = 30.0f;
@@ -54,7 +105,11 @@ namespace ExoInstruments.Visualization
         internal const double CloudMaxAttenuation = 0.85;                // thick cloud, never 100% opaque
         private const double CloudHazeRatePerSecond = 0.25;             // veiling scattered light off cloud base
         private const float CloudBlurPxMax = 2.0f;
-        private const float ReadNoiseSigmaValue = 0.02f;                // NOT amplified by gain (applied after the analog stage)
+        // NOT amplified by gain (applied after the analog stage) -- real ZWO ASI294MM Pro
+        // read noise (1.2 e-, best case) as a fraction of its real 66,000 e- full well
+        // (AtmosphericImagingNoise.ReadNoiseFraction), the same sensor anchor used for shot
+        // and dark-current noise.
+        private static readonly float ReadNoiseSigmaValue = (float)AtmosphericImagingNoise.ReadNoiseFraction;
 
         // Reference flux for a full Mün at zenith: albedo * (radius/distance)^2.
         private const double MunReferenceFluxUnits = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
@@ -110,13 +165,13 @@ namespace ExoInstruments.Visualization
         // sampling is an unused stub in the shipped source, so an isotropic incidence angle
         // here is no less physical than upstream. Rate is derived, not tuned: sea-level cosmic
         // ray (mostly muon) flux is ~1 cm^-2 min^-1 (Particle Data Group, "Passage of Particles
-        // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"). Sensor area uses the
-        // ZWO ASI294MM Pro's published 4.63 um pixel pitch (a real, commercially available
-        // monochrome astronomy camera) applied to the 480x480 frame: side = 480*4.63e-4 cm =
-        // 0.2222 cm, area = 0.04939 cm^2. Rate = 1 cm^-2 min^-1 * 0.04939 cm^2 / 60 s =
-        // 8.23e-4 hits/s -- genuinely rare for a short amateur exposure, matching real amateur
-        // imaging experience (cosmic ray hits are a long-exposure/large-sensor phenomenon).
-        private const float CosmicRayHitsPerSecond = 8.23e-4f;
+        // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"), applied to the real
+        // physical silicon area of the ZWO ASI294MM Pro sensor (native 4144x2822 at its real
+        // 4.63um pixel pitch -- the physical exposed area doesn't change with binning, only how
+        // pixels are grouped on readout, so this is computed from the native resolution
+        // regardless of the camera's current BinningFactor). See CosmicRayHitsPerSecond's
+        // static initializer for the computed rate.
+        private static readonly float CosmicRayHitsPerSecond = ComputeCosmicRayHitsPerSecond();
         private const int CosmicRayMinTrackPx = 2;
         private const int CosmicRayMaxTrackPx = 14;
         private const float CosmicRayDepositValue = 0.85f;
@@ -147,10 +202,12 @@ namespace ExoInstruments.Visualization
         // ratio, field curvature radius), which no published PlaneWave RC20 datasheet specifies
         // to the precision an aberration coefficient would need -- the radial-quadratic FORM is
         // the literature-sourced part; the pixel amplitude at the frame corner is a display
-        // calibration, not a measured quantity, same category as e.g. ExposureGainPerSecond.
+        // calibration, not a measured quantity -- no published RC20 optical prescription
+        // specifies field curvature/astigmatism coefficients to the precision needed.
         private const float AstigmatismStrengthPxAtCorner = 3.0f;
 
         private bool builtOnce;
+        private int builtBinningFactor = -1;
         private bool available;
 
         private GameObject root;
@@ -164,6 +221,7 @@ namespace ExoInstruments.Visualization
         private Color[] blurScratch;
         private float[] rawScratch;
         private float[] astigmatismScratch;
+        private float[] rowPrefixScratch;
 
         // Persistence trap state, one array per species (see PersistenceTauSeconds), surviving
         // between exposures so a bright target leaves a fading ghost in the next shot.
@@ -203,10 +261,18 @@ namespace ExoInstruments.Visualization
         private float captureDuration;
         private CelestialBody pendingTarget;
 
+        // --- Background processing state (the heavy per-pixel physics pipeline runs off the
+        // main thread once the exposure's integration time has elapsed -- see GatherFrameInputs
+        // /ComputeFramePixels/PollProcessTask) ------------------------------
+        private Task<Color[]> processTask;
+        private bool isProcessing;
+
         /// <summary>True while a timed exposure is integrating (between BeginExposure and completion).</summary>
         public bool IsCapturing => isCapturing;
         /// <summary>0..1 progress through the current timed exposure.</summary>
         public float CaptureProgress => isCapturing && captureDuration > 0f ? Mathf.Clamp01(captureElapsed / captureDuration) : 0f;
+        /// <summary>True while the captured frame's noise/effects pipeline is running on a background task, after the exposure's integration time has elapsed but before the photo is ready.</summary>
+        public bool IsProcessing => isProcessing;
         /// <summary>True once a timed exposure has completed and a finished photo is available.</summary>
         public bool HasCapturedPhoto { get; private set; }
 
@@ -217,7 +283,7 @@ namespace ExoInstruments.Visualization
         {
             get
             {
-                if (!builtOnce) EnsureSceneBuilt();
+                if (!builtOnce || builtBinningFactor != BinningFactor) EnsureSceneBuilt();
                 return available;
             }
         }
@@ -251,6 +317,10 @@ namespace ExoInstruments.Visualization
             HasCapturedPhoto = false;
             isCapturing = false;
             hasLockedAim = false;
+            // Doesn't stop the background Task itself (no cancellation token), but nulling the
+            // reference makes PollProcessTask ignore its result once it does finish.
+            processTask = null;
+            isProcessing = false;
         }
 
         /// <summary>Marks the photo as consumed without releasing the locked aim. Used between stacking subs — the natural drift is what alignment is supposed to correct.</summary>
@@ -266,31 +336,28 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Advances an in-progress timed exposure by deltaTime real seconds. When
-        /// the exposure completes, renders the target once with the committed
-        /// settings and freezes it as CapturedPhoto. No-op when not capturing.
+        /// Advances an in-progress timed exposure by deltaTime real seconds. When the
+        /// exposure's integration time elapses, renders the target and kicks the noise/effects
+        /// pipeline off onto a background Task (see PollProcessTask); when already processing,
+        /// polls that task for completion instead. No-op when neither capturing nor processing.
         /// </summary>
         public void TickCapture(float deltaTime)
         {
+            if (isProcessing)
+            {
+                PollProcessTask();
+                return;
+            }
+
             if (!isCapturing) return;
             captureElapsed += deltaTime;
             if (captureElapsed < captureDuration) return;
 
             isCapturing = false;
             RenderExposure(pendingTarget);
-            lastCaptureSnapshot = (Color[])pixelScratch.Clone();
-
-            if (outputTexture == null) return;
-            if (capturedTexture == null)
-            {
-                capturedTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
-            }
-            capturedTexture.SetPixels(outputTexture.GetPixels());
-            capturedTexture.Apply();
-            HasCapturedPhoto = true;
         }
 
-        /// <summary>Renders the target into readbackTexture, then processes it (filter/exposure/noise/focus/drift) into outputTexture.</summary>
+        /// <summary>Renders the target into readbackTexture (main thread), gathers every input the physics pipeline needs, then kicks that pipeline off onto a background Task.</summary>
         private void RenderExposure(CelestialBody targetBody)
         {
             if (targetBody == null) return;
@@ -298,7 +365,42 @@ namespace ExoInstruments.Visualization
             // which is how the body drifts off-center if it moved since then.
             if (Autoguiding) UpdateAim(targetBody);
             RenderScene(targetBody);
-            ProcessFrame(targetBody.flightGlobalsIndex, targetBody);
+
+            FrameComputeInputs inputs = GatherFrameInputs(targetBody);
+            isProcessing = true;
+            processTask = Task.Run(() => ComputeFramePixels(inputs));
+        }
+
+        /// <summary>Checks the background frame-processing Task; once complete, uploads the result to the output/captured textures and snapshots it for AstroImageStack -- the only parts that must happen on the main thread.</summary>
+        private void PollProcessTask()
+        {
+            if (processTask == null) { isProcessing = false; return; }
+            if (!processTask.IsCompleted) return;
+
+            if (processTask.IsFaulted)
+            {
+                Debug.LogError("[ExoInstruments] RC20 frame processing failed: " + processTask.Exception?.GetBaseException().Message);
+                processTask = null;
+                isProcessing = false;
+                return;
+            }
+
+            pixelScratch = processTask.Result;
+            processTask = null;
+            isProcessing = false;
+            lastCaptureSnapshot = (Color[])pixelScratch.Clone();
+
+            if (outputTexture == null) return;
+            outputTexture.SetPixels(pixelScratch);
+            outputTexture.Apply();
+
+            if (capturedTexture == null)
+            {
+                capturedTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
+            }
+            capturedTexture.SetPixels(pixelScratch);
+            capturedTexture.Apply();
+            HasCapturedPhoto = true;
         }
 
         private bool hasLockedAim;
@@ -404,8 +506,10 @@ namespace ExoInstruments.Visualization
 
         private void EnsureSceneBuilt()
         {
-            if (builtOnce) return;
+            if (builtOnce && builtBinningFactor == BinningFactor) return;
+            if (builtOnce) Dispose(); // binning changed since the last build -- tear down and rebuild at the new resolution
             builtOnce = true;
+            builtBinningFactor = BinningFactor;
 
             try
             {
@@ -466,25 +570,40 @@ namespace ExoInstruments.Visualization
             }
         }
 
+        /// <summary>Plain-data snapshot of everything ComputeFramePixels needs -- gathered on the main thread (it touches CelestialBody/Unity APIs), then handed to a background Task that touches none of that, mirroring the StartImagingRefresh/PollImagingRenderTask pattern used elsewhere in this mod.</summary>
+        private struct FrameComputeInputs
+        {
+            public Color[] Src;
+            public int TargetSeed;
+            public double Ut;
+            public float ExposureSeconds;
+            public float IsoGain;
+            public CameraFilter Filter;
+            public float Extinction;
+            public double ScintSigma;
+            public double TwilightRamp;
+            public double MoonSkyExcess;
+            public float CloudCoverage;
+            public double TotalElectrons;
+            public float SeeingBlurPx;
+            public float DefocusBlurPx;
+            public int DriftPx;
+        }
+
         /// <summary>
-        /// Converts the raw rendered frame into a monochrome CCD-frame look through the
-        /// physics pipeline: filter throughput, atmospheric extinction, EVE cloud cover,
-        /// sky glow (twilight + moon scattering + airglow + zodiacal), scintillation,
-        /// shot/dark/read noise, persistence ghosting, cosmic ray hits, full-well blooming,
-        /// charge-transfer smear, hot/dead pixels, optional drift trail, and combined
-        /// defocus/seeing/astigmatism blur.
+        /// Gathers every CelestialBody/Unity-API-touching input ComputeFramePixels needs, on
+        /// the main thread. Real photon-flux calibration: the imaged body's actual apparent
+        /// magnitude (real albedo/radius/Sun-distance/observer-distance/phase-angle, Lambertian
+        /// phase law -- see PhotonFluxModel) converted into real electrons collected through
+        /// the RC20's real aperture/obstruction/QE/filter-bandwidth/exposure/extinction.
         /// </summary>
-        private void ProcessFrame(int targetSeed, CelestialBody targetBody)
+        private FrameComputeInputs GatherFrameInputs(CelestialBody targetBody)
         {
             Color[] src = readbackTexture.GetPixels();
             EnsureDefectMap();
 
-            int n = TextureWidth * TextureHeight;
-            if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
-
             float exposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             float isoGain = Mathf.Clamp(Gain, MinGain, MaxGain);
-            float filterThroughput = FilterThroughput(Filter);
 
             double ut = Planetarium.GetUniversalTime();
 
@@ -500,81 +619,123 @@ namespace ExoInstruments.Visualization
                 ? Clamp01((sunAltDeg - AstronomicalTwilightSunAltitudeDeg) / (ImagingObservingConditions.TwilightSunAltitudeDeg - AstronomicalTwilightSunAltitudeDeg))
                 : 0.0;
             double moonSkyExcess = ComputeMoonSkyExcess(targetBody);
-            float skyBackground = (float)((TwilightSkyBackgroundRatePerSecond * twilightRamp
-                                          + MoonGlowRatePerSecond * moonSkyExcess
-                                          + AirglowBaselinePerSecond
-                                          + ZodiacalBaselineRatePerSecond) * exposureSeconds * filterThroughput);
-
-            // Single EVE sample for the whole frame: at 0.08–8 deg FOV, the cloud ray
-            // barely moves from KSC's own position, so per-pixel variation would be invented.
             float coverage = ComputeCloudCoverage();
 
-            AtmosphericImagingNoise.DarkCurrent(exposureSeconds, out double darkPedestalD, out double darkSigmaD);
+            double totalElectrons = ComputeCollectedElectrons(targetBody, extinction, exposureSeconds);
+
+            float seeingBlur = ComputeSeeingBlurPx(targetBody);
+            float defocusBlur = Autofocus ? 0f : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
+            int driftPx = Autoguiding ? 0 : ComputeDriftPixels(exposureSeconds, targetBody);
+
+            return new FrameComputeInputs
+            {
+                Src = src,
+                TargetSeed = targetBody.flightGlobalsIndex,
+                Ut = ut,
+                ExposureSeconds = exposureSeconds,
+                IsoGain = isoGain,
+                Filter = Filter,
+                Extinction = extinction,
+                ScintSigma = scintSigma,
+                TwilightRamp = twilightRamp,
+                MoonSkyExcess = moonSkyExcess,
+                CloudCoverage = coverage,
+                TotalElectrons = totalElectrons,
+                SeeingBlurPx = seeingBlur,
+                DefocusBlurPx = defocusBlur,
+                DriftPx = driftPx,
+            };
+        }
+
+        /// <summary>
+        /// Converts the raw rendered frame into a monochrome CCD-frame look through the
+        /// physics pipeline: filter throughput, atmospheric extinction, EVE cloud cover,
+        /// sky glow (twilight + moon scattering + airglow + zodiacal), scintillation,
+        /// shot/dark/read noise, persistence ghosting, cosmic ray hits, full-well blooming,
+        /// charge-transfer smear, hot/dead pixels, optional drift trail, and combined
+        /// defocus/seeing/astigmatism blur. Pure C#/array math only -- no CelestialBody or
+        /// UnityEngine.Object API touches -- so this runs on a background Task; only the
+        /// FrameComputeInputs gather step and the final texture upload need the main thread.
+        /// </summary>
+        private Color[] ComputeFramePixels(FrameComputeInputs inputs)
+        {
+            Color[] src = inputs.Src;
+            float filterThroughput = FilterThroughput(inputs.Filter);
+
+            int n = TextureWidth * TextureHeight;
+            if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
+            var pixels = new Color[n];
+
+            float skyBackground = (float)((TwilightSkyBackgroundRatePerSecond * inputs.TwilightRamp
+                                          + MoonGlowRatePerSecond * inputs.MoonSkyExcess
+                                          + AirglowBaselinePerSecond
+                                          + ZodiacalBaselineRatePerSecond) * inputs.ExposureSeconds * filterThroughput);
+
+            AtmosphericImagingNoise.DarkCurrent(inputs.ExposureSeconds, out double darkPedestalD, out double darkSigmaD);
             float darkPedestal = (float)darkPedestalD;
             float darkSigma = (float)darkSigmaD;
 
             // New RNG seed every exposure — read noise differs shot to shot, unlike the fixed defect map.
-            System.Random rng = new System.Random(unchecked(targetSeed * 9973 + (int)(ut * 997.0) + 17));
-            float scintJitter = 1f + NextGaussian(rng, (float)scintSigma);
+            System.Random rng = new System.Random(unchecked(inputs.TargetSeed * 9973 + (int)(inputs.Ut * 997.0) + 17));
+            float scintJitter = 1f + NextGaussian(rng, (float)inputs.ScintSigma);
 
-            float cloudTransmission = 1f - coverage * (float)CloudMaxAttenuation;
-            float haze = coverage * (float)CloudHazeRatePerSecond * exposureSeconds * filterThroughput;
-            float exposureBase = exposureSeconds * ExposureGainPerSecond * filterThroughput * extinction * scintJitter * cloudTransmission;
+            float cloudTransmission = 1f - inputs.CloudCoverage * (float)CloudMaxAttenuation;
+            float haze = inputs.CloudCoverage * (float)CloudHazeRatePerSecond * inputs.ExposureSeconds * filterThroughput;
 
-            for (int py = 0; py < TextureHeight; py++)
+            // Unity's own rendered pixel values (src[]) keep supplying the real spatial shading
+            // (terminator, limb, craters from the game's own 3D lighting) -- only the ABSOLUTE
+            // scale of that shading is recalibrated to match the physically-derived total
+            // electron count (inputs.TotalElectrons), so noise/saturation/SNR are all anchored
+            // to real physics rather than an invented flat exposure multiplier.
+            double totalRenderedSignal = 0.0;
+            for (int i = 0; i < n; i++) totalRenderedSignal += FilterSignal(src[i], inputs.Filter);
+
+            float calibratedSignalPerUnit = totalRenderedSignal > 1e-6
+                ? (float)((inputs.TotalElectrons / AtmosphericImagingNoise.SensorFullWellElectrons) / totalRenderedSignal)
+                : 0f;
+
+            for (int i = 0; i < n; i++)
             {
-                int row = py * TextureWidth;
-                for (int px = 0; px < TextureWidth; px++)
-                {
-                    int i = row + px;
+                float signal = FilterSignal(src[i], inputs.Filter);
+                float photon = signal * calibratedSignalPerUnit * scintJitter * cloudTransmission;
+                float totalPhoton = photon + haze + skyBackground;
 
-                    float signal = FilterSignal(src[i], Filter);
-                    float photon = signal * exposureBase;
-                    float totalPhoton = photon + haze + skyBackground;
+                float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton);
+                float combinedPreGainSigma = Mathf.Sqrt(shotSigma * shotSigma + darkSigma * darkSigma);
 
-                    float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton);
-                    float combinedPreGainSigma = Mathf.Sqrt(shotSigma * shotSigma + darkSigma * darkSigma);
+                float preGainValue = totalPhoton + darkPedestal + NextGaussian(rng, combinedPreGainSigma);
+                float postGain = preGainValue * inputs.IsoGain + NextGaussian(rng, ReadNoiseSigmaValue);
 
-                    float preGainValue = totalPhoton + darkPedestal + NextGaussian(rng, combinedPreGainSigma);
-                    float postGain = preGainValue * isoGain + NextGaussian(rng, ReadNoiseSigmaValue);
-
-                    // Left unclamped here — blooming/CTI below need to see genuine
-                    // above-full-well values before the sensor's own clipping applies.
-                    rawScratch[i] = postGain;
-                }
+                // Left unclamped here — blooming/CTI below need to see genuine
+                // above-full-well values before the sensor's own clipping applies.
+                rawScratch[i] = postGain;
             }
 
-            ApplyPersistence(rawScratch, ut);
-            ApplyCosmicRays(rawScratch, exposureSeconds, rng);
+            ApplyPersistence(rawScratch, inputs.Ut);
+            ApplyCosmicRays(rawScratch, inputs.ExposureSeconds, rng);
             ApplyBlooming(rawScratch);
             ApplyChargeTransferSmear(rawScratch);
 
             for (int i = 0; i < n; i++)
             {
                 float value = Mathf.Clamp01(rawScratch[i]);
-                pixelScratch[i] = new Color(value, value, value, 1f);
+                pixels[i] = new Color(value, value, value, 1f);
             }
 
             // Diurnal drift: 360 deg per Kerbin rotation, converted to pixels by the FOV.
-            if (!Autoguiding)
-            {
-                int driftPx = ComputeDriftPixels(exposureSeconds, targetBody);
-                if (driftPx >= 1) ApplyHorizontalMotionBlur(pixelScratch, driftPx);
-            }
+            if (inputs.DriftPx >= 1) ApplyHorizontalMotionBlur(pixels, inputs.DriftPx);
 
             // Defocus + seeing + cloud haze all go through one blur pass to avoid double-blurring.
-            float defocusBlur = Autofocus ? 0f : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
-            float seeingBlur = ComputeSeeingBlurPx(targetBody);
-            float cloudBlur = coverage * CloudBlurPxMax;
-            float blurRadius = defocusBlur + seeingBlur + cloudBlur;
+            float cloudBlur = inputs.CloudCoverage * CloudBlurPxMax;
+            float blurRadius = inputs.DefocusBlurPx + inputs.SeeingBlurPx + cloudBlur;
             if (blurRadius >= 0.5f)
             {
-                ApplyBoxBlur(pixelScratch, Mathf.RoundToInt(blurRadius));
+                ApplyBoxBlur(pixels, Mathf.RoundToInt(blurRadius));
             }
 
             // Field-dependent astigmatism, applied after the uniform blur so it reads as a distinct
             // off-axis smear rather than blending into the seeing/defocus radius.
-            ApplyAstigmatismBlur(pixelScratch);
+            ApplyAstigmatismBlur(pixels);
 
             // Defect overlay last: hot/dead pixels are a detector read-out artifact, not an
             // optical one, so they shouldn't be softened by the seeing/defocus/astigmatism blur the
@@ -587,15 +748,14 @@ namespace ExoInstruments.Visualization
             foreach (int idx in hotPixelIndices)
             {
                 float v = Mathf.Clamp01(0.9f + NextGaussian(rng, 0.05f));
-                pixelScratch[idx] = new Color(v, v, v, 1f);
+                pixels[idx] = new Color(v, v, v, 1f);
             }
             foreach (int idx in deadPixelIndices)
             {
-                pixelScratch[idx] = new Color(0f, 0f, 0f, 1f);
+                pixels[idx] = new Color(0f, 0f, 0f, 1f);
             }
 
-            outputTexture.SetPixels(pixelScratch);
-            outputTexture.Apply();
+            return pixels;
         }
 
         /// <summary>Altitude of a live body above KSC's horizon. Returns false if the home body or the body itself is unavailable.</summary>
@@ -668,6 +828,68 @@ namespace ExoInstruments.Visualization
                 total += (moonFlux / MunReferenceFluxUnits) * altitudeRamp * scatterWeight;
             }
             return total;
+        }
+
+        /// <summary>
+        /// Real electrons collected from the imaged body this exposure: its real apparent
+        /// magnitude (PhotonFluxModel.ApparentMagnitude, from real albedo/radius/positions),
+        /// converted via the real RC20 aperture/obstruction/QE/filter-bandwidth/extinction
+        /// chain (PhotonFluxModel.CollectedElectrons). Zero if any required geometry is missing.
+        /// </summary>
+        private double ComputeCollectedElectrons(CelestialBody targetBody, float extinctionTransmission, float exposureSeconds)
+        {
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+            if (home == null || sun == null || targetBody == null) return 0.0;
+
+            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            double distanceToObserverMeters = (targetBody.position - obsPos).magnitude;
+            double distanceToSunMeters = (targetBody.position - sun.position).magnitude;
+            if (distanceToObserverMeters < 1.0 || distanceToSunMeters < 1.0) return 0.0;
+
+            Vector3d toSunFromBody = (sun.position - targetBody.position).normalized;
+            Vector3d toObserverFromBody = (obsPos - targetBody.position).normalized;
+            double phaseAngleRad = Vector3d.Angle(toSunFromBody, toObserverFromBody) * Math.PI / 180.0;
+
+            double magnitude = PhotonFluxModel.ApparentMagnitude(
+                targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad);
+
+            double bandwidthAngstrom = FilterBandwidthAngstrom(Filter);
+            double apertureAreaCm2 = RealApertureAreaCm2();
+
+            return PhotonFluxModel.CollectedElectrons(
+                magnitude, bandwidthAngstrom, apertureAreaCm2, SensorQuantumEfficiency, exposureSeconds, extinctionTransmission);
+        }
+
+        /// <summary>Real RC20 effective collecting area (cm^2): full aperture minus the real secondary-mirror obstruction.</summary>
+        private static double RealApertureAreaCm2()
+        {
+            double apertureRadiusCm = Observatories.Rc20.ApertureMeters * 100.0 / 2.0;
+            double fullArea = Math.PI * apertureRadiusCm * apertureRadiusCm;
+            return fullArea * (1.0 - SecondaryObstructionFraction * SecondaryObstructionFraction);
+        }
+
+        /// <summary>Real cosmic-ray hit rate: sea-level flux (~1/cm^2/min) over the sensor's real, native (binning-independent) physical silicon area.</summary>
+        private static float ComputeCosmicRayHitsPerSecond()
+        {
+            const double sealevelFluxPerCm2PerMinute = 1.0;
+            double sideXCm = NativeTextureWidth * NativePixelSizeMeters * 100.0;
+            double sideYCm = NativeTextureHeight * NativePixelSizeMeters * 100.0;
+            double areaCm2 = sideXCm * sideYCm;
+            return (float)(sealevelFluxPerCm2PerMinute * areaCm2 / 60.0);
+        }
+
+        /// <summary>Real filter bandwidth in Angstrom, matching FilterThroughput's ratios (see its comment for the real bandwidth sources).</summary>
+        private static double FilterBandwidthAngstrom(CameraFilter filter)
+        {
+            switch (filter)
+            {
+                case CameraFilter.Red:
+                case CameraFilter.Green:
+                case CameraFilter.Blue:   return LuminanceBandwidthAngstrom / 3.0;
+                case CameraFilter.HAlpha: return 70.0; // real ~7nm narrowband Halpha filter FWHM
+                default:                  return LuminanceBandwidthAngstrom;
+            }
         }
 
         /// <summary>
@@ -919,15 +1141,23 @@ namespace ExoInstruments.Visualization
         private static double Clamp01(double v) => v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 
         /// <summary>Relative throughput per filter — luminance passes most, H-alpha least.</summary>
+        // Modern CMOS-optimized LRGB filter sets (e.g. Baader) are specifically designed for
+        // "1:1:1" balanced RGB transmission -- each channel independently >95% within its own
+        // band, so that a real imaging session doesn't need per-channel exposure-ratio
+        // compensation. L passes the whole ~420-685nm visible band at ~98% (roughly 3x any
+        // single RGB channel's bandpass at similar in-band transmission). Halpha is a narrowband
+        // filter (~7nm typical FWHM) against R's ~100nm-wide band on the same continuum source
+        // (the RC20 images reflective solar-system bodies, not emission nebulae, so there's no
+        // emission-line signal boost to add back): Halpha/R = 7/100, so Halpha/L = (1/3)*(7/100).
         private static float FilterThroughput(CameraFilter filter)
         {
             switch (filter)
             {
                 case CameraFilter.Luminance: return 1.0f;
-                case CameraFilter.Red:       return 0.5f;
-                case CameraFilter.Green:     return 0.55f;
-                case CameraFilter.Blue:      return 0.45f;
-                case CameraFilter.HAlpha:    return 0.12f;
+                case CameraFilter.Red:       return 1.0f / 3.0f;
+                case CameraFilter.Green:     return 1.0f / 3.0f;
+                case CameraFilter.Blue:      return 1.0f / 3.0f;
+                case CameraFilter.HAlpha:    return (1.0f / 3.0f) * (7.0f / 100.0f);
                 default:                     return 1.0f;
             }
         }
@@ -959,24 +1189,37 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Horizontal motion blur — the classic untracked star-trail smear.</summary>
+        /// <summary>
+        /// Horizontal-only sliding-window (prefix-sum) box blur, edge-clamped -- O(w) per
+        /// row regardless of the blur length, instead of the naive O(w*length) resampling a
+        /// per-pixel loop over each offset would cost. Needed once the sensor is real
+        /// resolution: ComputeDriftPixels' length can reach into the hundreds of pixels, and a
+        /// naive per-offset sum at that length, times millions of pixels, is the single most
+        /// expensive pass in the whole frame.
+        /// </summary>
         private void ApplyHorizontalMotionBlur(Color[] buffer, int length)
         {
             if (length < 1) return;
             if (blurScratch == null || blurScratch.Length != buffer.Length)
                 blurScratch = new Color[buffer.Length];
             int w = TextureWidth, h = TextureHeight;
+            if (rowPrefixScratch == null || rowPrefixScratch.Length < w + 1) rowPrefixScratch = new float[w + 1];
             float inv = 1f / (length + 1);
+
             for (int y = 0; y < h; y++)
             {
                 int row = y * w;
+                rowPrefixScratch[0] = 0f;
+                for (int x = 0; x < w; x++) rowPrefixScratch[x + 1] = rowPrefixScratch[x] + buffer[row + x].r;
+
                 for (int x = 0; x < w; x++)
                 {
-                    float sum = 0f;
-                    for (int dx = 0; dx <= length; dx++)
-                    {
-                        int sx = Mathf.Clamp(x - dx, 0, w - 1);
-                        sum += buffer[row + sx].r;
-                    }
+                    // Window [x-length, x], each sample individually edge-clamped -- matches the
+                    // original per-offset Mathf.Clamp behavior exactly (edge pixels repeat).
+                    int clampedLo = Math.Max(0, x - length);
+                    int leftPadCount = Math.Max(0, length - x);
+                    float innerSum = rowPrefixScratch[x + 1] - rowPrefixScratch[clampedLo];
+                    float sum = innerSum + leftPadCount * buffer[row].r;
                     float v = sum * inv;
                     blurScratch[row + x] = new Color(v, v, v, 1f);
                 }
@@ -984,7 +1227,11 @@ namespace ExoInstruments.Visualization
             Array.Copy(blurScratch, buffer, buffer.Length);
         }
 
-        /// <summary>Separable box blur (horizontal then vertical), radius in pixels.</summary>
+        /// <summary>
+        /// Separable box blur (horizontal then vertical), edge-clamped, via the same
+        /// sliding-window prefix-sum trick as ApplyHorizontalMotionBlur -- O(w*h) total
+        /// regardless of radius rather than O(w*h*radius).
+        /// </summary>
         private void ApplyBoxBlur(Color[] buffer, int radius)
         {
             if (radius < 1) return;
@@ -993,20 +1240,25 @@ namespace ExoInstruments.Visualization
                 blurScratch = new Color[buffer.Length];
             }
             int w = TextureWidth, h = TextureHeight;
+            int prefixLen = Math.Max(w, h) + 1;
+            if (rowPrefixScratch == null || rowPrefixScratch.Length < prefixLen) rowPrefixScratch = new float[prefixLen];
             float inv = 1f / (2 * radius + 1);
 
             // Horizontal pass: buffer -> blurScratch
             for (int y = 0; y < h; y++)
             {
                 int row = y * w;
+                rowPrefixScratch[0] = 0f;
+                for (int x = 0; x < w; x++) rowPrefixScratch[x + 1] = rowPrefixScratch[x] + buffer[row + x].r;
+
                 for (int x = 0; x < w; x++)
                 {
-                    float sum = 0f;
-                    for (int dx = -radius; dx <= radius; dx++)
-                    {
-                        int sx = Mathf.Clamp(x + dx, 0, w - 1);
-                        sum += buffer[row + sx].r;
-                    }
+                    int lo = x - radius, hi = x + radius;
+                    int clampedLo = Math.Max(0, lo), clampedHi = Math.Min(w - 1, hi);
+                    int leftPadCount = Math.Max(0, -lo);
+                    int rightPadCount = Math.Max(0, hi - (w - 1));
+                    float innerSum = rowPrefixScratch[clampedHi + 1] - rowPrefixScratch[clampedLo];
+                    float sum = innerSum + leftPadCount * buffer[row].r + rightPadCount * buffer[row + w - 1].r;
                     float v = sum * inv;
                     blurScratch[row + x] = new Color(v, v, v, 1f);
                 }
@@ -1014,14 +1266,17 @@ namespace ExoInstruments.Visualization
             // Vertical pass: blurScratch -> buffer
             for (int x = 0; x < w; x++)
             {
+                rowPrefixScratch[0] = 0f;
+                for (int y = 0; y < h; y++) rowPrefixScratch[y + 1] = rowPrefixScratch[y] + blurScratch[y * w + x].r;
+
                 for (int y = 0; y < h; y++)
                 {
-                    float sum = 0f;
-                    for (int dy = -radius; dy <= radius; dy++)
-                    {
-                        int sy = Mathf.Clamp(y + dy, 0, h - 1);
-                        sum += blurScratch[sy * w + x].r;
-                    }
+                    int lo = y - radius, hi = y + radius;
+                    int clampedLo = Math.Max(0, lo), clampedHi = Math.Min(h - 1, hi);
+                    int topPadCount = Math.Max(0, -lo);
+                    int bottomPadCount = Math.Max(0, hi - (h - 1));
+                    float innerSum = rowPrefixScratch[clampedHi + 1] - rowPrefixScratch[clampedLo];
+                    float sum = innerSum + topPadCount * blurScratch[x].r + bottomPadCount * blurScratch[(h - 1) * w + x].r;
                     float v = sum * inv;
                     buffer[y * w + x] = new Color(v, v, v, 1f);
                 }
@@ -1046,6 +1301,19 @@ namespace ExoInstruments.Visualization
             if (capturedTexture != null) { UnityEngine.Object.Destroy(capturedTexture); capturedTexture = null; }
             galaxyCam = null;
             scaledSpaceCam = null;
+
+            // Every resolution-sized scratch buffer/state must be rebuilt fresh at whatever
+            // resolution EnsureSceneBuilt runs next at (native size change on a binning switch).
+            pixelScratch = null;
+            blurScratch = null;
+            rawScratch = null;
+            astigmatismScratch = null;
+            rowPrefixScratch = null;
+            persistenceTraps = null;
+            hotPixelIndices = null;
+            deadPixelIndices = null;
+            lastCaptureSnapshot = null;
+            hasLockedAim = false;
         }
     }
 }

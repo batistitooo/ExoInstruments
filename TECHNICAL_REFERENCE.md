@@ -263,7 +263,40 @@ Full Greek-letter canonicalization table (all spelling variants → one 3-letter
 
 ## 7. RC20 solar-system astrograph
 
-Non-exoplanet instrument (`DetectionMethod.SolarSystemPhotography`) — point-and-shoot photography of any Kerbol-system body, clicked directly on the sky chart. `SolarSystemCameraTexture.cs` clones KSP's own galaxy/scaled-space cameras (same technique as Tarsier Space Technology's TSTCameraModule) and runs the frame through a full noise pipeline.
+Non-exoplanet instrument (`DetectionMethod.SolarSystemPhotography`) — point-and-shoot photography of any Kerbol-system body, clicked directly on the sky chart. `SolarSystemCameraTexture.cs` clones KSP's own galaxy/scaled-space cameras (same technique as Tarsier Space Technology's TSTCameraModule) and runs the frame through a full radiometric pipeline anchored end-to-end to two real, specific, cited pieces of hardware rather than an abstract gameplay scale: the **PlaneWave RC20** telescope (f/6.8, 0.51m aperture, 39% linear secondary obstruction — planewave.eu product page) and the **ZWO ASI294MM Pro** camera (4144×2822 native resolution, 4.63μm pixels, 66,000 e⁻ full well, 1.2 e⁻ read noise, 0.0022 e⁻/s/pixel dark current at -20°C, ~90% peak QE — ZWO official datasheet, zwoastro.com/product/asi294).
+
+### 7.0 Real photon-flux signal model (`Core/PhotonFluxModel.cs`)
+
+The imaged body's brightness is no longer an invented flat exposure multiplier — it is the body's real apparent magnitude, converted through the real telescope+camera chain into real electrons.
+
+**Apparent magnitude** (standard planetary H-G-system flux-ratio formalism):
+```
+phi(alpha) = [sin(alpha) + (π-alpha)·cos(alpha)] / π        (Lambertian-sphere phase law, Russell 1916)
+fluxRatio  = albedo · (R_AU/d_obs_AU)² / d_sun_AU² · phi(alpha)
+m_body     = -26.74 - 2.5·log10(fluxRatio)
+```
+`-26.74` is the Sun's real V-band apparent magnitude at 1 AU. `albedo`/`R` are the live `CelestialBody`'s own real fields; `d_sun`/`d_obs`/`alpha` (phase angle) come from live 3D positions (Sun, body, KSC observer), the same `Vector3d.Angle` pattern `ComputeMoonSkyExcess` already used. This is a genuine improvement over the `(1+cosθ)/2` half-phase approximation used elsewhere (§7.3) — the real phase-integral form, not a cosine stand-in.
+
+**Real electrons collected**:
+```
+N_electrons = 948 photons/cm²/s/Å · 10^(-0.4·m_body) · filterBandwidthÅ · apertureAreaCm² · QE · exposureSeconds · extinctionTransmission
+```
+`948 photons/cm²/s/Å` is the real V-band zero-magnitude photon flux density (Vega calibration, standard photometric reference). `apertureAreaCm² = π·(51cm/2)²·(1-0.39²)` (real RC20 aperture minus real secondary obstruction). `QE=0.90` (real ZWO ASI294MM Pro peak QE). `filterBandwidthÅ`: L≈2650Å (the whole ~420-685nm visible band), R/G/B each ≈883Å (an even third — modern "1:1:1 balanced" CMOS LRGB filter design, e.g. Baader's CMOS-optimized sets), Hα≈70Å (a real ~7nm narrowband filter FWHM).
+
+**Calibration, not replacement, of the rendered image**: Unity's own rendered pixel values keep supplying the real spatial shading (terminator, limb, craters — the game's own 3D lighting), summed once per exposure (`Σ FilterSignal`) and used only to redistribute the physically-derived `N_electrons` across pixels in the same proportions the render already has: `signalFraction(pixel) = renderedValue(pixel) · (N_electrons/SensorFullWellElectrons) / Σ renderedValue`. Only the *absolute scale* is recalibrated — noise, saturation, and SNR now all follow from real photon statistics rather than an invented gain constant.
+
+### 7.05 Real sensor resolution and binning
+
+`TextureWidth`/`TextureHeight` are no longer a fixed abstract 480×480 — they're the real ZWO ASI294MM Pro's native 4144×2822 divided by a selectable binning factor (`SolarSystemCameraTexture.BinningFactor`, 1×1/2×2/3×3/4×4), the same trade-off real acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem. Defaults to 4×4 (1036×705) for playability; 1×1 native is available at real cost. Changing binning tears down and rebuilds the camera's textures/scratch buffers on the next capture. Field of view is derived from the real RC20 focal length (3456mm) and the real (binned) pixel pitch, rather than an arbitrary 0.08–8° slider range: `MaxFovDeg` is the native (no-accessory) field across the sensor's long axis, `MinFovDeg` is that divided by a real, commonly available 4× Barlow.
+
+Two things had to be fixed to make real resolution actually tractable:
+- **Sliding-window (prefix-sum) blur**: the drift-trail and defocus/seeing/cloud box blurs were naive per-offset resampling, `O(w·h·radius)` — at real resolution, with radius scaling alongside the frame width, this risked far worse than the ~50× pixel-count increase alone. Rewritten as edge-clamped prefix-sum sliding windows, `O(w·h)` regardless of radius.
+- **Memory-aware stacking cap**: a fixed 30-subs/filter cap was ~330MB worst-case at the old resolution; unchanged at native 4144×2822 it would reach ~7GB across 5 filters. `AstroImageStack.MaxSubsPerFilter` is now derived from a fixed ~1GB total memory budget divided across 5 filters, shrinking automatically as resolution goes up (floor of 3, ceiling of 30).
+- **Lucky-imaging sharpness scoring** subsamples its region (targeting ~50,000 samples regardless of resolution) rather than sorting every pixel — sharpness/focus is a spatially broad property, so a representative stride is statistically equivalent and orders of magnitude cheaper at multi-megapixel resolution.
+
+### 7.06 Background processing
+
+The per-pixel physics pipeline (shot/dark/read noise, persistence, cosmic rays, blooming, CTI, blur, defects — all pure C# array math, no Unity/KSP API touches) now runs on a background `Task`, following the same `StartImagingRefresh`/`PollImagingRenderTask` "gather on main thread → compute off-thread → upload on main thread" pattern already used for the direct-imaging/sky-chart/forecast renders elsewhere in this mod. Only the Unity camera render (`Camera.Render`, `ReadPixels`) and the final texture upload remain on the main thread; everything CelestialBody/Unity-API-dependent (magnitude, positions, cloud cover, seeing) is gathered into a plain-data struct before the background task starts.
 
 ### 7.1 Optics / atmosphere
 
@@ -293,16 +326,18 @@ Separate from the generic heatmap (§5.4) — this one is **not** renormalized p
 
 ### 7.5 Sensor noise chain
 
-- **Shot noise**: `σ = 0.55·sqrt(signal)` — abstract [0,1] units, not real photon counts, but the shape (sqrt scaling, shadows noisier than highlights) is real.
-- **Dark current**: pedestal + `0.55·sqrt(darkUnits)` noise, `darkUnits = 0.01/s · exposure`.
-- **Read noise**: fixed Gaussian σ=0.02, applied *after* the ISO gain stage (not amplified by gain — matches real sensor electronics).
+All three noise terms are now anchored to the real ZWO ASI294MM Pro's real full well (66,000 e⁻), not independently tuned coefficients: `AtmosphericImagingNoise.PoissonNoiseCoefficient = 1/sqrt(66000)`, a zero-free-parameter consequence of Poisson statistics once a real full well is chosen.
+
+- **Shot noise**: `σ = (1/sqrt(66000))·sqrt(signal)`, `signal` now the real-photon-flux-calibrated fraction from §7.0.
+- **Dark current**: pedestal + same `1/sqrt(66000)`-scaled noise, `darkUnits = (0.0022/66000)/s · exposure` — the real ZWO dark-current rate (0.0022 e⁻/s/pixel at -20°C) expressed as a full-well fraction.
+- **Read noise**: fixed Gaussian σ = 1.2/66000 (the real ZWO read-noise spec as a full-well fraction), applied *after* the ISO gain stage (not amplified by gain — matches real sensor electronics).
 - **Hot/dead pixels**: fixed defect map, seeded once from a constant (`20260721`), same defects every session — 1-in-3000 hot, 1-in-6000 dead. Applied *after* all blur (a read-out-stage defect, not an optical one — shouldn't be softened by seeing/defocus/astigmatism blur the way real scene light is).
 - **Full-well blooming**: Pyxel's own model only hard-clips (`min(pixel, fwc)`, no redistribution — verified against their source, `pyxel/models/charge_collection/full_well.py`), so this follows real CCD device physics instead: excess charge above full well (`1.0`) spills along the column/shift-register direction, split symmetrically between the two vertical neighbors — a charge-conserving 50/50 split, the textbook default absent device-specific anti-blooming-gate data (**Janesick 2001, *Scientific Charge-Coupled Devices*, SPIE Press**). Cascades up to 4 iterations (a numerical convergence cap, not a physical quantity — same role as the 50-iteration cap on the Kepler-equation solver elsewhere in this codebase).
 - **Charge-transfer smear / CTI**: simplified single-trap-species version of the `nc`/`nr` capture/release structure from **Short et al. (2010)**'s CDM model (Pyxel's `pyxel/models/charge_transfer/cdm.py`). Capture fraction (`1e-4`/row) is calibrated against real measured charge-transfer inefficiency: a fresh CCD sits near `1e-6`/transfer, while HST's ACS/WFC at severely radiation-damaged end-of-life reaches `~1e-4-1e-3`/transfer (**Massey, Stoughton & Rhodes 2010, PASP 122, 1035**) — `1e-4` sits at that damaged-device ceiling, the conservative end of the real range for a healthy amateur sensor. Release fraction (`35%`/row) represents the fast-trap species real CDM models always include alongside slow traps — a trap whose release time is comparable to the transfer period empties within the first few pixels, the short visible trail seen below bright sources in real frames.
-- **Cosmic ray hits**: flat Poisson process, isotropic incidence angle, random 2–14px track length, deposits a bright streak. Rate is *derived*, not tuned: sea-level cosmic-ray (mostly muon) flux ≈ 1 cm⁻² min⁻¹ (**Particle Data Group, "Passage of Particles Through Matter" review**; **Grieder 2001, *Cosmic Rays at Earth***), applied to a real, commercially available sensor's pixel pitch — the **ZWO ASI294MM Pro's published 4.63 μm** — over the 480×480 frame: side `= 480×4.63e-4 cm = 0.2222 cm`, area `= 0.04939 cm²`, rate `= 1 cm⁻²min⁻¹ × 0.04939 cm² / 60s = 8.23e-4 hits/s` — genuinely rare for a short exposure, matching real amateur-imaging experience (cosmic ray hits are mainly a long-exposure/large-sensor phenomenon). Pyxel's own CosmiX/TARS angle model is an unimplemented stub in their shipped source, so isotropic sampling here is no less physical than upstream.
+- **Cosmic ray hits**: flat Poisson process, isotropic incidence angle, random 2–14px track length, deposits a bright streak. Rate is *derived*, not tuned: sea-level cosmic-ray (mostly muon) flux ≈ 1 cm⁻² min⁻¹ (**Particle Data Group, "Passage of Particles Through Matter" review**; **Grieder 2001, *Cosmic Rays at Earth***), applied to the sensor's real, native, binning-independent physical silicon area (the exposed area doesn't change with pixel binning) — side X `= 4144×4.63e-4 cm = 1.919 cm`, side Y `= 2822×4.63e-4 cm = 1.307 cm`, area `= 2.507 cm²`, rate `= 1 cm⁻²min⁻¹ × 2.507 cm² / 60s ≈ 0.0418 hits/s`. Pyxel's own CosmiX/TARS angle model is an unimplemented stub in their shipped source, so isotropic sampling here is no less physical than upstream.
 - **Persistence/ghosting**: real default trap time constants and species proportions from Pyxel's persistence model (`τ = {1,10,100,1000,10000}s`, proportions `{0.307,0.175,0.188,0.136,0.194}`, in the spirit of **Fixsen, Offenberg, Hanisch et al. 2000, PASP 112, 1350**). Each species relaxes exponentially toward an equilibrium fill level set by the current signal and its proportion, using the *same* τ for both capture and release — matching Pyxel's own one-τ-per-species structure, rather than a separately invented capture rate. A true exponential `Q(t)=Q₀·exp(-Δt/τ)` replaces Pyxel's small-step linear form (which would diverge over the multi-minute real-time gaps between manual RC20 shots); the relaxation is naturally self-bounded (it converges toward the equilibrium), so no arbitrary trap-capacity cap is needed either.
 - **ISO gain**: amplifies signal + pre-gain noise together; does not touch read noise.
-- **Filter throughput**: L=1.0, R=0.5, G=0.55, B=0.45, Hα=0.12 (narrowband, needs much longer exposure).
+- **Filter throughput**: L=1.0, R=G=B=1/3 (modern "1:1:1 balanced" CMOS LRGB filter design), Hα=(1/3)·(7/100) (real ~7nm narrowband vs ~100nm-wide broadband channel, no emission-line boost since the RC20 images reflective bodies, not nebulae).
 - **Diurnal drift**: without autoguiding, horizontal motion blur proportional to Kerbin's sidereal rotation rate over the exposure — an untracked mount's classic star-trail smear.
 
 **Explicitly rejected**: GalSim's brighter-fatter effect (`SiliconSensor`) — its real formula needs per-sensor electrostatic-vertex calibration tables (e2v/ITL-specific) with no generic published values, and the RC20 doesn't do stellar photometry (its targets are extended solar-system bodies, not point-source stars), so the effect's main visual payoff (saturated star-core broadening) barely applies.
@@ -315,6 +350,10 @@ Separate from the generic heatmap (§5.4) — this one is **not** renormalized p
 - **Display-only asinh stretch** (never applied to stored data): `arcsinh(k·v)/arcsinh(k)`, `k=5`.
 - **Lucky imaging**: each filter's subs ranked by a **variance-of-Laplacian sharpness score** (**Pech-Pacheco et al. 2000**, "Diatom autofocusing in brightfield microscopy" — the top-performing general-purpose focus operator in the **Pertuz, Puig & Garcia 2013** survey), computed over the central 60% of the frame (mirroring AutoStakkert!'s alignment-point "quality box" concept for real planetary lucky imaging, since the RC20 always centers its aim there) with the sharpest-magnitude 2% of Laplacian values trimmed before the variance is taken (robust against an isolated cosmic-ray hit or hot pixel masquerading as a sharp frame — the same trimmed-statistic idiom the background estimator already uses). Only the sharpest 30% of subs are kept before alignment/averaging (mid-range of the 1–60% practical range in the lucky-imaging literature — **Fried 1978** for the underlying theory, **Baldwin et al. 2001** for practical frame-selection fractions). Always forces alignment on when active.
   - *Note on the prior implementation*: an earlier version scored sharpness by raw peak-pixel value. Since blooming, cosmic rays, and hot pixels can all saturate a single pixel anywhere in the frame regardless of actual seeing, that metric was inadvertently selecting artifact-contaminated frames as "sharpest" — corrected to variance-of-Laplacian, which measures genuine local contrast rather than any single pixel's value.
+
+### 7.7 Real FITS export (`Visualization/FitsWriter.cs`)
+
+"Save Photo"/"Save composite" now write a real 16-bit FITS file alongside the PNG preview — the actual format a real RC20+camera setup would produce, not a proprietary/simplified one. Standards-conformant: 80-byte header cards, 2880-byte block padding (header and data), big-endian data regardless of host byte order, and the standard `BZERO=32768`/`BSCALE=1` convention for representing unsigned 16-bit data in FITS's native signed-16-bit (`BITPIX=16`) format. Header keywords match real acquisition-software conventions (SharpCap/NINA/MaximDL): `EXPTIME`, `XPIXSZ`/`YPIXSZ` (real binned pixel pitch), `EGAIN` (full well ÷ 65536), `FOCALLEN` (real 3456mm), `GAIN`, `FILTER`, `OBJECT`, `DATE-OBS`.
 
 ---
 
@@ -400,7 +439,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 7. **BLS transit search has no false-alarm probability calibration** — SNR is relative confidence only, not a statistically calibrated detection significance.
 8. **TTV/RM models are order-of-magnitude, single-dominant-perturber approximations** — only the strongest near-resonant pair is modeled; higher-order and secular effects are absent.
 9. **Direct-imaging PSF is a Gaussian + ad hoc ring term**, not a true Airy/Bessel diffraction pattern; speckle/background noise is uniform pseudo-noise, not physically-derived photon statistics.
-10. **RC20 sensor noise chain operates in abstract [0,1] units**, not real photon/electron counts — every effect's *functional form* is real (Poisson shot noise, CDM capture/release structure, Pyxel's persistence relaxation, real CTI/cosmic-ray/zodiacal magnitudes converted via the Pogson relation), but a handful of remaining amplitude constants (dark current rate, exposure gain, astigmatism's pixel amplitude at the frame corner) have no real photon-count analog to derive from and are display/gameplay calibration, not measured quantities — flagged individually in §7.
+10. **RC20 sensor noise chain is now anchored to real electron counts** (a real full well, read noise, and dark current, and a real photon-flux-calibrated signal — §7.0/§7.5), not abstract units — the remaining unanchored constant is astigmatism's pixel amplitude at the frame corner (no published RC20 optical prescription specifies it), flagged individually in §7.1.
 11. **CTI is a simplified single-trap-species model**; Pyxel's own real CDM (which this is adapted from) uses full SRH capture physics in real electron counts across multiple trap species.
 12. **Cosmic ray incidence angle is isotropic-sampled**, not derived from a real particle angular-distribution model (matches the fact that Pyxel's own shipped angle model is an unimplemented stub) — though the *rate* is now a real derived quantity (sea-level muon flux over a cited real sensor's pixel area, see §7.5).
 13. **Zodiacal light is a fixed baseline constant**, not position/season-dependent (no real ecliptic geometry exists for Kerbol in this mod) — though its *magnitude relative to airglow* is now derived from two real cited surface-brightness measurements via the Pogson relation, not independently invented.
@@ -411,6 +450,8 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 18. **Deterministic hash-based "randomness"** for stellar activity level, rotation period, spot phase, RM spin-orbit angle, and direct-imaging pointing/position-angle — reproducible per star, not drawn from any measured distribution beyond the *range* the draw is confined to.
 19. **RC20 brighter-fatter effect was deliberately not implemented** — GalSim's real model needs sensor-specific electrostatic calibration tables with no generic published values, and the effect's main payoff (point-source core broadening) barely applies to the RC20's extended solar-system targets anyway.
 20. **RC20 lucky-imaging sharpness's scoring window (60% central region) and outlier-trim fraction (2%) are algorithmic engineering choices**, not measured quantities — the *operator itself* (variance of Laplacian) and the *keep fraction* (30%, literature range 1–60%) are literature-sourced, same distinction as other robust-statistics parameters already in the codebase (e.g. the sky-background trim fraction).
+21. **The real photon-flux magnitude model (§7.0) treats a KSP `CelestialBody.albedo` as a rigorous geometric albedo** in the H-G planetary-magnitude sense, and its `.Radius` as a perfect sphere — the best available real input data from the game itself, but not a measured planetary albedo in the astronomical sense.
+22. **The Lambertian phase law (Russell 1916) assumes a perfectly diffuse, uniform-albedo sphere** — real solar-system bodies (especially airless, cratered ones) show real deviations from this (opposition surge, limb darkening/brightening) that this mod doesn't model.
 
 ---
 
@@ -451,8 +492,13 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 - Fixsen, D. J., Offenberg, J. D., Hanisch, R. J. et al. (2000). *PASP* 112, 1350. HgCdTe-detector persistence/trap-decay behavior, as implemented in the Pyxel detector-simulation framework.
 - Pech-Pacheco, J. L. et al. (2000). "Diatom autofocusing in brightfield microscopy: a comparative study." Variance-of-Laplacian sharpness/focus operator.
 - Pertuz, S., Puig, D. & Garcia, M. A. (2013). "Analysis of focus measure operators for shape-from-focus: a comparative study." Survey validating variance-of-Laplacian as a top-performing focus operator.
+- Russell, H. N. (1916). Lambertian-sphere phase-integral law used for the RC20's real apparent-magnitude model (§7.0).
+- ZWO official ASI294MM Pro datasheet (zwoastro.com/product/asi294): real full well, read noise, dark current, pixel pitch, native resolution, peak QE — the sensor anchor for the entire RC20 noise/resolution model.
+- PlaneWave Instruments / PlaneWave Europe RC20 product pages (planewave.com, planewave.eu): real f/6.8 focal ratio, focal length, and secondary-mirror obstruction.
+- Standard V-band photometric zero point (Vega calibration): 948 photons/cm²/s/Å — a standard reference value in observational photometry/exposure-time-calculator literature.
+- Real Sun apparent V-band magnitude at 1 AU (-26.74) — standard astronomical constant.
 
-Cosmetic (bad-pixel-map) correction before registration/stacking follows the standard professional calibration workflow used by PixInsight's `CosmeticCorrection` process, IRAF/ccdproc's `fixpix`, and ESO Reflex pipeline bad-pixel handling.
+Cosmetic (bad-pixel-map) correction before registration/stacking follows the standard professional calibration workflow used by PixInsight's `CosmeticCorrection` process, IRAF/ccdproc's `fixpix`, and ESO Reflex pipeline bad-pixel handling. FITS export (§7.7) follows the FITS standard's own conventions (80-byte cards, 2880-byte blocks, BZERO/BSCALE unsigned-16-bit representation) and real acquisition-software header keyword conventions (SharpCap, NINA, MaximDL).
 
 *Reverse-engineering note*: `EveCloudIntegration.cs`'s API was verified by decompiling EVE-Redux 1.11.7.2 with ilspycmd (not a paper, but a real methodological citation worth keeping for the paper's methods section).
 

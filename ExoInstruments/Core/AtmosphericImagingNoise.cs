@@ -36,22 +36,32 @@ namespace ExoInstruments.Core
             return Math.Sqrt(Math.Max(0.0, atAirmass * atAirmass - atZenith * atZenith));
         }
 
-        // Sensor noise: Poisson shot noise + dark current, in the same abstract [0,1]
-        // signal units the RC20 pipeline uses. The *shape* is real (sqrt(signal),
-        // shadows noisier than highlights) even if the units aren't photon counts.
-        private const double ShotNoiseCoefficient = 0.55;
-        private const double DarkCurrentRatePerSecond = 0.01; // abstract units/sec -- negligible on short subs, real on long ones
-        private const double DarkNoiseCoefficient = 0.55;
+        // Sensor noise: Poisson shot noise + dark current. The abstract [0,1] "signal
+        // fraction" this pipeline uses is defined as a fraction of a real sensor's full
+        // well, anchored to the ZWO ASI294MM Pro (a real, commercially available cooled
+        // monochrome astronomy camera; ZWO official datasheet, zwoastro.com/product/asi294):
+        // full well 66,000 e-, read noise 1.2 e- (best case), dark current 0.0022 e-/s/pixel
+        // at -20C. With that anchor, shot noise and dark-current shot noise both reduce to
+        // pure Poisson statistics -- sigma (electrons) = sqrt(N), so as a fraction of full
+        // well: sigma_fraction = sqrt(signalFraction * Fw) / Fw = sqrt(signalFraction) /
+        // sqrt(Fw). No separate tuned coefficient is needed once a real Fw is chosen; the
+        // same 1/sqrt(Fw) constant applies to both shot noise and dark-current shot noise,
+        // since both are the same physical process (Poisson-distributed electron counts).
+        public const double SensorFullWellElectrons = 66000.0;
+        private static readonly double PoissonNoiseCoefficient = 1.0 / Math.Sqrt(SensorFullWellElectrons);
+        private const double DarkCurrentRatePerSecond = 0.0022 / SensorFullWellElectrons; // real e-/s/pixel at -20C, as a full-well fraction
+        private const double ReadNoiseElectrons = 1.2; // real ZWO ASI294MM Pro spec, best case
+        public static readonly double ReadNoiseFraction = ReadNoiseElectrons / SensorFullWellElectrons;
 
         /// <summary>1-sigma shot noise for a pixel at the given (pre-gain) signal fraction.</summary>
-        public static double ShotNoiseSigma(double signalFraction) => ShotNoiseCoefficient * Math.Sqrt(Math.Max(0.0, signalFraction));
+        public static double ShotNoiseSigma(double signalFraction) => PoissonNoiseCoefficient * Math.Sqrt(Math.Max(0.0, signalFraction));
 
         /// <summary>Dark-current pedestal + noise for the given exposure. Pre-gain — accumulates regardless of gain setting.</summary>
         public static void DarkCurrent(double exposureSeconds, out double pedestalFraction, out double sigmaFraction)
         {
             double darkUnits = DarkCurrentRatePerSecond * Math.Max(0.0, exposureSeconds);
             pedestalFraction = darkUnits;
-            sigmaFraction = DarkNoiseCoefficient * Math.Sqrt(darkUnits);
+            sigmaFraction = PoissonNoiseCoefficient * Math.Sqrt(darkUnits); // same Poisson process, same full-well-derived coefficient
         }
     }
 }
