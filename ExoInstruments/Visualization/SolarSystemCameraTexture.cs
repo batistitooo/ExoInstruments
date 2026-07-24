@@ -17,13 +17,31 @@ namespace ExoInstruments.Visualization
     }
 
     /// <summary>
+    /// Neutral-density filter slot, real optical-density stops used by real astrophotographers
+    /// on targets too bright for exposure/gain alone to handle (Kerbin's compressed-scale solar
+    /// system puts nearby moons in exactly that regime -- Mun sits only a few magnitudes fainter
+    /// than Kerbol itself). OD/transmission values: Nd8/Nd64/Nd1000 are the standard photographic
+    /// ND stops (OD 0.9/1.8/3.0, transmission = 10^-OD); Nd100000 matches the real optical density
+    /// of a Baader AstroSolar safety film / Thousand Oaks solar filter (OD ~5.0), the real
+    /// accessory class used for direct imaging of the brightest object in the sky.
+    /// </summary>
+    public enum NdFilterStop
+    {
+        None,
+        Nd8,
+        Nd64,
+        Nd1000,
+        Nd100000
+    }
+
+    /// <summary>
     /// RC20 astrograph camera: clones KSP's scaled-space and galaxy cameras and
     /// points them at a solar-system body from KSC. Same technique as Tarsier Space
     /// Technology's TSTCameraModule, reimplemented here to avoid the dependency.
     /// Outputs a monochrome, noisy "single raw CCD frame" through a full physics
     /// pipeline (extinction, shot noise, seeing, EVE cloud cover, moon scattering,
-    /// persistence ghosting, cosmic rays, full-well blooming, charge-transfer smear,
-    /// astigmatism) -- see ProcessFrame for the per-effect citations.
+    /// cosmic rays, full-well blooming, charge-transfer smear, astigmatism) -- see
+    /// ProcessFrame for the per-effect citations.
     /// </summary>
     public class SolarSystemCameraTexture : IDisposable
     {
@@ -90,8 +108,11 @@ namespace ExoInstruments.Visualization
         // narrowband filter.
         private const double LuminanceBandwidthAngstrom = 2650.0;
 
-        public const float MinExposureSeconds = 0.05f;
-        public const float MaxExposureSeconds = 30.0f;
+        // Real ZWO ASI294MM Pro exposure range: 32us to 2000s (zwoastro.com datasheet).
+        // Bright nearby bodies (e.g. the Moon) need the low end reachable, or the RC20's
+        // real aperture/QE floods every pixel at any exposure the mod allows.
+        public const float MinExposureSeconds = 0.000032f;
+        public const float MaxExposureSeconds = 2000.0f;
 
         private const float MaxDefocusBlurPx = 7.0f;
         private const float SeeingBlurPxPerAirmass = 1.4f;
@@ -176,20 +197,6 @@ namespace ExoInstruments.Visualization
         private const int CosmicRayMaxTrackPx = 14;
         private const float CosmicRayDepositValue = 0.85f;
 
-        // Persistence/ghosting: real default trap time constants and species proportions from
-        // Pyxel's persistence model (pyxel/models/charge_collection/persistence.py), which are
-        // themselves in the spirit of Fixsen, Offenberg, Hanisch et al. (2000, PASP 112, 1350)
-        // for HgCdTe-style trap persistence. Pyxel's own model uses ONE time constant per
-        // species for both capture (approach to an equilibrium fill level) and release, so this
-        // does the same rather than inventing a separate capture-rate parameter: each species
-        // relaxes exponentially toward an equilibrium level set by the current signal and that
-        // species' share of total trap capacity (PersistenceProportions), using the same
-        // Q(t)=Q0*exp(-t/tau) relation as the release side. Real time between two RC20 shots
-        // can be minutes, where Pyxel's own small-step linearized form would blow up, so the
-        // true exponential is used throughout instead of their per-tick linear approximation.
-        private static readonly float[] PersistenceTauSeconds = { 1f, 10f, 100f, 1000f, 10000f };
-        private static readonly float[] PersistenceProportions = { 0.307f, 0.175f, 0.188f, 0.136f, 0.194f };
-
         // Astigmatism: for a true Ritchey-Chretien (what the RC20 is, per Observatories.cs),
         // third-order coma is corrected to zero by the RC hyperbolic-mirror design itself --
         // that is the entire reason the RC form exists (Ritchey & Chretien 1922). The dominant
@@ -223,11 +230,6 @@ namespace ExoInstruments.Visualization
         private float[] astigmatismScratch;
         private float[] rowPrefixScratch;
 
-        // Persistence trap state, one array per species (see PersistenceTauSeconds), surviving
-        // between exposures so a bright target leaves a fading ghost in the next shot.
-        private float[][] persistenceTraps;
-        private double lastPersistenceUt = double.NaN;
-
         private Renderer[] skyboxRenderers;
         private ScaledSpaceFader[] scaledSpaceFaders;
 
@@ -250,6 +252,22 @@ namespace ExoInstruments.Visualization
         public float FocusOffset { get; set; } = 0f;
         /// <summary>Selected filter-wheel position.</summary>
         public CameraFilter Filter { get; set; } = CameraFilter.Luminance;
+
+        /// <summary>Neutral-density filter slot: optical attenuation for targets too bright for exposure/gain alone.</summary>
+        public NdFilterStop NdFilter { get; set; } = NdFilterStop.None;
+
+        /// <summary>Real optical-density transmission (10^-OD) for each ND filter stop -- see NdFilterStop for sourcing.</summary>
+        public static double NdFilterTransmission(NdFilterStop stop)
+        {
+            switch (stop)
+            {
+                case NdFilterStop.Nd8: return Math.Pow(10.0, -0.9);
+                case NdFilterStop.Nd64: return Math.Pow(10.0, -1.8);
+                case NdFilterStop.Nd1000: return Math.Pow(10.0, -3.0);
+                case NdFilterStop.Nd100000: return Math.Pow(10.0, -5.0);
+                default: return 1.0;
+            }
+        }
         /// <summary>Sensor gain, [MinGain, MaxGain]: higher = brighter + noisier.</summary>
         public float Gain { get; set; } = 1.0f;
         /// <summary>When true the mount tracks the sky (no drift). Off by default — a bare RC20 has no autoguider.</summary>
@@ -299,6 +317,15 @@ namespace ExoInstruments.Visualization
             for (int i = 0; i < gray.Length; i++) gray[i] = lastCaptureSnapshot[i].r;
             return gray;
         }
+
+        /// <summary>
+        /// Last capture at full float precision, straight from the physics pipeline -- NOT
+        /// CapturedPhoto/GetPixels(), which round-trips through an 8-bit RGB24 Texture2D and
+        /// destroys nearly all of the real, physically-computed noise (shot/dark/read noise
+        /// live at a small fraction of full well, far below 1/255). FITS export needs this
+        /// full-precision source to actually be the 16-bit file it claims to be.
+        /// </summary>
+        public Color[] GetLastCaptureFullPrecision() => lastCaptureSnapshot != null ? (Color[])lastCaptureSnapshot.Clone() : null;
 
         /// <summary>Starts a timed exposure on targetBody. Nothing renders until the exposure completes.</summary>
         public void BeginExposure(CelestialBody targetBody)
@@ -651,7 +678,7 @@ namespace ExoInstruments.Visualization
         /// Converts the raw rendered frame into a monochrome CCD-frame look through the
         /// physics pipeline: filter throughput, atmospheric extinction, EVE cloud cover,
         /// sky glow (twilight + moon scattering + airglow + zodiacal), scintillation,
-        /// shot/dark/read noise, persistence ghosting, cosmic ray hits, full-well blooming,
+        /// shot/dark/read noise, cosmic ray hits, full-well blooming,
         /// charge-transfer smear, hot/dead pixels, optional drift trail, and combined
         /// defocus/seeing/astigmatism blur. Pure C#/array math only -- no CelestialBody or
         /// UnityEngine.Object API touches -- so this runs on a background Task; only the
@@ -711,7 +738,6 @@ namespace ExoInstruments.Visualization
                 rawScratch[i] = postGain;
             }
 
-            ApplyPersistence(rawScratch, inputs.Ut);
             ApplyCosmicRays(rawScratch, inputs.ExposureSeconds, rng);
             ApplyBlooming(rawScratch);
             ApplyChargeTransferSmear(rawScratch);
@@ -856,9 +882,10 @@ namespace ExoInstruments.Visualization
 
             double bandwidthAngstrom = FilterBandwidthAngstrom(Filter);
             double apertureAreaCm2 = RealApertureAreaCm2();
+            double combinedTransmission = extinctionTransmission * NdFilterTransmission(NdFilter);
 
             return PhotonFluxModel.CollectedElectrons(
-                magnitude, bandwidthAngstrom, apertureAreaCm2, SensorQuantumEfficiency, exposureSeconds, extinctionTransmission);
+                magnitude, bandwidthAngstrom, apertureAreaCm2, SensorQuantumEfficiency, exposureSeconds, combinedTransmission);
         }
 
         /// <summary>Real RC20 effective collecting area (cm^2): full aperture minus the real secondary-mirror obstruction.</summary>
@@ -978,50 +1005,6 @@ namespace ExoInstruments.Visualization
                     if (x < 0 || x >= w || y < 0 || y >= h) break;
                     int i = y * w + x;
                     if (raw[i] < CosmicRayDepositValue) raw[i] = CosmicRayDepositValue;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Persistence ghosting: each trap species relaxes exponentially toward an equilibrium
-        /// fill level set by the current signal and that species' share of trap capacity
-        /// (PersistenceProportions), using the same real time constant (PersistenceTauSeconds)
-        /// for both directions -- Pyxel's own persistence model uses one tau per species for
-        /// both capture and release, so this does too rather than inventing a separate capture
-        /// rate. When the equilibrium is above the trap's current level the trap fills (capture,
-        /// pulling charge out of the pixel); when a previously bright frame's trap sits above the
-        /// new, dimmer equilibrium it drains back into the pixel (release) -- the mechanism
-        /// behind a fading afterimage bleeding into the next shot. A true exponential relaxation
-        /// is used rather than Pyxel's own small-step linear form, since a real UT gap between
-        /// two RC20 shots can be minutes rather than a simulation tick; it is also naturally
-        /// bounded (converges toward the equilibrium at rate dt/tau), so unlike a fixed-rate
-        /// capture with no cap, a fast capture batch can't accumulate an ever-growing ghost.
-        /// </summary>
-        private void ApplyPersistence(float[] raw, double ut)
-        {
-            int n = TextureWidth * TextureHeight;
-            if (persistenceTraps == null)
-            {
-                persistenceTraps = new float[PersistenceTauSeconds.Length][];
-                for (int k = 0; k < persistenceTraps.Length; k++) persistenceTraps[k] = new float[n];
-                lastPersistenceUt = ut;
-                return; // nothing accumulated yet on the very first exposure
-            }
-
-            double dt = Math.Max(0.0, ut - lastPersistenceUt);
-            lastPersistenceUt = ut;
-
-            for (int k = 0; k < persistenceTraps.Length; k++)
-            {
-                float[] trap = persistenceTraps[k];
-                float approach = (float)(1.0 - Math.Exp(-dt / PersistenceTauSeconds[k]));
-                float proportion = PersistenceProportions[k];
-                for (int i = 0; i < n; i++)
-                {
-                    float equilibrium = raw[i] * proportion;
-                    float delta = (equilibrium - trap[i]) * approach; // positive = net capture, negative = net release
-                    trap[i] += delta;
-                    raw[i] -= delta;
                 }
             }
         }
@@ -1309,7 +1292,6 @@ namespace ExoInstruments.Visualization
             rawScratch = null;
             astigmatismScratch = null;
             rowPrefixScratch = null;
-            persistenceTraps = null;
             hotPixelIndices = null;
             deadPixelIndices = null;
             lastCaptureSnapshot = null;

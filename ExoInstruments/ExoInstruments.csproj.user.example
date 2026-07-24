@@ -30,6 +30,9 @@
         <Reference Update="UnityEngine.PhysicsModule">
             <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.PhysicsModule.dll</HintPath>
         </Reference>
+        <Reference Update="UnityEngine.InputLegacyModule">
+            <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.InputLegacyModule.dll</HintPath>
+        </Reference>
         <Reference Update="UnityEngine.IMGUIModule">
             <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.IMGUIModule.dll</HintPath>
         </Reference>
@@ -41,10 +44,6 @@
         </Reference>
         <Reference Update="UnityEngine.TextRenderingModule">
             <HintPath>PATH_TO_KSP_MANAGED\UnityEngine.TextRenderingModule.dll</HintPath>
-        </Reference>
-        <!-- KerbalKonstructs.dll lives in GameData/KerbalKonstructs/, not the Managed folder. -->
-        <Reference Update="KerbalKonstructs">
-            <HintPath>PATH_TO_KSP\GameData\KerbalKonstructs\KerbalKonstructs.dll</HintPath>
         </Reference>
     </ItemGroup>
 </Project>

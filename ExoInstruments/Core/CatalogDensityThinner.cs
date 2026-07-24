@@ -5,8 +5,10 @@ using System.Linq;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Cosmetic declutter pass: caps how many planet hosts survive in each coarse sky cell.
-    /// Without it the Kepler field (~115 deg²) forms an obvious clump that breaks fog-of-war.
+    /// Cosmetic declutter pass: caps how many Kepler-field hosts survive in each coarse
+    /// sky cell. The Kepler field (~115 deg²) is dense enough on its own to form an
+    /// obvious clump that breaks fog-of-war; other host stars are sparse across the sky
+    /// and are never thinned, regardless of how many share a cell.
     /// Selection within an over-full cell is by a stable hash of CatalogKey — deterministic
     /// and independent of file order, so a star's presence never changes between sessions.
     /// </summary>
@@ -18,10 +20,16 @@ namespace ExoInstruments.Core
         public static List<StarTarget> Thin(List<StarTarget> targets, double cellSizeDeg = DefaultCellSizeDeg, int maxPerCell = DefaultMaxPerCell)
         {
             var withoutCoords = new List<StarTarget>();
+            var kept = new List<StarTarget>();
             var cells = new Dictionary<(int raCell, int decCell), List<StarTarget>>();
 
             foreach (var t in targets)
             {
+                if (!IsKeplerHost(t))
+                {
+                    kept.Add(t);
+                    continue;
+                }
                 if (!t.RaDeg.HasValue || !t.DecDeg.HasValue)
                 {
                     withoutCoords.Add(t);
@@ -32,7 +40,7 @@ namespace ExoInstruments.Core
                 list.Add(t);
             }
 
-            var kept = new List<StarTarget>(withoutCoords);
+            kept.AddRange(withoutCoords);
             foreach (var cellTargets in cells.Values)
             {
                 if (cellTargets.Count <= maxPerCell)
@@ -45,6 +53,12 @@ namespace ExoInstruments.Core
                     .Take(maxPerCell));
             }
             return kept;
+        }
+
+        private static bool IsKeplerHost(StarTarget t)
+        {
+            return (t.HostStarName != null && t.HostStarName.IndexOf("Kepler", StringComparison.OrdinalIgnoreCase) >= 0)
+                || (t.Name != null && t.Name.IndexOf("Kepler", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static (int, int) CellKey(double raDeg, double decDeg, double cellSizeDeg)

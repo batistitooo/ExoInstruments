@@ -27,6 +27,9 @@
         <Reference Include="UnityEngine.PhysicsModule">
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.InputLegacyModule">
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.IMGUIModule">
             <Private>false</Private>
         </Reference>
@@ -37,9 +40,6 @@
             <Private>false</Private>
         </Reference>
         <Reference Include="UnityEngine.TextRenderingModule">
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="KerbalKonstructs">
             <Private>false</Private>
         </Reference>
     </ItemGroup>

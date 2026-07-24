@@ -197,7 +197,6 @@ namespace ExoInstruments
         // R_sun / R_earth — converts a transit depth into an estimated planet radius.
         private const double SolarRadiusToEarthRadii = 109.2;
 
-        private ObservatoryBuilding observatoryBuilding;
         private readonly SolarSystemCameraTexture solarSystemCamera = new SolarSystemCameraTexture();
         private readonly AstroImageStack astroStack = new AstroImageStack();
         private int stackBatchSize = 5;
@@ -206,6 +205,7 @@ namespace ExoInstruments
         private bool stackLuckyImaging = false;
         private float haBlendStrength = 0.5f;
         private Texture2D stackedCompositeTexture;
+        private Color[] lastComposedPixels;
         private string stackComposeError;
         private string stackBatchInterruptedMessage;
         private CelestialBody selectedPhotographyBody;
@@ -232,8 +232,16 @@ namespace ExoInstruments
                 args => OpenObservatoryWindow(),
                 "ExoInstruments: opens the observatory console (stand-in for clicking the building)");
 
-            observatoryBuilding = new ObservatoryBuilding(OpenObservatoryWindow);
-            observatoryBuilding.Setup();
+            // The building itself is a persistent (DontDestroyOnLoad) real KSC
+            // facility built by ExoObservatoryFacility, not owned by this
+            // per-scene addon -- we just subscribe to its click event.
+            ExoObservatoryBuilding.Clicked += OnObservatoryBuildingClicked;
+        }
+
+        private void OnObservatoryBuildingClicked()
+        {
+            Debug.Log("[Exoplanets] ExoObservatoryBuilding.Clicked received by ExoInstrumentsGUI -- opening window.");
+            OpenObservatoryWindow();
         }
 
         private List<StarTarget> LoadCatalog()
@@ -427,7 +435,7 @@ namespace ExoInstruments
             }
             DebugScreenConsole.RemoveConsoleCommand(ConsoleCommand);
             InputLockManager.RemoveControlLock(InputLockId);
-            observatoryBuilding?.Teardown();
+            ExoObservatoryBuilding.Clicked -= OnObservatoryBuildingClicked;
             solarSystemCamera.Dispose();
             ClearTextures();
             if (skyChartTexture != null) { Destroy(skyChartTexture); skyChartTexture = null; }
@@ -1224,7 +1232,9 @@ namespace ExoInstruments
             GUI.color = prevBg;
             if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.CapturedPhoto != null)
             {
-                GUI.DrawTexture(rect, solarSystemCamera.CapturedPhoto);
+                // The real sensor is non-square (4144x2822) -- draw at its true aspect ratio,
+                // letterboxed within the fixed preview box, instead of stretching to fill it.
+                GUI.DrawTexture(AspectFitRect(rect), solarSystemCamera.CapturedPhoto);
             }
 
             if (solarSystemCamera.IsCapturing)
@@ -1258,6 +1268,20 @@ namespace ExoInstruments
         // Fixed on-screen preview size -- independent of the camera's real, possibly much
         // larger, native sensor resolution (see SolarSystemCameraTexture.BinningFactor).
         private const int PreviewDisplaySize = 480;
+
+        /// <summary>Centers a sub-rect matching the real sensor's aspect ratio (4144x2822, non-square) inside a bounding box, so the image letterboxes instead of stretching.</summary>
+        static Rect AspectFitRect(Rect bounds)
+        {
+            float aspect = (float)SolarSystemCameraTexture.TextureWidth / SolarSystemCameraTexture.TextureHeight;
+            float w = bounds.width;
+            float h = w / aspect;
+            if (h > bounds.height)
+            {
+                h = bounds.height;
+                w = h * aspect;
+            }
+            return new Rect(bounds.x + (bounds.width - w) / 2f, bounds.y + (bounds.height - h) / 2f, w, h);
+        }
 
         /// <summary>Real sensor binning selector (1x1 native ZWO ASI294MM Pro resolution down to 4x4) -- the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
         void DrawResolutionControls()
@@ -1301,12 +1325,15 @@ namespace ExoInstruments
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            // Exposure time.
+            // Exposure time. Real range spans 32us to 2000s (six decades) -- a linear slider
+            // can't usefully address that, so drag position maps to log10(seconds), the same
+            // convention real acquisition tools (SharpCap, FireCapture) use for this exact reason.
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Exposure ({solarSystemCamera.ExposureSeconds:F2} s)", GUILayout.Width(150));
-            solarSystemCamera.ExposureSeconds = GUILayout.HorizontalSlider(
-                solarSystemCamera.ExposureSeconds,
-                SolarSystemCameraTexture.MinExposureSeconds, SolarSystemCameraTexture.MaxExposureSeconds);
+            GUILayout.Label($"Exposure ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Width(150));
+            float minLog = Mathf.Log10(SolarSystemCameraTexture.MinExposureSeconds);
+            float maxLog = Mathf.Log10(SolarSystemCameraTexture.MaxExposureSeconds);
+            float expLog = GUILayout.HorizontalSlider(Mathf.Log10(solarSystemCamera.ExposureSeconds), minLog, maxLog);
+            solarSystemCamera.ExposureSeconds = Mathf.Pow(10f, expLog);
             GUILayout.EndHorizontal();
 
             // Gain: continuous slider. 0.7 is the RC20's real minimum gain.
@@ -1326,6 +1353,20 @@ namespace ExoInstruments
                 bool sel = solarSystemCamera.Filter == f;
                 if (GUILayout.Toggle(sel, " " + FilterLabel(f), GUILayout.Width(58)) && !sel)
                     solarSystemCamera.Filter = f;
+            }
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            // ND filter: real optical-density stops for targets too bright for exposure/gain
+            // alone -- Kerbin's compressed-scale system puts nearby moons in that regime.
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("ND filter", GUILayout.Width(150));
+            GUI.enabled = !stackBatchRunning;
+            foreach (NdFilterStop stop in (NdFilterStop[])Enum.GetValues(typeof(NdFilterStop)))
+            {
+                bool sel = solarSystemCamera.NdFilter == stop;
+                if (GUILayout.Toggle(sel, " " + NdFilterLabel(stop), GUILayout.Width(58)) && !sel)
+                    solarSystemCamera.NdFilter = stop;
             }
             GUI.enabled = true;
             GUILayout.EndHorizontal();
@@ -1368,7 +1409,7 @@ namespace ExoInstruments
             else
             {
                 GUI.enabled = canExpose;
-                if (GUILayout.Button($"Capture ({solarSystemCamera.ExposureSeconds:F2} s)", GUILayout.Height(28), GUILayout.Width(180)))
+                if (GUILayout.Button($"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Height(28), GUILayout.Width(180)))
                     solarSystemCamera.BeginExposure(selectedPhotographyBody);
                 GUI.enabled = true;
             }
@@ -1482,7 +1523,7 @@ namespace ExoInstruments
                 Rect compositeRect = GUILayoutUtility.GetRect(
                     PreviewDisplaySize, PreviewDisplaySize,
                     GUILayout.Width(PreviewDisplaySize), GUILayout.Height(PreviewDisplaySize));
-                GUI.DrawTexture(compositeRect, stackedCompositeTexture);
+                GUI.DrawTexture(AspectFitRect(compositeRect), stackedCompositeTexture);
             }
 
             GUILayout.EndVertical();
@@ -1493,6 +1534,11 @@ namespace ExoInstruments
         {
             Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, stackLuckyImaging, haBlendStrength, out stackComposeError);
             if (pixels == null) return;
+
+            // Keep the full-precision composite for FITS export -- stackedCompositeTexture
+            // below is only for on-screen preview and round-trips through an 8-bit RGB24
+            // Texture2D, which would otherwise crush the real sub-1/255 noise floor to nothing.
+            lastComposedPixels = pixels;
 
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             if (stackedCompositeTexture == null || stackedCompositeTexture.width != w || stackedCompositeTexture.height != h)
@@ -1507,7 +1553,7 @@ namespace ExoInstruments
         /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file -- same scheme as SaveSolarSystemPhoto.</summary>
         void SaveStackedComposite()
         {
-            if (stackedCompositeTexture == null) return;
+            if (stackedCompositeTexture == null || lastComposedPixels == null) return;
             string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
             System.IO.Directory.CreateDirectory(dir);
             string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
@@ -1528,7 +1574,7 @@ namespace ExoInstruments
             };
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.fits"),
-                stackedCompositeTexture.GetPixels(), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
+                lastComposedPixels, stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
         }
 
         static string FilterLabel(CameraFilter f)
@@ -1542,6 +1588,25 @@ namespace ExoInstruments
                 case CameraFilter.HAlpha: return "Ha";
                 default: return f.ToString();
             }
+        }
+
+        static string NdFilterLabel(NdFilterStop stop)
+        {
+            switch (stop)
+            {
+                case NdFilterStop.Nd8: return "ND8";
+                case NdFilterStop.Nd64: return "ND64";
+                case NdFilterStop.Nd1000: return "ND1000";
+                case NdFilterStop.Nd100000: return "Solar";
+                default: return "None";
+            }
+        }
+
+        static string FormatExposure(float seconds)
+        {
+            if (seconds < 0.001f) return $"{seconds * 1_000_000f:F0} us";
+            if (seconds < 1f) return $"{seconds * 1000f:F1} ms";
+            return $"{seconds:F2} s";
         }
 
         /// <summary>Always-visible observability line for the selected body: night gate + the body's current altitude.</summary>
@@ -1585,7 +1650,7 @@ namespace ExoInstruments
             };
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.fits"),
-                frame.GetPixels(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
+                solarSystemCamera.GetLastCaptureFullPrecision(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
         }
 
         void DrawStarSelection()
@@ -1799,6 +1864,7 @@ namespace ExoInstruments
                 Destroy(stackedCompositeTexture);
                 stackedCompositeTexture = null;
             }
+            lastComposedPixels = null;
         }
 
         /// <summary>Refreshes IsSelectedTarget on the cached body points to match selectedPhotographyBody and re-rasters -- so the ring appears/moves the instant a body is (de)selected, without waiting for the next full catalog refresh.</summary>
