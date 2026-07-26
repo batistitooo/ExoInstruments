@@ -70,6 +70,8 @@ This project uses a proprietary license. It is not a Creative Commons license: r
 
 - **Decluttered sky chart.** A density-aware thinning pass caps how many real hosts survive per sky cell, so a single dense survey field (Kepler-style) can't give away "something's here" before it's ever been scanned.
 
+- **A real, upgradeable KSC Observatory building.** Not a toolbar button bolted onto stock scenery, but a genuine facility built on the same stock systems the VAB or Astronaut Complex use; real hover highlighting, a real right-click facility dialog, and a real funds-gated upgrade path. Its telescope continuously points at whatever target is currently being observed, using the same real altitude/azimuth conversion the rest of the mod already relies on, so the rig's orientation reflects the target's actual position in Kerbin's sky, not a cosmetic animation.
+
 ## The Telescope Fleet
 
 Each instrument's reference precision and cadence are drawn directly from its own instrument paper (see in-code citations).
@@ -95,7 +97,7 @@ Not yet implemented in the current build:
 - **Further real astrograph features** surveyed but not built: sensor binning, plate-solving, flat-frame calibration, meridian flip, dithering.
 - **Naming rights & a discovery archive.** Player-named planets on confirmation, plus an auto-generated logbook entry (light curve, date, instrument) per detection.
 - **Weather in the generic instrument forecast.** EVE cloud cover is already hooked into the RC20's solar-system forecast; extending it to the exoplanet-instrument heatmap (SPECULOOS, ELT, and the other ground-based facilities) is still open.
-- **A proper in-world observatory building** at the KSC (Kerbal Konstructs), replacing the current toolbar-button placeholder.
+- **Two additional KSC observatory buildings**, each a different real telescope type, planned as further additions alongside the current one.
 - **Space-based telescope facilities**, modeled after concept missions like ESA's LIFE, with atmospheric/biosignature classification as a further scientific payoff.
 - **Deeper catalog integration** and an **extended instrument roster** (more real-world facilities as further progression rungs).
 - **Economy rebalance**; current career Funds/Science values are still placeholders pending playtesting.

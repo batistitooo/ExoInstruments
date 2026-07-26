@@ -236,6 +236,13 @@ namespace ExoInstruments
             // facility built by ExoObservatoryFacility, not owned by this
             // per-scene addon -- we just subscribe to its click event.
             ExoObservatoryBuilding.Clicked += OnObservatoryBuildingClicked;
+
+            // ExoObservatoryTelescopeTracker.TrackedBody is a static field, so it
+            // survives scene reloads -- without this, a target selected in an
+            // earlier SpaceCentre visit keeps the telescope (and doors) pointed
+            // off-rest even though this fresh GUI instance's own
+            // selectedPhotographyBody correctly starts null.
+            ExoObservatoryTelescopeTracker.TrackedBody = selectedPhotographyBody;
         }
 
         private void OnObservatoryBuildingClicked()
@@ -1817,6 +1824,7 @@ namespace ExoInstruments
                     {
                         selectedPhotographyBody = null;
                         UpdateBodySelectionRingAndRerender();
+                        ExoObservatoryTelescopeTracker.TrackedBody = null;
                     }
                 }
                 e.Use();
@@ -1850,6 +1858,7 @@ namespace ExoInstruments
             photographySessionActive = false;
             ClearAstroStack();
             UpdateBodySelectionRingAndRerender();
+            ExoObservatoryTelescopeTracker.TrackedBody = body;
         }
 
         /// <summary>Drops all stacked subs and the composite preview -- the stack is specific to one target, it must not survive a target switch.</summary>

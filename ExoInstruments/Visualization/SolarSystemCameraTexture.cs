@@ -638,8 +638,9 @@ namespace ExoInstruments.Visualization
             double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
             float extinction = (float)AtmosphericImagingNoise.ExtinctionTransmission(airmass);
 
+            double angularDiameterRad = ComputeAngularDiameterRad(targetBody);
             double scintSigma = AtmosphericImagingNoise.ScintillationExcessSigma(
-                Observatories.Rc20.ApertureMeters, Observatories.Rc20.SiteAltitudeMeters, airmass, exposureSeconds);
+                Observatories.Rc20.ApertureMeters, Observatories.Rc20.SiteAltitudeMeters, airmass, exposureSeconds, angularDiameterRad);
 
             bool haveSunAlt = TryComputeAltitudeDeg(Planetarium.fetch != null ? Planetarium.fetch.Sun : null, out double sunAltDeg);
             double twilightRamp = haveSunAlt
@@ -714,11 +715,25 @@ namespace ExoInstruments.Visualization
             // scale of that shading is recalibrated to match the physically-derived total
             // electron count (inputs.TotalElectrons), so noise/saturation/SNR are all anchored
             // to real physics rather than an invented flat exposure multiplier.
-            double totalRenderedSignal = 0.0;
-            for (int i = 0; i < n; i++) totalRenderedSignal += FilterSignal(src[i], inputs.Filter);
+            //
+            // Calibrating against THIS filter's own rendered sum (e.g. sum of src[].r for the
+            // Red filter) would force every filter's stack to the same total electron budget --
+            // TotalElectrons is the same physical value for R/G/B (one body-wide albedo, split
+            // into equal thirds, see ComputeCollectedElectrons), so that erases the body's real
+            // per-channel color balance (a green-dominant body like Jool would have its R and B
+            // channels artificially boosted to match G's total, then LRGB-composited into
+            // whatever arbitrary hue survives the per-pixel contrast differences -- not Jool's
+            // actual color). Calibrating every filter against the SAME reference -- the frame's
+            // luminance-weighted sum, matching FilterSignal's own Luminance formula -- instead
+            // scales each channel by its real relative share of that luminance, so R:G:B keeps
+            // the body's true color ratio through calibration and into the later luminance-
+            // transfer step in AstroImageStack.ComposeLRGB (which already assumes R/G/B carry
+            // real relative color, not independently-normalized ones).
+            double totalRenderedLuminance = 0.0;
+            for (int i = 0; i < n; i++) totalRenderedLuminance += FilterSignal(src[i], CameraFilter.Luminance);
 
-            float calibratedSignalPerUnit = totalRenderedSignal > 1e-6
-                ? (float)((inputs.TotalElectrons / AtmosphericImagingNoise.SensorFullWellElectrons) / totalRenderedSignal)
+            float calibratedSignalPerUnit = totalRenderedLuminance > 1e-6
+                ? (float)((inputs.TotalElectrons / AtmosphericImagingNoise.SensorFullWellElectrons) / totalRenderedLuminance)
                 : 0f;
 
             for (int i = 0; i < n; i++)
@@ -886,6 +901,24 @@ namespace ExoInstruments.Visualization
 
             return PhotonFluxModel.CollectedElectrons(
                 magnitude, bandwidthAngstrom, apertureAreaCm2, SensorQuantumEfficiency, exposureSeconds, combinedTransmission);
+        }
+
+        /// <summary>
+        /// Angular diameter (radians) of targetBody as seen from KSC right now -- feeds
+        /// AtmosphericImagingNoise.ScintillationExcessSigma's extended-source suppression
+        /// (a resolved planetary disk, unlike a star, isn't a point source). Small-angle
+        /// approximation (2*radius/distance), which is fine at solar-system distances.
+        /// </summary>
+        private static double ComputeAngularDiameterRad(CelestialBody targetBody)
+        {
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null || targetBody == null) return 0.0;
+
+            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            double distanceMeters = (targetBody.position - obsPos).magnitude;
+            if (distanceMeters < 1.0) return 0.0;
+
+            return 2.0 * targetBody.Radius / distanceMeters;
         }
 
         /// <summary>Real RC20 effective collecting area (cm^2): full aperture minus the real secondary-mirror obstruction.</summary>

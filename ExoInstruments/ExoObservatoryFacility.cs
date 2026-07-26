@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using UnityEngine;
 using KSP.UI.Screens.DebugToolbar;
+using ExoInstruments.Core;
 
 namespace ExoInstruments
 {
@@ -410,17 +411,14 @@ namespace ExoInstruments
                     LogDebug($"  - {c.GetType().Name} on '{GetPath(c.transform)}' layer={LayerMask.LayerToName(c.gameObject.layer)} enabled={c.enabled} isTrigger={c.isTrigger} bounds.center={c.bounds.center} bounds.size={c.bounds.size}");
                 }
 
-                // Independent raycast/hover/click probe -- doesn't rely on
-                // SpaceCenterBuilding's own (private, unverifiable from outside)
-                // hover/click machinery, so it tells us the ground truth: is
-                // there anything raycastable here at all, and does Unity's mouse
-                // picking actually find it.
-                var probe = buildingGo.AddComponent<ExoObservatoryDebugProbe>();
-                probe.Init(_facility.transform, _building);
-                LogDebug("ExoObservatoryDebugProbe attached -- will log hover/click raycast results.");
+                // Drives glow/click/right-click -- see ExoObservatoryInputRelay for why
+                // this doesn't just rely on SpaceCenterBuilding's own click routing.
+                var inputRelay = buildingGo.AddComponent<ExoObservatoryInputRelay>();
+                inputRelay.Init(_building);
+                LogDebug("ExoObservatoryInputRelay attached.");
 
                 RegisterTuningConsoleCommands();
-                SetupDomeRotation();
+                SetupTelescopeTracking();
             }
             catch (Exception ex)
             {
@@ -429,59 +427,83 @@ namespace ExoInstruments
             }
         }
 
-        // Degrees/second for the sanity-check spin -- purely a "does this even
-        // move independently" test, not the real sky-tracking speed.
-        private const string DomeChildName = "Corps2";
-        private const float DomeTestSpinDegPerSec = 15f;
+        // Names baked into ExoObservatoryLVL1.mu's own hierarchy (Parts/ExoObservatoryLVL1.mu):
+        // dome/Telescope both spin in azimuth around CenterVerticalAxis together;
+        // altitude_sensitive (nested inside Telescope) additionally tips in altitude
+        // around CenterHorizontalAxis. lever/concrete_base_telescope/base/doorleft/
+        // doorright aren't touched here -- they either move with the whole facility
+        // or (the doors) get their own open/close animation later.
+        private const string DomeName = "dome";
+        private const string TelescopeName = "Telescope";
+        private const string AltitudeSensitiveName = "altitude_sensitive";
+        private const string CenterVerticalAxisName = "CenterVerticalAxis";
+        private const string CenterHorizontalAxisName = "CenterHorizontalAxis";
+        private const string LocalAnimationName = "LocalAnimation";
+        private const string DomeOpenClipName = "domeOpen";
 
         /// <summary>
-        /// Finds the dome's own child node (named "Corps2" in the current .mu --
-        /// "Corps1" is the static base) inside the spawned model and attaches a
-        /// slow constant spin, purely to confirm it moves independently of the
-        /// rest of the telescope body before wiring up real sky-tracking (which
-        /// needs a currently-observed target to point at, see SkyCoordinates.cs).
+        /// Finds the dome/telescope/pivot nodes inside the spawned model and attaches
+        /// ExoObservatoryTelescopeTracker, which continuously points them at
+        /// ExoObservatoryTelescopeTracker.TrackedBody (set from ExoInstrumentsGUI
+        /// whenever the RC20 photography target changes). Degrades gracefully: azimuth
+        /// tracking needs dome+Telescope+CenterVerticalAxis; altitude tracking
+        /// additionally needs altitude_sensitive+CenterHorizontalAxis -- missing pieces
+        /// just get skipped (logged), not a hard failure.
         /// </summary>
-        private void SetupDomeRotation()
+        private void SetupTelescopeTracking()
         {
             var facilityInstance = _facility.CurrentLevel?.facilityInstance;
             if (facilityInstance == null)
             {
-                LogDebug("WARNING: SetupDomeRotation: facilityInstance is null, cannot find the dome.");
+                LogDebug("WARNING: SetupTelescopeTracking: facilityInstance is null.");
                 return;
             }
 
-            Transform dome = FindChildRecursive(facilityInstance.transform, DomeChildName);
-            if (dome == null)
+            Transform root = facilityInstance.transform;
+            Transform dome = FindChildRecursive(root, DomeName);
+            Transform telescope = FindChildRecursive(root, TelescopeName);
+            Transform altitudeSensitive = FindChildRecursive(root, AltitudeSensitiveName);
+            Transform centerVertical = FindChildRecursive(root, CenterVerticalAxisName);
+            Transform centerHorizontal = FindChildRecursive(root, CenterHorizontalAxisName);
+            Transform localAnimation = FindChildRecursive(root, LocalAnimationName);
+
+            LogDebug($"SetupTelescopeTracking: dome={(dome != null ? "found" : "MISSING")}, Telescope={(telescope != null ? "found" : "MISSING")}, " +
+                     $"altitude_sensitive={(altitudeSensitive != null ? "found" : "MISSING")}, CenterVerticalAxis={(centerVertical != null ? "found" : "MISSING")}, " +
+                     $"CenterHorizontalAxis={(centerHorizontal != null ? "found" : "MISSING")}, LocalAnimation={(localAnimation != null ? "found" : "MISSING")}.");
+
+            // Don't require the Animation component to sit exactly on LocalAnimation --
+            // search the whole model for any Animation component carrying the
+            // "domeOpen" clip, so a differently-placed component (e.g. directly on
+            // doorright, or on the model root) still gets found instead of silently
+            // doing nothing.
+            Animation domeAnimation = null;
+            var allAnimations = facilityInstance.GetComponentsInChildren<Animation>(true);
+            LogDebug($"Animation components found anywhere in the model: {allAnimations.Length}.");
+            foreach (var anim in allAnimations)
             {
-                LogDebug($"WARNING: SetupDomeRotation: no child named '{DomeChildName}' found under '{facilityInstance.name}'. Children present: [{string.Join(", ", facilityInstance.GetComponentsInChildren<Transform>(true).Select(t => t.name))}]");
+                var clipNames = new System.Collections.Generic.List<string>();
+                foreach (AnimationState state in anim) clipNames.Add(state.name);
+                LogDebug($"  - Animation on '{GetPath(anim.transform)}': clips=[{string.Join(", ", clipNames)}].");
+                if (domeAnimation == null && anim[DomeOpenClipName] != null) domeAnimation = anim;
+            }
+            if (domeAnimation == null)
+            {
+                LogDebug($"WARNING: no Animation component anywhere in the model has a clip named '{DomeOpenClipName}' -- door animation won't play. " +
+                         "Check in Unity that the Animation component's Animations list actually includes this clip, and that the model was re-exported after adding it.");
+            }
+            else
+            {
+                LogDebug($"Using Animation component on '{GetPath(domeAnimation.transform)}' for '{DomeOpenClipName}'.");
+            }
+
+            if (dome == null || telescope == null || centerVertical == null)
+            {
+                LogDebug($"WARNING: SetupTelescopeTracking: missing dome/Telescope/CenterVerticalAxis -- no tracking set up. Children present: [{string.Join(", ", root.GetComponentsInChildren<Transform>(true).Select(t => t.name))}]");
                 return;
             }
 
-            // Don't guess which of the dome's own local axes is "vertical" --
-            // the Fusion/Blender/Unity export chain's Z-up-vs-Y-up handling
-            // means it isn't necessarily local Y. Compare all three local axes
-            // (in world space, via Transform.up/right/forward) against the
-            // real vertical at this spot on Kerbin (radially outward from the
-            // planet's center -- world Y alone isn't exactly it either, though
-            // it's very close this near the equator) and spin around whichever
-            // one lines up best.
-            Vector3 worldUp = (dome.position - FlightGlobals.GetHomeBody().position).normalized;
-            float dotUp = Vector3.Dot(dome.up, worldUp);
-            float dotRight = Vector3.Dot(dome.right, worldUp);
-            float dotForward = Vector3.Dot(dome.forward, worldUp);
-            LogDebug($"Dome local-axis alignment with world-up: up·up={dotUp:F3}, right·up={dotRight:F3}, forward·up={dotForward:F3}.");
-
-            Vector3 spinAxisLocal;
-            string axisName;
-            float absUp = Mathf.Abs(dotUp), absRight = Mathf.Abs(dotRight), absForward = Mathf.Abs(dotForward);
-            if (absRight >= absUp && absRight >= absForward) { spinAxisLocal = Vector3.right; axisName = "right (local X)"; }
-            else if (absForward >= absUp && absForward >= absRight) { spinAxisLocal = Vector3.forward; axisName = "forward (local Z)"; }
-            else { spinAxisLocal = Vector3.up; axisName = "up (local Y)"; }
-
-            var rotator = dome.gameObject.AddComponent<ExoObservatoryDomeRotator>();
-            rotator.DegreesPerSecond = DomeTestSpinDegPerSec;
-            rotator.LocalAxis = spinAxisLocal;
-            LogDebug($"SetupDomeRotation: found '{GetPath(dome)}', spinning it at {DomeTestSpinDegPerSec} deg/s around its local {axisName} axis (auto-detected as closest to true vertical).");
+            var tracker = facilityInstance.AddComponent<ExoObservatoryTelescopeTracker>();
+            tracker.Init(dome, telescope, altitudeSensitive, centerVertical, localAnimation, domeAnimation, DomeOpenClipName);
         }
 
         private static Transform FindChildRecursive(Transform root, string name)
@@ -668,92 +690,23 @@ namespace ExoInstruments
     }
 
     /// <summary>
-    /// Independent diagnostic: every frame, raycasts from the active camera
-    /// through the mouse position across ALL layers and logs what it hits,
-    /// specifically around hover state changes and mouse clicks. This doesn't
-    /// feed into SpaceCenterBuilding's own (private) hover/click logic at all --
-    /// it exists purely to answer, from the outside, whether a collider is even
-    /// present and reachable by a raycast at the observatory's screen position,
-    /// since SpaceCenterBuilding gave no errors yet produced no visible effect.
+    /// Drives the observatory's click/hover behaviour from Unity's native mouse
+    /// messages (OnMouseEnter/Exit/Down/Up/Over), which -- confirmed by extensive
+    /// testing -- fire reliably here even though SpaceCenterBuilding's own private
+    /// OnMouseDown/OnMouseUp (which receive the exact same messages) never end up
+    /// calling OnClicked()/OnContextMenuSpawn() on their own. Rather than rely on
+    /// that private logic, this drives the real stock methods (HighLightBuilding,
+    /// TriggerClick/TriggerContextMenu) directly -- still the authentic stock
+    /// glow/dialog, just triggered from a path proven to work.
     /// </summary>
-    public class ExoObservatoryDebugProbe : MonoBehaviour
+    public class ExoObservatoryInputRelay : MonoBehaviour
     {
         private const string Prefix = "[Exoplanets]";
-        private Transform _root;
         private ExoObservatoryBuilding _target;
-        private bool _wasHovering;
-        private bool _loggedNoCamera;
-        private float _nextStateLogTime;
 
-        public void Init(Transform root, ExoObservatoryBuilding target)
+        public void Init(ExoObservatoryBuilding target)
         {
-            _root = root;
             _target = target;
-        }
-
-        private void Start()
-        {
-            LogState("Start()");
-        }
-
-        private void Update()
-        {
-            // Periodic heartbeat of the base component's own state -- if
-            // enabled ever goes false, Unity stops delivering it OnMouseDown/Up
-            // entirely (silently, no error), which would explain hits being
-            // detected by this probe's own raycast but OnClicked() never firing.
-            if (Time.unscaledTime >= _nextStateLogTime)
-            {
-                _nextStateLogTime = Time.unscaledTime + 3f;
-                LogState("heartbeat");
-            }
-
-            Camera cam = Camera.main;
-            if (cam == null) cam = Camera.allCameras.FirstOrDefault(c => c.isActiveAndEnabled);
-            if (cam == null)
-            {
-                if (!_loggedNoCamera)
-                {
-                    _loggedNoCamera = true;
-                    Debug.Log($"{Prefix} No active camera found (Camera.main is null and no other active camera) -- cannot raycast under the mouse.");
-                }
-                return;
-            }
-
-            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-            bool didHit = Physics.Raycast(ray, out RaycastHit hitInfo, 50000f, ~0, QueryTriggerInteraction.Collide);
-            bool hoveringUs = didHit && _root != null && hitInfo.collider.transform.IsChildOf(_root);
-
-            if (hoveringUs != _wasHovering)
-            {
-                _wasHovering = hoveringUs;
-                Debug.Log(hoveringUs
-                    ? $"{Prefix} hover ENTER on '{hitInfo.collider.gameObject.name}' (camera='{cam.name}', layer={LayerMask.LayerToName(hitInfo.collider.gameObject.layer)}, distance={hitInfo.distance:F1}m)"
-                    : $"{Prefix} hover EXIT");
-            }
-
-            if (Input.GetMouseButtonDown(0)) LogClick("LEFT", cam, didHit, hitInfo, hoveringUs);
-            if (Input.GetMouseButtonDown(1)) LogClick("RIGHT", cam, didHit, hitInfo, hoveringUs);
-        }
-
-        private void LogState(string when)
-        {
-            if (_target == null)
-            {
-                Debug.Log($"{Prefix} [{when}] no SpaceCenterBuilding target reference.");
-                return;
-            }
-            Debug.Log($"{Prefix} [{when}] SpaceCenterBuilding state: enabled={_target.enabled}, gameObject.activeInHierarchy={_target.gameObject.activeInHierarchy}, Operational={_target.Operational}, InView={_target.InView}, Facility={(_target.Facility != null ? _target.Facility.name : "NULL")}.");
-        }
-
-        private static void LogClick(string button, Camera cam, bool didHit, RaycastHit hitInfo, bool hoveringUs)
-        {
-            if (!didHit)
-            {
-                Debug.Log($"{Prefix} {button} click: raycast from camera '{cam.name}' hit NOTHING under the mouse (mousePos={Input.mousePosition}).");
-                return;
-            }
-            Debug.Log($"{Prefix} {button} click: raycast hit '{hitInfo.collider.gameObject.name}' (layer={LayerMask.LayerToName(hitInfo.collider.gameObject.layer)}), belongsToObservatory={hoveringUs}, distance={hitInfo.distance:F1}m, camera='{cam.name}'.");
         }
 
         // Unity's OWN native mouse-picking -- confirmed reliable (fires every
@@ -764,17 +717,9 @@ namespace ExoInstruments
         // (HighLightBuilding, TriggerClick/TriggerContextMenu) directly from
         // here -- still the authentic stock glow/dialog, just triggered from a
         // path we've proven works instead of SpaceCenterBuilding's own.
-        private void OnMouseEnter()
-        {
-            Debug.Log($"{Prefix} [native Unity] OnMouseEnter() fired on '{name}' -- driving HighLightBuilding(true).");
-            _target?.HighLightBuilding(true);
-        }
+        private void OnMouseEnter() => _target?.HighLightBuilding(true);
 
-        private void OnMouseExit()
-        {
-            Debug.Log($"{Prefix} [native Unity] OnMouseExit() fired on '{name}' -- driving HighLightBuilding(false).");
-            _target?.HighLightBuilding(false);
-        }
+        private void OnMouseExit() => _target?.HighLightBuilding(false);
 
         private void OnMouseDown()
         {
@@ -819,14 +764,349 @@ namespace ExoInstruments
     /// -- once that's wired up this constant-speed spin gets replaced by a
     /// Quaternion.LookRotation towards the current target's computed direction.
     /// </summary>
-    public class ExoObservatoryDomeRotator : MonoBehaviour
+    /// <summary>
+    /// Points the telescope model at ExoObservatoryTelescopeTracker.TrackedBody (set
+    /// from ExoInstrumentsGUI whenever the RC20 photography target changes; null when
+    /// idle -- the rig just sits at its authored rest pose then).
+    ///
+    /// Two-axis gimbal, matching the .mu's own hierarchy (Parts/ExoObservatoryLVL1.mu):
+    /// dome and Telescope both spin in azimuth together around CenterVerticalAxis;
+    /// altitude_sensitive (nested inside Telescope, so it automatically inherits the
+    /// azimuth spin) additionally tips in altitude around CenterHorizontalAxis.
+    /// CenterHorizontalAxis is expected to be parented under Telescope/dome (so it
+    /// rides along with azimuth) but NOT under altitude_sensitive itself (which would
+    /// make the altitude pivot move with the very thing it's supposed to pivot).
+    ///
+    /// Every update resets each rigged part to its captured rest pose and reapplies
+    /// the FULL current azimuth/altitude via Transform.RotateAround (rather than
+    /// incrementally rotating frame to frame), so there's no drift and the rig always
+    /// reflects the real current sky position, not an accumulated approximation of it.
+    /// </summary>
+    public class ExoObservatoryTelescopeTracker : MonoBehaviour
     {
-        public float DegreesPerSecond;
-        public Vector3 LocalAxis = Vector3.up;
+        /// <summary>Set from ExoInstrumentsGUI wherever selectedPhotographyBody changes. Null = idle/parked.</summary>
+        public static CelestialBody TrackedBody;
+
+        // No azimuth/altitude calibration constants: aiming is measured against the
+        // tube's own current orientation each frame (see Update), so the rig's rest
+        // pose and axis signs cancel out on their own. Earlier versions carried an
+        // AzimuthOffsetDeg and an AltitudeOffsetDeg here, plus an axis sign flag --
+        // each was fitted to one observed symptom and broke another.
+
+        /// <summary>
+        /// The tube's optical (pointing) axis expressed in altitude_sensitive's own
+        /// local frame. Model-specific to ExoObservatoryLVL1.mu -- re-measure if the
+        /// tube is re-exported.
+        ///
+        /// Identified from logged altitudes of all three local axes while the tilt
+        /// was driven by a known angle: forward stayed pinned at altitude 0 (that's
+        /// the trunnion), right tracked the applied angle 1:1, and up tracked
+        /// 90-minus-that. Azimuth cannot tell right from up here -- every axis in the
+        /// tilt plane shares the same azimuth -- which is why an earlier reading of
+        /// "-right, because its azimuth matches" was wrong. Altitude discriminates:
+        /// aiming -right at a target at the zenith left the visible barrel on the
+        /// horizon (90 - 90), so the barrel lies in the up direction.
+        ///
+        /// It is not exactly up, though: logged at rest, up sits dead on the local
+        /// vertical (dot 1.000), which would put the barrel at the zenith when
+        /// parked -- but the barrel is modelled at 54 deg above the horizon (measured
+        /// in Blender), i.e. mounted TubeOpticalTiltFromUpDeg away from up inside the
+        /// tilt plane, toward the side the scope looks out of. Aiming up itself
+        /// therefore left a constant pointing error of about that size across the
+        /// whole track. Flip the sign of TubeOpticalTiltFromUpDeg if the tube ends up
+        /// off by twice this in the other direction.
+        /// </summary>
+        private const float TubeOpticalTiltFromUpDeg = 36f;
+        private static readonly Vector3 TubeOpticalAxisLocal =
+            Quaternion.AngleAxis(TubeOpticalTiltFromUpDeg, Vector3.forward) * Vector3.up;
+
+        private Transform _dome, _telescope, _altitudeSensitive, _centerVertical, _localAnimation;
+        private Vector3 _domeRestPos, _telescopeRestPos, _altRestLocalPos, _localAnimationRestPos;
+        private Quaternion _domeRestRot, _telescopeRestRot, _altRestLocalRot, _localAnimationRestRot;
+        private Vector3 _verticalAxisWorld;
+
+        // DIAGNOSTIC: set true to bypass real altitude tracking and instead spin the
+        // tube through a continuous 0-360 deg loop around the dome-derived axis, so
+        // the axis placement/pivot can be visually checked in-game. Set back to
+        // false once the real axis is confirmed good.
+        private const bool AltitudeDiagnosticSweep = false;
+        private const float DiagnosticSweepDegPerSec = 20f;
+        private float _diagnosticSweepDeg;
+
+        /// <summary>
+        /// The trunnion (altitude hinge) axis in world space: perpendicular to both
+        /// the local vertical and the tube's current optical axis, which is the
+        /// definition of an alt-az mount's altitude axis.
+        ///
+        /// Computed rather than picked from the dome's own local axes: the earlier
+        /// "whichever local axis is most perpendicular to vertical" rule is ambiguous
+        /// -- two of the dome's three axes satisfy it equally, so the tie-break was
+        /// arbitrary. It happened to pick the pointing axis itself, leaving the
+        /// optical axis exactly parallel to the supposed hinge (logged dot = -1.000),
+        /// which made the altitude projection degenerate and froze the tube at rest.
+        /// The cross product has no such ambiguity, and rides along with the azimuth
+        /// swing for free since the optical axis does.
+        /// </summary>
+        private Vector3 CurrentAltitudeAxisWorld()
+        {
+            Vector3 axis = Vector3.Cross(_verticalAxisWorld, OpticalAxisWorld());
+            // Degenerate only if the tube points straight up/down, where azimuth and
+            // trunnion coincide anyway; fall back to any horizontal dome axis.
+            return axis.sqrMagnitude < 1e-8f ? _dome.up : axis.normalized;
+        }
+
+        private Animation _domeAnimation;
+        private string _domeOpenClipName;
+        private bool? _doorsOpen; // null = not yet set (forces the first Update to actually trigger Play)
+
+        public void Init(Transform dome, Transform telescope, Transform altitudeSensitive, Transform centerVertical, Transform localAnimation, Animation domeAnimation, string domeOpenClipName)
+        {
+            _dome = dome;
+            _telescope = telescope;
+            _altitudeSensitive = altitudeSensitive;
+            _centerVertical = centerVertical;
+            _localAnimation = localAnimation;
+            _domeAnimation = domeAnimation;
+            _domeOpenClipName = domeOpenClipName;
+
+            _domeRestPos = dome.position;
+            _domeRestRot = dome.rotation;
+            _telescopeRestPos = telescope.position;
+            _telescopeRestRot = telescope.rotation;
+            if (altitudeSensitive != null)
+            {
+                _altRestLocalPos = altitudeSensitive.localPosition;
+                _altRestLocalRot = altitudeSensitive.localRotation;
+            }
+            // LocalAnimation (the doors) isn't a child of dome in the current .mu, so it
+            // doesn't automatically inherit dome's azimuth spin -- rotate it explicitly,
+            // same pivot/axis, right alongside dome and Telescope every Update.
+            if (localAnimation != null)
+            {
+                _localAnimationRestPos = localAnimation.position;
+                _localAnimationRestRot = localAnimation.rotation;
+            }
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            Vector3 worldVertical = Vector3.up;
+            if (home != null)
+            {
+                Vector3d verticalD = (Vector3d)centerVertical.position - home.position;
+                worldVertical = ((Vector3)verticalD).normalized;
+            }
+            _verticalAxisWorld = ChooseClosestAxis(centerVertical, worldVertical, out string vAxisName);
+            Debug.Log($"[Exoplanets] TelescopeTracker: vertical axis = CenterVerticalAxis.{vAxisName} (auto-detected, world dir={_verticalAxisWorld}).");
+
+            // Sanity-check the rig's geometry and report how the computed trunnion
+            // (see CurrentAltitudeAxisWorld) lines up with the dome's own authored
+            // axes -- they should coincide on a well-built model.
+            if (altitudeSensitive != null)
+            {
+                Vector3 optical = altitudeSensitive.TransformDirection(TubeOpticalAxisLocal);
+                Vector3 trunnion = Vector3.Cross(_verticalAxisWorld, optical).normalized;
+                Debug.Log($"[Exoplanets] TelescopeTracker: tube optical axis at rest (local {TubeOpticalAxisLocal}) = world {optical}, " +
+                          $"dot with vertical={Vector3.Dot(optical, _verticalAxisWorld):F3} (0 = tube horizontal at rest).");
+                Debug.Log($"[Exoplanets] TelescopeTracker: computed trunnion = {trunnion}; agreement with dome's own axes -- " +
+                          $"|dot right|={Mathf.Abs(Vector3.Dot(trunnion, dome.right)):F3}, |dot up|={Mathf.Abs(Vector3.Dot(trunnion, dome.up)):F3}, " +
+                          $"|dot forward|={Mathf.Abs(Vector3.Dot(trunnion, dome.forward)):F3} (one of these near 1.0 means it matches a real hinge in the model).");
+            }
+
+            if (altitudeSensitive == null)
+            {
+                Debug.Log("[Exoplanets] TelescopeTracker: no altitude_sensitive -- azimuth-only tracking (dome+Telescope spin, tube doesn't tip).");
+            }
+        }
+
+        /// <summary>Picks whichever of t's own local axes is closest to targetWorldDir, sign-matched so positive RotateAround angles go the expected way.</summary>
+        private static Vector3 ChooseClosestAxis(Transform t, Vector3 targetWorldDir, out string axisName)
+        {
+            float dotUp = Vector3.Dot(t.up, targetWorldDir);
+            float dotRight = Vector3.Dot(t.right, targetWorldDir);
+            float dotForward = Vector3.Dot(t.forward, targetWorldDir);
+            float absUp = Mathf.Abs(dotUp), absRight = Mathf.Abs(dotRight), absForward = Mathf.Abs(dotForward);
+            if (absRight >= absUp && absRight >= absForward) { axisName = "right"; return t.right * Mathf.Sign(dotRight == 0f ? 1f : dotRight); }
+            if (absForward >= absUp && absForward >= absRight) { axisName = "forward"; return t.forward * Mathf.Sign(dotForward == 0f ? 1f : dotForward); }
+            axisName = "up"; return t.up * Mathf.Sign(dotUp == 0f ? 1f : dotUp);
+        }
+
+        private float _nextDiagLogTime;
 
         private void Update()
         {
-            transform.Rotate(LocalAxis, DegreesPerSecond * Time.deltaTime, Space.Self);
+            double altDeg = 0.0, azDeg = 0.0;
+            bool haveTarget = TrackedBody != null
+                && TryComputeAltAz(TrackedBody, out altDeg, out azDeg)
+                && altDeg > 0.0;
+
+            // Always rebuild from the authored rest pose, then aim from there.
+            _dome.position = _domeRestPos; _dome.rotation = _domeRestRot;
+            _telescope.position = _telescopeRestPos; _telescope.rotation = _telescopeRestRot;
+            if (_localAnimation != null)
+            {
+                _localAnimation.position = _localAnimationRestPos;
+                _localAnimation.rotation = _localAnimationRestRot;
+            }
+            if (_altitudeSensitive != null)
+            {
+                _altitudeSensitive.localPosition = _altRestLocalPos;
+                _altitudeSensitive.localRotation = _altRestLocalRot;
+            }
+
+            float azimuth = 0f, altitude = 0f;
+
+            if (AltitudeDiagnosticSweep && _altitudeSensitive != null)
+            {
+                _diagnosticSweepDeg = (_diagnosticSweepDeg + DiagnosticSweepDegPerSec * Time.deltaTime) % 360f;
+                _altitudeSensitive.RotateAround(_centerVertical.position, CurrentAltitudeAxisWorld(), _diagnosticSweepDeg);
+            }
+            else if (haveTarget && TryGetTargetDirection(TrackedBody, out Vector3 targetDir))
+            {
+                // Rather than converting the target to an az/alt pair and hoping the
+                // rig's rest pose, axis signs and zero points all line up (every one
+                // of those was a separate calibration constant, and each fix for one
+                // broke another), measure the angle actually needed to bring the
+                // tube's optical axis onto the target and rotate by exactly that.
+                // Self-correcting: no rest-pose offset, and immune to the chosen
+                // axis's sign (flipping the axis flips both the measured angle and
+                // the rotation direction, which cancel).
+                Vector3 pivot = _centerVertical.position;
+
+                // Azimuth: swing dome/telescope/doors about the vertical until the
+                // optical axis, seen from directly above, bears on the target.
+                azimuth = SignedAngleAbout(OpticalAxisWorld(), targetDir, _verticalAxisWorld);
+                _dome.RotateAround(pivot, _verticalAxisWorld, azimuth);
+                _telescope.RotateAround(pivot, _verticalAxisWorld, azimuth);
+                if (_localAnimation != null) _localAnimation.RotateAround(pivot, _verticalAxisWorld, azimuth);
+
+                // Altitude: tip the tube about the trunnion, which the azimuth swing
+                // above has already carried into its correct orientation.
+                if (_altitudeSensitive != null)
+                {
+                    Vector3 trunnion = CurrentAltitudeAxisWorld();
+                    altitude = SignedAngleAbout(OpticalAxisWorld(), targetDir, trunnion);
+                    _altitudeSensitive.RotateAround(pivot, trunnion, altitude);
+                }
+            }
+
+            SetDoorsOpen(haveTarget);
+
+            // Diagnostic: log the target's real az/alt side by side with the tube's
+            // OWN actual pointing direction's az/alt (same conversion, just fed the
+            // tube's world-space forward vector instead of a body position) -- gives
+            // exact numbers to compare instead of guessing from visual descriptions.
+            if (haveTarget && Time.unscaledTime >= _nextDiagLogTime)
+            {
+                _nextDiagLogTime = Time.unscaledTime + 2f;
+                if (TryGetLocalFrame(out Vector3d obsPos, out Vector3d up, out Vector3d north, out Vector3d east))
+                {
+                    Transform tube = _altitudeSensitive != null ? _altitudeSensitive : _telescope;
+                    // Log all three local axes, not just the one being aimed: aiming
+                    // an axis and then measuring that same axis is circular and always
+                    // reads ~0 error. Only the other two carry independent information
+                    // about which one the visible barrel actually lies along.
+                    DirectionToAltAz(tube.up, up, north, east, out double uAlt, out double uAz);
+                    DirectionToAltAz(tube.right, up, north, east, out double rAlt, out double rAz);
+                    DirectionToAltAz(tube.forward, up, north, east, out double fAlt, out double fAz);
+                    Debug.Log($"[Exoplanets] TRACK DIAG: target az={azDeg:F1} alt={altDeg:F1} | applied az={azimuth:F1} alt={altitude:F1} | " +
+                              $"up az={uAz:F1} alt={uAlt:F1} (err {AngleDelta(uAz, azDeg):F1}/{uAlt - altDeg:F1}) | " +
+                              $"right az={rAz:F1} alt={rAlt:F1} | forward az={fAz:F1} alt={fAlt:F1}");
+                }
+            }
+        }
+
+        private static double AngleDelta(double a, double b)
+        {
+            double d = (a - b + 540.0) % 360.0 - 180.0;
+            return d;
+        }
+
+        /// <summary>The tube's optical (pointing) axis in world space right now.</summary>
+        private Vector3 OpticalAxisWorld()
+        {
+            Transform t = _altitudeSensitive != null ? _altitudeSensitive : _telescope;
+            return t.TransformDirection(TubeOpticalAxisLocal);
+        }
+
+        /// <summary>
+        /// The rotation about <paramref name="axis"/> that best takes <paramref name="from"/>
+        /// onto <paramref name="to"/> -- both projected onto the plane the axis is normal
+        /// to, since only that component is reachable by rotating about it. 0 when either
+        /// projection degenerates (direction parallel to the axis).
+        /// </summary>
+        private static float SignedAngleAbout(Vector3 from, Vector3 to, Vector3 axis)
+        {
+            Vector3 f = Vector3.ProjectOnPlane(from, axis);
+            Vector3 t = Vector3.ProjectOnPlane(to, axis);
+            if (f.sqrMagnitude < 1e-8f || t.sqrMagnitude < 1e-8f) return 0f;
+            return Vector3.SignedAngle(f.normalized, t.normalized, axis);
+        }
+
+        private static bool TryGetTargetDirection(CelestialBody body, out Vector3 dir)
+        {
+            dir = Vector3.forward;
+            if (body == null || !TryGetLocalFrame(out Vector3d obsPos, out _, out _, out _)) return false;
+            Vector3d d = body.position - obsPos;
+            if (d.sqrMagnitude < 1e-6) return false;
+            dir = ((Vector3)d).normalized;
+            return true;
+        }
+
+        private static bool TryGetLocalFrame(out Vector3d obsPos, out Vector3d up, out Vector3d north, out Vector3d east)
+        {
+            obsPos = default; up = default; north = default; east = default;
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+            obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            up = (obsPos - home.position).normalized;
+            Vector3d spinAxis = ((Vector3d)home.transform.up).normalized;
+            east = Vector3d.Cross(spinAxis, up).normalized;
+            north = Vector3d.Cross(up, east).normalized;
+            return true;
+        }
+
+        private static void DirectionToAltAz(Vector3d dir, Vector3d up, Vector3d north, Vector3d east, out double altDeg, out double azDeg)
+        {
+            dir = dir.normalized;
+            altDeg = 90.0 - Vector3d.Angle(up, dir);
+            double e = Vector3d.Dot(dir, east);
+            double n = Vector3d.Dot(dir, north);
+            azDeg = (Math.Atan2(e, n) * 180.0 / Math.PI + 360.0) % 360.0;
+        }
+
+        /// <summary>
+        /// Plays the "domeOpen" legacy Animation clip forward to open, or the same
+        /// clip in reverse (negative speed, starting from its end) to close -- same
+        /// trick real KSP facility door animations use, no separate "close" clip
+        /// needed. Only actually calls Play() on a state change, not every frame.
+        /// </summary>
+        private void SetDoorsOpen(bool open)
+        {
+            if (_domeAnimation == null || string.IsNullOrEmpty(_domeOpenClipName)) return;
+            if (_doorsOpen.HasValue && _doorsOpen.Value == open) return;
+            _doorsOpen = open;
+
+            var state = _domeAnimation[_domeOpenClipName];
+            if (state == null)
+            {
+                Debug.LogWarning($"[Exoplanets] TelescopeTracker: Animation clip '{_domeOpenClipName}' not found -- can't {(open ? "open" : "close")} the doors.");
+                return;
+            }
+
+            state.speed = open ? 1f : -1f;
+            state.time = open ? 0f : state.length;
+            _domeAnimation.Play(_domeOpenClipName);
+            Debug.Log($"[Exoplanets] TelescopeTracker: playing '{_domeOpenClipName}' {(open ? "forward (opening)" : "in reverse (closing)")}.");
+        }
+
+        /// <summary>Same alt/az convention as ExoInstrumentsGUI.TryComputeBodyAltAz -- azimuth from North, clockwise through East; altitude negative below the horizon.</summary>
+        private static bool TryComputeAltAz(CelestialBody body, out double altDeg, out double azDeg)
+        {
+            altDeg = 0.0; azDeg = 0.0;
+            if (body == null || !TryGetLocalFrame(out Vector3d obsPos, out Vector3d up, out Vector3d north, out Vector3d east)) return false;
+
+            Vector3d toBody = (body.position - obsPos).normalized;
+            DirectionToAltAz(toBody, up, north, east, out altDeg, out azDeg);
+            return true;
         }
     }
 }

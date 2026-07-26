@@ -24,15 +24,38 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// Effective height of the dominant turbulent layer, used to project a source's
+        /// angular size into a linear size at that layer (see ScintillationExcessSigma).
+        /// Same order of magnitude as the pressure scale height above; both trace to
+        /// where the bulk of the atmosphere (and its turbulence) actually sits.
+        /// </summary>
+        private const double TurbulenceLayerHeightMeters = 8000.0;
+
+        /// <summary>
         /// Scintillation sigma above the zenith value, for a given aperture/airmass/exposure.
         /// Lets the camera reuse the same Young formula as the transit photometers
         /// without going through the Transit-only API.
+        ///
+        /// angularDiameterRad is the imaged body's own apparent angular size (0 for a
+        /// point source, e.g. a star). Young's formula alone models a point source: a
+        /// resolved planetary disk spans many independent turbulent cells at once, and
+        /// their intensity fluctuations average out across the disk the same way a
+        /// larger telescope aperture averages them out over its own area (extended-source
+        /// scintillation suppression, Dravins, Lindegren, Mezey &amp; Young 1997, "Atmospheric
+        /// Intensity Scintillation of Stars I", PASP 109, 173). Modeled here by projecting
+        /// the source's angular size to a linear size at the turbulent layer's height and
+        /// combining it with the real aperture (root-sum-square, i.e. as an equivalent
+        /// larger averaging aperture) before applying Young's formula -- so a resolved
+        /// planet scintillates far less than a point star through the same telescope,
+        /// while angularDiameterRad=0 leaves star photometry exactly as before.
         /// </summary>
-        public static double ScintillationExcessSigma(double apertureMeters, double siteAltitudeMeters, double airmass, double exposureSeconds)
+        public static double ScintillationExcessSigma(double apertureMeters, double siteAltitudeMeters, double airmass, double exposureSeconds, double angularDiameterRad = 0.0)
         {
             if (double.IsNaN(airmass) || double.IsInfinity(airmass) || airmass <= 1.0) return 0.0;
-            double atZenith = AtmosphericNoise.YoungSigmaRaw(apertureMeters, siteAltitudeMeters, 1.0, exposureSeconds);
-            double atAirmass = AtmosphericNoise.YoungSigmaRaw(apertureMeters, siteAltitudeMeters, airmass, exposureSeconds);
+            double sourceSizeMeters = Math.Max(0.0, angularDiameterRad) * TurbulenceLayerHeightMeters;
+            double effectiveApertureMeters = Math.Sqrt(apertureMeters * apertureMeters + sourceSizeMeters * sourceSizeMeters);
+            double atZenith = AtmosphericNoise.YoungSigmaRaw(effectiveApertureMeters, siteAltitudeMeters, 1.0, exposureSeconds);
+            double atAirmass = AtmosphericNoise.YoungSigmaRaw(effectiveApertureMeters, siteAltitudeMeters, airmass, exposureSeconds);
             return Math.Sqrt(Math.Max(0.0, atAirmass * atAirmass - atZenith * atZenith));
         }
 

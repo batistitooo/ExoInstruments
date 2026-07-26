@@ -73,4 +73,20 @@
               DestinationFolder="$(OutputPath)..\PluginData\%(RecursiveDir)"
               SkipUnchangedFiles="true" />
     </Target>
+
+    <!--
+        Same idea again: mirrors the repo's Parts/ (the observatory's exported .mu
+        models, referenced by GameDatabase path in ExoObservatoryFacility.cs) to
+        GameData/ExoInstruments/Parts/ on every build. These are checked into the
+        repo as binary assets, same as the icon in Textures/; there is no separate
+        Unity/PartTools project tracked here to regenerate them from.
+    -->
+    <Target Name="CopyParts" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <PartsToCopy Include="$(ProjectDir)Parts\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(PartsToCopy)"
+              DestinationFolder="$(OutputPath)..\Parts\%(RecursiveDir)"
+              SkipUnchangedFiles="true" />
+    </Target>
 </Project>
