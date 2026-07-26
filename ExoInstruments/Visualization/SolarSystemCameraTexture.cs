@@ -350,6 +350,7 @@ namespace ExoInstruments.Visualization
         private Texture2D capturedTexture;
         private Color[] pixelScratch;
         private Color[] blurScratch;
+        private Color[] frameScratch;
         private float[] psfPlaneScratch;
         private float[] psfHaloScratch;
         private Color[] displayScratch;
@@ -500,6 +501,36 @@ namespace ExoInstruments.Visualization
         public float LastSaturatedFraction => lastSaturatedFraction;
         private float lastSaturatedFraction;
 
+        /// <summary>
+        /// The scintillation multiplier drawn for the last capture, and the sigma it came from
+        /// (see ScintillationMultiplier). Surfaced because this is a single per-exposure random
+        /// draw applied to the whole target: it is the reason two otherwise identical captures
+        /// can differ in brightness, which is real, and it must never be negative, which is the
+        /// bug that used to turn a bright planet into a black disc on a lit sky.
+        /// </summary>
+        /// <summary>Why the last capture failed, or null if it succeeded. Shown in the panel -- see PollProcessTask.</summary>
+        public string LastProcessingError { get; private set; }
+
+        /// <summary>True when the graphics device refused the render target at the current binning -- every capture at this resolution will be garbage until the player bins down.</summary>
+        public bool RenderTargetRefused => renderTextureRefused;
+        private bool renderTextureRefused;
+
+        /// <summary>
+        /// The untouched Unity render behind the last capture, before any of this pipeline's
+        /// physics. Diagnostic only, and the one measurement that cleanly attributes a bad frame:
+        /// if this is already wrong the fault is in the game's own scaled-space rendering or in
+        /// how the clone cameras are set up, and no change to the optical or sensor model can
+        /// recover detail that was never drawn; if this is right and the finished frame is not,
+        /// the fault is downstream and reproducible offline. Written out only when the player
+        /// asks for it (see the Diagnostics toggle) -- it costs a second full-resolution PNG.
+        /// </summary>
+        public Texture2D RawRenderFrame => readbackTexture;
+
+        public float LastScintillationFactor => lastScintillationFactor;
+        public float LastScintillationSigma => lastScintillationSigma;
+        private float lastScintillationFactor = 1f;
+        private float lastScintillationSigma;
+
         /// <summary>Atmospheric FWHM (arcsec) fed to the PSF for the last capture -- the residual left by adaptive optics, or the plain ground-based seeing figure. 0 means diffraction-limited.</summary>
         public double LastAtmosphericFwhmArcsec { get; private set; }
 
@@ -603,11 +634,20 @@ namespace ExoInstruments.Visualization
 
             if (processTask.IsFaulted)
             {
-                Debug.LogError("[ExoInstruments] RC20 frame processing failed: " + processTask.Exception?.GetBaseException().Message);
+                Exception cause = processTask.Exception?.GetBaseException();
+                // Surfaced in the panel, not just the log: a failed capture otherwise looks like
+                // a corrupted image rather than an error, and the player has no way to tell the
+                // difference without opening the debug console.
+                LastProcessingError = cause is OutOfMemoryException
+                    ? $"Out of memory processing a {TextureWidth}x{TextureHeight} frame "
+                      + $"({(double)TextureWidth * TextureHeight / 1e6:F1} Mpx). Use a higher binning factor."
+                    : cause?.Message ?? "unknown error";
+                Debug.LogError($"[ExoInstruments] Frame processing failed at {TextureWidth}x{TextureHeight}: {cause}");
                 processTask = null;
                 isProcessing = false;
                 return;
             }
+            LastProcessingError = null;
 
             pixelScratch = processTask.Result;
             processTask = null;
@@ -717,36 +757,99 @@ namespace ExoInstruments.Visualization
             // Sun parallax from KSC is ~0.05 deg (negligible). May need revisiting for
             // distant bodies like Jool, but only with a technique that can't affect the game view.
 
+            // Large planet packs unload a body's scaled-space textures when no camera the GAME
+            // knows about can see it -- and the telescope's cameras are clones it doesn't know
+            // about. Photographing an unloaded body draws its mesh with no colour map: a black
+            // disc with a lit rim. Force the target (and its moons, which share the field)
+            // resident first. No-op without Kopernicus.
+            KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(targetBody);
+
+            // A RenderTexture's contents are volatile: Unity documents them as lost on graphics-
+            // device events, fullscreen transitions among them -- which is what alt-tabbing is.
+            // A texture whose backing surface was released reports IsCreated() false and must be
+            // re-created before anything renders into it.
+            if (renderTexture != null && !renderTexture.IsCreated()) renderTexture.Create();
+
             RenderTexture activeRT = RenderTexture.active;
             RenderTexture.active = renderTexture;
 
             float fov = Mathf.Clamp(FovDeg, MinFovDeg, MaxFovDeg);
-            AimCamera(galaxyCam, GalaxyCameraName, camPos, look, fov);
-            galaxyCam.Render();
 
+            // The galaxy camera needs the same matrix resets as the scaled-space one below, for
+            // the same reason: CopyFrom inherits the live camera's own projection, and setting
+            // fieldOfView afterwards does not override an explicitly-set matrix. Without the
+            // reset the star field and skybox are rendered at the GAME's wide field instead of
+            // the telescope's, i.e. a hugely magnified patch of sky smeared behind the target.
+            // KSP itself keeps the two cameras' fields in lockstep (ScaledCamera.SetFoV sets
+            // fieldOfView on both), so treating them differently here was never right.
             // Force every body's scaled stand-in visible — KSP fades them by real-camera
             // distance, which has nothing to do with where our clone points.
-            // Home body excepted: its stand-in would wrap the camera.
+            //
+            // The home body is the exception, and it must be switched OFF rather than merely
+            // left alone. The clone sits at the home body's own scaled position, i.e. INSIDE
+            // its scaled stand-in, so a stand-in left enabled is rendered as a shell wrapped
+            // around the camera: a large smooth coloured gradient across the frame, brightest
+            // where the shell is lit, with a curved terminator running through it. Skipping it
+            // only avoided switching it on; whether it was already on was left to KSP's own
+            // distance fade, whose thresholds are set per body and differ between planet packs
+            // -- so the same code could look clean on one install and produce a coloured wash on
+            // another. Restored afterwards, so the live scene is unaffected.
+            ScaledSpaceFader homeFader = null;
+            bool homeFaderWasEnabled = false;
             foreach (ScaledSpaceFader fader in scaledSpaceFaders)
             {
                 if (fader == null || fader.r == null) continue;
-                if (home != null && fader.celestialBody == home) continue;
+                if (home != null && fader.celestialBody == home)
+                {
+                    homeFader = fader;
+                    homeFaderWasEnabled = fader.r.enabled;
+                    fader.r.enabled = false;
+                    continue;
+                }
                 fader.r.enabled = true;
             }
 
-            // The matrix resets are critical: KSP's ScaledSpace camera carries a custom
-            // view/projection matrix that CopyFrom inherits and silently overrides our transform.
-            // Resetting them makes the clone's own transform authoritative.
-            AimCamera(scaledSpaceCam, ScaledSpaceCameraName, camPos, look, fov);
-            scaledSpaceCam.ResetWorldToCameraMatrix();
-            scaledSpaceCam.ResetProjectionMatrix();
-            scaledSpaceCam.clearFlags = CameraClearFlags.Depth;
-            scaledSpaceCam.farClipPlane = 3e15f;
-            scaledSpaceCam.Render();
+            // Rendered TWICE, and only the second pass is read back.
+            //
+            // The first capture after the window regains focus was reliably wrong -- a black disc
+            // with a lit rim where the planet should be, i.e. its geometry drawn without its
+            // surface texture -- while every subsequent capture from the same setup was correct.
+            // That is a graphics-device reset: alt-tabbing releases GPU-side resources, and the
+            // scaled-space bodies' textures are restored lazily, on demand, by the frame that
+            // first asks for them. Our capture WAS that frame, so it rendered against surfaces
+            // that had not been restored yet and read back the result before they were.
+            //
+            // A discarded warm-up pass makes the demand explicit and lets the restore happen
+            // before the frame that counts. Done unconditionally rather than behind focus
+            // tracking: it costs one extra camera render (single-digit milliseconds, against the
+            // hundreds this capture already spends convolving the PSF), and it removes the whole
+            // class of first-frame staleness instead of a state machine that has to guess which
+            // events invalidate what.
+            for (int pass = 0; pass < 2; pass++)
+            {
+                AimCamera(galaxyCam, GalaxyCameraName, camPos, look, fov);
+                galaxyCam.ResetWorldToCameraMatrix();
+                galaxyCam.ResetProjectionMatrix();
+                galaxyCam.Render();
+
+                // The matrix resets are critical: KSP's ScaledSpace camera carries a custom
+                // view/projection matrix that CopyFrom inherits and silently overrides our
+                // transform. Resetting them makes the clone's own transform authoritative.
+                AimCamera(scaledSpaceCam, ScaledSpaceCameraName, camPos, look, fov);
+                scaledSpaceCam.ResetWorldToCameraMatrix();
+                scaledSpaceCam.ResetProjectionMatrix();
+                scaledSpaceCam.clearFlags = CameraClearFlags.Depth;
+                scaledSpaceCam.farClipPlane = 3e15f;
+                scaledSpaceCam.Render();
+            }
 
             readbackTexture.ReadPixels(new Rect(0, 0, TextureWidth, TextureHeight), 0, 0);
             readbackTexture.Apply();
             RenderTexture.active = activeRT;
+
+            // Hand the home body's stand-in back exactly as it was found -- the live scene draws
+            // through it and must not be left switched off by a capture.
+            if (homeFader != null && homeFader.r != null) homeFader.r.enabled = homeFaderWasEnabled;
         }
 
         /// <summary>Copies the live camera settings onto the clone, then sets position/rotation/FOV.</summary>
@@ -802,7 +905,18 @@ namespace ExoInstruments.Visualization
                 {
                     name = "ExoInstrumentsSolarSystemCameraRT"
                 };
-                renderTexture.Create();
+                // Create() reports whether the graphics device actually granted the surface. At
+                // the largest instrument's native resolution this is a 4096x4128 ARGB32 target
+                // with a 24-bit depth buffer -- roughly 340 MB of VRAM for this one texture, on
+                // top of whatever the game already holds. A refusal here is silent otherwise: the
+                // camera still "renders", and the readback returns whatever was in memory.
+                if (!renderTexture.Create())
+                {
+                    Debug.LogError($"[ExoInstruments] The graphics device refused a {TextureWidth}x{TextureHeight} "
+                                 + $"({(double)TextureWidth * TextureHeight / 1e6:F1} Mpx) render target. Use a higher binning factor.");
+                    renderTextureRefused = true;
+                }
+                else renderTextureRefused = false;
 
                 var galaxyObj = new GameObject("ExoInstrumentsGalaxyCamClone");
                 galaxyObj.transform.parent = root.transform; // explicit zero below — parent alone doesn't reset world position
@@ -1026,7 +1140,15 @@ namespace ExoInstruments.Visualization
 
             int n = TextureWidth * TextureHeight;
             if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
-            var pixels = new Color[n];
+
+            // Reused, not freshly allocated per capture. A Color is 16 bytes, so at the largest
+            // instrument's native resolution (4096x4128 = 16.9 Mpx) this single array is 270 MB;
+            // allocating it again every exposure churned that much through the large-object heap
+            // per shot, on top of the several other frame-sized buffers this pipeline already
+            // holds. The result is handed straight to PollProcessTask on the main thread and
+            // copied out there, so one buffer is enough.
+            if (frameScratch == null || frameScratch.Length != n) frameScratch = new Color[n];
+            Color[] pixels = frameScratch;
 
             float skyBackground = (float)((TwilightSkyBackgroundRatePerSecond * inputs.TwilightRamp
                                           + MoonGlowRatePerSecond * inputs.MoonSkyExcess
@@ -1045,7 +1167,9 @@ namespace ExoInstruments.Visualization
 
             // New RNG seed every exposure — read noise differs shot to shot, unlike the fixed defect map.
             System.Random rng = new System.Random(unchecked(inputs.TargetSeed * 9973 + (int)(inputs.Ut * 997.0) + 17));
-            float scintJitter = 1f + NextGaussian(rng, (float)inputs.ScintSigma);
+            float scintJitter = ScintillationMultiplier(rng, inputs.ScintSigma);
+            lastScintillationFactor = scintJitter;
+            lastScintillationSigma = (float)inputs.ScintSigma;
 
             float cloudTransmission = 1f - inputs.CloudCoverage * (float)CloudMaxAttenuation;
             float haze = inputs.CloudCoverage * (float)CloudHazeRatePerSecond * inputs.ExposureSeconds * filterThroughput;
@@ -1142,6 +1266,39 @@ namespace ExoInstruments.Visualization
             }
 
             return pixels;
+        }
+
+        /// <summary>
+        /// Per-exposure scintillation: the fractional intensity fluctuation the atmosphere
+        /// imposes on the target's light, drawn once per frame.
+        ///
+        /// Drawn from a LOG-NORMAL distribution, not an additive Gaussian. Scintillation is a
+        /// multiplicative modulation of an intensity, and an intensity cannot be negative --
+        /// atmospheric turbulence redistributes starlight, it does not remove more than all of
+        /// it. Real scintillation is in fact measured to be approximately log-normal (Dravins,
+        /// Lindegren, Mezey &amp; Young 1997, the same series this pipeline's Young formula and
+        /// extended-source suppression already come from), so this is the physically correct
+        /// distribution rather than a defensive clamp bolted onto the wrong one.
+        ///
+        /// The previous form, 1 + N(0, sigma), was unbounded below. Because this factor scales
+        /// the TARGET's signal but not the sky background added after it, a single unlucky draw
+        /// at large sigma did not merely dim the frame -- it INVERTED it: the target went
+        /// negative and clamped to black while the sky kept its own positive background and
+        /// saturated white. A bright planet came out as a black disc on a white field.
+        ///
+        /// Parameters are chosen so the multiplier has unit mean and a relative standard
+        /// deviation of exactly sigma, matching what the Young/Dravins formula returns: for
+        /// X = exp(mu + s*Z), Var(X)/E(X)^2 = exp(s^2) - 1, so s = sqrt(ln(1 + sigma^2)) and
+        /// mu = -s^2/2. For small sigma this is indistinguishable from the old form (s -> sigma),
+        /// so ordinary observing conditions behave exactly as before.
+        /// </summary>
+        private static float ScintillationMultiplier(System.Random rng, double sigma)
+        {
+            if (!(sigma > 0.0) || double.IsNaN(sigma) || double.IsInfinity(sigma)) return 1f;
+
+            double s = Math.Sqrt(Math.Log(1.0 + sigma * sigma));
+            double z = NextGaussian(rng, 1f);
+            return (float)Math.Exp(-0.5 * s * s + s * z);
         }
 
         /// <summary>Altitude of a live body above KSC's horizon. Returns false if the home body or the body itself is unavailable.</summary>
@@ -1684,6 +1841,10 @@ namespace ExoInstruments.Visualization
             // resolution EnsureSceneBuilt runs next at (native size change on a binning switch).
             pixelScratch = null;
             blurScratch = null;
+            frameScratch = null;
+            psfPlaneScratch = null;
+            psfHaloScratch = null;
+            displayScratch = null;
             rawScratch = null;
             astigmatismScratch = null;
             rowPrefixScratch = null;

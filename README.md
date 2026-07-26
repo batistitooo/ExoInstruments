@@ -98,6 +98,73 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 | **VLT FORS2** | Real VLT Unit Telescope 1, 8.2 m, real FORS2 imager | Solar-System Photography | N/A; not an exoplanet detector | The actual Very Large Telescope, pointed at the neighborhood instead of a distant galaxy |
 | **VLT SPHERE** | Real VLT Unit Telescope 3, 8.2 m, real SPHERE/ZIMPOL adaptive optics | Solar-System Photography | N/A; not an exoplanet detector | Same VLT, extreme adaptive optics: real ~25 mas resolution instead of ordinary seeing |
 
+## Solar-System Observing Guide
+
+The right instrument for a target isn't the biggest one — it's whichever one actually *frames* the body without either overflowing the field (empty magnification) or shrinking it to a handful of pixels. The tables below are computed straight from each instrument's real aperture, focal length, and sensor (§7.00/§7.11 of the [technical reference](./TECHNICAL_REFERENCE.md)), not eyeballed.
+
+**Reading the tables:** "px @ tight zoom" is the target's diameter in pixels once fully zoomed in (real Barlow/HR-collimator factor where the instrument has one); "% of frame" is that diameter against the sensor's own long axis at that zoom. A target well over 100% has genuinely overflowed the field — you're looking at a crop, not the whole disk.
+
+### Stock Kerbol system (from Kerbin)
+
+| Target | Apparent size | Best instrument | Zoom | Notes |
+|---|---|---|---|---|
+| **Mün** | ~6875″ (1.9°) | *(none)* | — | Too close for any instrument here — it overflows every field by 20×+. This is a naked-eye/map-view target, not a telescope one. |
+| **Minmus** | ~527″ (8.8′) | RC20 / CDK1000 | **Wide** (no Barlow) | Also overflows at tight zoom; frames nicely (~46% of the wide field) with the Barlow backed out. |
+| Eve | 76.7″ | CDK1000 | Tight | 46% of frame, 1926 px across. Genuinely bright (thick, reflective cloud deck) — watch the live saturation readout and dial in an ND filter if it clips. |
+| Jool | 44.9″ | CDK1000 | Tight | 27% of frame, 1127 px — best balance of framing and light. FORS2 gives more light-collecting area but a wider tight-zoom field, so it frames Jool smaller (17%). |
+| Duna | 18.5″ | CDK1000 | Tight | 11% of frame, 466 px — enough to show real surface contrast. |
+| Moho | 12.4″ | CDK1000 | Tight | 8% of frame, 311 px — small and dim; needs a real exposure, not a snapshot. |
+| Ike | 7.5″ | CDK1000 | Tight | 5% of frame — modest on every ground scope; overflows SPHERE's 3.7″ field instead of fitting it. |
+| **Dres** | 2.1″ | **VLT SPHERE** | Tight (fixed) | 57% of frame, 1161 px. The dwarf-planet-class bodies (Dres, Eeloo, Gilly) are exactly SPHERE's niche — see the diffraction/AO math in §7.11. |
+| **Eeloo** | 1.6″ | **VLT SPHERE** | Tight (fixed) | 44% of frame, 906 px. |
+| **Gilly** | 1.4″ | **VLT SPHERE** | Tight (fixed) | 39% of frame, 797 px — Eve's tiny moon is unresolvable anywhere else. |
+| **Vall** | 2.2″ | **VLT SPHERE** | Tight (fixed) | 61% of frame, 1247 px. |
+| **Laythe** | 3.7″ | **VLT SPHERE** | Tight (fixed) | ~101% of frame — fills it almost exactly. |
+| **Tylo** | 4.5″ | **VLT SPHERE** | Tight (fixed) | 122% — a slight crop, still the best option by far. |
+| Bop | 0.5″ | VLT SPHERE | Tight (fixed) | Only 13% of frame, but that's still 271 px — SPHERE's fine plate scale (1.8 mas/px) resolves it where every other instrument gives single-digit pixels. |
+| Pol | 0.3″ | VLT SPHERE | Tight (fixed) | The hardest real target in the roster: 183 px, 9% of frame. |
+
+The pattern above isn't a coincidence: SPHERE dominates every small/icy/rocky body (Jool's moons, the dwarf planets) exactly the way the real VLT/SPHERE dominates that same class of target in actual observing programs — the mod converges on the real instrument's real niche because the optics feeding it are real, not because anyone tuned it to do so.
+
+### Real Solar System (RSS, from Earth)
+
+Distances and magnitudes at *best* elongation/opposition — actual framing on any given night will be worse than the table shows; check the in-game `disk X" = Y px` diagnostic line for the real value at the time.
+
+| Target | Best diameter | Best instrument | ND filter needed (FORS2, min exposure) | Notes |
+|---|---|---|---|---|
+| Moon | 1800″ | RC20 / CDK1000 | ND100000 | Overflows every field at tight zoom (600%+) — shoot it wide. |
+| Venus | 66″ | RC20 / CDK1000 | ND1000 | 23–40% of frame on the amateur scopes. |
+| **Saturn (+rings)** | 46″ | **VLT FORS2** | **ND64** | The best VLT FORS2 target by far: same resolved detail as Jupiter, 12× less saturation. |
+| Jupiter | 49.9″ | VLT FORS2 | ND1000 | Good detail (77 resolution elements) but needs the stronger ND — this is what "impossible with ND8" looks like. |
+| Mars | 25.1″ | VLT FORS2 | ND1000 | 39 resolution elements at opposition; far fewer near conjunction (3.5″). |
+| Mercury | 13.0″ | VLT FORS2 | ND100000 | Small and close to the Sun — a genuinely hard real target, same as in life. |
+| **Neptune** | 2.4″ | **VLT SPHERE** | none | The best SPHERE target: 65% of the 3.7″ field, ~473 s exposure for good SNR. |
+| Ganymede | 1.72″ | VLT SPHERE | none | 47% of frame, ~13 s exposure. |
+| Callisto | 1.58″ | VLT SPHERE | none | 43% of frame, ~30 s exposure. |
+| Io / Europa | 1.05–1.22″ | VLT SPHERE | none | 28–33% of frame, ~9 s exposure. |
+| Titan | 0.90″ | VLT SPHERE | none | 24% of frame, ~96 s (Saturn's haze makes it faint per unit area). |
+| Ceres / Vesta | 0.60–0.70″ | VLT SPHERE | none | 16–19% of frame, 3–15 s. |
+| Pluto | 0.11″ | VLT SPHERE | none | 3% of frame — the hardest real target in the whole mod. |
+| Uranus | 3.8″ | *either* | ND64 (FORS2) | Right at SPHERE's field edge (103%) — FORS2 also works, with a stronger filter. |
+
+**RC20/CDK1000 on real-solar-system targets:** at their real minimum exposure (32 µs), even Jupiter or the Moon barely register through a 0.51–1.0 m amateur aperture at real interplanetary distances — saturation isn't the risk, under-exposure is. Raise exposure and gain rather than reaching for an ND filter, and use the live diagnostic line to dial it in.
+
+### Memory cost per capture
+
+A capture is monochrome — one value per pixel — but the pipeline currently stores it duplicated three-fold in `Color` buffers along the way. Numbers below are exact, computed from every frame-sized buffer the pipeline actually allocates:
+
+| Config | Megapixels | Managed heap | GPU textures | **Total** |
+|---|---|---|---|---|
+| FORS2, 1×1 | 16.91 | 1226 MB | 419 MB | **1645 MB** |
+| FORS2, 2×2 | 4.23 | 306 MB | 105 MB | 411 MB |
+| FORS2, 4×4 | 1.06 | 77 MB | 26 MB | 103 MB |
+| RC20 / CDK1000, 1×1 | 11.69 | 848 MB | 290 MB | 1138 MB |
+| RC20 / CDK1000, 4×4 | 0.73 | 53 MB | 18 MB | 71 MB |
+| SPHERE, 1×1 | 4.19 | 304 MB | 104 MB | 408 MB |
+| SPHERE, 4×4 | 0.26 | 19 MB | 6 MB | 26 MB |
+
+**2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
+
 ## Future Roadmap
 
 Not yet implemented in the current build:

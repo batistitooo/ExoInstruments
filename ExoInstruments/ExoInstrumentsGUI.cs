@@ -203,6 +203,7 @@ namespace ExoInstruments
         private int stackBatchRemaining = 0;
         private bool stackAlignSubs = true;
         private bool stackLuckyImaging = false;
+        private bool saveDiagnosticFrames = false;
         private float haBlendStrength = 0.5f;
         private Texture2D stackedCompositeTexture;
         private Color[] lastComposedPixels;
@@ -1413,6 +1414,11 @@ namespace ExoInstruments
                 GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 20),
                     "Processing exposure (real sensor resolution takes a moment)...", plotTitleStyle);
             }
+            else if (solarSystemCamera.LastProcessingError != null)
+            {
+                GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 40),
+                    "Capture failed: " + solarSystemCamera.LastProcessingError, plotTitleStyle);
+            }
             else if (!solarSystemCamera.HasCapturedPhoto)
             {
                 GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 20),
@@ -1459,8 +1465,19 @@ namespace ExoInstruments
                 GUI.enabled = true;
             }
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
-            GUILayout.Label($"({w}x{h})", smallCaptionStyle);
+            GUILayout.Label($"({w}x{h}, {(double)w * h / 1e6:F1} Mpx)", smallCaptionStyle);
             GUILayout.EndHorizontal();
+
+            if (solarSystemCamera.RenderTargetRefused)
+            {
+                GUILayout.Label(
+                    $"The graphics device refused a {w}x{h} render target -- captures at this binning will be garbage. "
+                    + "Select a higher binning factor.", smallCaptionStyle);
+            }
+
+            // Off by default: this is for attributing a bad frame, not part of normal use.
+            saveDiagnosticFrames = GUILayout.Toggle(saveDiagnosticFrames,
+                " Diagnostics: also save the raw render on Save Photo (attributes a bad frame to the game's rendering vs. this mod's pipeline)");
 
             DrawDisplayStretchControls();
             DrawResolvingPowerDiagnostic();
@@ -1557,6 +1574,15 @@ namespace ExoInstruments
                     $"PSF: diffraction {Arcsec(diff)} + atmosphere {Arcsec(atm)} = {Arcsec(delivered)} delivered "
                     + $"({delivered / plateScale:F1} px, {delivered / Math.Max(1e-9, diskArcsec) * 100.0:F1}% of disk)"
                     + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
+                    smallCaptionStyle);
+
+                // A single per-exposure draw applied to the whole target, so it is the reason two
+                // otherwise identical captures differ in brightness. It can never be negative --
+                // if it ever reads below zero, the running build predates that fix.
+                float sc = solarSystemCamera.LastScintillationFactor;
+                GUILayout.Label(
+                    $"Scintillation this frame: x{sc:F3} (sigma {solarSystemCamera.LastScintillationSigma:F2})"
+                    + (sc < 0f ? "  <-- NEGATIVE: stale build, restart KSP" : ""),
                     smallCaptionStyle);
             }
 
@@ -1933,6 +1959,17 @@ namespace ExoInstruments
 
             byte[] pngData = frame.EncodeToPNG();
             System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.png"), pngData);
+
+            if (saveDiagnosticFrames)
+            {
+                Texture2D raw = solarSystemCamera.RawRenderFrame;
+                if (raw != null)
+                {
+                    System.IO.File.WriteAllBytes(
+                        System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}_RAWRENDER.png"),
+                        raw.EncodeToPNG());
+                }
+            }
 
             // Companion dump of the untouched Unity render (see RawRenderFrame): the finished PNG
             // alone can't tell you whether softness came from the game's own scaled-space
