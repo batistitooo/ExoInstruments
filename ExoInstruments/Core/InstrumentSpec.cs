@@ -65,6 +65,15 @@ namespace ExoInstruments.Core
         /// <summary>Site altitude above sea level (m), for the scintillation exp(-h/8000) factor.</summary>
         public double SiteAltitudeMeters { get; set; }
 
+        /// <summary>
+        /// The visual telescope this instrument drives in SolarSystemCameraTexture, when Method
+        /// == SolarSystemPhotography (see VisualTelescopeCatalog). Selecting this row in the
+        /// Observatory dropdown calls SolarSystemCameraTexture.SetActiveTelescope(VisualTelescope)
+        /// so the rendering/noise pipeline matches whichever instrument is chosen. Null for every
+        /// exoplanet-detection method, where it has no meaning.
+        /// </summary>
+        public VisualTelescopeSpec VisualTelescope { get; set; }
+
         // --- Career progression: unlock economy -----------------------------
         // PLACEHOLDER values (see Observatories.cs) -- balance à valider avec
         // Baptiste. Sandbox/science-sandbox games ignore all of this, same gate

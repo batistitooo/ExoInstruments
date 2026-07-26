@@ -640,8 +640,8 @@ namespace ExoInstruments
             // against getting stuck on an instrument the player can't use.
             if (!IsInstrumentUnlocked(SelectedInstrument))
             {
-                selectedObservatoryIndex = Array.FindIndex(Observatories.All, IsInstrumentUnlocked);
-                if (selectedObservatoryIndex < 0) selectedObservatoryIndex = 0;
+                int fallback = Array.FindIndex(Observatories.All, IsInstrumentUnlocked);
+                SelectObservatory(fallback >= 0 ? fallback : 0);
             }
 
             string currentLabel = SelectedInstrument.DisplayName;
@@ -665,7 +665,7 @@ namespace ExoInstruments
                     string label = isCurrent ? $"> {instrument.DisplayName}" : instrument.DisplayName;
                     if (GUILayout.Button(label, GUILayout.Height(24)))
                     {
-                        selectedObservatoryIndex = i;
+                        SelectObservatory(i);
                         observatoryMenuOpen = false;
                     }
                 }
@@ -753,6 +753,32 @@ namespace ExoInstruments
                     GUILayout.Label($"{transitingCount} known transiting planets orbit this host. Their transits superpose on one light curve; the analysis separates them by iterative masking.", smallCaptionStyle);
                 }
             }
+        }
+
+        /// <summary>
+        /// Selects an Observatories.All row. If it's a SolarSystemPhotography instrument (RC20,
+        /// CDK1000, ...), also syncs SolarSystemCameraTexture's active telescope to match --
+        /// re-deriving every optics/sensor-driven quantity the physics pipeline uses (aperture,
+        /// focal length, FOV range, exposure/gain range, QE, full well, read/dark noise,
+        /// cosmic-ray rate, astigmatism) from the newly selected instrument's real spec (see
+        /// SolarSystemCameraTexture.SetActiveTelescope). A captured-but-unsaved photo and any
+        /// stacked subs are tied to whichever instrument produced them (different aperture/
+        /// focal-length/plate-scale invalidate them), so both are discarded on switch, exactly
+        /// like SelectPhotographyBody does on a target switch. No-op (besides the index update)
+        /// when the newly selected row isn't a photography instrument, or already matches the
+        /// active telescope.
+        /// </summary>
+        void SelectObservatory(int index)
+        {
+            selectedObservatoryIndex = index;
+            InstrumentSpec instrument = Observatories.All[index];
+            if (instrument.Method != DetectionMethod.SolarSystemPhotography) return;
+            if (instrument.VisualTelescope == null) return;
+            if (instrument.VisualTelescope == SolarSystemCameraTexture.ActiveTelescope) return;
+
+            solarSystemCamera.DiscardCapturedPhoto();
+            ClearAstroStack();
+            solarSystemCamera.SetActiveTelescope(instrument.VisualTelescope);
         }
 
         // Which instrument's presentation card is currently expanded; toggled by
@@ -1112,6 +1138,7 @@ namespace ExoInstruments
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null) return points;
 
+            var candidates = new List<(CelestialBody Body, double Alt, double Az, float Radius, Color Color)>();
             foreach (CelestialBody body in FlightGlobals.Bodies)
             {
                 if (body == home) continue;
@@ -1124,22 +1151,116 @@ namespace ExoInstruments
                 if (alt <= 0.0)
                     continue;
 
+                candidates.Add((body, alt, az, BodyMarkerRadiusPx(body), BodyMarkerColor(body)));
+            }
+
+            DeclutterBodyPositions(candidates);
+
+            foreach (var c in candidates)
+            {
                 points.Add(new SkyChartPoint
                 {
                     IsBody = true,
-                    AltitudeDeg = alt,
-                    AzimuthDeg = az,
-                    BodyMarkerRadiusPx = BodyMarkerRadiusPx(body),
-                    BodyColor = BodyMarkerColor(body),
+                    AltitudeDeg = c.Alt,
+                    AzimuthDeg = c.Az,
+                    BodyMarkerRadiusPx = c.Radius,
+                    BodyColor = c.Color,
 
                     // Only the selected photography target gets a ring.
-                    IsSelectedTarget = body == selectedPhotographyBody,
+                    IsSelectedTarget = c.Body == selectedPhotographyBody,
                 });
 
-                hitList.Add((body, alt, az));
+                hitList.Add((c.Body, c.Alt, c.Az));
             }
 
             return points;
+        }
+
+        /// <summary>
+        /// Nudges apart body markers whose real alt/az project to (nearly) the same screen
+        /// point -- a moon and its parent planet routinely do this in KSP's compressed solar
+        /// system, stacking their dots on the chart and making them impossible to click apart.
+        /// Detects overlapping clusters using the UNZOOMED (raw) projection, so the fix holds at
+        /// any zoom level: SkyChartTexture's projection scales linearly with zoom, so a
+        /// separation wide enough to click at zoom=1 only gets easier at higher zoom, never
+        /// harder. Each cluster's members are then arranged evenly on a small circle around
+        /// their shared position, sized so adjacent markers clear each other's click radius.
+        ///
+        /// Chart display and hit-testing ONLY -- BuildChartBodyPoints feeds these adjusted alt/az
+        /// into both the rendered SkyChartPoint and the hitList used for click hit-testing, so
+        /// the dot the player sees is always the dot they can click. Every other use of a body's
+        /// real position (capture aim, tracking, physics) calls TryComputeBodyAltAz or reads the
+        /// CelestialBody directly and never sees this adjustment.
+        /// </summary>
+        void DeclutterBodyPositions(List<(CelestialBody Body, double Alt, double Az, float Radius, Color Color)> candidates)
+        {
+            if (candidates.Count < 2) return;
+
+            int w = SkyChartWidth, h = SkyChartHeight;
+            var rawView = SkyChartView.Default(w, h);
+            var rawPos = new Vector2[candidates.Count];
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                rawPos[i] = SkyChartTexture.ProjectAltAzToScreen(candidates[i].Alt, candidates[i].Az, w, h, rawView);
+            }
+
+            // Union-find: two markers join a cluster if their discs overlap (plus a little
+            // padding for comfortable clicking), transitively -- so a short chain of moons all
+            // near the same spot ends up as one cluster, not several partially-overlapping pairs.
+            int[] parent = new int[candidates.Count];
+            for (int i = 0; i < parent.Length; i++) parent[i] = i;
+            int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            void Union(int a, int b) { a = Find(a); b = Find(b); if (a != b) parent[a] = b; }
+
+            const float ClickPadding = 6f;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                for (int j = i + 1; j < candidates.Count; j++)
+                {
+                    float threshold = candidates[i].Radius + candidates[j].Radius + ClickPadding;
+                    if ((rawPos[i] - rawPos[j]).sqrMagnitude < threshold * threshold)
+                    {
+                        Union(i, j);
+                    }
+                }
+            }
+
+            var clusters = new Dictionary<int, List<int>>();
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                int root = Find(i);
+                if (!clusters.TryGetValue(root, out var list)) clusters[root] = list = new List<int>();
+                list.Add(i);
+            }
+
+            const float MinAdjacentSpacingPx = 18f; // comfortably more than 2x the sky chart's baseline 8px hit radius
+            const float MaxDeclutterRadiusPx = 40f; // caps how far a huge cluster (e.g. Jool + 5 moons) can sprawl
+            foreach (var cluster in clusters.Values)
+            {
+                if (cluster.Count < 2) continue;
+                // Deterministic order (not insertion order) so the ring's arrangement doesn't
+                // visibly shuffle between chart refreshes.
+                cluster.Sort((a, b) => string.CompareOrdinal(candidates[a].Body.bodyName, candidates[b].Body.bodyName));
+
+                Vector2 centroid = Vector2.zero;
+                foreach (int idx in cluster) centroid += rawPos[idx];
+                centroid /= cluster.Count;
+
+                float ringRadius = Mathf.Min(MaxDeclutterRadiusPx,
+                    MinAdjacentSpacingPx / (2f * Mathf.Sin(Mathf.PI / cluster.Count)));
+
+                for (int k = 0; k < cluster.Count; k++)
+                {
+                    float angle = 2f * Mathf.PI * k / cluster.Count;
+                    Vector2 newRaw = centroid + ringRadius * new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                    SkyChartTexture.UnprojectRawPixel(newRaw.x, newRaw.y, w, h, out double newAlt, out double newAz);
+                    newAlt = Math.Max(0.5, newAlt); // never let the nudge push a marker below the horizon line
+
+                    int idx = cluster[k];
+                    var c = candidates[idx];
+                    candidates[idx] = (c.Body, newAlt, newAz, c.Radius, c.Color);
+                }
+            }
         }
 
         /// <summary>Marker radius in pixels for a body, from its real radius (log-compressed between the smallest moon and a gas giant), always bigger than any star marker so it reads as "a planet, not a star".</summary>
@@ -1290,7 +1411,7 @@ namespace ExoInstruments
             return new Rect(bounds.x + (bounds.width - w) / 2f, bounds.y + (bounds.height - h) / 2f, w, h);
         }
 
-        /// <summary>Real sensor binning selector (1x1 native ZWO ASI294MM Pro resolution down to 4x4) -- the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
+        /// <summary>Real sensor binning selector (1x1 native resolution down to 4x4) -- the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
         void DrawResolutionControls()
         {
             GUILayout.BeginHorizontal();
@@ -1324,7 +1445,7 @@ namespace ExoInstruments
 
             // Zoom (FOV): left = wide, right = tight. Smaller FOV = more zoom.
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Zoom (FOV {solarSystemCamera.FovDeg:F1} deg)", GUILayout.Width(150));
+            GUILayout.Label($"Zoom (FOV {FormatFov(solarSystemCamera.FovDeg)})", GUILayout.Width(150));
             GUI.enabled = !stackBatchRunning;
             float invFov = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - solarSystemCamera.FovDeg;
             invFov = GUILayout.HorizontalSlider(invFov, SolarSystemCameraTexture.MinFovDeg, SolarSystemCameraTexture.MaxFovDeg);
@@ -1351,11 +1472,14 @@ namespace ExoInstruments
                 SolarSystemCameraTexture.MinGain, SolarSystemCameraTexture.MaxGain);
             GUILayout.EndHorizontal();
 
-            // Filter wheel.
+            // Filter wheel -- only the active telescope's real filters (VisualTelescopeSpec.
+            // AvailableFilters). Most instruments have all five; one that genuinely lacks a
+            // filter (e.g. SPHERE/ZIMPOL has no real blue filter) simply doesn't offer it here,
+            // rather than faking a channel that doesn't exist on the real hardware.
             GUILayout.BeginHorizontal();
             GUILayout.Label("Filter", GUILayout.Width(150));
             GUI.enabled = !stackBatchRunning;
-            foreach (CameraFilter f in (CameraFilter[])Enum.GetValues(typeof(CameraFilter)))
+            foreach (CameraFilter f in SolarSystemCameraTexture.ActiveTelescope.AvailableFilters)
             {
                 bool sel = solarSystemCamera.Filter == f;
                 if (GUILayout.Toggle(sel, " " + FilterLabel(f), GUILayout.Width(58)) && !sel)
@@ -1387,10 +1511,18 @@ namespace ExoInstruments
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            // Autoguiding.
+            // Autoguiding. Forced on and locked for an instrument with no real bare/unguided
+            // mode (VisualTelescopeSpec.AlwaysAutoguided, e.g. the VLT) -- SetActiveTelescope
+            // already flips the property itself; this just stops the player from toggling it
+            // back off and reintroducing drift trailing a real 8.2m research telescope never has.
+            bool autoguidingLocked = SolarSystemCameraTexture.AutoguidingForced;
             GUILayout.BeginHorizontal();
+            GUI.enabled = !autoguidingLocked;
             solarSystemCamera.Autoguiding = GUILayout.Toggle(solarSystemCamera.Autoguiding,
-                " Autoguiding (tracks the sky; off = the target drifts between shots unless re-centered)");
+                autoguidingLocked
+                    ? " Autoguiding (always on -- this instrument has no unguided mode)"
+                    : " Autoguiding (tracks the sky; off = the target drifts between shots unless re-centered)");
+            GUI.enabled = true;
             GUILayout.FlexibleSpace();
             // Manual re-center: only meaningful without autoguiding -- with it
             // on, every capture already re-centers automatically.
@@ -1572,7 +1704,7 @@ namespace ExoInstruments
             {
                 ExposureSeconds = astroStack.TotalExposureSeconds(solarSystemCamera.Filter),
                 PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
-                FullWellElectrons = AtmosphericImagingNoise.SensorFullWellElectrons,
+                FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
                 FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 FilterName = "LRGB",
@@ -1616,6 +1748,23 @@ namespace ExoInstruments
             return $"{seconds:F2} s";
         }
 
+        /// <summary>
+        /// Real acquisition-software convention (SharpCap, NINA): FOV switches to arcminutes
+        /// below 1 degree, since every telescope in VisualTelescopeCatalog has a sub-1-degree
+        /// range and a flat "X.X deg" label would round every instrument's real MinFovDeg/
+        /// MaxFovDeg range down to the same one or two digits, hiding genuine differences
+        /// between telescopes (and between zoom settings on the same one) behind the rounding.
+        /// Drops to arcseconds below 1 arcminute for SPHERE/ZIMPOL's real ~3.6" field, which
+        /// would otherwise round to an unreadable "0.06'".
+        /// </summary>
+        static string FormatFov(float deg)
+        {
+            float arcmin = deg * 60f;
+            if (arcmin < 1f) return $"{arcmin * 60f:F2}\"";
+            if (deg < 1f) return $"{arcmin:F2}'";
+            return $"{deg:F2} deg";
+        }
+
         /// <summary>Always-visible observability line for the selected body: night gate + the body's current altitude.</summary>
         void DrawPhotographyObservability()
         {
@@ -1648,7 +1797,7 @@ namespace ExoInstruments
             {
                 ExposureSeconds = solarSystemCamera.ExposureSeconds,
                 PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
-                FullWellElectrons = AtmosphericImagingNoise.SensorFullWellElectrons,
+                FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
                 FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 FilterName = FilterLabel(solarSystemCamera.Filter),
@@ -2226,7 +2375,7 @@ namespace ExoInstruments
                 Funding.Instance.AddFunds(-instrument.UnlockCostFunds, TransactionReasons.RnDPartPurchase);
                 scenario.MarkInstrumentUnlocked(instrument.Name);
                 int idx = Array.IndexOf(Observatories.All, instrument);
-                if (idx >= 0) selectedObservatoryIndex = idx;
+                if (idx >= 0) SelectObservatory(idx);
                 observatoryMenuOpen = false;
             }
             GUI.enabled = true;

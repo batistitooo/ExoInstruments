@@ -45,21 +45,83 @@ namespace ExoInstruments.Visualization
     /// </summary>
     public class SolarSystemCameraTexture : IDisposable
     {
-        // Real ZWO ASI294MM Pro native sensor resolution (official ZWO datasheet,
-        // zwoastro.com/product/asi294): 4144x2822, 4.63um pixel pitch.
-        public const int NativeTextureWidth = 4144;
-        public const int NativeTextureHeight = 2822;
-        private const float NativePixelSizeMeters = 4.63e-6f;
+        // All optics/sensor identity constants (aperture, focal length, native resolution,
+        // pixel pitch, QE, full well, exposure/gain range, ...) live in VisualTelescopeCatalog,
+        // not here -- this class is the rendering pipeline for whichever spec it's pointed at.
+        // Mutable (not readonly): the player can switch instruments from the Observatory dropdown
+        // in the GUI (ExoInstrumentsGUI.SelectObservatory), which re-derives every optics/sensor-
+        // driven quantity below from whichever VisualTelescopeSpec is now active. See
+        // SetActiveTelescope for the switch itself, and builtSpec/EnsureSceneBuilt for how the
+        // render targets and scratch buffers get rebuilt at the new instrument's resolution.
+        private static VisualTelescopeSpec Spec = VisualTelescopeCatalog.Rc20;
 
-        // Real PlaneWave RC20 focal length: f/6.8 at 0.51m aperture = 3.468m (planewave.eu
-        // product page). A real, commonly available 4x Barlow gives the "high power" end of
-        // the zoom range; the native (no-accessory) focal length gives the "wide" end --
-        // replaces the old invented 0.08-8 deg range with a derived one (see MinFovDeg/MaxFovDeg).
-        private const float RealFocalLengthMeters = 0.51f * 6.8f;
-        private const float BarlowFactor = 4.0f;
+        /// <summary>The visual telescope this pipeline is currently simulating.</summary>
+        public static VisualTelescopeSpec ActiveTelescope => Spec;
 
         /// <summary>
-        /// Pixel binning factor (1=native 4144x2822, 2/3/4 = NxN binning) -- the real technique
+        /// Switches the active telescope: every optics/sensor constant this class exposes
+        /// (aperture, focal length, FOV range, exposure/gain range, full well, read/dark noise,
+        /// ...) is re-derived from the new spec on the next read, and EnsureSceneBuilt rebuilds
+        /// the render targets and scratch buffers at its resolution on the next capture (see
+        /// builtSpec). Resets zoom to the new instrument's wide end.
+        ///
+        /// Exposure is rescaled by the ratio of the two telescopes' real effective collecting
+        /// area (aperture squared, minus obstruction), the same thing a real astronomer redoes
+        /// with an exposure-time calculator when changing instruments -- without it, a exposure
+        /// tuned for the RC20's 0.51m aperture carried straight over to the VLT's 8.2m one
+        /// (~258x the collecting area) blows every pixel far past full well, and the pipeline's
+        /// per-column blooming (ApplyBlooming, real CCD physics, only ever spills vertically)
+        /// turns the saturated body into a tall white bar instead of a photo. Then clamped into
+        /// the new instrument's real exposure range.
+        ///
+        /// Forces Autoguiding on for a spec with AlwaysAutoguided (a real research telescope like
+        /// the VLT has no bare/unguided mode) -- otherwise Autoguiding, being a plain player-set
+        /// toggle, would silently carry over whatever the player last chose on the RC20/CDK1000,
+        /// including off.
+        ///
+        /// Does NOT discard an already-captured photo or stacked subs -- those belong to the
+        /// instrument that took them, so ExoInstrumentsGUI.SwitchTelescope discards them itself
+        /// before calling this.
+        /// </summary>
+        public void SetActiveTelescope(VisualTelescopeSpec spec)
+        {
+            if (spec == null || spec == Spec) return;
+
+            double oldAreaM2 = EffectiveApertureAreaM2(Spec);
+            Spec = spec;
+            double newAreaM2 = EffectiveApertureAreaM2(spec);
+            if (oldAreaM2 > 0.0 && newAreaM2 > 0.0)
+            {
+                ExposureSeconds *= (float)(oldAreaM2 / newAreaM2);
+            }
+
+            FovDeg = MaxFovDeg;
+            ExposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
+            Gain = Mathf.Clamp(Gain, MinGain, MaxGain);
+            if (spec.AlwaysAutoguided) Autoguiding = true;
+            if (Array.IndexOf(spec.AvailableFilters, Filter) < 0) Filter = CameraFilter.Luminance;
+        }
+
+        /// <summary>Real effective light-collecting area (m^2): full aperture minus the real secondary-mirror obstruction. Shared by SetActiveTelescope's exposure rescaling and RealApertureAreaCm2's per-frame photon-flux calc -- same physical quantity, different units for each caller's convenience.</summary>
+        private static double EffectiveApertureAreaM2(VisualTelescopeSpec spec)
+        {
+            double radiusM = spec.ApertureMeters / 2.0;
+            double fullAreaM2 = Math.PI * radiusM * radiusM;
+            return fullAreaM2 * (1.0 - spec.SecondaryObstructionFraction * spec.SecondaryObstructionFraction);
+        }
+
+        /// <summary>True when the active telescope always has precision tracking and the Autoguiding toggle shouldn't be player-editable (see VisualTelescopeSpec.AlwaysAutoguided).</summary>
+        public static bool AutoguidingForced => Spec.AlwaysAutoguided;
+
+        private static float NativePixelSizeMeters => (float)Spec.NativePixelSizeMeters;
+        private static float RealFocalLengthMeters => (float)Spec.FocalLengthMeters;
+        private static float BarlowFactor => (float)Spec.BarlowFactor;
+
+        public static int NativeTextureWidth => Spec.NativeSensorWidthPx;
+        public static int NativeTextureHeight => Spec.NativeSensorHeightPx;
+
+        /// <summary>
+        /// Pixel binning factor (1=native resolution, 2/3/4 = NxN binning) -- the real technique
         /// astrophotography acquisition software (SharpCap, NINA) offers for exactly this
         /// trade-off (resolution vs. processing cost/noise). Changing this rebuilds the
         /// camera's textures and scratch buffers on the next capture.
@@ -72,10 +134,23 @@ namespace ExoInstruments.Visualization
         /// <summary>Real (binned) pixel pitch in microns -- for FITS XPIXSZ/YPIXSZ header keywords.</summary>
         public static double PixelSizeMicrons => NativePixelSizeMeters * BinningFactor * 1e6;
 
-        /// <summary>Real RC20 focal length in mm -- for the FITS FOCALLEN header keyword.</summary>
+        /// <summary>Real focal length in mm -- for the FITS FOCALLEN header keyword.</summary>
         public static double FocalLengthMm => RealFocalLengthMeters * 1000.0;
 
-        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the real RC20 focal length and real ZWO pixel pitch.</summary>
+        /// <summary>
+        /// Real full well AT THE CURRENT BINNING, in electrons -- for FITS header info and the
+        /// shot-noise/saturation pipeline. Binning here is real on-chip/charge-domain summing
+        /// (the same assumption BinningFactor's own doc comment already makes), which combines
+        /// BinningFactor^2 physical pixels' charge into one before it's ever read out, so a
+        /// binned pixel's real saturation capacity is BinningFactor^2 times the native
+        /// per-pixel spec, not that same native figure applied unchanged. Getting this wrong at
+        /// high binning on a huge-aperture instrument (e.g. the VLT at 4x4) makes every pixel
+        /// look saturated far too early, which the per-column blooming pass (ApplyBlooming) then
+        /// turns into a large white smear instead of the real, correctly-exposed frame.
+        /// </summary>
+        public static double FullWellElectrons => Spec.FullWellElectrons * BinningFactor * BinningFactor;
+
+        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch.</summary>
         private static float PlateScaleArcsecPerPixel
         {
             get
@@ -89,30 +164,20 @@ namespace ExoInstruments.Visualization
         /// <summary>Native (no-accessory) field of view across the sensor's long axis -- the "wide" end of the zoom range.</summary>
         public static float MaxFovDeg => (TextureWidth * PlateScaleArcsecPerPixel) / 3600f;
 
-        /// <summary>Field of view with a real 4x Barlow -- the "high power" end of the zoom range.</summary>
+        /// <summary>Field of view with a real Barlow -- the "high power" end of the zoom range.</summary>
         public static float MinFovDeg => MaxFovDeg / BarlowFactor;
 
         private const string GalaxyCameraName = "GalaxyCamera";
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
 
-        // Real PlaneWave RC20 secondary-mirror obstruction: 39% of primary diameter
-        // (planewave.eu product page) -> area fraction blocked = 0.39^2.
-        private const double SecondaryObstructionFraction = 0.39;
-
-        // Real ZWO ASI294MM Pro peak quantum efficiency (official datasheet).
-        private const double SensorQuantumEfficiency = 0.90;
-
         // Real filter bandwidths in Angstrom, matching FilterThroughput's ratios: L covers the
-        // whole ~420-685nm visible band (~2650 Angstrom); R/G/B each get an even third (modern
-        // "1:1:1 balanced" CMOS LRGB filter design); H-alpha is a real ~7nm (70 Angstrom)
-        // narrowband filter.
-        private const double LuminanceBandwidthAngstrom = 2650.0;
+        // whole ~420-685nm visible band; R/G/B each get an even third (modern "1:1:1 balanced"
+        // CMOS LRGB filter design); H-alpha is a real ~7nm (70 Angstrom) narrowband filter.
+        private static double LuminanceBandwidthAngstrom => Spec.LuminanceBandwidthAngstrom;
 
-        // Real ZWO ASI294MM Pro exposure range: 32us to 2000s (zwoastro.com datasheet).
-        // Bright nearby bodies (e.g. the Moon) need the low end reachable, or the RC20's
-        // real aperture/QE floods every pixel at any exposure the mod allows.
-        public const float MinExposureSeconds = 0.000032f;
-        public const float MaxExposureSeconds = 2000.0f;
+        /// <summary>Real sensor exposure range -- see VisualTelescopeCatalog for sourcing.</summary>
+        public static float MinExposureSeconds => Spec.MinExposureSeconds;
+        public static float MaxExposureSeconds => Spec.MaxExposureSeconds;
 
         private const float MaxDefocusBlurPx = 7.0f;
         private const float SeeingBlurPxPerAirmass = 1.4f;
@@ -126,11 +191,14 @@ namespace ExoInstruments.Visualization
         internal const double CloudMaxAttenuation = 0.85;                // thick cloud, never 100% opaque
         private const double CloudHazeRatePerSecond = 0.25;             // veiling scattered light off cloud base
         private const float CloudBlurPxMax = 2.0f;
-        // NOT amplified by gain (applied after the analog stage) -- real ZWO ASI294MM Pro
-        // read noise (1.2 e-, best case) as a fraction of its real 66,000 e- full well
-        // (AtmosphericImagingNoise.ReadNoiseFraction), the same sensor anchor used for shot
-        // and dark-current noise.
-        private static readonly float ReadNoiseSigmaValue = (float)AtmosphericImagingNoise.ReadNoiseFraction;
+        // NOT amplified by gain (applied after the analog stage) -- the active telescope's real
+        // read noise (a fixed per-readout-event electron figure, unaffected by binning) as a
+        // fraction of the CURRENT BINNED full well (this class's own FullWellElectrons, not
+        // Spec.FullWellElectrons directly) -- the same sensor anchor used for shot and
+        // dark-current noise. Binning genuinely reduces read noise's relative significance in a
+        // real sensor (same read noise electrons, now a smaller slice of a bigger binned well),
+        // which this correctly reflects.
+        private static float ReadNoiseSigmaValue => (float)(Spec.ReadNoiseElectrons / FullWellElectrons);
 
         // Reference flux for a full Mün at zenith: albedo * (radius/distance)^2.
         private const double MunReferenceFluxUnits = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
@@ -186,35 +254,31 @@ namespace ExoInstruments.Visualization
         // sampling is an unused stub in the shipped source, so an isotropic incidence angle
         // here is no less physical than upstream. Rate is derived, not tuned: sea-level cosmic
         // ray (mostly muon) flux is ~1 cm^-2 min^-1 (Particle Data Group, "Passage of Particles
-        // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"), applied to the real
-        // physical silicon area of the ZWO ASI294MM Pro sensor (native 4144x2822 at its real
-        // 4.63um pixel pitch -- the physical exposed area doesn't change with binning, only how
-        // pixels are grouped on readout, so this is computed from the native resolution
-        // regardless of the camera's current BinningFactor). See CosmicRayHitsPerSecond's
-        // static initializer for the computed rate.
-        private static readonly float CosmicRayHitsPerSecond = ComputeCosmicRayHitsPerSecond();
+        // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"), applied to the active
+        // telescope's own real physical silicon area (native sensor width/height at its real
+        // pixel pitch -- the physical exposed area doesn't change with binning, only how pixels
+        // are grouped on readout, so this is computed from the native resolution regardless of
+        // the camera's current BinningFactor). A property, not a cached field: it must re-read
+        // Spec every call so a telescope switch with a different sensor recomputes the real
+        // rate instead of silently keeping the old instrument's.
+        private static float CosmicRayHitsPerSecond => ComputeCosmicRayHitsPerSecond();
         private const int CosmicRayMinTrackPx = 2;
         private const int CosmicRayMaxTrackPx = 14;
         private const float CosmicRayDepositValue = 0.85f;
 
-        // Astigmatism: for a true Ritchey-Chretien (what the RC20 is, per Observatories.cs),
-        // third-order coma is corrected to zero by the RC hyperbolic-mirror design itself --
-        // that is the entire reason the RC form exists (Ritchey & Chretien 1922). The dominant
-        // remaining off-axis third-order (Seidel) aberration for this telescope class is
-        // astigmatism, whose transverse blur scales with the SQUARE of the field angle (Seidel
-        // aberration theory: S_II/coma scales linearly with field, S_III/astigmatism
-        // quadratically -- see Schroeder, "Astronomical Optics" 2nd ed. 2000, Ch. 6, or Rutten &
-        // van Venrooij, "Telescope Optics"), directed radially outward from the optical axis.
-        // The absolute amplitude depends on the telescope's actual optical prescription (focal
-        // ratio, field curvature radius), which no published PlaneWave RC20 datasheet specifies
-        // to the precision an aberration coefficient would need -- the radial-quadratic FORM is
-        // the literature-sourced part; the pixel amplitude at the frame corner is a display
-        // calibration, not a measured quantity -- no published RC20 optical prescription
-        // specifies field curvature/astigmatism coefficients to the precision needed.
-        private const float AstigmatismStrengthPxAtCorner = 3.0f;
+        // Astigmatism: the radial-quadratic FORM (Seidel aberration theory: S_II/coma scales
+        // linearly with field, S_III/astigmatism quadratically -- see Schroeder, "Astronomical
+        // Optics" 2nd ed. 2000, Ch. 6, or Rutten & van Venrooij, "Telescope Optics") is the same
+        // for every two-mirror astrograph in this pipeline, so it's applied here regardless of
+        // which telescope is active; the PEAK amplitude at the frame corner is instrument-
+        // specific (VisualTelescopeSpec.AstigmatismStrengthPxAtCorner) since it depends on that
+        // telescope's own optical prescription and how completely its design cancels off-axis
+        // aberrations -- see each catalog entry's own comment for its sourcing.
+        private static float AstigmatismStrengthPxAtCorner => Spec.AstigmatismStrengthPxAtCorner;
 
         private bool builtOnce;
         private int builtBinningFactor = -1;
+        private VisualTelescopeSpec builtSpec;
         private bool available;
 
         private GameObject root;
@@ -238,12 +302,18 @@ namespace ExoInstruments.Visualization
         private int[] hotPixelIndices;
         private int[] deadPixelIndices;
 
-        // RC20's real continuous gain control (replaces the old ISO-step abstraction).
-        // 0.7 is the hardware minimum; 8.0 matches the old ISO-800 noise ceiling.
-        public const float MinGain = 0.7f;
-        public const float MaxGain = 8.0f;
-        /// <summary>Field of view in degrees (zoom). Clamped to [MinFovDeg, MaxFovDeg].</summary>
-        public float FovDeg { get; set; } = 3.0f;
+        /// <summary>Real continuous gain control range -- see VisualTelescopeCatalog for sourcing.</summary>
+        public static float MinGain => Spec.MinGain;
+        public static float MaxGain => Spec.MaxGain;
+        /// <summary>Field of view in degrees (zoom). Clamped to [MinFovDeg, MaxFovDeg]. Defaults to
+        /// the wide end (MaxFovDeg) -- the old flat 3.0 default predates the real derived FOV
+        /// range (roughly 0.06-0.32 deg for the RC20) and sat outside it, which is why the GUI
+        /// slider showed a stale "3.0 deg" label until the user's first drag: GUILayout.HorizontalSlider
+        /// only clamps the value it returns once there's actual pointer interaction, so an
+        /// out-of-range starting value round-trips unchanged on every frame before that. Starting
+        /// at MaxFovDeg also matches how real acquisition software (SharpCap, NINA) opens a
+        /// session zoomed out, and stays correct for whichever VisualTelescopeSpec is active.</summary>
+        public float FovDeg { get; set; } = MaxFovDeg;
         /// <summary>Exposure time in seconds. Drives brightness, noise, drift trailing, and how long BeginExposure takes.</summary>
         public float ExposureSeconds { get; set; } = 0.5f;
         /// <summary>When true, the frame is always sharp; when false, FocusOffset controls defocus blur.</summary>
@@ -301,7 +371,7 @@ namespace ExoInstruments.Visualization
         {
             get
             {
-                if (!builtOnce || builtBinningFactor != BinningFactor) EnsureSceneBuilt();
+                if (!builtOnce || builtBinningFactor != BinningFactor || builtSpec != Spec) EnsureSceneBuilt();
                 return available;
             }
         }
@@ -533,10 +603,11 @@ namespace ExoInstruments.Visualization
 
         private void EnsureSceneBuilt()
         {
-            if (builtOnce && builtBinningFactor == BinningFactor) return;
-            if (builtOnce) Dispose(); // binning changed since the last build -- tear down and rebuild at the new resolution
+            if (builtOnce && builtBinningFactor == BinningFactor && builtSpec == Spec) return;
+            if (builtOnce) Dispose(); // binning or active telescope changed since the last build -- tear down and rebuild at the new resolution
             builtOnce = true;
             builtBinningFactor = BinningFactor;
+            builtSpec = Spec;
 
             try
             {
@@ -640,7 +711,7 @@ namespace ExoInstruments.Visualization
 
             double angularDiameterRad = ComputeAngularDiameterRad(targetBody);
             double scintSigma = AtmosphericImagingNoise.ScintillationExcessSigma(
-                Observatories.Rc20.ApertureMeters, Observatories.Rc20.SiteAltitudeMeters, airmass, exposureSeconds, angularDiameterRad);
+                Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, angularDiameterRad);
 
             bool haveSunAlt = TryComputeAltitudeDeg(Planetarium.fetch != null ? Planetarium.fetch.Sun : null, out double sunAltDeg);
             double twilightRamp = haveSunAlt
@@ -699,7 +770,13 @@ namespace ExoInstruments.Visualization
                                           + AirglowBaselinePerSecond
                                           + ZodiacalBaselineRatePerSecond) * inputs.ExposureSeconds * filterThroughput);
 
-            AtmosphericImagingNoise.DarkCurrent(inputs.ExposureSeconds, out double darkPedestalD, out double darkSigmaD);
+            // Deliberately the NATIVE (unbinned) Spec.FullWellElectrons here, paired with the
+            // native per-physical-pixel DarkCurrentElectronsPerSecond -- both real electron
+            // quantities scale by BinningFactor^2 together in a real binned pixel, so the
+            // resulting pedestal/sigma FRACTION (what DarkCurrent actually returns) comes out
+            // identical either way; using the raw per-pixel numbers is just simpler than
+            // multiplying both sides by the same factor for no change in the answer.
+            AtmosphericImagingNoise.DarkCurrent(inputs.ExposureSeconds, Spec.FullWellElectrons, Spec.DarkCurrentElectronsPerSecond, out double darkPedestalD, out double darkSigmaD);
             float darkPedestal = (float)darkPedestalD;
             float darkSigma = (float)darkSigmaD;
 
@@ -733,7 +810,7 @@ namespace ExoInstruments.Visualization
             for (int i = 0; i < n; i++) totalRenderedLuminance += FilterSignal(src[i], CameraFilter.Luminance);
 
             float calibratedSignalPerUnit = totalRenderedLuminance > 1e-6
-                ? (float)((inputs.TotalElectrons / AtmosphericImagingNoise.SensorFullWellElectrons) / totalRenderedLuminance)
+                ? (float)((inputs.TotalElectrons / FullWellElectrons) / totalRenderedLuminance)
                 : 0f;
 
             for (int i = 0; i < n; i++)
@@ -742,7 +819,7 @@ namespace ExoInstruments.Visualization
                 float photon = signal * calibratedSignalPerUnit * scintJitter * cloudTransmission;
                 float totalPhoton = photon + haze + skyBackground;
 
-                float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton);
+                float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton, FullWellElectrons);
                 float combinedPreGainSigma = Mathf.Sqrt(shotSigma * shotSigma + darkSigma * darkSigma);
 
                 float preGainValue = totalPhoton + darkPedestal + NextGaussian(rng, combinedPreGainSigma);
@@ -813,9 +890,24 @@ namespace ExoInstruments.Visualization
             return true;
         }
 
-        /// <summary>Blur from looking through Kerbin's own atmosphere — grows with airmass, sharply worse near the horizon.</summary>
+        /// <summary>
+        /// Blur from looking through Kerbin's own atmosphere. For a plain (non-AO) instrument
+        /// this grows with airmass, sharply worse near the horizon, the same way real seeing
+        /// does. An instrument with real adaptive optics (VisualTelescopeSpec.AdaptiveOpticsFwhmArcsec,
+        /// e.g. SPHERE/ZIMPOL) instead returns its own real, roughly airmass-independent
+        /// corrected FWHM converted to pixels at the CURRENT plate scale -- real AO actively
+        /// cancels atmospheric distortion in front of the wavefront sensor, rather than just
+        /// blurring the image, so unlike the plain model it isn't a fixed pixel count: it scales
+        /// correctly with zoom/binning because it's derived from a real arcsec figure, not a
+        /// pixel one.
+        /// </summary>
         private float ComputeSeeingBlurPx(CelestialBody targetBody)
         {
+            if (Spec.AdaptiveOpticsFwhmArcsec > 0.0)
+            {
+                return (float)(Spec.AdaptiveOpticsFwhmArcsec / PlateScaleArcsecPerPixel);
+            }
+
             if (!TryComputeAltitudeDeg(targetBody, out double altDeg)) return 0f;
             if (altDeg <= 0.0) return MaxSeeingBlurPx; // shouldn't be capturable this low, but cap defensively
 
@@ -900,7 +992,7 @@ namespace ExoInstruments.Visualization
             double combinedTransmission = extinctionTransmission * NdFilterTransmission(NdFilter);
 
             return PhotonFluxModel.CollectedElectrons(
-                magnitude, bandwidthAngstrom, apertureAreaCm2, SensorQuantumEfficiency, exposureSeconds, combinedTransmission);
+                magnitude, bandwidthAngstrom, apertureAreaCm2, Spec.QuantumEfficiency, exposureSeconds, combinedTransmission);
         }
 
         /// <summary>
@@ -921,13 +1013,8 @@ namespace ExoInstruments.Visualization
             return 2.0 * targetBody.Radius / distanceMeters;
         }
 
-        /// <summary>Real RC20 effective collecting area (cm^2): full aperture minus the real secondary-mirror obstruction.</summary>
-        private static double RealApertureAreaCm2()
-        {
-            double apertureRadiusCm = Observatories.Rc20.ApertureMeters * 100.0 / 2.0;
-            double fullArea = Math.PI * apertureRadiusCm * apertureRadiusCm;
-            return fullArea * (1.0 - SecondaryObstructionFraction * SecondaryObstructionFraction);
-        }
+        /// <summary>Real effective collecting area (cm^2): full aperture minus the real secondary-mirror obstruction.</summary>
+        private static double RealApertureAreaCm2() => EffectiveApertureAreaM2(Spec) * 1.0e4; // m^2 -> cm^2
 
         /// <summary>Real cosmic-ray hit rate: sea-level flux (~1/cm^2/min) over the sensor's real, native (binning-independent) physical silicon area.</summary>
         private static float ComputeCosmicRayHitsPerSecond()
@@ -939,15 +1026,15 @@ namespace ExoInstruments.Visualization
             return (float)(sealevelFluxPerCm2PerMinute * areaCm2 / 60.0);
         }
 
-        /// <summary>Real filter bandwidth in Angstrom, matching FilterThroughput's ratios (see its comment for the real bandwidth sources).</summary>
+        /// <summary>Real filter bandwidth in Angstrom for the active telescope's own real filter set (VisualTelescopeSpec) -- each filter's real bandwidth, not a fraction of Luminance, since a research instrument's R/G/B are each their own named filter with their own published FWHM (unlike an amateur LRGB wheel, where an even split is the real design -- see VisualTelescopeCatalog.Rc20's own comment).</summary>
         private static double FilterBandwidthAngstrom(CameraFilter filter)
         {
             switch (filter)
             {
-                case CameraFilter.Red:
-                case CameraFilter.Green:
-                case CameraFilter.Blue:   return LuminanceBandwidthAngstrom / 3.0;
-                case CameraFilter.HAlpha: return 70.0; // real ~7nm narrowband Halpha filter FWHM
+                case CameraFilter.Red:    return Spec.RedBandwidthAngstrom;
+                case CameraFilter.Green:  return Spec.GreenBandwidthAngstrom;
+                case CameraFilter.Blue:   return Spec.BlueBandwidthAngstrom;
+                case CameraFilter.HAlpha: return Spec.HAlphaBandwidthAngstrom;
                 default:                  return LuminanceBandwidthAngstrom;
             }
         }
@@ -1156,26 +1243,18 @@ namespace ExoInstruments.Visualization
 
         private static double Clamp01(double v) => v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 
-        /// <summary>Relative throughput per filter — luminance passes most, H-alpha least.</summary>
-        // Modern CMOS-optimized LRGB filter sets (e.g. Baader) are specifically designed for
-        // "1:1:1" balanced RGB transmission -- each channel independently >95% within its own
-        // band, so that a real imaging session doesn't need per-channel exposure-ratio
-        // compensation. L passes the whole ~420-685nm visible band at ~98% (roughly 3x any
-        // single RGB channel's bandpass at similar in-band transmission). Halpha is a narrowband
-        // filter (~7nm typical FWHM) against R's ~100nm-wide band on the same continuum source
-        // (the RC20 images reflective solar-system bodies, not emission nebulae, so there's no
-        // emission-line signal boost to add back): Halpha/R = 7/100, so Halpha/L = (1/3)*(7/100).
+        /// <summary>
+        /// Relative sky-glow/haze throughput per filter, against Luminance -- a narrower filter
+        /// passes proportionally less of the (per-second, full-bandwidth-implied) sky background
+        /// just as it passes proportionally less of the target's own signal, so this is derived
+        /// directly from each filter's real bandwidth (VisualTelescopeSpec, see
+        /// FilterBandwidthAngstrom) rather than a separately-tuned set of ratios -- one real
+        /// number feeds both, instead of two figures that could silently drift apart.
+        /// </summary>
         private static float FilterThroughput(CameraFilter filter)
         {
-            switch (filter)
-            {
-                case CameraFilter.Luminance: return 1.0f;
-                case CameraFilter.Red:       return 1.0f / 3.0f;
-                case CameraFilter.Green:     return 1.0f / 3.0f;
-                case CameraFilter.Blue:      return 1.0f / 3.0f;
-                case CameraFilter.HAlpha:    return (1.0f / 3.0f) * (7.0f / 100.0f);
-                default:                     return 1.0f;
-            }
+            if (filter == CameraFilter.Luminance) return 1.0f;
+            return (float)(FilterBandwidthAngstrom(filter) / LuminanceBandwidthAngstrom);
         }
 
         /// <summary>Signal a mono sensor records through the given filter (L = luminance, R/G/B = single channel, H-alpha = red).</summary>

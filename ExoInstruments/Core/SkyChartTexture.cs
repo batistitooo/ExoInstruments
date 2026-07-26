@@ -304,6 +304,24 @@ namespace ExoInstruments.Visualization
         public static Vector2 ProjectAltAzToScreen(double altDeg, double azDeg, int width, int height, SkyChartView view)
             => ProjectToPixel(altDeg, azDeg, width, height, view);
 
+        /// <summary>
+        /// Inverse of ProjectToPixel's raw (pre pan/zoom) stage: given a raw pixel position, the
+        /// alt/az that would project there. Used by ExoInstrumentsGUI's marker decluttering (see
+        /// BuildChartBodyPoints/DeclutterBodyPositions) to convert a small on-screen nudge back
+        /// into real alt/az, so the same coordinates drive both rendering and hit-testing.
+        /// </summary>
+        public static void UnprojectRawPixel(double rawX, double rawY, int width, int height, out double altDeg, out double azDeg)
+        {
+            double rMax = ComputeRMax(width, height);
+            double centerX = width / 2.0;
+            double centerY = height / 2.0;
+            double dx = rawX - centerX;
+            double dy = rawY - centerY;
+            double r = Math.Sqrt(dx * dx + dy * dy);
+            azDeg = (Math.Atan2(dx, dy) * 180.0 / Math.PI + 360.0) % 360.0;
+            altDeg = 90.0 * (1.0 - r / rMax);
+        }
+
         /// <summary>r = Rmax*(90-alt)/90 in raw space, then (raw - pan)*zoom + center for the view transform.</summary>
         private static Vector2 ProjectToPixel(double altDeg, double azDeg, int width, int height, SkyChartView view)
         {

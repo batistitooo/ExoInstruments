@@ -193,8 +193,9 @@ namespace ExoInstruments.Core
                           "just a picture, monochrome and grainy the way a real long-exposure frame off an amateur CCD looks before anyone " +
                           "stacks and processes it.",
             IsSpaceBased = false,
-            ApertureMeters = 0.51,
-            SiteAltitudeMeters = 560.0,    // ETH Zurich's own observatory site
+            ApertureMeters = VisualTelescopeCatalog.Rc20.ApertureMeters,
+            SiteAltitudeMeters = VisualTelescopeCatalog.Rc20.SiteAltitudeMeters, // ETH Zurich's own observatory site
+            VisualTelescope = VisualTelescopeCatalog.Rc20,
             // Placeholders -- balance à valider avec Baptiste.
             UnlockedByDefault = false,
             UnlockCostFunds = 15_000.0,
@@ -203,9 +204,106 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
         };
 
+        public static readonly InstrumentSpec Cdk1000 = new InstrumentSpec
+        {
+            Name = "CDK1000",
+            DisplayName = "PlaneWave CDK1000 (Research Astrograph)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "PlaneWave Instruments CDK1000: 1-meter (39.4 in) Corrected Dall-Kirkham astrograph, f/6, 47% central obstruction " +
+                       "(planewave.com). A real unit was installed at Palomar Observatory in 2024 to support MIT's WINTER project and " +
+                       "Caltech research.",
+            Description = "A full meter of aperture -- research-observatory class, the same telescope PlaneWave installed at Palomar in 2024. " +
+                          "Nearly four times the RC20's light-collecting area and close to double its resolving power, with a corrected " +
+                          "Dall-Kirkham design that cancels off-axis coma AND astigmatism (an RC only cancels coma), so the field stays flat " +
+                          "corner to corner. That reach is what it takes to frame the small, faint, or distant bodies the RC20 can't " +
+                          "usefully resolve -- at real research-instrument cost.",
+            IsSpaceBased = false,
+            ApertureMeters = VisualTelescopeCatalog.Cdk1000.ApertureMeters,
+            SiteAltitudeMeters = VisualTelescopeCatalog.Cdk1000.SiteAltitudeMeters, // Palomar Observatory
+            VisualTelescope = VisualTelescopeCatalog.Cdk1000,
+            // Placeholders -- balance à valider avec Baptiste. Strictly better than the RC20 in
+            // every optical respect, so priced and gated above it per this file's own "bigger
+            // investment -> bigger payoff" ordering rule.
+            UnlockedByDefault = false,
+            UnlockCostFunds = 60_000.0,
+            UnlockScienceThreshold = 20.0,
+            ScanCostFunds = 120.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+        };
+
+        public static readonly InstrumentSpec Fors2Vlt = new InstrumentSpec
+        {
+            Name = "VLT FORS2",
+            DisplayName = "VLT UT1 + FORS2 (Flagship Astrograph)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "ESO Very Large Telescope, Unit Telescope 1 (Antu), 8.2m, fitted with the real FORS2 imager: mosaic of two MIT/LL " +
+                       "CCID20 CCDs, 15um pixels, 0.126\"/pixel (eso.org FORS2 User Manual and Standard Filters page). Same Paranal site " +
+                       "(2635m) already used for ESPRESSO in this mod.",
+            Description = "Not a hobbyist instrument at all: one of the four 8.2m Unit Telescopes of the actual Very Large Telescope, " +
+                          "carrying its real optical imager/spectrograph, FORS2. Every number driving this camera -- aperture, plate scale, " +
+                          "the real MIT CCID20 detector, its real filters -- is FORS2's own published spec, not a reskinned amateur camera. " +
+                          "Sixteen times the RC20's raw aperture area puts the faintest, smallest, most distant bodies in the system within " +
+                          "reach at last. The gain dial is gone, too: a real research CCD doesn't have one -- what you get is what the " +
+                          "hardware's own fixed readout mode gives you.",
+            IsSpaceBased = false,
+            ApertureMeters = VisualTelescopeCatalog.Fors2Vlt.ApertureMeters,
+            SiteAltitudeMeters = VisualTelescopeCatalog.Fors2Vlt.SiteAltitudeMeters, // Paranal Observatory
+            VisualTelescope = VisualTelescopeCatalog.Fors2Vlt,
+            // Placeholders -- balance à valider avec Baptiste. The biggest jump yet over the
+            // CDK1000, priced and gated accordingly per this file's own ordering rule.
+            UnlockedByDefault = false,
+            UnlockCostFunds = 250_000.0,
+            UnlockScienceThreshold = 80.0,
+            ScanCostFunds = 400.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+        };
+
+        public static readonly InstrumentSpec Sphere = new InstrumentSpec
+        {
+            Name = "VLT SPHERE",
+            DisplayName = "VLT UT3 + SPHERE (Adaptive-Optics Astrograph)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "ESO Very Large Telescope, Unit Telescope 3 (Melipal), 8.2m, fitted with the real SPHERE/ZIMPOL extreme-AO imaging " +
+                       "polarimeter: SAXO adaptive optics, ~25 mas achieved FWHM, real CCD (640,000 e- full well) (Schmid et al. 2018, " +
+                       "A&A 619, A9). Same Paranal site (2635m) as FORS2, different Unit Telescope.",
+            Description = "The same VLT, a different real instrument, solving a different real problem: FORS2 is seeing-limited -- " +
+                          "Paranal's own atmosphere blurs it to about an arcsecond no matter the mirror size. SPHERE instead corrects " +
+                          "that turbulence in real time with its SAXO adaptive-optics system, reaching about 25 milliarcseconds of real " +
+                          "resolution -- some 24 to 40 times finer. That's what it takes to actually resolve the system's smallest, most " +
+                          "marginal bodies, not just collect more of their light. The tradeoff is real too: ZIMPOL's true field of view " +
+                          "is barely 3.6 arcseconds wide, and it has no blue filter at all -- a specialist's instrument, not a generalist's.",
+            IsSpaceBased = false,
+            ApertureMeters = VisualTelescopeCatalog.Sphere.ApertureMeters,
+            SiteAltitudeMeters = VisualTelescopeCatalog.Sphere.SiteAltitudeMeters, // Paranal Observatory
+            VisualTelescope = VisualTelescopeCatalog.Sphere,
+            // Placeholders -- balance à valider avec Baptiste. A specialist upgrade rather than a
+            // strict step up from the CDK1000/FORS2 (tiny FOV, no blue channel), so priced
+            // similarly to FORS2 rather than automatically higher.
+            UnlockedByDefault = false,
+            UnlockCostFunds = 300_000.0,
+            UnlockScienceThreshold = 100.0,
+            ScanCostFunds = 450.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+        };
+
         public static readonly InstrumentSpec[] All =
         {
-            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, Rc20
+            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, Rc20, Cdk1000, Fors2Vlt, Sphere
         };
     }
 }
