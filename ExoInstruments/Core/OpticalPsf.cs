@@ -386,18 +386,44 @@ namespace ExoInstruments.Core
             return Math.Max(1, Math.Min(MaxKernelRadiusPx, r));
         }
 
-        /// <summary>Samples a radially symmetric profile onto a square kernel grid, evaluating each pixel at its own centre offset from the axis.</summary>
+        /// <summary>Radial lookup samples per pixel. At 4/px the spacing is a quarter pixel, far finer than any structure these smooth profiles contain.</summary>
+        private const int RadialLutSamplesPerPixel = 4;
+
+        /// <summary>
+        /// Samples a radially symmetric profile onto a square kernel grid.
+        ///
+        /// The profile is evaluated on a fine 1D radial lookup table and interpolated onto the
+        /// grid, rather than evaluated once per pixel. This is not a shortcut for its own sake:
+        /// the atmospheric profile costs a 512-step quadrature with a Bessel evaluation per step,
+        /// so a halo kernel of radius 256 would otherwise mean 263,169 quadratures -- of order
+        /// 10^8 special-function evaluations for a single capture. Both profiles here depend on
+        /// radius alone and are smooth on the scale of a quarter pixel, so tabulating and
+        /// interpolating is ~180x cheaper for a difference far below the kernel's own truncation.
+        /// </summary>
         private static double[] SampleRadial(int radius, double plateScaleArcsecPerPixel, Func<double, double> intensityAtThetaRad)
         {
             int size = 2 * radius + 1;
             var k = new double[size * size];
+
+            double maxRadiusPx = radius * Math.Sqrt(2.0);
+            int lutCount = (int)Math.Ceiling(maxRadiusPx * RadialLutSamplesPerPixel) + 2;
+            var lut = new double[lutCount];
+            for (int i = 0; i < lutCount; i++)
+            {
+                double rPx = (double)i / RadialLutSamplesPerPixel;
+                lut[i] = intensityAtThetaRad(rPx * plateScaleArcsecPerPixel * ArcsecToRad);
+            }
+
             for (int dy = -radius; dy <= radius; dy++)
             {
                 for (int dx = -radius; dx <= radius; dx++)
                 {
                     double rPx = Math.Sqrt((double)dx * dx + (double)dy * dy);
-                    double thetaRad = rPx * plateScaleArcsecPerPixel * ArcsecToRad;
-                    k[(dy + radius) * size + (dx + radius)] = intensityAtThetaRad(thetaRad);
+                    double pos = rPx * RadialLutSamplesPerPixel;
+                    int i0 = (int)pos;
+                    if (i0 >= lutCount - 1) { k[(dy + radius) * size + (dx + radius)] = lut[lutCount - 1]; continue; }
+                    double frac = pos - i0;
+                    k[(dy + radius) * size + (dx + radius)] = lut[i0] * (1.0 - frac) + lut[i0 + 1] * frac;
                 }
             }
             return k;

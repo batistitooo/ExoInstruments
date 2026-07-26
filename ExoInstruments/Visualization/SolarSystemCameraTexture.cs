@@ -343,11 +343,18 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private const int MaxHaloKernelRadiusPx = 256;
 
-        // Cache for the solved adaptive-optics residual (see ComputeAtmosphericFwhmArcsec).
-        private VisualTelescopeSpec aoResidualSpec;
-        private CameraFilter aoResidualFilter;
-        private double aoResidualPlateScale = -1.0;
-        private double aoResidualArcsec;
+        // Built PSF, cached on everything it depends on (see EnsurePsfKernels).
+        private VisualTelescopeSpec psfCacheSpec;
+        private CameraFilter psfCacheFilter;
+        private double psfCachePlateScale = -1.0;
+        private double psfCacheAtmosphericFwhm = -1.0;
+        private double psfCacheDefocusRadius = -1.0;
+        private float[] psfCacheCore;
+        private int psfCacheCoreRadius;
+        private float psfCacheCoreWeight = 1f;
+        private float[] psfCacheHalo;
+        private int psfCacheHaloRadius;
+        private double psfCacheDiffractionFwhm;
         private float[] rawScratch;
         private float[] astigmatismScratch;
         private float[] rowPrefixScratch;
@@ -813,14 +820,14 @@ namespace ExoInstruments.Visualization
             public double MoonSkyExcess;
             public float CloudCoverage;
             public double TotalElectrons;
-            /// <summary>The corrected core of the instrument's PSF for this frame (diffraction + residual atmosphere + any defocus), pre-built on the main thread -- see OpticalPsf.</summary>
-            public float[] PsfKernel;
-            public int PsfKernelRadius;
-            /// <summary>Fraction of the light the core carries: an AO system's real Strehl ratio, or 1 for an instrument whose PSF has no separate halo.</summary>
-            public float PsfCoreWeight;
-            /// <summary>The wide uncorrected seeing halo carrying the remaining (1 - PsfCoreWeight) of the light, or null when there is none.</summary>
-            public float[] PsfHaloKernel;
-            public int PsfHaloKernelRadius;
+            // PSF ingredients rather than a finished kernel. Building the kernel is pure C# that
+            // touches nothing Unity-owned, so it belongs on the background side of this boundary
+            // -- doing it here would stall the main thread at the moment the player presses
+            // Capture, which is exactly when a stall is most visible.
+            public double PlateScaleArcsec;
+            /// <summary>Plain ground-based seeing (arcsec), already resolved from the target's airmass on the main thread. Ignored when the instrument has adaptive optics.</summary>
+            public double SeeingFwhmArcsec;
+            public double DefocusDiscRadiusPx;
             public int DriftPx;
         }
 
@@ -860,45 +867,13 @@ namespace ExoInstruments.Visualization
 
             // Cloud cover degrades the delivered image quality on top of the clear-sky term;
             // folded into the atmospheric FWHM (an angular quantity) rather than added as a
-            // separate pixel count, so it scales correctly with plate scale and binning.
-            double atmosphericFwhmArcsec = ComputeAtmosphericFwhmArcsec(targetBody)
-                                         + coverage * CloudBlurPxMax * PlateScaleArcsecPerPixel;
-            float defocusDiscRadiusPx = Autofocus ? 0f : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
+            // separate pixel count, so it scales correctly with plate scale and binning. Only
+            // the plain ground-based term is resolved here, because only it needs the target's
+            // altitude; the adaptive-optics solve is pure arithmetic and happens off-thread.
+            double seeingFwhmArcsec = ComputeGroundSeeingFwhmArcsec(targetBody)
+                                    + coverage * CloudBlurPxMax * PlateScaleArcsecPerPixel;
+            double defocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
             int driftPx = Autoguiding ? 0 : ComputeDriftPixels(exposureSeconds, targetBody);
-
-            float[] psfKernel = OpticalPsf.BuildKernel(
-                PlateScaleArcsecPerPixel,
-                Spec.ApertureMeters,
-                Spec.SecondaryObstructionFraction,
-                FilterCentralWavelengthMeters(Filter),
-                atmosphericFwhmArcsec,
-                defocusDiscRadiusPx,
-                out int psfRadius);
-
-            // A real adaptive-optics PSF is two-component: a corrected core carrying the system's
-            // Strehl ratio, plus the wide halo of everything it failed to correct. Building the
-            // halo as its own kernel (rather than merging both into one profile) keeps the core
-            // genuinely sharp -- the halo then reads as the diffuse background it physically is,
-            // instead of smearing the surface detail the core resolved.
-            float coreWeight = 1f;
-            float[] haloKernel = null;
-            int haloRadius = 0;
-            if (Spec.AdaptiveOpticsFwhmArcsec > 0.0 && Spec.AdaptiveOpticsStrehlRatio > 0.0
-                && Spec.AdaptiveOpticsHaloSeeingFwhmArcsec > 0.0)
-            {
-                coreWeight = (float)Mathf.Clamp01((float)Spec.AdaptiveOpticsStrehlRatio);
-                haloKernel = OpticalPsf.BuildSeeingHaloKernel(
-                    PlateScaleArcsecPerPixel,
-                    Spec.AdaptiveOpticsHaloSeeingFwhmArcsec,
-                    FilterCentralWavelengthMeters(Filter),
-                    MaxHaloKernelRadiusPx,
-                    out haloRadius);
-            }
-
-            LastAppliedBlurRadiusPx = psfRadius;
-            LastAtmosphericFwhmArcsec = atmosphericFwhmArcsec;
-            LastDiffractionFwhmArcsec = OpticalPsf.AiryFwhmArcsec(
-                Spec.ApertureMeters, Spec.SecondaryObstructionFraction, FilterCentralWavelengthMeters(Filter));
 
             return new FrameComputeInputs
             {
@@ -914,13 +889,86 @@ namespace ExoInstruments.Visualization
                 MoonSkyExcess = moonSkyExcess,
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
-                PsfKernel = psfKernel,
-                PsfKernelRadius = psfRadius,
-                PsfCoreWeight = coreWeight,
-                PsfHaloKernel = haloKernel,
-                PsfHaloKernelRadius = haloRadius,
+                PlateScaleArcsec = PlateScaleArcsecPerPixel,
+                SeeingFwhmArcsec = seeingFwhmArcsec,
+                DefocusDiscRadiusPx = defocusDiscRadiusPx,
                 DriftPx = driftPx,
             };
+        }
+
+        /// <summary>
+        /// Builds (or reuses) the instrument's PSF for this frame. Runs on the background pipeline
+        /// thread -- none of it touches Unity or KSP state.
+        ///
+        /// Cached on everything it depends on, because none of those change between two captures
+        /// with the same settings, and the adaptive-optics solve alone builds a couple of dozen
+        /// trial kernels. A stacking batch therefore pays for the PSF once, not once per sub.
+        /// </summary>
+        private void EnsurePsfKernels(FrameComputeInputs inputs, out float[] core, out int coreRadius,
+                                      out float coreWeight, out float[] halo, out int haloRadius)
+        {
+            double wavelength = FilterCentralWavelengthMeters(inputs.Filter);
+            bool hasAo = Spec.AdaptiveOpticsFwhmArcsec > 0.0;
+
+            double atmosphericFwhm;
+            if (hasAo)
+            {
+                // The published delivered figure already contains diffraction, which is now
+                // computed separately from the pupil -- solve for the residual that reproduces it.
+                atmosphericFwhm = OpticalPsf.AtmosphericFwhmForDelivered(
+                    Spec.AdaptiveOpticsFwhmArcsec, inputs.PlateScaleArcsec,
+                    Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
+            }
+            else
+            {
+                atmosphericFwhm = inputs.SeeingFwhmArcsec;
+            }
+
+            bool reusable = psfCacheSpec == Spec
+                         && psfCacheFilter == inputs.Filter
+                         && psfCachePlateScale == inputs.PlateScaleArcsec
+                         && psfCacheAtmosphericFwhm == atmosphericFwhm
+                         && psfCacheDefocusRadius == inputs.DefocusDiscRadiusPx;
+
+            if (!reusable)
+            {
+                psfCacheCore = OpticalPsf.BuildKernel(
+                    inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
+                    wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx, out psfCacheCoreRadius);
+
+                // A real adaptive-optics PSF is two-component: a corrected core carrying the
+                // system's Strehl ratio, plus the wide halo of everything it failed to correct.
+                psfCacheHalo = null;
+                psfCacheHaloRadius = 0;
+                psfCacheCoreWeight = 1f;
+                if (hasAo && Spec.AdaptiveOpticsStrehlRatio > 0.0 && Spec.AdaptiveOpticsHaloSeeingFwhmArcsec > 0.0)
+                {
+                    psfCacheCoreWeight = Mathf.Clamp01((float)Spec.AdaptiveOpticsStrehlRatio);
+                    psfCacheHalo = OpticalPsf.BuildSeeingHaloKernel(
+                        inputs.PlateScaleArcsec, Spec.AdaptiveOpticsHaloSeeingFwhmArcsec,
+                        wavelength, MaxHaloKernelRadiusPx, out psfCacheHaloRadius);
+                }
+
+                psfCacheSpec = Spec;
+                psfCacheFilter = inputs.Filter;
+                psfCachePlateScale = inputs.PlateScaleArcsec;
+                psfCacheAtmosphericFwhm = atmosphericFwhm;
+                psfCacheDefocusRadius = inputs.DefocusDiscRadiusPx;
+
+                psfCacheDiffractionFwhm = OpticalPsf.AiryFwhmArcsec(
+                    Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
+            }
+
+            core = psfCacheCore;
+            coreRadius = psfCacheCoreRadius;
+            coreWeight = psfCacheCoreWeight;
+            halo = psfCacheHalo;
+            haloRadius = psfCacheHaloRadius;
+
+            // Diagnostics, read on the main thread after the task completes.
+            LastAppliedBlurRadiusPx = psfCacheCoreRadius;
+            LastAtmosphericFwhmArcsec = atmosphericFwhm;
+            LastDiffractionFwhmArcsec = psfCacheDiffractionFwhm;
         }
 
         /// <summary>
@@ -1029,8 +1077,9 @@ namespace ExoInstruments.Visualization
             // The instrument's real PSF -- diffraction off its own annular pupil, convolved with
             // the Kolmogorov atmosphere and any defocus (see OpticalPsf). One convolution, so
             // nothing is blurred twice.
-            ApplyPsf(pixels, inputs.PsfKernel, inputs.PsfKernelRadius,
-                     inputs.PsfCoreWeight, inputs.PsfHaloKernel, inputs.PsfHaloKernelRadius);
+            EnsurePsfKernels(inputs, out float[] psfCore, out int psfRadius,
+                             out float psfCoreWeight, out float[] psfHalo, out int psfHaloRadius);
+            ApplyPsf(pixels, psfCore, psfRadius, psfCoreWeight, psfHalo, psfHaloRadius);
 
             // Field-dependent astigmatism, applied after the PSF so it reads as a distinct
             // off-axis smear rather than blending into the on-axis profile.
@@ -1082,34 +1131,11 @@ namespace ExoInstruments.Visualization
         /// correctly with zoom/binning because it's derived from a real arcsec figure, not a
         /// pixel one.
         /// </summary>
-        private double ComputeAtmosphericFwhmArcsec(CelestialBody targetBody)
+        private double ComputeGroundSeeingFwhmArcsec(CelestialBody targetBody)
         {
-            if (Spec.AdaptiveOpticsFwhmArcsec > 0.0)
-            {
-                // An AO system's published figure (e.g. SPHERE/SAXO's 25 mas) is the DELIVERED
-                // resolution -- diffraction already included. Since the diffraction term is now
-                // computed from the pupil and convolved in separately, feeding that same figure
-                // through again would double-count it. What belongs here is only the residual
-                // the AO leaves behind, solved for numerically so the finished PSF measures the
-                // published figure exactly (see AtmosphericFwhmForDelivered for why quadrature
-                // subtraction is not good enough for these profiles).
-                //
-                // Cached: the answer depends only on the instrument, the filter's wavelength and
-                // the plate scale, all fixed between captures, and the solve builds a couple of
-                // dozen trial kernels.
-                double plateScale = PlateScaleArcsecPerPixel;
-                double wavelength = FilterCentralWavelengthMeters(Filter);
-                if (aoResidualSpec != Spec || aoResidualFilter != Filter || aoResidualPlateScale != plateScale)
-                {
-                    aoResidualArcsec = OpticalPsf.AtmosphericFwhmForDelivered(
-                        Spec.AdaptiveOpticsFwhmArcsec, plateScale,
-                        Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
-                    aoResidualSpec = Spec;
-                    aoResidualFilter = Filter;
-                    aoResidualPlateScale = plateScale;
-                }
-                return aoResidualArcsec;
-            }
+            // An instrument with adaptive optics doesn't use this path at all -- its atmospheric
+            // term is the residual left after correction, solved for in EnsurePsfKernels.
+            if (Spec.AdaptiveOpticsFwhmArcsec > 0.0) return 0.0;
 
             if (!TryComputeAltitudeDeg(targetBody, out double altDeg)) return 0.0;
 
