@@ -1056,7 +1056,7 @@ namespace ExoInstruments
             obsPos = default; up = default; north = default; east = default;
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null) return false;
-            obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            obsPos = ObservatorySite.WorldPosition(home);
             up = (obsPos - home.position).normalized;
             Vector3d spinAxis = ((Vector3d)home.transform.up).normalized;
             east = Vector3d.Cross(spinAxis, up).normalized;

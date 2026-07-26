@@ -1105,7 +1105,7 @@ namespace ExoInstruments
             if (home == null || body == null) return false;
 
             Vector3d obsPos = home.GetWorldSurfacePosition(
-                SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+                ObservatorySite.LatitudeDeg, ObservatorySite.LongitudeDeg, 100.0);
             Vector3d up = (obsPos - home.position).normalized;
             Vector3d spinAxis = ((Vector3d)home.transform.up).normalized;
             Vector3d east = Vector3d.Cross(spinAxis, up).normalized;
@@ -1278,8 +1278,10 @@ namespace ExoInstruments
         /// Real-ish body color by name (stock Kerbol system) -- a rough match to
         /// each body's actual albedo/surface color, so Duna reads rust-red, Jool
         /// green, Eve purple, etc., rather than every body being the same dot.
-        /// Falls back to a neutral pale grey for anything not in the stock list
-        /// (a modded/Kopernicus body).
+        /// Covers both the stock system and the real one (Real Solar System and any pack sharing
+        /// those body names), matched by name rather than gated on which pack is installed -- a
+        /// name that isn't present simply never matches. Falls back to a neutral pale grey for
+        /// anything in neither list (another Kopernicus pack's own bodies).
         /// </summary>
         static Color BodyMarkerColor(CelestialBody body)
         {
@@ -1301,6 +1303,35 @@ namespace ExoInstruments
                 case "Pol": return new Color(0.78f, 0.68f, 0.50f, 1f);
                 case "Eeloo": return new Color(0.88f, 0.90f, 0.92f, 1f);
                 case "Sun": case "Kerbol": return new Color(1f, 0.92f, 0.55f, 1f);
+
+                // Real solar system (Real Solar System and any pack using the same body names).
+                // Approximate visual colours, matched to how each body actually looks to the eye
+                // through a telescope rather than to enhanced-colour spacecraft imagery.
+                case "Mercury": return new Color(0.66f, 0.62f, 0.58f, 1f);
+                case "Venus": return new Color(0.95f, 0.90f, 0.75f, 1f);
+                case "Earth": return new Color(0.36f, 0.52f, 0.72f, 1f);
+                case "Moon": return new Color(0.78f, 0.76f, 0.72f, 1f);
+                case "Mars": return new Color(0.80f, 0.44f, 0.28f, 1f);
+                case "Phobos": case "Deimos": return new Color(0.52f, 0.47f, 0.43f, 1f);
+                case "Ceres": return new Color(0.62f, 0.60f, 0.58f, 1f);
+                case "Jupiter": return new Color(0.83f, 0.72f, 0.58f, 1f);
+                case "Io": return new Color(0.88f, 0.80f, 0.42f, 1f);
+                case "Europa": return new Color(0.86f, 0.82f, 0.75f, 1f);
+                case "Ganymede": return new Color(0.68f, 0.63f, 0.57f, 1f);
+                case "Callisto": return new Color(0.52f, 0.48f, 0.45f, 1f);
+                case "Saturn": return new Color(0.90f, 0.82f, 0.63f, 1f);
+                case "Titan": return new Color(0.83f, 0.65f, 0.35f, 1f);
+                case "Enceladus": return new Color(0.93f, 0.94f, 0.95f, 1f);
+                case "Mimas": case "Tethys": case "Dione": case "Rhea": case "Iapetus":
+                    return new Color(0.78f, 0.76f, 0.73f, 1f);
+                case "Uranus": return new Color(0.62f, 0.83f, 0.86f, 1f);
+                case "Titania": case "Oberon": case "Ariel": case "Umbriel": case "Miranda":
+                    return new Color(0.62f, 0.60f, 0.58f, 1f);
+                case "Neptune": return new Color(0.35f, 0.48f, 0.82f, 1f);
+                case "Triton": return new Color(0.80f, 0.76f, 0.74f, 1f);
+                case "Pluto": return new Color(0.78f, 0.68f, 0.58f, 1f);
+                case "Charon": return new Color(0.65f, 0.63f, 0.62f, 1f);
+
                 default: return new Color(0.8f, 0.8f, 0.8f, 1f);
             }
         }
@@ -1925,6 +1956,11 @@ namespace ExoInstruments
 
         void DrawStarSelection()
         {
+            // The site is what decides which half of the sky is reachable at all, so it belongs
+            // next to the target list rather than buried in a diagnostic. On stock this reads as
+            // the equatorial KSC; on a pack that relocates the space centre it reads as wherever
+            // the observatory actually stands, and the chart above it changes accordingly.
+            GUILayout.Label($"Observing from {ObservatorySite.Describe()}", smallCaptionStyle);
             GUILayout.Label($"Select target star: ({catalog.Count} loaded)");
             GUILayout.Label("Filter by name (matches are highlighted and clickable on the sky chart):");
 
@@ -3330,8 +3366,8 @@ namespace ExoInstruments
         {
             var ctx = new ImagingObserverContext
             {
-                LatitudeDeg = SkyCoordinates.KscLatitudeDeg,
-                LongitudeDeg = SkyCoordinates.KscLongitudeDeg,
+                LatitudeDeg = ObservatorySite.LatitudeDeg,
+                LongitudeDeg = ObservatorySite.LongitudeDeg,
             };
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null) return ctx; // no rotation, no sun orbit: permanent-night fallback
@@ -3932,7 +3968,7 @@ namespace ExoInstruments
 
             double ut = Planetarium.GetUniversalTime();
             double localMeridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
-                ut, home.rotationPeriod, home.initialRotation, SkyCoordinates.KscLongitudeDeg);
+                ut, home.rotationPeriod, home.initialRotation, ObservatorySite.LongitudeDeg);
             var catalogSnapshot = catalog;
             string filterSnapshot = searchFilter;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
@@ -3949,7 +3985,7 @@ namespace ExoInstruments
                 var points = new List<SkyChartPoint>();
                 foreach (var star in catalogSnapshot)
                 {
-                    var horizontal = SkyCoordinates.TryComputeHorizontal(star, localMeridianRaDeg, SkyCoordinates.KscLatitudeDeg);
+                    var horizontal = SkyCoordinates.TryComputeHorizontal(star, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
                     if (!horizontal.HasValue) continue;
                     if (!horizontal.Value.IsAboveHorizon(0.0)) continue;
 
@@ -4289,8 +4325,8 @@ namespace ExoInstruments
             double cloudTransmission = 1.0 - cloudCoverage * SolarSystemCameraTexture.CloudMaxAttenuation;
 
             Vector3d observerNow = home.GetWorldSurfacePosition(
-                SkyCoordinates.KscLatitudeDeg,
-                SkyCoordinates.KscLongitudeDeg,
+                ObservatorySite.LatitudeDeg,
+                ObservatorySite.LongitudeDeg,
                 100.0);
 
             Vector3d homeNow = home.position;

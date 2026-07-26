@@ -17,12 +17,24 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Pure C# equatorial-to-horizontal transform -- no Unity/KSP dependency.
     ///
-    /// The real star catalog (RA/Dec) has no physical relationship to Kerbin's
-    /// rotation -- this is a deliberate simplification, consistent with the rest
-    /// of the mod's design (see StarCatalog/ExoplanetCsvLoader). We pick an
-    /// arbitrary zero point: at UT=0, the observer's meridian is defined to sit
-    /// at RA=0h. From there, Kerbin's rotation sweeps the meridian around the
-    /// sky -- one full lap per sidereal day, four times faster than Earth's.
+    /// Nothing here is tied to a particular home world. Every input that could be
+    /// -- the observer's latitude and longitude, the body's rotation period and
+    /// initial rotation -- is passed in by the caller, which reads them from the
+    /// running game (see ObservatorySite and BuildImagingObserverContext). The
+    /// transform itself is the standard one and is equally valid on Kerbin, on a
+    /// Real Solar System Earth, or on anything else a planet pack installs.
+    ///
+    /// On the RA zero point: on stock KSP the real star catalog has no physical
+    /// relationship to Kerbin's rotation, so the convention is arbitrary -- at
+    /// UT=0 the observer's meridian is defined to sit at RA=0h, and Kerbin's spin
+    /// sweeps it around the sky from there, one lap per sidereal day, four times
+    /// faster than Earth's. On a pack that models the real solar system, the same
+    /// arithmetic acquires real meaning for free: the home body's rotation period
+    /// becomes a real sidereal day, and because such packs define their inertial
+    /// frame to be the real one (that is how they place bodies on real orbital
+    /// elements), the angle this returns tracks genuine local sidereal time.
+    /// Whether it also matches a given skybox's own orientation is that skybox's
+    /// business -- see SkyAlignmentOffsetHours, which exists for exactly that.
     ///
     /// Rotation is computed from UT and the body's rotation period/initial
     /// rotation, not read live from CelestialBody.rotationAngle, so this works
@@ -30,10 +42,6 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class SkyCoordinates
     {
-        // Kerbal Space Center, stock KSP.
-        public const double KscLatitudeDeg = -0.0972;
-        public const double KscLongitudeDeg = -74.6002;
-
         /// <summary>
         /// The right ascension currently sitting on the observer's meridian.
         /// Feed this bodyRotationPeriodSeconds/bodyInitialRotationDeg from

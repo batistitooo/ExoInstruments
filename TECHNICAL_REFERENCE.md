@@ -12,8 +12,36 @@ Exhaustive technical record of every mechanic, formula, data source, and known s
 - **Layering**: `Core/` = pure C#, no Unity dependency, all the actual physics/math/data-model code, unit-testable in principle. `Visualization/` = Unity-dependent texture rendering (reads Core outputs, produces `Color[]`/`Texture2D`). `Session/` = per-campaign game-loop objects (tick forward in UT, accumulate samples). `ExoInstrumentsGUI.cs` = the single large IMGUI window (~4150 lines) gluing everything together. Root-level files (`BetterTimeWarpIntegration.cs`, `ObservatoryBuilding.cs`, `ExoInstrumentsScenario.cs`) are cross-cutting integrations.
 - **Three independent detection pipelines** (`DetectionMethod` enum): `Transit`, `RadialVelocity`, `DirectImaging`, plus a fourth non-exoplanet mode `SolarSystemPhotography` (RC20/CDK1000/VLT FORS2/VLT SPHERE) that reuses the instrument-economy scaffolding but none of the detection-science fields.
 - **Telescope catalog** (`Core/VisualTelescopeCatalog.cs`): every optics/sensor constant the `SolarSystemPhotography` rendering pipeline uses (aperture, focal length, native resolution, pixel pitch, QE, full well, read/dark noise, exposure/gain range, per-filter bandwidth and central wavelength, astigmatism amplitude, adaptive-optics FWHM/Strehl/halo) lives in a `VisualTelescopeSpec`, not hardcoded in `SolarSystemCameraTexture.cs`. `InstrumentSpec.VisualTelescope` (`Core/Observatories.cs`) links a career-economy row to its spec; picking that row in the Observatory dropdown calls `SolarSystemCameraTexture.SetActiveTelescope`, which re-derives every downstream quantity from the new spec.
-- **No real KSP star system used for astrophysics**: the star catalog (real RA/Dec, real exoplanet.eu/BSC data) is projected onto Kerbin's sky using an *arbitrary* zero-point convention (`SkyCoordinates.cs`) — Kerbin's rotation sweeps the meridian around the real sky, four times faster than Earth's, with no physical relationship between the two. This is a deliberate, foundational simplification everything else builds on.
+- **No real KSP star system used for astrophysics**: the star catalog (real RA/Dec, real exoplanet.eu/BSC data) is projected onto the home world's sky using an *arbitrary* zero-point convention (`SkyCoordinates.cs`) — on stock, Kerbin's rotation sweeps the meridian around the real sky, four times faster than Earth's, with no physical relationship between the two. This is a deliberate, foundational simplification everything else builds on. On a pack that models the real solar system the *rate* becomes real for free (see §1.1).
+- **Home-world agnostic** (§1.1): nothing in the observing model assumes stock Kerbin. Observer position, body spin, and orbital geometry are all read from the running game.
 - **Deterministic-by-hash design**: many "random" per-star properties (stellar activity level, rotation period, spot phase, RM spin-orbit angle, direct-imaging pointing offset) are not stored — they're derived from an FNV-1a (or similar) hash of the star's identity string, so the same star always gets the same synthetic properties across sessions without needing save-file bloat.
+
+---
+
+## 1.1 Home world and observatory site (`ObservatorySite.cs`)
+
+The mod does not assume stock Kerbin anywhere in its observing model, and does not depend on any planet pack being installed. Everything that could be home-world-specific is read from the running game:
+
+| Quantity | Source |
+|---|---|
+| Observer latitude / longitude | `SpaceCenter.Instance.Latitude/.Longitude` |
+| Home body spin (period, initial rotation) | `FlightGlobals.GetHomeBody()` |
+| Home body orbit (places the Sun) | `home.orbit` (LAN + argPe, period, epoch, mean anomaly) |
+| Moonlight reference flux | brightest moon of `home.orbitingBodies`, at its own semi-major axis |
+
+**Observer position.** Previously hardcoded to stock KSC's latitude −0.0972°. This is the single input that most changes the sky: at the equator the entire celestial sphere is reachable and everything rises perpendicular to the horizon; at Cape Canaveral's 28.6° N — where Real Solar System puts the space centre — the south celestial pole is permanently below the horizon, northern targets become circumpolar, and airmass at a given hour angle differs for every declination. Hardcoding one latitude silently produced the wrong sky for anyone not on stock.
+
+`SpaceCenter.Instance` is KSP's own space-centre object; verified by decompiling `Assembly-CSharp` that `SpaceCenter.Start()` sets its latitude/longitude from `cb.GetLatitudeAndLongitude(transform.position)` — i.e. from the actual space-centre transform on the actual host body. A pack that relocates or replaces the space centre is therefore picked up automatically, with no per-pack special casing. Resolution is cached once obtained (the object only populates its coordinates in scenes where it exists, and the space centre does not move during a game); the stock coordinates remain as a fallback if it is never available. The resolved site is shown in the target-selection panel.
+
+Harness-verified against textbook astronomy at both latitudes: maximum altitude reproduces `90 − |lat − dec|` exactly (Vega 79.82° vs 79.82° predicted at 28.6° N); Polaris is circumpolar at Cape Canaveral (minimum altitude 27.9°) and not at stock KSC (−0.8°); the Small Magellanic Cloud region never rises at Cape Canaveral (−11.4°) while reaching 17.3° from stock KSC.
+
+**Moonlight reference.** `MoonSkyExcess = 1` means "this system's full moon overhead", and the reference flux `albedo·(radius/distance)²` is now derived at runtime from the home body's brightest moon rather than hardcoded to stock's Mün. The same constant means very different things on different home worlds: Mün is a 200 km body only 12,000 km away, the real Moon is 1737 km at 384,400 km, and the two fluxes differ by a factor of ~13.6 — a constant calibrated on one leaves moonlight about an order of magnitude wrong on the other. Lunar phase is the single biggest driver of usable dark time at any real site, so this is worth getting right. A home world with no moons yields zero lunar pollution rather than a division by zero.
+
+**Sidereal meaning.** On stock, the RA zero point is arbitrary by construction (§1). On a pack modelling the real solar system the same arithmetic acquires real meaning for free: the home body's rotation period becomes a real sidereal day, and because such packs define their inertial frame to be the real one — that is how they place bodies on real orbital elements — the meridian angle tracks genuine local sidereal time. Whether it also agrees with a particular skybox replacement's own orientation is that skybox's business and is not claimed here.
+
+**Body colours.** `BodyMarkerColor` covers the real solar system's body names alongside the stock ones, matched by name rather than gated on which pack is installed — a name that isn't present simply never matches, and anything in neither list falls back to neutral grey.
+
+**What does not need changing.** The scale-driven parts adapt on their own because they were already derived from real physics rather than tuned constants: apparent magnitudes come from real albedo/radius/distance geometry (§7.0), so the extreme overbrightness of stock's compressed system (Mün at magnitude −22.5, §7.07) simply does not arise on real distances and the ND filters become optional rather than mandatory; plate scale, field of view and the PSF (§7.11) are properties of the instrument, not the sky; and the seeing/airmass model keys off the target's computed altitude.
 
 ---
 
@@ -538,7 +566,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 
 *(Every one of these is worth a line in a paper's Methods/Limitations section — collected here so nothing gets missed.)*
 
-1. **No real physical link between the star catalog's RA/Dec and Kerbin's sky** — an arbitrary zero-point convention, not real astrometry (`SkyCoordinates.cs`).
+1. **No real physical link between the star catalog's RA/Dec and the home world's sky** — an arbitrary zero-point convention, not real astrometry (`SkyCoordinates.cs`). The observer's *position* and the body's *rotation rate* are real and read from the game (§1.1), so a pack modelling the real solar system gets a real sidereal rate and a real latitude; only the zero point stays a convention, and no agreement with any particular skybox replacement is claimed.
 2. **No weather simulation** in the generic (exoplanet-instrument) observing forecast — only the solar-system-photography forecast (any of the four instruments, §7.4) factors in real EVE cloud cover, and even that assumes clouds persist unchanged into the future (no forecastable weather model exists to query).
 3. **`PrecisionExponent = 0.2` uniform across every instrument** — real magnitude-precision scaling varies by instrument/detector; this is one simplified relation for all.
 4. **Career-economy numbers (unlock cost, science threshold, scan cost, reward multiplier, all of `ScienceRewards.cs`) are explicitly unvalidated placeholders** pending playtesting — only their relative ordering is a real design constraint.

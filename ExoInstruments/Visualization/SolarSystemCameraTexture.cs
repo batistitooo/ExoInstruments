@@ -222,8 +222,46 @@ namespace ExoInstruments.Visualization
         // which this correctly reflects.
         private static float ReadNoiseSigmaValue => (float)(Spec.ReadNoiseElectrons / FullWellElectrons);
 
-        // Reference flux for a full Mün at zenith: albedo * (radius/distance)^2.
-        private const double MunReferenceFluxUnits = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
+        /// <summary>
+        /// Reference flux the moonlight term is expressed in: the home world's own brightest moon,
+        /// full and at its mean distance, as albedo * (radius/distance)^2. So MoonSkyExcess = 1
+        /// always means "this system's full moon overhead", whatever system that is.
+        ///
+        /// Derived at runtime rather than hardcoded, because the same absolute number means very
+        /// different things on different home worlds. Stock's Mün is a 200km body only 12,000km
+        /// away; the real Moon is 1737km at 384,400km, and the ratio of those two fluxes is a
+        /// factor of ~13.6. A constant calibrated on one makes moonlight roughly an order of
+        /// magnitude wrong on the other -- and it is a real observational effect worth getting
+        /// right, since lunar phase is the single biggest driver of usable dark time at any site.
+        ///
+        /// Cached per home body: this depends only on the system's geometry, which does not change.
+        /// </summary>
+        private static double MoonReferenceFluxUnits(CelestialBody home)
+        {
+            if (home == null) return 0.0;
+            if (ReferenceEquals(home, moonReferenceBody)) return moonReferenceFlux;
+
+            double best = 0.0;
+            if (home.orbitingBodies != null)
+            {
+                foreach (CelestialBody moon in home.orbitingBodies)
+                {
+                    if (moon == null || moon.orbit == null) continue;
+                    double distance = moon.orbit.semiMajorAxis;
+                    if (distance <= 0.0) continue;
+                    double ratio = moon.Radius / distance;
+                    double flux = Math.Max(0.0, moon.albedo) * ratio * ratio;
+                    if (flux > best) best = flux;
+                }
+            }
+
+            moonReferenceBody = home;
+            moonReferenceFlux = best;
+            return best;
+        }
+
+        private static CelestialBody moonReferenceBody;
+        private static double moonReferenceFlux;
 
         // Zodiacal light, relative to AirglowBaselinePerSecond via the real Pogson magnitude-
         // ratio relation (already how MoonlightPollution converts magnitudes to flux elsewhere
@@ -1113,7 +1151,7 @@ namespace ExoInstruments.Visualization
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null || body == null) return false;
 
-            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d obsPos = ObservatorySite.WorldPosition(home);
             Vector3d up = (obsPos - home.position).normalized;
             Vector3d toBody = (body.position - obsPos).normalized;
             altDeg = 90.0 - Vector3d.Angle(up, toBody);
@@ -1227,12 +1265,14 @@ namespace ExoInstruments.Visualization
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || home.orbitingBodies == null) return 0.0;
 
-            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d obsPos = ObservatorySite.WorldPosition(home);
             Vector3d toTarget = targetBody != null ? (targetBody.position - obsPos) : Vector3d.zero;
             bool haveTarget = toTarget.sqrMagnitude > 1e-6;
             if (haveTarget) toTarget = toTarget.normalized;
 
             double kernelAtReference = MoonlightPollution.ScatteringKernel(30.0);
+            double referenceFlux = MoonReferenceFluxUnits(home);
+            if (referenceFlux <= 0.0) return 0.0; // a home world with no moons has no lunar pollution
             double total = 0.0;
             foreach (CelestialBody moon in home.orbitingBodies)
             {
@@ -1253,7 +1293,7 @@ namespace ExoInstruments.Visualization
                 double altitudeRamp = Math.Min(1.0, altDeg / 10.0);
                 double scatterWeight = MoonlightPollution.ScatteringKernel(separationDeg) / kernelAtReference;
 
-                total += (moonFlux / MunReferenceFluxUnits) * altitudeRamp * scatterWeight;
+                total += (moonFlux / referenceFlux) * altitudeRamp * scatterWeight;
             }
             return total;
         }
@@ -1270,7 +1310,7 @@ namespace ExoInstruments.Visualization
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || targetBody == null) return 0.0;
 
-            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d obsPos = ObservatorySite.WorldPosition(home);
             double distanceToObserverMeters = (targetBody.position - obsPos).magnitude;
             double distanceToSunMeters = (targetBody.position - sun.position).magnitude;
             if (distanceToObserverMeters < 1.0 || distanceToSunMeters < 1.0) return 0.0;
@@ -1305,7 +1345,7 @@ namespace ExoInstruments.Visualization
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null || targetBody == null) return 0.0;
 
-            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d obsPos = ObservatorySite.WorldPosition(home);
             double distanceMeters = (targetBody.position - obsPos).magnitude;
             if (distanceMeters < 1.0) return 0.0;
 
@@ -1492,7 +1532,7 @@ namespace ExoInstruments.Visualization
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null) return 0f;
 
-            Vector3d obsPos = home.GetWorldSurfacePosition(SkyCoordinates.KscLatitudeDeg, SkyCoordinates.KscLongitudeDeg, 100.0);
+            Vector3d obsPos = ObservatorySite.WorldPosition(home);
             Vector3d worldUp = (obsPos - home.position).normalized;
             Vector3 bodyFixedUp = home.bodyTransform != null
                 ? home.bodyTransform.InverseTransformDirection((Vector3)worldUp)
