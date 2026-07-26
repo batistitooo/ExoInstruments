@@ -49,6 +49,19 @@ namespace ExoInstruments.Core
         public double BlueBandwidthAngstrom;
         public double HAlphaBandwidthAngstrom;
 
+        // Real CENTRAL wavelength (nm) per filter-wheel position. Separate from the bandwidths
+        // above because diffraction cares about where the passband sits, not how wide it is:
+        // the whole PSF scales as lambda/D (see OpticalPsf), so the same telescope genuinely
+        // resolves finer through a blue filter than a red one -- a real, measurable effect that
+        // a single instrument-wide wavelength would erase. Each entry's own comment sources its
+        // filter set; a position the instrument doesn't physically have is left at 0 and is
+        // unreachable (see AvailableFilters).
+        public double LuminanceCentralWavelengthNm;
+        public double RedCentralWavelengthNm;
+        public double GreenCentralWavelengthNm;
+        public double BlueCentralWavelengthNm;
+        public double HAlphaCentralWavelengthNm;
+
         /// <summary>
         /// Which CameraFilter positions actually exist as a real filter on this instrument --
         /// the GUI's filter wheel only offers these. Most instruments carry all five; an
@@ -67,6 +80,24 @@ namespace ExoInstruments.Core
         /// the plain ground-based seeing model applies, same as every telescope before SPHERE.
         /// </summary>
         public double AdaptiveOpticsFwhmArcsec;
+
+        /// <summary>
+        /// Strehl ratio this AO system really achieves -- the fraction of the light it actually
+        /// concentrates into the diffraction-limited core. Only meaningful alongside
+        /// AdaptiveOpticsFwhmArcsec.
+        ///
+        /// This is what makes a real AO point-spread function two-component rather than one
+        /// broadened blob: a corrected core carrying this fraction, plus a wide halo carrying
+        /// the rest (see AdaptiveOpticsHaloSeeingFwhmArcsec, and OpticalPsf.BuildAdaptiveOptics
+        /// Kernel). Collapsing the two into a single profile of the right total FWHM gets the
+        /// width right but puts far too much light at intermediate scales, which is exactly
+        /// where a resolved planetary disk's surface detail lives -- it smears features that a
+        /// real AO frame keeps sharp on top of a diffuse background.
+        /// </summary>
+        public double AdaptiveOpticsStrehlRatio;
+
+        /// <summary>Seeing FWHM (arcsec) of the uncorrected halo the AO leaves behind -- the site's own real median seeing, since the halo is simply the light the correction failed to gather.</summary>
+        public double AdaptiveOpticsHaloSeeingFwhmArcsec;
 
         /// <summary>
         /// True for an instrument that always has precision active tracking, with no real bare/
@@ -153,6 +184,17 @@ namespace ExoInstruments.Core
             GreenBandwidthAngstrom = 2650.0 / 3.0,
             BlueBandwidthAngstrom = 2650.0 / 3.0,
             HAlphaBandwidthAngstrom = 70.0,
+
+            // Amateur LRGB set: L is the real ~420-685nm visible band this filter class covers
+            // (centre 552.5nm), and R/G/B are its even thirds -- the same 1:1:1 balanced split
+            // the bandwidths above already assume, so the centres fall at the midpoint of each
+            // third (B 420-508.3, G 508.3-596.7, R 596.7-685nm). H-alpha is the real line.
+            LuminanceCentralWavelengthNm = 552.5,
+            RedCentralWavelengthNm = 640.8,
+            GreenCentralWavelengthNm = 552.5,
+            BlueCentralWavelengthNm = 464.2,
+            HAlphaCentralWavelengthNm = 656.3,
+
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 3.0f,
         };
@@ -222,6 +264,15 @@ namespace ExoInstruments.Core
             GreenBandwidthAngstrom = 2650.0 / 3.0,
             BlueBandwidthAngstrom = 2650.0 / 3.0,
             HAlphaBandwidthAngstrom = 70.0,
+
+            // Same real amateur LRGB filter set as the RC20 (same camera, same accessory class)
+            // -- see Rc20's own comment for how these centres follow from the band's even thirds.
+            LuminanceCentralWavelengthNm = 552.5,
+            RedCentralWavelengthNm = 640.8,
+            GreenCentralWavelengthNm = 552.5,
+            BlueCentralWavelengthNm = 464.2,
+            HAlphaCentralWavelengthNm = 656.3,
+
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
@@ -327,6 +378,17 @@ namespace ExoInstruments.Core
             GreenBandwidthAngstrom = 1110.0,
             BlueBandwidthAngstrom = 880.0,
             HAlphaBandwidthAngstrom = 61.0,
+
+            // Real FORS2 broadband set, the same filters the bandwidths above come from: Bessell
+            // B (429nm/88nm), V (554nm/111nm), R (655nm/165nm) and the narrowband H-alpha
+            // (656.3nm/6.1nm). Luminance is FORS2's own full sensitivity range (~330-1100nm,
+            // i.e. the 7700 Angstrom width above), whose centre is 715nm.
+            LuminanceCentralWavelengthNm = 715.0,
+            RedCentralWavelengthNm = 655.0,
+            GreenCentralWavelengthNm = 554.0,
+            BlueCentralWavelengthNm = 429.0,
+            HAlphaCentralWavelengthNm = 656.3,
+
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
@@ -426,9 +488,27 @@ namespace ExoInstruments.Core
             GreenBandwidthAngstrom = 806.0,
             BlueBandwidthAngstrom = 0.0, // no real ZIMPOL blue filter -- see AvailableFilters
             HAlphaBandwidthAngstrom = 55.0,
+
+            // Real ZIMPOL filter centres, the same ones the bandwidths above come from (Schmid
+            // et al. 2018): V 554nm as Green, N_R 646nm as Red, B_Ha 655.6nm as HAlpha.
+            // Luminance is ZIMPOL's own quoted 500-900nm working regime, centre 700nm. Blue
+            // stays 0 -- there is no real ZIMPOL broadband blue filter and the position is
+            // unreachable (see AvailableFilters immediately below).
+            LuminanceCentralWavelengthNm = 700.0,
+            RedCentralWavelengthNm = 646.0,
+            GreenCentralWavelengthNm = 554.0,
+            BlueCentralWavelengthNm = 0.0,
+            HAlphaCentralWavelengthNm = 655.6,
+
             AvailableFilters = new[] { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.HAlpha },
 
             AdaptiveOpticsFwhmArcsec = 0.025,
+            // Strehl ~40% in I band, the ZIMPOL system paper's own quoted performance alongside
+            // the 25 mas figure above. The halo is Paranal's real median seeing (0.65", ESO's
+            // published site figure -- the same site FORS2 above observes from), since the halo
+            // is by definition the fraction SAXO did not correct.
+            AdaptiveOpticsStrehlRatio = 0.40,
+            AdaptiveOpticsHaloSeeingFwhmArcsec = 0.65,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
 

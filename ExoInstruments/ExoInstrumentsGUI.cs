@@ -1430,6 +1430,116 @@ namespace ExoInstruments
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             GUILayout.Label($"({w}x{h})", smallCaptionStyle);
             GUILayout.EndHorizontal();
+
+            DrawDisplayStretchControls();
+            DrawResolvingPowerDiagnostic();
+        }
+
+        /// <summary>
+        /// Display transfer function selector. This is a VIEWER control, not an instrument one --
+        /// the saved FITS and everything the stacker consumes stay linear no matter what is
+        /// picked here, exactly as in a real observing tool.
+        /// </summary>
+        void DrawDisplayStretchControls()
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Display stretch:", GUILayout.Width(110));
+            var current = SolarSystemCameraTexture.Stretch;
+            foreach (DisplayStretch mode in new[] { DisplayStretch.Linear, DisplayStretch.Log, DisplayStretch.Asinh })
+            {
+                bool selected = current == mode;
+                if (GUILayout.Toggle(selected, " " + StretchLabel(mode), GUILayout.Width(76)) && !selected)
+                {
+                    SolarSystemCameraTexture.Stretch = mode;
+                    // Restretch the frame already on screen rather than making the player re-expose.
+                    solarSystemCamera.UploadDisplayTextures();
+                }
+            }
+            GUILayout.EndHorizontal();
+            GUILayout.Label(StretchDescription(SolarSystemCameraTexture.Stretch), smallCaptionStyle);
+        }
+
+        static string StretchLabel(DisplayStretch mode)
+        {
+            switch (mode)
+            {
+                case DisplayStretch.Log:   return "Log";
+                case DisplayStretch.Asinh: return "Asinh";
+                default:                   return "Linear";
+            }
+        }
+
+        static string StretchDescription(DisplayStretch mode)
+        {
+            switch (mode)
+            {
+                case DisplayStretch.Log:
+                    return "Logarithmic (DS9 formulation, a=1000) -- strongest lift of faint detail, compresses the bright end hard. Viewer only; the FITS stays linear.";
+                case DisplayStretch.Asinh:
+                    return "Asinh (Lupton et al. 2004, the SDSS standard) -- linear near zero, logarithmic beyond, so faint surface detail lifts without crushing bright regions. Viewer only; the FITS stays linear.";
+                default:
+                    return "Linear -- the detector's raw signal. Faithful, but a bright resolved disk hides its own few-percent surface contrast in a handful of display levels.";
+            }
+        }
+
+        /// <summary>
+        /// The three numbers that decide whether surface detail is resolvable at all, and which
+        /// stage is the binding constraint: the real plate scale, how many pixels the target's
+        /// disk actually spans at it, and how much blur the optical model is adding on top.
+        /// Real acquisition/planning tools (SharpCap, NINA, ESO's ETCs) surface exactly this,
+        /// and without it a soft frame is indistinguishable from a correctly-modelled one --
+        /// the player can't tell "too few pixels on the disk" from "the model is over-blurring"
+        /// from "the game's own texture ran out of detail", which are three different problems
+        /// with three different answers.
+        /// </summary>
+        /// <summary>Angular size in whichever unit reads naturally at that scale -- milliarcsec below 0.1", arcsec above.</summary>
+        static string Arcsec(double arcsec)
+            => arcsec < 0.1 ? $"{arcsec * 1000.0:F1} mas" : $"{arcsec:F2}\"";
+
+        void DrawResolvingPowerDiagnostic()
+        {
+            if (selectedPhotographyBody == null) return;
+
+            float plateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+            if (plateScale <= 0f) return;
+
+            double diskArcsec = SolarSystemCameraTexture.AngularDiameterArcsec(selectedPhotographyBody);
+            double diskPx = diskArcsec / plateScale;
+            float blurPx = solarSystemCamera.LastAppliedBlurRadiusPx;
+
+            string scale = plateScale < 0.1f
+                ? $"{plateScale * 1000f:F1} mas/px"
+                : $"{plateScale:F3}\"/px";
+
+            GUILayout.Label($"Plate scale {scale}  |  disk {diskArcsec:F2}\" = {diskPx:F0} px", smallCaptionStyle);
+
+            if (solarSystemCamera.HasCapturedPhoto && diskPx > 0.0)
+            {
+                // What actually limits the frame, split into the two terms that compete for it:
+                // the telescope's own diffraction (which no observing condition can beat) and
+                // whatever the atmosphere still contributes after adaptive optics, if any.
+                double diff = solarSystemCamera.LastDiffractionFwhmArcsec;
+                double atm = solarSystemCamera.LastAtmosphericFwhmArcsec;
+                double delivered = Math.Sqrt(diff * diff + atm * atm);
+
+                GUILayout.Label(
+                    $"PSF: diffraction {Arcsec(diff)} + atmosphere {Arcsec(atm)} = {Arcsec(delivered)} delivered "
+                    + $"({delivered / plateScale:F1} px, {delivered / Math.Max(1e-9, diskArcsec) * 100.0:F1}% of disk)"
+                    + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
+                    smallCaptionStyle);
+            }
+
+            // Saturation is the one failure here that silently destroys real detail rather than
+            // just softening it, and on a large-aperture instrument it is the DEFAULT outcome on a
+            // bright disk -- worth calling out explicitly instead of leaving it as a percentage
+            // the player has to know how to interpret.
+            if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.LastSaturatedFraction > 0.01f)
+            {
+                GUILayout.Label(
+                    "Over-exposed: saturated pixels have lost their real surface contrast. "
+                    + "Shorten the exposure, drop the gain, or add ND -- exactly what a real observer does on a bright target.",
+                    smallCaptionStyle);
+            }
         }
 
         /// <summary>Zoom / exposure / ISO / filter / focus / guiding controls + the Capture and Save buttons.</summary>
@@ -1793,6 +1903,10 @@ namespace ExoInstruments
             byte[] pngData = frame.EncodeToPNG();
             System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.png"), pngData);
 
+            // Companion dump of the untouched Unity render (see RawRenderFrame): the finished PNG
+            // alone can't tell you whether softness came from the game's own scaled-space
+            // rendering of the body or from this mod's optical model. Saving both side by side
+            // makes that attribution a one-glance comparison instead of a guess.
             var fitsInfo = new FitsWriter.FitsHeaderInfo
             {
                 ExposureSeconds = solarSystemCamera.ExposureSeconds,

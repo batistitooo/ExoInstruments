@@ -7,6 +7,28 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Visualization
 {
     /// <summary>Filter-wheel positions. A mono CCD shoots one filter at a time, so each is its own grayscale frame -- the filter just selects which of the rendered scene's channels (and how much throughput) forms the signal.</summary>
+    /// <summary>
+    /// Display transfer function applied when a finished frame is turned into something the eye
+    /// can read. DISPLAY ONLY -- the science path (GetLastCaptureFullPrecision, the FITS export
+    /// and everything AstroImageStack stacks) always receives the untouched linear signal, which
+    /// is the same separation every real observing tool keeps between its viewer and its data.
+    ///
+    /// No astronomical image is looked at linearly. A resolved planetary disk puts almost all of
+    /// its pixels into a narrow bright range, so real surface contrast -- a few percent of the
+    /// local level -- occupies a handful of the 256 levels an 8-bit display has and is invisible,
+    /// even though the data holds it perfectly. Every real viewer (DS9, PixInsight, IRAF, ESO's
+    /// Reflex) therefore offers exactly this choice of stretch.
+    /// </summary>
+    public enum DisplayStretch
+    {
+        /// <summary>Raw linear signal, faithful to the detector but the hardest to read on a bright extended source.</summary>
+        Linear,
+        /// <summary>Logarithmic, DS9's own formulation y = log(a*x + 1) / log(a + 1) with its default a = 1000 (Joye &amp; Mandel 2003, ADASS XII, the SAOImage DS9 paper). Strong lift of faint detail; compresses the bright end hard.</summary>
+        Log,
+        /// <summary>Inverse hyperbolic sine, the astronomical standard from Lupton et al. 2004 (PASP 116, 133, "Preparing Red-Green-Blue Images from CCD Data"). Linear near zero and logarithmic far from it, so it lifts faint structure without crushing bright regions the way a pure log does -- what SDSS's own imagery uses.</summary>
+        Asinh
+    }
+
     public enum CameraFilter
     {
         Luminance, // clear/L: full luminance, maximum throughput
@@ -150,8 +172,8 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static double FullWellElectrons => Spec.FullWellElectrons * BinningFactor * BinningFactor;
 
-        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch.</summary>
-        private static float PlateScaleArcsecPerPixel
+        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch. Public because it's the single number that decides whether a target is resolvable at all -- real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it front and center for exactly that reason.</summary>
+        public static float PlateScaleArcsecPerPixel
         {
             get
             {
@@ -290,6 +312,42 @@ namespace ExoInstruments.Visualization
         private Texture2D capturedTexture;
         private Color[] pixelScratch;
         private Color[] blurScratch;
+        private float[] psfPlaneScratch;
+        private float[] psfHaloScratch;
+        private Color[] displayScratch;
+
+        /// <summary>
+        /// Display transfer function for finished frames. Affects only what is shown and the PNG
+        /// quick-look; the FITS export and the stacking path always get the linear signal.
+        /// </summary>
+        public static DisplayStretch Stretch { get; set; } = DisplayStretch.Asinh;
+
+        /// <summary>DS9's own default scaling constant for its log transfer function.</summary>
+        private const double LogStretchA = 1000.0;
+
+        /// <summary>
+        /// Softening parameter of the asinh stretch: the signal level, as a fraction of full
+        /// scale, below which the curve stays essentially linear. 0.02 puts the turnover just
+        /// above this pipeline's real noise floor, so genuine faint structure is lifted while the
+        /// noise itself is not amplified into visible grain.
+        /// </summary>
+        private const double AsinhSoftening = 0.02;
+
+        /// <summary>
+        /// Radius ceiling for the seeing-halo kernel. Larger than the core's because the halo is
+        /// genuinely that wide (Paranal's 0.65" is 361 px across at ZIMPOL's unbinned scale), but
+        /// still bounded: the transform size, and so the cost of every capture, grows with it.
+        /// Truncating a halo's far wings and renormalising leaves its FWHM untouched -- only the
+        /// faint outermost flux is redistributed, and at these radii that flux is already a flat
+        /// pedestal across the whole field.
+        /// </summary>
+        private const int MaxHaloKernelRadiusPx = 256;
+
+        // Cache for the solved adaptive-optics residual (see ComputeAtmosphericFwhmArcsec).
+        private VisualTelescopeSpec aoResidualSpec;
+        private CameraFilter aoResidualFilter;
+        private double aoResidualPlateScale = -1.0;
+        private double aoResidualArcsec;
         private float[] rawScratch;
         private float[] astigmatismScratch;
         private float[] rowPrefixScratch;
@@ -378,6 +436,30 @@ namespace ExoInstruments.Visualization
 
         /// <summary>The finished, timed-exposure photo (frozen at exposure completion), or null before the first BeginExposure completes.</summary>
         public Texture2D CapturedPhoto => capturedTexture;
+
+        /// <summary>Half-width (pixels) of the PSF kernel convolved into the last capture. See OpticalPsf for what the kernel contains.</summary>
+        public float LastAppliedBlurRadiusPx { get; private set; }
+
+        /// <summary>
+        /// Fraction of the last capture's pixels that reached or exceeded full well BEFORE the
+        /// sensor's clipping was applied -- i.e. genuinely blown-out, their real surface contrast
+        /// irrecoverably destroyed by saturation rather than merely softened.
+        ///
+        /// Diagnostic, and a necessary one on a large-aperture instrument: an 8.2m telescope on a
+        /// bright solar-system disk saturates almost instantly, and a saturated disk looks like a
+        /// featureless blur (flat white core, blooming halo) that is easily mistaken for an
+        /// optics/atmosphere problem when it is really just gross over-exposure. Written on the
+        /// background pipeline thread; safe to read after the processing Task completes, which is
+        /// the only place PollProcessTask ever does.
+        /// </summary>
+        public float LastSaturatedFraction => lastSaturatedFraction;
+        private float lastSaturatedFraction;
+
+        /// <summary>Atmospheric FWHM (arcsec) fed to the PSF for the last capture -- the residual left by adaptive optics, or the plain ground-based seeing figure. 0 means diffraction-limited.</summary>
+        public double LastAtmosphericFwhmArcsec { get; private set; }
+
+        /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
+        public double LastDiffractionFwhmArcsec { get; private set; }
 
         /// <summary>Last capture as a grayscale float[] (row-major, y-down), for AstroImageStack. Null before the first capture. Fresh copy every call.</summary>
         public float[] GetLastCaptureGray()
@@ -485,19 +567,67 @@ namespace ExoInstruments.Visualization
             pixelScratch = processTask.Result;
             processTask = null;
             isProcessing = false;
+
+            // The snapshot is taken from the LINEAR pipeline output, before any display transfer
+            // function -- it is what the FITS export and AstroImageStack consume, and stretching
+            // it would corrupt every downstream measurement.
             lastCaptureSnapshot = (Color[])pixelScratch.Clone();
 
-            if (outputTexture == null) return;
-            outputTexture.SetPixels(pixelScratch);
+            HasCapturedPhoto = true;
+            UploadDisplayTextures();
+        }
+
+        /// <summary>
+        /// Rebuilds the on-screen/preview textures from the stored linear capture through the
+        /// current display stretch. Separate from PollProcessTask so changing the stretch
+        /// re-renders the existing frame instead of forcing a new exposure -- the same way a real
+        /// viewer restretches what is already on screen.
+        /// </summary>
+        public void UploadDisplayTextures()
+        {
+            if (lastCaptureSnapshot == null || outputTexture == null) return;
+
+            int n = lastCaptureSnapshot.Length;
+            if (displayScratch == null || displayScratch.Length != n) displayScratch = new Color[n];
+            for (int i = 0; i < n; i++)
+            {
+                float v = ApplyDisplayStretch(lastCaptureSnapshot[i].r);
+                displayScratch[i] = new Color(v, v, v, 1f);
+            }
+
+            outputTexture.SetPixels(displayScratch);
             outputTexture.Apply();
 
             if (capturedTexture == null)
             {
                 capturedTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
             }
-            capturedTexture.SetPixels(pixelScratch);
+            capturedTexture.SetPixels(displayScratch);
             capturedTexture.Apply();
-            HasCapturedPhoto = true;
+        }
+
+        /// <summary>
+        /// Display transfer function -- see the DisplayStretch enum for what each mode is and
+        /// where it comes from. Input and output are both normalised to [0,1].
+        /// </summary>
+        private static float ApplyDisplayStretch(float linear)
+        {
+            float v = Mathf.Clamp01(linear);
+            switch (Stretch)
+            {
+                case DisplayStretch.Log:
+                    // DS9's log scale, at its own default a = 1000.
+                    return (float)(Math.Log(LogStretchA * v + 1.0) / Math.Log(LogStretchA + 1.0));
+
+                case DisplayStretch.Asinh:
+                    // Lupton et al. 2004. The softening parameter sets where the curve turns over
+                    // from linear to logarithmic; normalising by asinh(1/beta) keeps white at 1.
+                    return (float)(Math.Log(v / AsinhSoftening + Math.Sqrt(v * v / (AsinhSoftening * AsinhSoftening) + 1.0))
+                                 / Math.Log(1.0 / AsinhSoftening + Math.Sqrt(1.0 / (AsinhSoftening * AsinhSoftening) + 1.0)));
+
+                default:
+                    return v;
+            }
         }
 
         private bool hasLockedAim;
@@ -683,8 +813,14 @@ namespace ExoInstruments.Visualization
             public double MoonSkyExcess;
             public float CloudCoverage;
             public double TotalElectrons;
-            public float SeeingBlurPx;
-            public float DefocusBlurPx;
+            /// <summary>The corrected core of the instrument's PSF for this frame (diffraction + residual atmosphere + any defocus), pre-built on the main thread -- see OpticalPsf.</summary>
+            public float[] PsfKernel;
+            public int PsfKernelRadius;
+            /// <summary>Fraction of the light the core carries: an AO system's real Strehl ratio, or 1 for an instrument whose PSF has no separate halo.</summary>
+            public float PsfCoreWeight;
+            /// <summary>The wide uncorrected seeing halo carrying the remaining (1 - PsfCoreWeight) of the light, or null when there is none.</summary>
+            public float[] PsfHaloKernel;
+            public int PsfHaloKernelRadius;
             public int DriftPx;
         }
 
@@ -722,9 +858,47 @@ namespace ExoInstruments.Visualization
 
             double totalElectrons = ComputeCollectedElectrons(targetBody, extinction, exposureSeconds);
 
-            float seeingBlur = ComputeSeeingBlurPx(targetBody);
-            float defocusBlur = Autofocus ? 0f : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
+            // Cloud cover degrades the delivered image quality on top of the clear-sky term;
+            // folded into the atmospheric FWHM (an angular quantity) rather than added as a
+            // separate pixel count, so it scales correctly with plate scale and binning.
+            double atmosphericFwhmArcsec = ComputeAtmosphericFwhmArcsec(targetBody)
+                                         + coverage * CloudBlurPxMax * PlateScaleArcsecPerPixel;
+            float defocusDiscRadiusPx = Autofocus ? 0f : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
             int driftPx = Autoguiding ? 0 : ComputeDriftPixels(exposureSeconds, targetBody);
+
+            float[] psfKernel = OpticalPsf.BuildKernel(
+                PlateScaleArcsecPerPixel,
+                Spec.ApertureMeters,
+                Spec.SecondaryObstructionFraction,
+                FilterCentralWavelengthMeters(Filter),
+                atmosphericFwhmArcsec,
+                defocusDiscRadiusPx,
+                out int psfRadius);
+
+            // A real adaptive-optics PSF is two-component: a corrected core carrying the system's
+            // Strehl ratio, plus the wide halo of everything it failed to correct. Building the
+            // halo as its own kernel (rather than merging both into one profile) keeps the core
+            // genuinely sharp -- the halo then reads as the diffuse background it physically is,
+            // instead of smearing the surface detail the core resolved.
+            float coreWeight = 1f;
+            float[] haloKernel = null;
+            int haloRadius = 0;
+            if (Spec.AdaptiveOpticsFwhmArcsec > 0.0 && Spec.AdaptiveOpticsStrehlRatio > 0.0
+                && Spec.AdaptiveOpticsHaloSeeingFwhmArcsec > 0.0)
+            {
+                coreWeight = (float)Mathf.Clamp01((float)Spec.AdaptiveOpticsStrehlRatio);
+                haloKernel = OpticalPsf.BuildSeeingHaloKernel(
+                    PlateScaleArcsecPerPixel,
+                    Spec.AdaptiveOpticsHaloSeeingFwhmArcsec,
+                    FilterCentralWavelengthMeters(Filter),
+                    MaxHaloKernelRadiusPx,
+                    out haloRadius);
+            }
+
+            LastAppliedBlurRadiusPx = psfRadius;
+            LastAtmosphericFwhmArcsec = atmosphericFwhmArcsec;
+            LastDiffractionFwhmArcsec = OpticalPsf.AiryFwhmArcsec(
+                Spec.ApertureMeters, Spec.SecondaryObstructionFraction, FilterCentralWavelengthMeters(Filter));
 
             return new FrameComputeInputs
             {
@@ -740,8 +914,11 @@ namespace ExoInstruments.Visualization
                 MoonSkyExcess = moonSkyExcess,
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
-                SeeingBlurPx = seeingBlur,
-                DefocusBlurPx = defocusBlur,
+                PsfKernel = psfKernel,
+                PsfKernelRadius = psfRadius,
+                PsfCoreWeight = coreWeight,
+                PsfHaloKernel = haloKernel,
+                PsfHaloKernelRadius = haloRadius,
                 DriftPx = driftPx,
             };
         }
@@ -834,6 +1011,12 @@ namespace ExoInstruments.Visualization
             ApplyBlooming(rawScratch);
             ApplyChargeTransferSmear(rawScratch);
 
+            // Saturation census BEFORE the clamp below throws the over-full-well information away
+            // -- once clipped, a blown pixel is indistinguishable from a legitimately bright one.
+            int saturated = 0;
+            for (int i = 0; i < n; i++) if (rawScratch[i] >= 1f) saturated++;
+            lastSaturatedFraction = n > 0 ? (float)saturated / n : 0f;
+
             for (int i = 0; i < n; i++)
             {
                 float value = Mathf.Clamp01(rawScratch[i]);
@@ -843,16 +1026,14 @@ namespace ExoInstruments.Visualization
             // Diurnal drift: 360 deg per Kerbin rotation, converted to pixels by the FOV.
             if (inputs.DriftPx >= 1) ApplyHorizontalMotionBlur(pixels, inputs.DriftPx);
 
-            // Defocus + seeing + cloud haze all go through one blur pass to avoid double-blurring.
-            float cloudBlur = inputs.CloudCoverage * CloudBlurPxMax;
-            float blurRadius = inputs.DefocusBlurPx + inputs.SeeingBlurPx + cloudBlur;
-            if (blurRadius >= 0.5f)
-            {
-                ApplyBoxBlur(pixels, Mathf.RoundToInt(blurRadius));
-            }
+            // The instrument's real PSF -- diffraction off its own annular pupil, convolved with
+            // the Kolmogorov atmosphere and any defocus (see OpticalPsf). One convolution, so
+            // nothing is blurred twice.
+            ApplyPsf(pixels, inputs.PsfKernel, inputs.PsfKernelRadius,
+                     inputs.PsfCoreWeight, inputs.PsfHaloKernel, inputs.PsfHaloKernelRadius);
 
-            // Field-dependent astigmatism, applied after the uniform blur so it reads as a distinct
-            // off-axis smear rather than blending into the seeing/defocus radius.
+            // Field-dependent astigmatism, applied after the PSF so it reads as a distinct
+            // off-axis smear rather than blending into the on-axis profile.
             ApplyAstigmatismBlur(pixels);
 
             // Defect overlay last: hot/dead pixels are a detector read-out artifact, not an
@@ -901,21 +1082,109 @@ namespace ExoInstruments.Visualization
         /// correctly with zoom/binning because it's derived from a real arcsec figure, not a
         /// pixel one.
         /// </summary>
-        private float ComputeSeeingBlurPx(CelestialBody targetBody)
+        private double ComputeAtmosphericFwhmArcsec(CelestialBody targetBody)
         {
             if (Spec.AdaptiveOpticsFwhmArcsec > 0.0)
             {
-                return (float)(Spec.AdaptiveOpticsFwhmArcsec / PlateScaleArcsecPerPixel);
+                // An AO system's published figure (e.g. SPHERE/SAXO's 25 mas) is the DELIVERED
+                // resolution -- diffraction already included. Since the diffraction term is now
+                // computed from the pupil and convolved in separately, feeding that same figure
+                // through again would double-count it. What belongs here is only the residual
+                // the AO leaves behind, solved for numerically so the finished PSF measures the
+                // published figure exactly (see AtmosphericFwhmForDelivered for why quadrature
+                // subtraction is not good enough for these profiles).
+                //
+                // Cached: the answer depends only on the instrument, the filter's wavelength and
+                // the plate scale, all fixed between captures, and the solve builds a couple of
+                // dozen trial kernels.
+                double plateScale = PlateScaleArcsecPerPixel;
+                double wavelength = FilterCentralWavelengthMeters(Filter);
+                if (aoResidualSpec != Spec || aoResidualFilter != Filter || aoResidualPlateScale != plateScale)
+                {
+                    aoResidualArcsec = OpticalPsf.AtmosphericFwhmForDelivered(
+                        Spec.AdaptiveOpticsFwhmArcsec, plateScale,
+                        Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
+                    aoResidualSpec = Spec;
+                    aoResidualFilter = Filter;
+                    aoResidualPlateScale = plateScale;
+                }
+                return aoResidualArcsec;
             }
 
-            if (!TryComputeAltitudeDeg(targetBody, out double altDeg)) return 0f;
-            if (altDeg <= 0.0) return MaxSeeingBlurPx; // shouldn't be capturable this low, but cap defensively
+            if (!TryComputeAltitudeDeg(targetBody, out double altDeg)) return 0.0;
 
-            double airmass = ImagingObservingConditions.AirmassAt(altDeg);
-            if (double.IsInfinity(airmass) || double.IsNaN(airmass)) return MaxSeeingBlurPx;
+            // The plain ground-based model stays calibrated exactly as before -- its airmass
+            // response is unchanged -- but is expressed as the ANGLE it always physically was.
+            // Seeing is a property of the atmosphere, not of the sensor, so quoting it in pixels
+            // made it wrongly depend on the plate scale and binning; converting once here at the
+            // current plate scale preserves the existing behaviour while letting OpticalPsf work
+            // in the units the Kolmogorov model actually needs.
+            float blurPx;
+            if (altDeg <= 0.0) blurPx = MaxSeeingBlurPx; // shouldn't be capturable this low, but cap defensively
+            else
+            {
+                double airmass = ImagingObservingConditions.AirmassAt(altDeg);
+                if (double.IsInfinity(airmass) || double.IsNaN(airmass)) blurPx = MaxSeeingBlurPx;
+                else blurPx = Mathf.Min(MaxSeeingBlurPx, Mathf.Max(0f, (float)airmass - 1f) * SeeingBlurPxPerAirmass);
+            }
+            return blurPx * PlateScaleArcsecPerPixel;
+        }
 
-            float excess = Mathf.Max(0f, (float)airmass - 1f);
-            return Mathf.Min(MaxSeeingBlurPx, excess * SeeingBlurPxPerAirmass);
+        /// <summary>Real central wavelength (metres) of the filter currently in the wheel -- the lambda in lambda/D. Falls back to Luminance for a position this instrument doesn't physically carry.</summary>
+        private static double FilterCentralWavelengthMeters(CameraFilter filter)
+        {
+            double nm;
+            switch (filter)
+            {
+                case CameraFilter.Red:    nm = Spec.RedCentralWavelengthNm; break;
+                case CameraFilter.Green:  nm = Spec.GreenCentralWavelengthNm; break;
+                case CameraFilter.Blue:   nm = Spec.BlueCentralWavelengthNm; break;
+                case CameraFilter.HAlpha: nm = Spec.HAlphaCentralWavelengthNm; break;
+                default:                  nm = Spec.LuminanceCentralWavelengthNm; break;
+            }
+            if (nm <= 0.0) nm = Spec.LuminanceCentralWavelengthNm;
+            return nm * 1e-9;
+        }
+
+        /// <summary>
+        /// Convolves the frame with the instrument's PSF. The pipeline is monochrome by this
+        /// point (every pixel carries one value in all three channels), so this works on a
+        /// single plane rather than three -- a third of the transform work for an identical result.
+        /// </summary>
+        private void ApplyPsf(Color[] pixels, float[] kernel, int radius,
+                              float coreWeight, float[] haloKernel, int haloRadius)
+        {
+            if (kernel == null || radius < 1) return;
+
+            int n = pixels.Length;
+            if (psfPlaneScratch == null || psfPlaneScratch.Length != n) psfPlaneScratch = new float[n];
+            for (int i = 0; i < n; i++) psfPlaneScratch[i] = pixels[i].r;
+
+            bool hasHalo = haloKernel != null && haloRadius >= 1 && coreWeight < 0.999f;
+
+            // Convolution is linear, so a PSF that is the sum of two components can be applied as
+            // the weighted sum of two convolutions -- exactly equivalent to convolving once with
+            // the combined kernel, but it lets each component be sized to its own scale instead
+            // of forcing the compact core to carry the halo's enormous support.
+            float[] haloPlane = null;
+            if (hasHalo)
+            {
+                if (psfHaloScratch == null || psfHaloScratch.Length != n) psfHaloScratch = new float[n];
+                Array.Copy(psfPlaneScratch, psfHaloScratch, n);
+                haloPlane = psfHaloScratch;
+                FourierConvolution.Convolve(haloPlane, TextureWidth, TextureHeight, haloKernel, haloRadius);
+            }
+
+            FourierConvolution.Convolve(psfPlaneScratch, TextureWidth, TextureHeight, kernel, radius);
+
+            for (int i = 0; i < n; i++)
+            {
+                float v = hasHalo
+                    ? coreWeight * psfPlaneScratch[i] + (1f - coreWeight) * haloPlane[i]
+                    : psfPlaneScratch[i];
+                v = Mathf.Clamp01(v);
+                pixels[i] = new Color(v, v, v, 1f);
+            }
         }
 
         /// <summary>
@@ -1001,6 +1270,10 @@ namespace ExoInstruments.Visualization
         /// (a resolved planetary disk, unlike a star, isn't a point source). Small-angle
         /// approximation (2*radius/distance), which is fine at solar-system distances.
         /// </summary>
+        /// <summary>targetBody's apparent diameter in arcsec as seen from KSC right now -- paired with PlateScaleArcsecPerPixel this is what decides how many pixels across the disk actually lands on, i.e. whether any surface detail is resolvable in principle.</summary>
+        public static double AngularDiameterArcsec(CelestialBody targetBody)
+            => ComputeAngularDiameterRad(targetBody) * (180.0 / Math.PI) * 3600.0;
+
         private static double ComputeAngularDiameterRad(CelestialBody targetBody)
         {
             CelestialBody home = FlightGlobals.GetHomeBody();
@@ -1320,62 +1593,6 @@ namespace ExoInstruments.Visualization
                 }
             }
             Array.Copy(blurScratch, buffer, buffer.Length);
-        }
-
-        /// <summary>
-        /// Separable box blur (horizontal then vertical), edge-clamped, via the same
-        /// sliding-window prefix-sum trick as ApplyHorizontalMotionBlur -- O(w*h) total
-        /// regardless of radius rather than O(w*h*radius).
-        /// </summary>
-        private void ApplyBoxBlur(Color[] buffer, int radius)
-        {
-            if (radius < 1) return;
-            if (blurScratch == null || blurScratch.Length != buffer.Length)
-            {
-                blurScratch = new Color[buffer.Length];
-            }
-            int w = TextureWidth, h = TextureHeight;
-            int prefixLen = Math.Max(w, h) + 1;
-            if (rowPrefixScratch == null || rowPrefixScratch.Length < prefixLen) rowPrefixScratch = new float[prefixLen];
-            float inv = 1f / (2 * radius + 1);
-
-            // Horizontal pass: buffer -> blurScratch
-            for (int y = 0; y < h; y++)
-            {
-                int row = y * w;
-                rowPrefixScratch[0] = 0f;
-                for (int x = 0; x < w; x++) rowPrefixScratch[x + 1] = rowPrefixScratch[x] + buffer[row + x].r;
-
-                for (int x = 0; x < w; x++)
-                {
-                    int lo = x - radius, hi = x + radius;
-                    int clampedLo = Math.Max(0, lo), clampedHi = Math.Min(w - 1, hi);
-                    int leftPadCount = Math.Max(0, -lo);
-                    int rightPadCount = Math.Max(0, hi - (w - 1));
-                    float innerSum = rowPrefixScratch[clampedHi + 1] - rowPrefixScratch[clampedLo];
-                    float sum = innerSum + leftPadCount * buffer[row].r + rightPadCount * buffer[row + w - 1].r;
-                    float v = sum * inv;
-                    blurScratch[row + x] = new Color(v, v, v, 1f);
-                }
-            }
-            // Vertical pass: blurScratch -> buffer
-            for (int x = 0; x < w; x++)
-            {
-                rowPrefixScratch[0] = 0f;
-                for (int y = 0; y < h; y++) rowPrefixScratch[y + 1] = rowPrefixScratch[y] + blurScratch[y * w + x].r;
-
-                for (int y = 0; y < h; y++)
-                {
-                    int lo = y - radius, hi = y + radius;
-                    int clampedLo = Math.Max(0, lo), clampedHi = Math.Min(h - 1, hi);
-                    int topPadCount = Math.Max(0, -lo);
-                    int bottomPadCount = Math.Max(0, hi - (h - 1));
-                    float innerSum = rowPrefixScratch[clampedHi + 1] - rowPrefixScratch[clampedLo];
-                    float sum = innerSum + topPadCount * blurScratch[x].r + bottomPadCount * blurScratch[(h - 1) * w + x].r;
-                    float v = sum * inv;
-                    buffer[y * w + x] = new Color(v, v, v, 1f);
-                }
-            }
         }
 
         public void Dispose()
