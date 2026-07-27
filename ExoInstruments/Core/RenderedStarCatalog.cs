@@ -1,0 +1,261 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace ExoInstruments.Core
+{
+    /// <summary>One catalogue star as the imaging pipeline needs it: where it is, how bright it is, and what colour.</summary>
+    public struct RenderedStar
+    {
+        public double RaDeg;
+        public double DecDeg;
+        /// <summary>Johnson V apparent magnitude.</summary>
+        public double VMag;
+        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star.</summary>
+        public double ColorIndexBV;
+
+        public bool HasColor => !double.IsNaN(ColorIndexBV);
+    }
+
+    /// <summary>
+    /// The star catalogue that gets DRAWN into a photograph, as opposed to the Bright Star
+    /// Catalogue the exoplanet instruments hunt through.
+    ///
+    /// These are two different jobs and they want two different catalogues. The exoplanet side
+    /// wants a short list a player can plausibly work through, which is why it uses the BSC's
+    /// 9110 naked-eye stars and why that choice is deliberately left alone. A rendered frame
+    /// wants completeness over a small solid angle: at 0.22 BSC stars per square degree, a
+    /// 0.07 deg^2 frame contains one BSC star about once in every 65 exposures, which is why
+    /// the sky came out empty. Tycho-2 (Hog et al. 2000, A&amp;A 355, L27) carries 2.56 million
+    /// stars complete to V=11.0, or 61 per square degree, so a real and correctly-placed star
+    /// field lands in every frame. Nothing here touches the detection pipeline.
+    ///
+    /// Loaded once and held: the packed file is ~29 MB and a cone search reads only the
+    /// declination bands the field of view actually overlaps.
+    ///
+    /// Pure C# apart from the file read, with no Unity or KSP types, so a search can run on the
+    /// background imaging thread.
+    /// </summary>
+    public sealed class RenderedStarCatalog
+    {
+        private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'S', (byte)'T', (byte)'A', (byte)'R', (byte)'1' };
+
+        // Must match tools/pack_star_catalog.py, which writes the file.
+        private const int FormatVersion = 2;
+        private const double VMagOffset = 2.0;
+        private const short BvUnknown = -32768;
+
+        /// <summary>
+        /// Positions are fixed point over a full turn, not float32 degrees. A float32 near
+        /// RA = 360 deg resolves only 0.077 arcsec, which is harmless at the RC20's 1.1
+        /// arcsec/px but is forty-three pixels at SPHERE/ZIMPOL's ~1.8 mas plate scale. Fixed
+        /// point gives a uniform 360/2^32 = 0.3 mas everywhere for the same four bytes, and the
+        /// raw integers stay monotonic in RA so the binary search runs on them directly.
+        /// </summary>
+        private const double RaDegPerUnit = 360.0 / 4294967296.0;
+        private const double DecDegPerUnit = 180.0 / 4294967296.0;
+
+        private uint[] raFixed;
+        private int[] decFixed;
+        private ushort[] vMagMilli;
+        private short[] bvMilli;
+        private uint[] bandStart;
+        private int bandCount;
+        private double bandWidthDeg;
+
+        /// <summary>Number of stars held. Zero when no catalogue file was loaded.</summary>
+        public int Count => raFixed != null ? raFixed.Length : 0;
+
+        /// <summary>True once a catalogue has been loaded successfully.</summary>
+        public bool IsLoaded => Count > 0;
+
+        /// <summary>
+        /// Reads the packed catalogue. Throws on a malformed file so the caller can log it and
+        /// carry on without a star field, rather than rendering from half-read data.
+        /// </summary>
+        public void Load(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var reader = new BinaryReader(stream))
+            {
+                byte[] magic = reader.ReadBytes(Magic.Length);
+                for (int i = 0; i < Magic.Length; i++)
+                {
+                    if (magic.Length != Magic.Length || magic[i] != Magic[i])
+                        throw new InvalidDataException("not an ExoInstruments packed star catalogue");
+                }
+
+                int version = reader.ReadInt32();
+                if (version != FormatVersion) throw new InvalidDataException("unsupported catalogue version " + version);
+
+                int count = reader.ReadInt32();
+                bandCount = reader.ReadInt32();
+                bandWidthDeg = reader.ReadSingle();
+                if (count < 0 || bandCount <= 0 || bandWidthDeg <= 0.0)
+                    throw new InvalidDataException("catalogue header is out of range");
+
+                bandStart = new uint[bandCount + 1];
+                for (int i = 0; i <= bandCount; i++) bandStart[i] = reader.ReadUInt32();
+
+                raFixed = new uint[count];
+                decFixed = new int[count];
+                vMagMilli = new ushort[count];
+                bvMilli = new short[count];
+                for (int i = 0; i < count; i++)
+                {
+                    raFixed[i] = reader.ReadUInt32();
+                    decFixed[i] = reader.ReadInt32();
+                    vMagMilli[i] = reader.ReadUInt16();
+                    bvMilli[i] = reader.ReadInt16();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Every star within radiusDeg of the given direction and brighter than
+        /// faintestVMag, appended to results.
+        ///
+        /// Scans only the declination bands the cone touches. The RA half-width of the cone
+        /// grows as 1/cos(dec), since a cone of fixed angular radius spans more hours of RA the
+        /// closer it sits to a pole, and it degenerates entirely over the pole itself, where the
+        /// whole band is taken instead of trying to bracket an RA range that wraps.
+        /// </summary>
+        public void Search(double centreRaDeg, double centreDecDeg, double radiusDeg,
+                           double faintestVMag, List<RenderedStar> results)
+        {
+            if (!IsLoaded || results == null || radiusDeg <= 0.0) return;
+
+            int firstBand = BandOf(centreDecDeg - radiusDeg);
+            int lastBand = BandOf(centreDecDeg + radiusDeg);
+
+            double cosRadius = Math.Cos(radiusDeg * Math.PI / 180.0);
+            double centreDecRad = centreDecDeg * Math.PI / 180.0;
+            double sinCentreDec = Math.Sin(centreDecRad);
+            double cosCentreDec = Math.Cos(centreDecRad);
+            ushort faintestMilli = ToMagMilli(faintestVMag);
+
+            for (int band = firstBand; band <= lastBand; band++)
+            {
+                int lo = (int)bandStart[band];
+                int hi = (int)bandStart[band + 1];
+                if (hi <= lo) continue;
+
+                // RA half-width of the cone at this band's declination. Near a pole the
+                // denominator vanishes and every RA is inside the cone, so the whole band is
+                // scanned rather than bracketed.
+                double bandDec = BandCentreDeg(band);
+                double cosBandDec = Math.Cos(bandDec * Math.PI / 180.0);
+                double raHalfWidthDeg = 180.0;
+                if (cosBandDec > 1e-6)
+                {
+                    double arg = (cosRadius - sinCentreDec * Math.Sin(bandDec * Math.PI / 180.0))
+                               / (cosCentreDec * cosBandDec);
+                    if (arg > 1.0) continue;             // no RA at this declination is close enough
+                    if (arg > -1.0) raHalfWidthDeg = Math.Acos(arg) * 180.0 / Math.PI;
+                }
+
+                if (raHalfWidthDeg >= 180.0)
+                {
+                    ScanRange(lo, hi, sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                    continue;
+                }
+
+                double raLo = centreRaDeg - raHalfWidthDeg;
+                double raHi = centreRaDeg + raHalfWidthDeg;
+                if (raLo < 0.0 || raHi >= 360.0)
+                {
+                    // The RA window straddles 0h, so it is two ranges in a catalogue sorted on
+                    // [0, 360). Both are found by the same binary search on the wrapped bounds.
+                    ScanRange(lo, UpperBound(lo, hi, ToRaFixed(raHi)), sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                    ScanRange(LowerBound(lo, hi, ToRaFixed(raLo)), hi, sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                }
+                else
+                {
+                    ScanRange(LowerBound(lo, hi, ToRaFixed(raLo)), UpperBound(lo, hi, ToRaFixed(raHi)),
+                              sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                }
+            }
+        }
+
+        /// <summary>Exact angular test on a bracketed range; the RA/declination bracketing above only narrows the candidates, it doesn't decide membership.</summary>
+        private void ScanRange(int lo, int hi, double sinCentreDec, double cosCentreDec,
+                               double centreRaDeg, double cosRadius, ushort faintestMilli,
+                               List<RenderedStar> results)
+        {
+            for (int i = lo; i < hi; i++)
+            {
+                if (vMagMilli[i] > faintestMilli) continue;
+
+                double starRaDeg = raFixed[i] * RaDegPerUnit;
+                double starDecDeg = decFixed[i] * DecDegPerUnit;
+                double decRad = starDecDeg * Math.PI / 180.0;
+                double deltaRa = (starRaDeg - centreRaDeg) * Math.PI / 180.0;
+                double cosSeparation = sinCentreDec * Math.Sin(decRad)
+                                     + cosCentreDec * Math.Cos(decRad) * Math.Cos(deltaRa);
+                if (cosSeparation < cosRadius) continue;
+
+                results.Add(new RenderedStar
+                {
+                    RaDeg = starRaDeg,
+                    DecDeg = starDecDeg,
+                    VMag = vMagMilli[i] / 1000.0 - VMagOffset,
+                    ColorIndexBV = bvMilli[i] == BvUnknown ? double.NaN : bvMilli[i] / 1000.0,
+                });
+            }
+        }
+
+        private int LowerBound(int lo, int hi, uint ra)
+        {
+            while (lo < hi)
+            {
+                int mid = lo + ((hi - lo) >> 1);
+                if (raFixed[mid] < ra) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        private int UpperBound(int lo, int hi, uint ra)
+        {
+            while (lo < hi)
+            {
+                int mid = lo + ((hi - lo) >> 1);
+                if (raFixed[mid] <= ra) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        /// <summary>Degrees to the file's fixed-point RA units, wrapping the full turn.</summary>
+        private static uint ToRaFixed(double raDeg)
+        {
+            double wrapped = raDeg % 360.0;
+            if (wrapped < 0.0) wrapped += 360.0;
+            double units = wrapped / RaDegPerUnit;
+            return units >= 4294967295.0 ? 4294967295u : (uint)units;
+        }
+
+        private int BandOf(double dec)
+        {
+            int b = (int)((dec + 90.0) / bandWidthDeg);
+            return b < 0 ? 0 : (b >= bandCount ? bandCount - 1 : b);
+        }
+
+        private double BandCentreDeg(int band)
+        {
+            // The declination in the band whose RA half-width is widest, which is the edge
+            // nearest the equator; using the centre would under-bracket half the band.
+            double low = -90.0 + band * bandWidthDeg;
+            double high = low + bandWidthDeg;
+            if (low > 0.0) return low;
+            if (high < 0.0) return high;
+            return 0.0;
+        }
+
+        private static ushort ToMagMilli(double vMag)
+        {
+            double milli = (vMag + VMagOffset) * 1000.0;
+            if (milli <= 0.0) return 0;
+            return milli >= 65535.0 ? (ushort)65535 : (ushort)milli;
+        }
+
+    }
+}

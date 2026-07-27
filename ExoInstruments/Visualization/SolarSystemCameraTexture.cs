@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -205,13 +206,13 @@ namespace ExoInstruments.Visualization
         private const float SeeingBlurPxPerAirmass = 1.4f;
         private const float MaxSeeingBlurPx = 6.0f;
 
-        // Sky brightness ramps from -12 deg (capture cutoff) down to astronomical twilight at -18 deg.
-        private const double AstronomicalTwilightSunAltitudeDeg = -18.0;
-        private const double TwilightSkyBackgroundRatePerSecond = 0.30; // at the -12 deg threshold
-        private const double MoonGlowRatePerSecond = 0.02;              // full Mün at zenith
-        private const double AirglowBaselinePerSecond = 0.004;          // always-present night-sky glow
+        // Sky brightness now comes from SkyBrightnessModel, in the real V mag/arcsec^2 the
+        // quantity is measured and published in. The per-second, per-pixel rates that used to
+        // live here (twilight 0.30, moon 0.02, airglow 0.004, cloud haze 0.25) had no physical
+        // unit, could not be checked against any published sky-brightness measurement, and
+        // silently depended on the plate scale, so binning the sensor or fitting a Barlow
+        // changed how bright the night sky was.
         internal const double CloudMaxAttenuation = 0.85;                // thick cloud, never 100% opaque
-        private const double CloudHazeRatePerSecond = 0.25;             // veiling scattered light off cloud base
         private const float CloudBlurPxMax = 2.0f;
         // NOT amplified by gain (applied after the analog stage) -- the active telescope's real
         // read noise (a fixed per-readout-event electron figure, unaffected by binning) as a
@@ -263,16 +264,8 @@ namespace ExoInstruments.Visualization
         private static CelestialBody moonReferenceBody;
         private static double moonReferenceFlux;
 
-        // Zodiacal light, relative to AirglowBaselinePerSecond via the real Pogson magnitude-
-        // ratio relation (already how MoonlightPollution converts magnitudes to flux elsewhere
-        // in this mod): Leinert et al. (1998, A&AS 127, 1) give V=23.3 mag/arcsec^2 zodiacal
-        // light at the ecliptic pole (its faintest, most conservative value); Patat (2003, A&A
-        // 400, 1183) gives V~21.7 mag/arcsec^2 for typical new-moon zenith dark-sky brightness
-        // at a dark site (dominated by airglow, the same phenomenon AirglowBaselinePerSecond
-        // represents). ratio = 10^(-0.4*(23.3-21.7)) = 10^-0.64 = 0.229, so zodiacal = 0.229 *
-        // AirglowBaselinePerSecond. The mod has no real ecliptic geometry for Kerbol, so this
-        // stays a fixed baseline rather than a position-dependent term.
-        private const double ZodiacalBaselineRatePerSecond = AirglowBaselinePerSecond * 0.229;
+        // Zodiacal light and the dark-sky airglow baseline now live in SkyBrightnessModel,
+        // as the published V surface brightnesses they are (Leinert et al. 1998; Patat 2003).
 
         // Full-well overflow ("blooming"): Pyxel only hard-clips at full well and ships no
         // redistribution model to port. Real CCD full-well overflow is described in Janesick
@@ -349,9 +342,7 @@ namespace ExoInstruments.Visualization
         private Texture2D outputTexture;
         private Texture2D capturedTexture;
         private Color[] pixelScratch;
-        private Color[] blurScratch;
         private Color[] frameScratch;
-        private float[] psfPlaneScratch;
         private float[] psfHaloScratch;
         private Color[] displayScratch;
 
@@ -395,8 +386,12 @@ namespace ExoInstruments.Visualization
         private int psfCacheHaloRadius;
         private double psfCacheDiffractionFwhm;
         private float[] rawScratch;
+        /// <summary>The frame's signal plane, in fractions of full well: rendered bodies plus every point source, before any noise exists.</summary>
+        private float[] signalScratch;
+        private float[] smearScratch;
+        private float[] smearLineScratch;
         private float[] astigmatismScratch;
-        private float[] rowPrefixScratch;
+        private int lastStarsDrawnInternal;
 
         private Renderer[] skyboxRenderers;
         private ScaledSpaceFader[] scaledSpaceFaders;
@@ -858,7 +853,25 @@ namespace ExoInstruments.Visualization
             ResetCameraFromLive(clone, liveCameraName);
             clone.transform.position = pos;
             clone.transform.rotation = rot;
-            clone.fieldOfView = fovDeg;
+            clone.aspect = (float)TextureWidth / TextureHeight;
+            clone.fieldOfView = HorizontalToVerticalFovDeg(fovDeg);
+        }
+
+        /// <summary>
+        /// Unity's Camera.fieldOfView is the VERTICAL field; every field of view in this class
+        /// (FovDeg, MinFovDeg, MaxFovDeg) is quoted across the sensor's long axis, because that
+        /// is how a telescope's field is normally quoted and how the zoom range is derived from
+        /// the real focal length. Assigning one to the other left the scene rendered at the
+        /// sensor's aspect ratio too wide, 1.47x on the RC20's 4144x2822 chip, so a body's
+        /// size in the frame did not match the plate scale the same class reports for the FITS
+        /// header, and no star drawn at its real position could line up with it.
+        /// </summary>
+        private static float HorizontalToVerticalFovDeg(float horizontalFovDeg)
+        {
+            if (TextureWidth <= 0 || TextureHeight <= 0) return horizontalFovDeg;
+            double tanHalfH = Math.Tan(0.5 * horizontalFovDeg * Math.PI / 180.0);
+            double tanHalfV = tanHalfH * TextureHeight / TextureWidth;
+            return (float)(2.0 * Math.Atan(tanHalfV) * 180.0 / Math.PI);
         }
 
         /// <summary>Copies the live camera settings onto the clone and restores the clone's own render target (the only property that must survive CopyFrom).</summary>
@@ -968,7 +981,6 @@ namespace ExoInstruments.Visualization
             public CameraFilter Filter;
             public float Extinction;
             public double ScintSigma;
-            public double TwilightRamp;
             public double MoonSkyExcess;
             public float CloudCoverage;
             public double TotalElectrons;
@@ -980,7 +992,39 @@ namespace ExoInstruments.Visualization
             /// <summary>Plain ground-based seeing (arcsec), already resolved from the target's airmass on the main thread. Ignored when the instrument has adaptive optics.</summary>
             public double SeeingFwhmArcsec;
             public double DefocusDiscRadiusPx;
-            public int DriftPx;
+
+            // --- Sky field ------------------------------------------------------------
+            /// <summary>Where each direction on the sky lands on the sensor, built from the camera's own axes (see BuildFieldGeometry).</summary>
+            public GnomonicProjection Projection;
+            /// <summary>Catalogue stars whose light reaches the sensor this exposure, already cone-searched on the main thread.</summary>
+            public List<RenderedStar> Stars;
+            /// <summary>Solar-system bodies in the field too small for the renderer to resolve, already projected and converted to signal.</summary>
+            public List<PointSource> UnresolvedBodies;
+            public bool HaveFieldGeometry;
+            public double StartMeridianRaDeg;
+            public double EndMeridianRaDeg;
+            public double ObserverLatitudeDeg;
+            /// <summary>Sky background over the whole exposure, in electrons per pixel, from a real surface brightness (see SkyBrightnessModel), not a per-pixel rate.</summary>
+            public double SkyElectronsPerPixel;
+            /// <summary>Scintillation for a POINT source: stars get no benefit from the extended-source averaging that quietens a resolved disk.</summary>
+            public double PointSourceScintSigma;
+            /// <summary>Signal below which a source cannot be told from the frame's own noise and is not drawn (see BuildStarSignalFloor).</summary>
+            public double SignalCutoffFraction;
+            // Photometric chain for a catalogue star, resolved on the main thread so the
+            // background pass needs nothing but arithmetic.
+            public double FilterCentralWavelengthMeters;
+            public double FilterBandwidthAngstrom;
+            public double ApertureAreaCm2;
+            /// <summary>Atmospheric extinction at the fitted filter's own wavelength: extinction alone, no ND filter, no cloud.</summary>
+            public double BandExtinction;
+            public double CloudTransmission;
+            /// <summary>Full transmission chain for a catalogue star: band extinction, cloud, and the ND filter.</summary>
+            public double StarTransmission;
+
+            // --- Diurnal drift, as a real vector on the sensor ---------------------------
+            /// <summary>Pixel displacement of the field centre over the exposure. Zero when the mount tracks.</summary>
+            public double DriftPixelX;
+            public double DriftPixelY;
         }
 
         /// <summary>
@@ -1002,16 +1046,19 @@ namespace ExoInstruments.Visualization
 
             TryComputeAltitudeDeg(targetBody, out double targetAltDeg);
             double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
-            float extinction = (float)AtmosphericImagingNoise.ExtinctionTransmission(airmass);
+            // Extinction at the fitted filter's own wavelength: a real site is far more
+            // transparent in the red than in the blue, so a single grey coefficient made every
+            // filter of an LRGB set lose exactly the same light, which they do not.
+            float extinction = (float)AtmosphericImagingNoise.ExtinctionTransmissionAt(
+                airmass, FilterCentralWavelengthMeters(Filter), Spec.SiteAltitudeMeters);
 
             double angularDiameterRad = ComputeAngularDiameterRad(targetBody);
             double scintSigma = AtmosphericImagingNoise.ScintillationExcessSigma(
                 Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, angularDiameterRad);
 
+            // The Sun's real altitude, handed straight to the sky model; twilight brightness is
+            // a measured function of solar depression, not a normalised ramp between two limits.
             bool haveSunAlt = TryComputeAltitudeDeg(Planetarium.fetch != null ? Planetarium.fetch.Sun : null, out double sunAltDeg);
-            double twilightRamp = haveSunAlt
-                ? Clamp01((sunAltDeg - AstronomicalTwilightSunAltitudeDeg) / (ImagingObservingConditions.TwilightSunAltitudeDeg - AstronomicalTwilightSunAltitudeDeg))
-                : 0.0;
             double moonSkyExcess = ComputeMoonSkyExcess(targetBody);
             float coverage = ComputeCloudCoverage();
 
@@ -1025,9 +1072,8 @@ namespace ExoInstruments.Visualization
             double seeingFwhmArcsec = ComputeGroundSeeingFwhmArcsec(targetBody)
                                     + coverage * CloudBlurPxMax * PlateScaleArcsecPerPixel;
             double defocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
-            int driftPx = Autoguiding ? 0 : ComputeDriftPixels(exposureSeconds, targetBody);
 
-            return new FrameComputeInputs
+            var inputs = new FrameComputeInputs
             {
                 Src = src,
                 TargetSeed = targetBody.flightGlobalsIndex,
@@ -1037,15 +1083,481 @@ namespace ExoInstruments.Visualization
                 Filter = Filter,
                 Extinction = extinction,
                 ScintSigma = scintSigma,
-                TwilightRamp = twilightRamp,
                 MoonSkyExcess = moonSkyExcess,
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
                 PlateScaleArcsec = PlateScaleArcsecPerPixel,
                 SeeingFwhmArcsec = seeingFwhmArcsec,
                 DefocusDiscRadiusPx = defocusDiscRadiusPx,
-                DriftPx = driftPx,
             };
+
+            // A star is a point source, so it gets none of the extended-source scintillation
+            // suppression a resolved disk enjoys; it is the same reason a planet looks steady to the
+            // naked eye while a star of the same brightness twinkles.
+            inputs.PointSourceScintSigma = AtmosphericImagingNoise.ScintillationExcessSigma(
+                Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, 0.0);
+
+            GatherSkyBackground(ref inputs, targetAltDeg, sunAltDeg, haveSunAlt, coverage);
+            GatherSkyField(ref inputs, targetBody, exposureSeconds, airmass);
+
+            return inputs;
+        }
+
+        /// <summary>
+        /// Total sky background over the exposure, in electrons per pixel.
+        ///
+        /// Every term is a real V surface brightness (see SkyBrightnessModel) summed as flux and
+        /// then pushed through the same photometric chain as the sources sitting on it, instead
+        /// of the per-pixel-per-second rates this used to carry. Those rates had no unit, could
+        /// not be compared against a published sky-brightness measurement, and silently changed
+        /// meaning whenever the plate scale did, so binning the sensor or fitting a Barlow
+        /// altered how bright the night sky was.
+        /// </summary>
+        private void GatherSkyBackground(ref FrameComputeInputs inputs, double targetAltDeg,
+                                         double sunAltDeg, bool haveSunAlt, float cloudCoverage)
+        {
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            double planetRadius = home != null ? home.Radius : 0.0;
+            double zenithAngleDeg = 90.0 - targetAltDeg;
+
+            double wavelength = FilterCentralWavelengthMeters(inputs.Filter);
+            double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
+            double transmission = AtmosphericImagingNoise.ExtinctionTransmissionAt(airmass, wavelength, Spec.SiteAltitudeMeters);
+
+            // Airglow is emitted inside the atmosphere: the van Rhijn path lengthening brightens
+            // it toward the horizon while extinction over the same path dims it, and the two
+            // largely cancel, which is why both are applied and neither alone.
+            double flux = Math.Pow(10.0, -0.4 * SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2)
+                        * SkyBrightnessModel.AirglowVanRhijnFactor(zenithAngleDeg, planetRadius)
+                        * transmission;
+
+            // Zodiacal light originates outside the atmosphere, so it is simply attenuated by it.
+            flux += Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
+
+            // Moonlight and twilight are both sunlight scattered WITHIN the atmosphere, so the
+            // extinction along the line of sight is already part of the measured surface
+            // brightness the model is calibrated against and is not applied again.
+            flux = SkyBrightnessModel.AddMagnitude(flux, SkyBrightnessModel.MoonlightVMagPerArcsec2(inputs.MoonSkyExcess));
+            if (haveSunAlt) flux = SkyBrightnessModel.AddMagnitude(flux, SkyBrightnessModel.TwilightVMagPerArcsec2(sunAltDeg));
+
+            // Cloud veiling: cloud scatters ground and sky light back down, which is why an
+            // overcast night sky is brighter than a clear one rather than darker. Modelled as a
+            // multiplier on the sky that is already there, since that light is its source.
+            flux *= 1.0 + cloudCoverage * CloudVeilingSkyGain;
+
+            double perSecond = SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                SkyBrightnessModel.FluxToMagPerArcsec2(flux),
+                inputs.PlateScaleArcsec,
+                FilterBandwidthAngstrom(inputs.Filter),
+                RealApertureAreaCm2(),
+                Spec.QuantumEfficiency,
+                NdFilterTransmission(NdFilter));
+
+            inputs.SkyElectronsPerPixel = perSecond * inputs.ExposureSeconds;
+            LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(flux);
+        }
+
+        /// <summary>
+        /// How much brighter cloud makes the sky, at full coverage. Cloud is lit from below by
+        /// the same scattered light the clear sky already carries, so it is expressed as a gain
+        /// on that rather than as an independent source: the pipeline has no ground-light model
+        /// to derive an absolute cloud brightness from, and inventing one would be worse than
+        /// scaling the term whose light the cloud is actually reflecting.
+        /// </summary>
+        private const double CloudVeilingSkyGain = 2.0;
+
+        /// <summary>
+        /// Builds the frame's sky geometry and gathers everything that will be drawn into it as
+        /// a point source: catalogue stars, and any solar-system body the optics cannot resolve.
+        ///
+        /// All of it happens here, on the main thread, because it needs CelestialBody positions
+        /// and the observatory's real orientation; what leaves is plain data the background pass
+        /// can work on.
+        /// </summary>
+        private void GatherSkyField(ref FrameComputeInputs inputs, CelestialBody targetBody,
+                                    float exposureSeconds, double airmass)
+        {
+            inputs.HaveFieldGeometry = false;
+            if (!TryBuildFieldGeometry(inputs.Ut, out GnomonicProjection projection,
+                                       out double meridianRaDeg, out double latitudeDeg))
+                return;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            double rotationPeriod = home != null && home.rotationPeriod > 0 ? home.rotationPeriod : 0.0;
+
+            inputs.HaveFieldGeometry = true;
+            inputs.Projection = projection;
+            inputs.ObserverLatitudeDeg = latitudeDeg;
+
+            // With the mount tracking, the sky is held still relative to the sensor and nothing
+            // trails. Without it the sky turns underneath a fixed instrument, one full turn per
+            // sidereal day of whatever world the observatory stands on, and every source in the
+            // frame draws a streak. Modelling it as the sky's own rotation, rather than as a
+            // sideways smear of the finished image, is what makes the streaks curve and makes
+            // stars at the frame edge trail further than those at its centre (field rotation).
+            //
+            // The exposure ENDS at the moment the scene was rendered, so it integrates over the
+            // interval leading up to it: the sky's position now is the end of every streak, and
+            // the start is where it was one exposure earlier. Running the interval the other way
+            // would put every trail on the wrong side of its source.
+            inputs.EndMeridianRaDeg = meridianRaDeg;
+            inputs.StartMeridianRaDeg = (Autoguiding || rotationPeriod <= 0.0)
+                ? meridianRaDeg
+                : meridianRaDeg - 360.0 * exposureSeconds / rotationPeriod;
+
+            inputs.FilterCentralWavelengthMeters = FilterCentralWavelengthMeters(inputs.Filter);
+            inputs.FilterBandwidthAngstrom = FilterBandwidthAngstrom(inputs.Filter);
+            inputs.ApertureAreaCm2 = RealApertureAreaCm2();
+
+            // Extinction at the FILTER's own wavelength, not one grey figure: a site loses far
+            // more blue light than red, so the same star really is a different brightness
+            // through each filter of an LRGB set.
+            inputs.BandExtinction = AtmosphericImagingNoise.ExtinctionTransmissionAt(
+                airmass, inputs.FilterCentralWavelengthMeters, Spec.SiteAltitudeMeters);
+            inputs.CloudTransmission = 1.0 - inputs.CloudCoverage * CloudMaxAttenuation;
+            inputs.StarTransmission = inputs.BandExtinction * inputs.CloudTransmission * NdFilterTransmission(NdFilter);
+
+            inputs.SignalCutoffFraction = BuildStarSignalFloor(inputs);
+
+            // Drift first: the unresolved bodies gathered next trail along the same vector.
+            inputs.DriftPixelX = 0.0;
+            inputs.DriftPixelY = 0.0;
+            if (inputs.EndMeridianRaDeg != inputs.StartMeridianRaDeg)
+                ComputeFieldCentreDrift(inputs, projection, latitudeDeg,
+                                        out inputs.DriftPixelX, out inputs.DriftPixelY);
+
+            inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
+            inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, targetBody, projection, exposureSeconds);
+            inputs.TotalElectrons = ComputeSceneElectrons(inputs, targetBody, projection, exposureSeconds);
+        }
+
+        /// <summary>
+        /// Electron budget the rendered image is calibrated against: the target's own signal
+        /// plus that of every other body large enough for the renderer to have drawn as a disk
+        /// in the same frame.
+        ///
+        /// The renderer produces one image containing every body in view, but only one number
+        /// can scale it. Using the target's electrons alone, which is what this used to do, meant a
+        /// moon sharing the frame stole part of the target's budget and neither came out at its
+        /// real brightness. Summing the resolved bodies fixes the frame's TOTAL, and leaves the
+        /// renderer's own shading to decide how that total is divided between them; since the
+        /// renderer already lights each body from the same Sun with its own albedo map, that
+        /// division is close to right. Bodies too small to resolve are excluded here because
+        /// they are drawn separately as point sources, so nothing is counted twice.
+        /// </summary>
+        private double ComputeSceneElectrons(FrameComputeInputs inputs, CelestialBody targetBody,
+                                             GnomonicProjection projection, float exposureSeconds)
+        {
+            float bodyTransmission = (float)(inputs.BandExtinction * inputs.CloudTransmission);
+            double total = ComputeCollectedElectrons(targetBody, bodyTransmission, exposureSeconds);
+            if (FlightGlobals.Bodies == null) return total;
+
+            foreach (CelestialBody body in FlightGlobals.Bodies)
+            {
+                if (body == null || body == targetBody) continue;
+                if (!IsResolvedByOptics(body, inputs.PlateScaleArcsec)) continue;
+                if (!TryProjectBody(body, projection, out double px, out double py)) continue;
+                if (px < 0.0 || px > projection.WidthPx || py < 0.0 || py > projection.HeightPx) continue;
+
+                total += ComputeCollectedElectrons(body, bodyTransmission, exposureSeconds);
+            }
+            return total;
+        }
+
+        /// <summary>
+        /// The catalogue of stars drawn into photographs. Set once by the GUI at load time (see
+        /// ExoInstrumentsGUI.LoadRenderedStarCatalog); null or empty simply means no star field,
+        /// and every other part of the pipeline carries on unchanged.
+        ///
+        /// Deliberately NOT the Bright Star Catalogue the exoplanet instruments search: that one
+        /// is small on purpose, so that hunting for a transit stays a tractable game, and nothing
+        /// here touches it. See RenderedStarCatalog for why one catalogue cannot do both jobs.
+        /// </summary>
+        public static RenderedStarCatalog StarCatalog { get; set; }
+
+        /// <summary>Sky surface brightness (V mag/arcsec^2) behind the last capture: the number a real observer would quote for the conditions. Higher is darker.</summary>
+        public double LastSkyBrightnessVMagPerArcsec2 { get; private set; }
+
+        /// <summary>Number of catalogue stars actually drawn into the last capture.</summary>
+        public int LastStarsDrawn => lastStarsDrawnInternal;
+
+        /// <summary>Limiting V magnitude of the last capture: the faintest star that rose above its noise floor.</summary>
+        public double LastLimitingVMag { get; private set; }
+
+        /// <summary>
+        /// Builds the frame's sky geometry from the camera's OWN axes.
+        ///
+        /// The chain is: the telescope's aim is a real direction in the game's world; the
+        /// observatory's local north/east/up turn that into an altitude and azimuth; and
+        /// SkyCoordinates turns those into the right ascension and declination the catalogue is
+        /// indexed by. Deriving the frame this way rather than from an assumed orientation is
+        /// what guarantees the star field lines up with the rendered planet, since both come from the
+        /// same three axes.
+        ///
+        /// The local basis is read from KSP's own latitude/longitude convention, by asking the
+        /// home body where a point slightly north and slightly east of the observatory is, rather
+        /// than from cross products of a rotation axis, because Unity's left-handed frame makes the
+        /// sign of such a product easy to get backwards and impossible to notice, and this form
+        /// simply cannot be wrong about which way east is.
+        /// </summary>
+        private bool TryBuildFieldGeometry(double ut, out GnomonicProjection projection,
+                                           out double meridianRaDeg, out double latitudeDeg)
+        {
+            projection = default(GnomonicProjection);
+            meridianRaDeg = 0.0;
+            latitudeDeg = 0.0;
+            haveSiteBasis = false;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null || !hasLockedAim) return false;
+
+            latitudeDeg = ObservatorySite.LatitudeDeg;
+            double longitudeDeg = ObservatorySite.LongitudeDeg;
+            double elevation = ObservatorySite.SiteElevationMeters;
+
+            Vector3d observer = ObservatorySite.WorldPosition(home);
+            Vector3d up = (observer - home.position).normalized;
+            if (up.sqrMagnitude < 0.5) return false;
+
+            // Step in latitude/longitude and see which way the world moves. At the poles the
+            // northward step would run over the top, so it is taken southward and negated.
+            const double StepDeg = 0.01;
+            bool nearNorthPole = latitudeDeg + StepDeg > 90.0;
+            Vector3d northProbe = home.GetWorldSurfacePosition(
+                nearNorthPole ? latitudeDeg - StepDeg : latitudeDeg + StepDeg, longitudeDeg, elevation) - observer;
+            if (nearNorthPole) northProbe = -northProbe;
+            Vector3d eastProbe = home.GetWorldSurfacePosition(latitudeDeg, longitudeDeg + StepDeg, elevation) - observer;
+
+            Vector3d north = Orthonormalize(northProbe, up);
+            Vector3d east = Orthonormalize(eastProbe, up);
+            if (north.sqrMagnitude < 0.5 || east.sqrMagnitude < 0.5) return false;
+
+            // Held for the rest of the gather pass: every body projected into this frame is
+            // resolved against the same basis, and it does not change within one capture.
+            siteNorth = north;
+            siteEast = east;
+            siteUp = up;
+            haveSiteBasis = true;
+
+            // Scaled space is a uniform scaling of the world about a moving origin, so a
+            // DIRECTION is identical in both frames, which is why the camera's axes, held in
+            // scaled space, can be resolved against a local basis built in world space.
+            SkyVector boresight = ToLocalBasis(lockedLook * Vector3.forward, north, east, up);
+            SkyVector frameUp = ToLocalBasis(lockedLook * Vector3.up, north, east, up);
+            SkyVector frameRight = ToLocalBasis(lockedLook * Vector3.right, north, east, up);
+
+            float fov = Mathf.Clamp(FovDeg, MinFovDeg, MaxFovDeg);
+            projection = new GnomonicProjection(boresight, frameUp, frameRight, fov, TextureWidth, TextureHeight);
+
+            meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                ut, home.rotationPeriod, home.initialRotation, longitudeDeg);
+            return true;
+        }
+
+        /// <summary>Component of v perpendicular to axis, normalised. Zero-length when v is parallel to axis.</summary>
+        private static Vector3d Orthonormalize(Vector3d v, Vector3d axis)
+        {
+            Vector3d perpendicular = v - axis * Vector3d.Dot(v, axis);
+            double magnitude = perpendicular.magnitude;
+            return magnitude < 1e-9 ? Vector3d.zero : perpendicular / magnitude;
+        }
+
+        /// <summary>Resolves a world direction into the observatory's (north, east, up) basis, the one SkyVector.FromHorizontal works in.</summary>
+        private static SkyVector ToLocalBasis(Vector3 direction, Vector3d north, Vector3d east, Vector3d up)
+        {
+            Vector3d d = direction;
+            return SkyVector.Normalized(Vector3d.Dot(d, north), Vector3d.Dot(d, east), Vector3d.Dot(d, up));
+        }
+
+        /// <summary>
+        /// Faintest signal worth drawing, as a fraction of full well.
+        ///
+        /// A source far below the noise in the pixel it lands on changes nothing a viewer or a
+        /// stacking pass could recover, so drawing it only costs time. The floor is the frame's
+        /// own noise (sky shot noise, dark current and read noise, exactly the terms
+        /// ComputeFramePixels goes on to apply), scaled by StarFieldRenderer's cutoff fraction,
+        /// which sits well below 1 so nothing marginally detectable is thrown away.
+        /// </summary>
+        private double BuildStarSignalFloor(FrameComputeInputs inputs)
+        {
+            double fullWell = FullWellElectrons;
+            double skyElectrons = Math.Max(0.0, inputs.SkyElectronsPerPixel);
+            double darkElectrons = Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor * inputs.ExposureSeconds;
+            double noiseElectrons = Math.Sqrt(skyElectrons + darkElectrons) + Spec.ReadNoiseElectrons;
+
+            double floorElectrons = StarFieldRenderer.NoiseFloorCutoffFraction * Math.Max(1.0, noiseElectrons);
+            return floorElectrons / Math.Max(1.0, fullWell);
+        }
+
+        /// <summary>
+        /// Cone-searches the catalogue for everything that could land on the sensor.
+        ///
+        /// The search is cut at the magnitude whose signal equals the frame's noise floor, so a
+        /// short exposure reads only the bright stars while a long one pulls in everything the
+        /// catalogue holds, the same way a real frame's star count grows with exposure time.
+        /// </summary>
+        private List<RenderedStar> SearchStarCatalog(FrameComputeInputs inputs, GnomonicProjection projection,
+                                                     double meridianRaDeg, double latitudeDeg)
+        {
+            RenderedStarCatalog catalog = StarCatalog;
+            if (catalog == null || !catalog.IsLoaded) return null;
+
+            SkyVector boresight = projection.Boresight;
+            double altDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, boresight.Z))) * 180.0 / Math.PI;
+            double azDeg = Math.Atan2(boresight.Y, boresight.X) * 180.0 / Math.PI;
+
+            SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, meridianRaDeg, latitudeDeg,
+                                                  out double centreRaDeg, out double centreDecDeg);
+
+            // The search cone must cover where the field will have TURNED to by the end of the
+            // exposure as well as where it starts, or a star that trails into frame is missed.
+            double trailDeg = Math.Abs(inputs.EndMeridianRaDeg - inputs.StartMeridianRaDeg);
+            double radiusDeg = projection.SearchRadiusDeg(trailDeg + StarSearchMarginDeg);
+
+            double limitingVMag = LimitingVMagFor(inputs);
+            LastLimitingVMag = limitingVMag;
+
+            var stars = new List<RenderedStar>(256);
+            catalog.Search(centreRaDeg, centreDecDeg, radiusDeg, limitingVMag, stars);
+            return stars;
+        }
+
+        /// <summary>Extra cone-search radius, covering the PSF wings of a star just outside the sensor and any small inconsistency between the rendered and catalogue frames.</summary>
+        private const double StarSearchMarginDeg = 0.05;
+
+        /// <summary>
+        /// The apparent magnitude whose collected signal equals the frame's noise floor, which is the
+        /// faintest star this exposure can show. Inverts PhotonFluxModel's own flux relation
+        /// rather than approximating it, so it stays consistent with what the sources are
+        /// actually drawn at.
+        /// </summary>
+        private double LimitingVMagFor(FrameComputeInputs inputs)
+        {
+            double floorElectrons = inputs.SignalCutoffFraction * FullWellElectrons;
+            double perZeroMag = PhotonFluxModel.CollectedElectrons(
+                0.0, inputs.FilterBandwidthAngstrom, inputs.ApertureAreaCm2,
+                Spec.QuantumEfficiency, inputs.ExposureSeconds, inputs.StarTransmission);
+
+            if (floorElectrons <= 0.0 || perZeroMag <= 0.0) return 0.0;
+            return -2.5 * Math.Log10(floorElectrons / perZeroMag);
+        }
+
+        /// <summary>
+        /// Solar-system bodies sharing the field that the optics cannot resolve into a disk.
+        ///
+        /// A moon whose apparent diameter is under a couple of pixels is a point of light, and
+        /// the renderer draws it as at most a dim sub-pixel speck with no correct brightness.
+        /// Computing its real apparent magnitude and depositing it through the same path as a
+        /// star puts it in the frame at the right place with the right flux, which is how the
+        /// moons of a giant planet show up as points beside it in a real photograph.
+        ///
+        /// A body large enough to be resolved is left to the renderer, and is instead counted in
+        /// the electron budget the rendered image is calibrated against (see
+        /// ComputeSceneElectrons), so it is never drawn twice.
+        /// </summary>
+        private List<PointSource> GatherUnresolvedBodies(FrameComputeInputs inputs, CelestialBody targetBody,
+                                                         GnomonicProjection projection, float exposureSeconds)
+        {
+            var sources = new List<PointSource>();
+            if (FlightGlobals.Bodies == null) return sources;
+
+            // ComputeCollectedElectrons applies the ND filter itself, so it is handed the
+            // atmospheric terms only; passing the full star chain would attenuate twice.
+            float bodyTransmission = (float)(inputs.BandExtinction * inputs.CloudTransmission);
+
+            double fullWell = FullWellElectrons;
+            foreach (CelestialBody body in FlightGlobals.Bodies)
+            {
+                if (body == null || body == targetBody) continue;
+                if (IsResolvedByOptics(body, inputs.PlateScaleArcsec)) continue;
+                if (!TryProjectBody(body, projection, out double px, out double py)) continue;
+
+                double electrons = ComputeCollectedElectrons(body, bodyTransmission, exposureSeconds);
+                double signal = electrons / Math.Max(1.0, fullWell);
+                if (signal <= inputs.SignalCutoffFraction) continue;
+
+                sources.Add(new PointSource
+                {
+                    SignalFraction = signal,
+                    // The body's live position is where the exposure ENDED, so its streak runs
+                    // back from there. Over one exposure its own orbital motion is far below the
+                    // diurnal drift, so the field centre's displacement is the whole of it.
+                    StartPixelX = px - inputs.DriftPixelX,
+                    StartPixelY = py - inputs.DriftPixelY,
+                    EndPixelX = px,
+                    EndPixelY = py,
+                });
+            }
+            return sources;
+        }
+
+        /// <summary>True when a body's apparent disk spans enough pixels for the renderer to draw it as a disk rather than a point.</summary>
+        private static bool IsResolvedByOptics(CelestialBody body, double plateScaleArcsec)
+        {
+            if (plateScaleArcsec <= 0.0) return true;
+            return AngularDiameterArcsec(body) >= ResolvedBodyMinDiameterPx * plateScaleArcsec;
+        }
+
+        /// <summary>Apparent diameter, in pixels, below which a body is treated as a point source rather than a rendered disk. Two pixels is the sampling limit; below it there is no disk to resolve.</summary>
+        private const double ResolvedBodyMinDiameterPx = 2.0;
+
+        // Observatory's local (north, east, up) basis in world space, built once per capture by
+        // TryBuildFieldGeometry and reused for every body projected into that frame.
+        private Vector3d siteNorth, siteEast, siteUp;
+        private bool haveSiteBasis;
+
+        /// <summary>
+        /// Projects a live body onto the sensor through the frame geometry. The direction is
+        /// resolved straight against the observatory's local basis rather than converted to an
+        /// azimuth first, which is both cheaper and free of the singularity an azimuth has
+        /// directly overhead.
+        /// </summary>
+        private bool TryProjectBody(CelestialBody body, GnomonicProjection projection, out double px, out double py)
+        {
+            px = py = 0.0;
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null || body == null || !haveSiteBasis) return false;
+
+            Vector3d observer = ObservatorySite.WorldPosition(home);
+            Vector3d toBody = body.position - observer;
+            if (toBody.sqrMagnitude < 1.0) return false;
+            toBody = toBody.normalized;
+
+            if (Vector3d.Dot(toBody, siteUp) <= 0.0) return false; // below the observatory's horizon
+
+            SkyVector direction = SkyVector.Normalized(
+                Vector3d.Dot(toBody, siteNorth), Vector3d.Dot(toBody, siteEast), Vector3d.Dot(toBody, siteUp));
+            return projection.TryProject(direction, out px, out py);
+        }
+
+        /// <summary>
+        /// How far the field centre slides across the sensor over the exposure, as a real vector
+        /// rather than the horizontal-only smear this used to assume. Measured by projecting the
+        /// boresight's own sky position through the geometry at both ends of the exposure, so it
+        /// carries the true direction of the drift at whatever latitude and hour angle the
+        /// observatory happens to be looking from.
+        /// </summary>
+        private static void ComputeFieldCentreDrift(FrameComputeInputs inputs, GnomonicProjection projection,
+                                                    double latitudeDeg, out double driftX, out double driftY)
+        {
+            driftX = driftY = 0.0;
+
+            SkyVector boresight = projection.Boresight;
+            double altDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, boresight.Z))) * 180.0 / Math.PI;
+            double azDeg = Math.Atan2(boresight.Y, boresight.X) * 180.0 / Math.PI;
+
+            SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, inputs.StartMeridianRaDeg, latitudeDeg,
+                                                  out double raDeg, out double decDeg);
+
+            HorizontalCoordinates endAltAz = SkyCoordinates.EquatorialToHorizontal(
+                raDeg, decDeg, inputs.EndMeridianRaDeg, latitudeDeg);
+
+            if (!projection.TryProject(SkyVector.FromHorizontal(endAltAz.AltitudeDeg, endAltAz.AzimuthDeg),
+                                       out double endX, out double endY))
+                return;
+
+            driftX = endX - 0.5 * projection.WidthPx;
+            driftY = endY - 0.5 * projection.HeightPx;
         }
 
         /// <summary>
@@ -1124,22 +1636,37 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Converts the raw rendered frame into a monochrome CCD-frame look through the
-        /// physics pipeline: filter throughput, atmospheric extinction, EVE cloud cover,
-        /// sky glow (twilight + moon scattering + airglow + zodiacal), scintillation,
-        /// shot/dark/read noise, cosmic ray hits, full-well blooming,
-        /// charge-transfer smear, hot/dead pixels, optional drift trail, and combined
-        /// defocus/seeing/astigmatism blur. Pure C#/array math only -- no CelestialBody or
-        /// UnityEngine.Object API touches -- so this runs on a background Task; only the
-        /// FrameComputeInputs gather step and the final texture upload need the main thread.
+        /// Builds the finished frame from the rendered scene, the star field and the sky, in the
+        /// order the light and the electronics really act.
+        ///
+        /// That order is the point of this method, and it changed:
+        ///
+        ///   1. SIGNAL PLANE. The rendered bodies, scaled to their real electron count, plus
+        ///      every point source, catalogue stars and unresolved moons alike, deposited at its
+        ///      own sub-pixel position with its own independently computed flux.
+        ///   2. OPTICS. One convolution with the instrument's real PSF, plus off-axis
+        ///      astigmatism. This acts on the SIGNAL, before any noise exists.
+        ///   3. SKY. A real surface brightness, uniform across the frame.
+        ///   4. DETECTOR. Shot noise, dark current, gain, read noise, cosmic rays, blooming,
+        ///      charge-transfer smear, then the sensor's own defects.
+        ///
+        /// The previous version convolved the PSF AFTER drawing noise, which is backwards in a
+        /// way that matters: blurring a noise field correlates neighbouring pixels and shrinks
+        /// its variance, so the frame's measured signal-to-noise ratio no longer matched the
+        /// physics that produced it, and no stacking or photometry done on it could be trusted.
+        /// Optics blur light; they cannot blur the readout that happens afterwards.
+        ///
+        /// Pure C#/array math only, with no CelestialBody or UnityEngine.Object API touches, so
+        /// this runs on a background Task; only the gather step and the texture upload need the
+        /// main thread.
         /// </summary>
         private Color[] ComputeFramePixels(FrameComputeInputs inputs)
         {
             Color[] src = inputs.Src;
-            float filterThroughput = FilterThroughput(inputs.Filter);
 
             int n = TextureWidth * TextureHeight;
             if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
+            if (signalScratch == null || signalScratch.Length != n) signalScratch = new float[n];
 
             // Reused, not freshly allocated per capture. A Color is 16 bytes, so at the largest
             // instrument's native resolution (4096x4128 = 16.9 Mpx) this single array is 270 MB;
@@ -1149,11 +1676,7 @@ namespace ExoInstruments.Visualization
             // copied out there, so one buffer is enough.
             if (frameScratch == null || frameScratch.Length != n) frameScratch = new Color[n];
             Color[] pixels = frameScratch;
-
-            float skyBackground = (float)((TwilightSkyBackgroundRatePerSecond * inputs.TwilightRamp
-                                          + MoonGlowRatePerSecond * inputs.MoonSkyExcess
-                                          + AirglowBaselinePerSecond
-                                          + ZodiacalBaselineRatePerSecond) * inputs.ExposureSeconds * filterThroughput);
+            float[] signal = signalScratch;
 
             // Deliberately the NATIVE (unbinned) Spec.FullWellElectrons here, paired with the
             // native per-physical-pixel DarkCurrentElectronsPerSecond -- both real electron
@@ -1171,8 +1694,7 @@ namespace ExoInstruments.Visualization
             lastScintillationFactor = scintJitter;
             lastScintillationSigma = (float)inputs.ScintSigma;
 
-            float cloudTransmission = 1f - inputs.CloudCoverage * (float)CloudMaxAttenuation;
-            float haze = inputs.CloudCoverage * (float)CloudHazeRatePerSecond * inputs.ExposureSeconds * filterThroughput;
+            float cloudTransmission = (float)inputs.CloudTransmission;
 
             // Unity's own rendered pixel values (src[]) keep supplying the real spatial shading
             // (terminator, limb, craters from the game's own 3D lighting) -- only the ABSOLUTE
@@ -1200,11 +1722,51 @@ namespace ExoInstruments.Visualization
                 ? (float)((inputs.TotalElectrons / FullWellElectrons) / totalRenderedLuminance)
                 : 0f;
 
+            // --- 1. Signal plane -------------------------------------------------------
+            // The rendered bodies first: the renderer supplies the spatial shading, the physics
+            // supplies the scale.
             for (int i = 0; i < n; i++)
             {
-                float signal = FilterSignal(src[i], inputs.Filter);
-                float photon = signal * calibratedSignalPerUnit * scintJitter * cloudTransmission;
-                float totalPhoton = photon + haze + skyBackground;
+                signal[i] = FilterSignal(src[i], inputs.Filter) * calibratedSignalPerUnit * scintJitter * cloudTransmission;
+            }
+
+            // The rendered scene is a snapshot at one instant; an unguided mount lets the sky
+            // slide across the sensor during the exposure, so the whole scene draws a streak
+            // along the real drift vector rather than the horizontal-only smear assumed before.
+            // Negated: the rendered snapshot is the END of the exposure, so the scene's streak
+            // extends backwards from where it was drawn, the same way each star's does.
+            ApplyLinearSmear(signal, -inputs.DriftPixelX, -inputs.DriftPixelY);
+
+            // Then everything unresolved. Stars are point sources, so they carry the point-source
+            // scintillation rather than the resolved disk's much quieter figure.
+            lastStarsDrawnInternal = 0;
+            if (inputs.HaveFieldGeometry)
+            {
+                float starScint = ScintillationMultiplier(rng, inputs.PointSourceScintSigma);
+                DepositSkyField(signal, inputs, starScint);
+            }
+
+            // --- 2. Optics -------------------------------------------------------------
+            // The instrument's real PSF: diffraction off its own annular pupil, convolved with
+            // the Kolmogorov atmosphere and any defocus (see OpticalPsf). One convolution over
+            // the whole signal plane, so a star and the planet beside it get the same optics and
+            // nothing is blurred twice.
+            EnsurePsfKernels(inputs, out float[] psfCore, out int psfRadius,
+                             out float psfCoreWeight, out float[] psfHalo, out int psfHaloRadius);
+            ApplyPsf(signal, psfCore, psfRadius, psfCoreWeight, psfHalo, psfHaloRadius);
+
+            // Field-dependent astigmatism, applied after the PSF so it reads as a distinct
+            // off-axis smear rather than blending into the on-axis profile.
+            ApplyAstigmatismBlur(signal);
+
+            // --- 3. Sky, then 4. detector ----------------------------------------------
+            // The sky is uniform, and convolving a constant field with a unit-sum kernel returns
+            // it unchanged, so adding it after the PSF is exact and saves a transform.
+            float skyBackground = (float)(inputs.SkyElectronsPerPixel / Math.Max(1.0, FullWellElectrons));
+
+            for (int i = 0; i < n; i++)
+            {
+                float totalPhoton = signal[i] + skyBackground;
 
                 float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton, FullWellElectrons);
                 float combinedPreGainSigma = Mathf.Sqrt(shotSigma * shotSigma + darkSigma * darkSigma);
@@ -1232,20 +1794,6 @@ namespace ExoInstruments.Visualization
                 float value = Mathf.Clamp01(rawScratch[i]);
                 pixels[i] = new Color(value, value, value, 1f);
             }
-
-            // Diurnal drift: 360 deg per Kerbin rotation, converted to pixels by the FOV.
-            if (inputs.DriftPx >= 1) ApplyHorizontalMotionBlur(pixels, inputs.DriftPx);
-
-            // The instrument's real PSF -- diffraction off its own annular pupil, convolved with
-            // the Kolmogorov atmosphere and any defocus (see OpticalPsf). One convolution, so
-            // nothing is blurred twice.
-            EnsurePsfKernels(inputs, out float[] psfCore, out int psfRadius,
-                             out float psfCoreWeight, out float[] psfHalo, out int psfHaloRadius);
-            ApplyPsf(pixels, psfCore, psfRadius, psfCoreWeight, psfHalo, psfHaloRadius);
-
-            // Field-dependent astigmatism, applied after the PSF so it reads as a distinct
-            // off-axis smear rather than blending into the on-axis profile.
-            ApplyAstigmatismBlur(pixels);
 
             // Defect overlay last: hot/dead pixels are a detector read-out artifact, not an
             // optical one, so they shouldn't be softened by the seeing/defocus/astigmatism blur the
@@ -1368,19 +1916,143 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Convolves the frame with the instrument's PSF. The pipeline is monochrome by this
-        /// point (every pixel carries one value in all three channels), so this works on a
-        /// single plane rather than three -- a third of the transform work for an identical result.
+        /// Draws every unresolved source into the signal plane: the catalogue stars found for
+        /// this pointing, and the solar-system bodies too small for the renderer to resolve.
+        ///
+        /// Both go through the same path because they are the same thing optically, a point of
+        /// light of known flux at a known place, and putting them on one path is what keeps a
+        /// moon and a star of the same magnitude equally bright in the finished frame.
         /// </summary>
-        private void ApplyPsf(Color[] pixels, float[] kernel, int radius,
+        private void DepositSkyField(float[] signal, FrameComputeInputs inputs, float scintillation)
+        {
+            int drawn = 0;
+
+            if (inputs.Stars != null && inputs.Stars.Count > 0)
+            {
+                double wavelength = inputs.FilterCentralWavelengthMeters;
+                double bandwidth = inputs.FilterBandwidthAngstrom;
+                double area = inputs.ApertureAreaCm2;
+                double qe = Spec.QuantumEfficiency;
+                double exposure = inputs.ExposureSeconds;
+                double transmission = inputs.StarTransmission * scintillation;
+
+                drawn = StarFieldRenderer.DepositStars(
+                    signal, TextureWidth, TextureHeight,
+                    inputs.Stars, inputs.Projection,
+                    inputs.StartMeridianRaDeg, inputs.EndMeridianRaDeg,
+                    inputs.ObserverLatitudeDeg,
+                    FullWellElectrons,
+                    inputs.SignalCutoffFraction,
+                    star => StellarPhotometry.CollectedElectrons(
+                        star.VMag, star.ColorIndexBV, wavelength, bandwidth,
+                        area, qe, exposure, transmission));
+            }
+
+            if (inputs.UnresolvedBodies != null)
+            {
+                foreach (PointSource body in inputs.UnresolvedBodies)
+                {
+                    PointSource scaled = body;
+                    scaled.SignalFraction *= scintillation;
+                    StarFieldRenderer.Deposit(signal, TextureWidth, TextureHeight, scaled);
+                }
+            }
+
+            lastStarsDrawnInternal = drawn;
+        }
+
+        /// <summary>
+        /// Smears the plane along a straight path, conserving flux, which is what a source sweeping
+        /// across the sensor during the exposure actually lays down.
+        ///
+        /// Implemented as a sliding-window sum along parallel rasterised lines in the drift
+        /// direction, so every pixel is visited a constant number of times regardless of how
+        /// long the streak is. The naive form, resampling each pixel once per step of the
+        /// trail, costs the trail's length per pixel, and an unguided exposure can trail
+        /// further than the sensor is wide.
+        ///
+        /// Light that runs off the edge is gone rather than clamped back in: a body drifting out
+        /// of frame really does leave, and edge-clamping would invent flux that was never
+        /// collected.
+        /// </summary>
+        private void ApplyLinearSmear(float[] plane, double driftX, double driftY)
+        {
+            int w = TextureWidth, h = TextureHeight;
+            double length = Math.Sqrt(driftX * driftX + driftY * driftY);
+            if (length < 1.0) return;
+
+            if (smearScratch == null || smearScratch.Length != plane.Length) smearScratch = new float[plane.Length];
+            Array.Clear(smearScratch, 0, smearScratch.Length);
+
+            // The axis the drift travels furthest along is stepped one pixel at a time, so the
+            // rasterised lines have |slope| <= 1 and together cover every pixel exactly once --
+            // which is what makes the smear conserve flux rather than gain or lose it to gaps.
+            bool xMajor = Math.Abs(driftX) >= Math.Abs(driftY);
+            double majorDrift = xMajor ? driftX : driftY;
+            double minorDrift = xMajor ? driftY : driftX;
+            int window = (int)Math.Round(Math.Abs(majorDrift));
+            if (window < 1) return;
+
+            double slope = minorDrift / majorDrift;
+            int majorLen = xMajor ? w : h;
+            int minorLen = xMajor ? h : w;
+            bool forward = majorDrift >= 0.0;
+
+            if (smearLineScratch == null || smearLineScratch.Length < majorLen) smearLineScratch = new float[majorLen];
+
+            // Only the lines that can actually cross the frame are walked. A line rises or falls
+            // by slope*(majorLen-1) from end to end, so which side of the frame it has to start
+            // outside of depends on the sign of the slope; widening both sides would double
+            // the work for lines that are empty by construction.
+            int minorSpread = (int)Math.Ceiling(Math.Abs(slope) * (majorLen - 1)) + 1;
+            int firstStart = slope >= 0.0 ? -minorSpread : 0;
+            int lastStart = slope >= 0.0 ? minorLen : minorLen + minorSpread;
+            float invSamples = 1f / (window + 1);
+
+            for (int start = firstStart; start < lastStart; start++)
+            {
+                // Gathered in DRIFT order, so the smear below is a plain causal box filter.
+                for (int k = 0; k < majorLen; k++)
+                {
+                    int majorPos = forward ? k : majorLen - 1 - k;
+                    int minorPos = start + (int)Math.Round(slope * majorPos);
+                    smearLineScratch[k] = (minorPos >= 0 && minorPos < minorLen)
+                        ? plane[xMajor ? minorPos * w + majorPos : majorPos * w + minorPos]
+                        : 0f;
+                }
+
+                float running = 0f;
+                for (int k = 0; k < majorLen; k++)
+                {
+                    running += smearLineScratch[k];
+                    int leaving = k - window - 1;
+                    if (leaving >= 0) running -= smearLineScratch[leaving];
+
+                    int majorPos = forward ? k : majorLen - 1 - k;
+                    int minorPos = start + (int)Math.Round(slope * majorPos);
+                    if (minorPos >= 0 && minorPos < minorLen)
+                        smearScratch[xMajor ? minorPos * w + majorPos : majorPos * w + minorPos] += running * invSamples;
+                }
+            }
+
+            Array.Copy(smearScratch, plane, plane.Length);
+        }
+
+        /// <summary>
+        /// Convolves the signal plane with the instrument's PSF. The pipeline is monochrome, so
+        /// this works on a single plane rather than three, a third of the transform work for
+        /// an identical result.
+        ///
+        /// Deliberately NOT clamped to full well: a saturated star core has to reach the
+        /// blooming pass with its real over-full-well value, or the charge that should spill
+        /// down the column is silently discarded here instead.
+        /// </summary>
+        private void ApplyPsf(float[] plane, float[] kernel, int radius,
                               float coreWeight, float[] haloKernel, int haloRadius)
         {
             if (kernel == null || radius < 1) return;
 
-            int n = pixels.Length;
-            if (psfPlaneScratch == null || psfPlaneScratch.Length != n) psfPlaneScratch = new float[n];
-            for (int i = 0; i < n; i++) psfPlaneScratch[i] = pixels[i].r;
-
+            int n = plane.Length;
             bool hasHalo = haloKernel != null && haloRadius >= 1 && coreWeight < 0.999f;
 
             // Convolution is linear, so a PSF that is the sum of two components can be applied as
@@ -1391,20 +2063,17 @@ namespace ExoInstruments.Visualization
             if (hasHalo)
             {
                 if (psfHaloScratch == null || psfHaloScratch.Length != n) psfHaloScratch = new float[n];
-                Array.Copy(psfPlaneScratch, psfHaloScratch, n);
+                Array.Copy(plane, psfHaloScratch, n);
                 haloPlane = psfHaloScratch;
                 FourierConvolution.Convolve(haloPlane, TextureWidth, TextureHeight, haloKernel, haloRadius);
             }
 
-            FourierConvolution.Convolve(psfPlaneScratch, TextureWidth, TextureHeight, kernel, radius);
+            FourierConvolution.Convolve(plane, TextureWidth, TextureHeight, kernel, radius);
 
-            for (int i = 0; i < n; i++)
+            if (hasHalo)
             {
-                float v = hasHalo
-                    ? coreWeight * psfPlaneScratch[i] + (1f - coreWeight) * haloPlane[i]
-                    : psfPlaneScratch[i];
-                v = Mathf.Clamp01(v);
-                pixels[i] = new Color(v, v, v, 1f);
+                for (int i = 0; i < n; i++)
+                    plane[i] = coreWeight * plane[i] + (1f - coreWeight) * haloPlane[i];
             }
         }
 
@@ -1647,12 +2316,12 @@ namespace ExoInstruments.Visualization
         /// focus positions in an off-axis RC/Ritchey-Chretien field. Zero at the target itself
         /// (centered by definition), worst for background stars near the corners.
         /// </summary>
-        private void ApplyAstigmatismBlur(Color[] buffer)
+        private void ApplyAstigmatismBlur(float[] plane)
         {
             int w = TextureWidth, h = TextureHeight;
             int n = w * h;
             if (astigmatismScratch == null || astigmatismScratch.Length != n) astigmatismScratch = new float[n];
-            for (int i = 0; i < n; i++) astigmatismScratch[i] = buffer[i].r;
+            Array.Copy(plane, astigmatismScratch, n);
 
             float cx = w / 2f, cy = h / 2f;
             float maxR = Mathf.Sqrt(cx * cx + cy * cy);
@@ -1677,8 +2346,7 @@ namespace ExoInstruments.Visualization
                         int sy = Mathf.Clamp(y + Mathf.RoundToInt(ny * s), 0, h - 1);
                         sum += astigmatismScratch[sy * w + sx];
                     }
-                    float v = sum / (steps + 1);
-                    buffer[y * w + x] = new Color(v, v, v, 1f);
+                    plane[y * w + x] = sum / (steps + 1);
                 }
             }
         }
@@ -1739,20 +2407,6 @@ namespace ExoInstruments.Visualization
 
         private static double Clamp01(double v) => v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 
-        /// <summary>
-        /// Relative sky-glow/haze throughput per filter, against Luminance -- a narrower filter
-        /// passes proportionally less of the (per-second, full-bandwidth-implied) sky background
-        /// just as it passes proportionally less of the target's own signal, so this is derived
-        /// directly from each filter's real bandwidth (VisualTelescopeSpec, see
-        /// FilterBandwidthAngstrom) rather than a separately-tuned set of ratios -- one real
-        /// number feeds both, instead of two figures that could silently drift apart.
-        /// </summary>
-        private static float FilterThroughput(CameraFilter filter)
-        {
-            if (filter == CameraFilter.Luminance) return 1.0f;
-            return (float)(FilterBandwidthAngstrom(filter) / LuminanceBandwidthAngstrom);
-        }
-
         /// <summary>Signal a mono sensor records through the given filter (L = luminance, R/G/B = single channel, H-alpha = red).</summary>
         private static float FilterSignal(Color c, CameraFilter filter)
         {
@@ -1764,58 +2418,6 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.HAlpha: return c.r; // H-alpha sits in the deep red
                 default:                  return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
             }
-        }
-
-        /// <summary>Drift trail length in pixels for an untracked exposure. Capped so even a 30 s sub never fills the whole frame.</summary>
-        private int ComputeDriftPixels(float exposureSeconds, CelestialBody targetBody)
-        {
-            CelestialBody home = FlightGlobals.GetHomeBody();
-            double rotationPeriod = home != null && home.rotationPeriod > 0 ? home.rotationPeriod : 21600.0;
-            double driftDegPerSec = 360.0 / rotationPeriod;      // sidereal rate, tied to Kerbin's spin
-            double driftDeg = driftDegPerSec * exposureSeconds;  // 1 real second treated as 1 sky-second
-            float fov = Mathf.Clamp(FovDeg, MinFovDeg, MaxFovDeg);
-            double pxPerDeg = TextureWidth / (double)fov;
-            int px = (int)(driftDeg * pxPerDeg);
-            return Mathf.Clamp(px, 0, TextureWidth / 3);
-        }
-
-        /// <summary>Horizontal motion blur — the classic untracked star-trail smear.</summary>
-        /// <summary>
-        /// Horizontal-only sliding-window (prefix-sum) box blur, edge-clamped -- O(w) per
-        /// row regardless of the blur length, instead of the naive O(w*length) resampling a
-        /// per-pixel loop over each offset would cost. Needed once the sensor is real
-        /// resolution: ComputeDriftPixels' length can reach into the hundreds of pixels, and a
-        /// naive per-offset sum at that length, times millions of pixels, is the single most
-        /// expensive pass in the whole frame.
-        /// </summary>
-        private void ApplyHorizontalMotionBlur(Color[] buffer, int length)
-        {
-            if (length < 1) return;
-            if (blurScratch == null || blurScratch.Length != buffer.Length)
-                blurScratch = new Color[buffer.Length];
-            int w = TextureWidth, h = TextureHeight;
-            if (rowPrefixScratch == null || rowPrefixScratch.Length < w + 1) rowPrefixScratch = new float[w + 1];
-            float inv = 1f / (length + 1);
-
-            for (int y = 0; y < h; y++)
-            {
-                int row = y * w;
-                rowPrefixScratch[0] = 0f;
-                for (int x = 0; x < w; x++) rowPrefixScratch[x + 1] = rowPrefixScratch[x] + buffer[row + x].r;
-
-                for (int x = 0; x < w; x++)
-                {
-                    // Window [x-length, x], each sample individually edge-clamped -- matches the
-                    // original per-offset Mathf.Clamp behavior exactly (edge pixels repeat).
-                    int clampedLo = Math.Max(0, x - length);
-                    int leftPadCount = Math.Max(0, length - x);
-                    float innerSum = rowPrefixScratch[x + 1] - rowPrefixScratch[clampedLo];
-                    float sum = innerSum + leftPadCount * buffer[row].r;
-                    float v = sum * inv;
-                    blurScratch[row + x] = new Color(v, v, v, 1f);
-                }
-            }
-            Array.Copy(blurScratch, buffer, buffer.Length);
         }
 
         public void Dispose()
@@ -1840,14 +2442,14 @@ namespace ExoInstruments.Visualization
             // Every resolution-sized scratch buffer/state must be rebuilt fresh at whatever
             // resolution EnsureSceneBuilt runs next at (native size change on a binning switch).
             pixelScratch = null;
-            blurScratch = null;
             frameScratch = null;
-            psfPlaneScratch = null;
             psfHaloScratch = null;
             displayScratch = null;
             rawScratch = null;
             astigmatismScratch = null;
-            rowPrefixScratch = null;
+            signalScratch = null;
+            smearScratch = null;
+            smearLineScratch = null;
             hotPixelIndices = null;
             deadPixelIndices = null;
             lastCaptureSnapshot = null;

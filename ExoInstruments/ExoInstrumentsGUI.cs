@@ -228,6 +228,7 @@ namespace ExoInstruments
         void Start()
         {
             catalog = LoadCatalog();
+            LoadRenderedStarCatalog();
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
@@ -260,6 +261,37 @@ namespace ExoInstruments
             Debug.Log($"[ExoInstruments] Density thinning: {beforeThinning} real hosts -> {exoplanetTargets.Count} " +
                       "(caps dense survey fields like Kepler so they don't visibly clump on the sky chart).");
             return MergeWithBackgroundStars(exoplanetTargets);
+        }
+
+        /// <summary>
+        /// Loads the Tycho-2 catalogue that gets DRAWN into photographs.
+        ///
+        /// Entirely separate from the Bright Star Catalogue loaded below, which stays exactly as
+        /// it is: the exoplanet instruments deliberately search a small, sparse list so that
+        /// finding a transit remains a tractable game. This one exists only so that a photograph
+        /// has a real star field behind its subject, and nothing in the detection pipeline ever
+        /// reads it. A missing or unreadable file simply means no star field.
+        /// </summary>
+        private void LoadRenderedStarCatalog()
+        {
+            string path = KSPUtil.ApplicationRootPath + "GameData/ExoInstruments/PluginData/RenderedStarCatalog.bin";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.LogWarning($"[ExoInstruments] Rendered star catalog not found at {path}. "
+                                   + "Photographs will have an empty sky background.");
+                    return;
+                }
+                var catalog = new RenderedStarCatalog();
+                catalog.Load(path);
+                SolarSystemCameraTexture.StarCatalog = catalog;
+                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Tycho-2 stars loaded.");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the rendered star catalog: {e.Message}");
+            }
         }
 
         private List<StarTarget> LoadExoplanetCatalog()
@@ -1583,6 +1615,16 @@ namespace ExoInstruments
                 GUILayout.Label(
                     $"Scintillation this frame: x{sc:F3} (sigma {solarSystemCamera.LastScintillationSigma:F2})"
                     + (sc < 0f ? "  <-- NEGATIVE: stale build, restart KSP" : ""),
+                    smallCaptionStyle);
+
+                // The three numbers that describe the sky the subject was photographed against:
+                // how dark it was, how faint this exposure could reach, and what it actually
+                // caught. All are quantities a real observer records with the frame.
+                double skyMag = solarSystemCamera.LastSkyBrightnessVMagPerArcsec2;
+                string sky = double.IsPositiveInfinity(skyMag) ? "--" : $"{skyMag:F2} mag/arcsec²";
+                GUILayout.Label(
+                    $"Sky {sky}  |  limiting magnitude V {solarSystemCamera.LastLimitingVMag:F1}"
+                    + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
                     smallCaptionStyle);
             }
 

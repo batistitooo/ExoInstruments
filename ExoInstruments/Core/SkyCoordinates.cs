@@ -85,6 +85,39 @@ namespace ExoInstruments.Core
             return new HorizontalCoordinates { AltitudeDeg = altDeg, AzimuthDeg = azDeg };
         }
 
+        /// <summary>
+        /// The inverse of EquatorialToHorizontal: where a direction the observer is physically
+        /// pointing at sits in the catalogue's equatorial frame (Meeus, "Astronomical
+        /// Algorithms", Ch. 13, the same transformation pair read the other way).
+        ///
+        /// This is what ties the camera to the star catalogue. The telescope's aim is known as a
+        /// real direction in the game's world, which converts to altitude and azimuth over the
+        /// observatory; the catalogue is in right ascension and declination. Without this
+        /// inversion there is no way to ask "which stars is the instrument actually looking at",
+        /// and the rendered frame can only ever contain what the game itself drew.
+        /// </summary>
+        public static void HorizontalToEquatorial(
+            double altitudeDeg, double azimuthDeg,
+            double localMeridianRaDeg, double observerLatitudeDeg,
+            out double raDeg, out double decDeg)
+        {
+            double altRad = DegToRad(altitudeDeg);
+            double latRad = DegToRad(observerLatitudeDeg);
+            // Meeus measures azimuth westward from south; this mod measures it from north
+            // through east, the compass convention, so the two differ by half a turn.
+            double azFromSouthRad = DegToRad(azimuthDeg - 180.0);
+
+            double sinDec = Math.Sin(latRad) * Math.Sin(altRad) - Math.Cos(latRad) * Math.Cos(altRad) * Math.Cos(azFromSouthRad);
+            sinDec = Math.Min(1.0, Math.Max(-1.0, sinDec));
+            decDeg = RadToDeg(Math.Asin(sinDec));
+
+            double y = Math.Sin(azFromSouthRad);
+            double x = Math.Cos(azFromSouthRad) * Math.Sin(latRad) + Math.Tan(altRad) * Math.Cos(latRad);
+            double hourAngleDeg = RadToDeg(Math.Atan2(y, x));
+
+            raDeg = NormalizeDegrees(localMeridianRaDeg - hourAngleDeg);
+        }
+
         /// <summary>Convenience overload for a catalog target; null if it has no RA/Dec.</summary>
         public static HorizontalCoordinates? TryComputeHorizontal(
             StarTarget target,
