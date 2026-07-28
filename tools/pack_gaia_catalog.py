@@ -61,10 +61,20 @@ USAGE
     python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 
 No third-party packages: the ESA archive speaks TAP, which is plain HTTP, so this runs on a
-stock Python 3. The archive is queried in declination
-slices, because a single anonymous job cannot return tens of millions of rows; each slice
-is sized to stay under the archive's row cap. Expect this to take a while and to move a
-few hundred MB over the network.
+stock Python 3.
+
+The sky is fetched in source_id slices, because a single anonymous job cannot return tens of
+millions of rows. Each range is COUNTED first (cheap, transfers nothing) and split until it
+fits, so dense sky near the Galactic plane subdivides further than empty sky near the poles
+without any tuning.
+
+BE PATIENT, AND EXPECT TO RETRY. The anonymous archive is not only size-limited but appears
+to throttle: ranges that returned in one second when tried in isolation failed after ~112 s
+when run back to back. A full G < 13 pack is therefore best measured in hours rather than
+minutes, and may need to be restarted. Two ways to make that better, neither done here:
+  * An ESA archive account raises the anonymous limits substantially. The TAP endpoint takes
+    a login; adding that here means the tool prompting for your own credentials.
+  * Caching each completed slice to disk so a restart resumes rather than begins again.
 
     python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --cone 266.4 -29.0 1.0
 
@@ -199,7 +209,7 @@ def build_star(ra, dec, g, bp_rp):
 TAP_ASYNC = "https://gea.esac.esa.int/tap-server/tap/async"
 
 
-def tap_query(adql, timeout_s=1800):
+def tap_query(adql, timeout_s=3600, quiet=False):
     """Run one ADQL query as an async TAP job and return its rows as dicts."""
     body = urllib.parse.urlencode({
         "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv",
@@ -209,15 +219,22 @@ def tap_query(adql, timeout_s=1800):
     with urllib.request.urlopen(urllib.request.Request(TAP_ASYNC, data=body, method="POST")) as r:
         job = r.geturl().split("?")[0]
 
-    deadline = time.time() + timeout_s
+    # Progress is printed while polling. Without it a slice that legitimately takes minutes is
+    # indistinguishable from a hang, which is exactly how this first looked.
+    started = time.time()
     while True:
         with urllib.request.urlopen(job + "/phase") as r:
             phase = r.read().decode().strip()
+        elapsed = time.time() - started
         if phase in ("COMPLETED", "ERROR", "ABORTED"):
+            if not quiet or phase != "COMPLETED":
+                print(f"      {phase.lower()} after {elapsed:.0f}s", flush=True)
             break
-        if time.time() > deadline:
+        if elapsed > timeout_s:
             raise RuntimeError(f"TAP job {job} still {phase} after {timeout_s}s")
-        time.sleep(2)
+        if not quiet:
+            print(f"      {phase.lower()}... {elapsed:.0f}s", end="\r", flush=True)
+        time.sleep(3)
 
     if phase != "COMPLETED":
         with urllib.request.urlopen(job + "/error") as r:
@@ -228,8 +245,58 @@ def tap_query(adql, timeout_s=1800):
     return list(csv.DictReader(io.StringIO(text)))
 
 
+# HEALPix level 12 index space, shifted the way Gaia defines source_id. Splitting this range
+# splits the sky, because HEALPix is equal-area and source_id is ordered by it.
+SOURCE_ID_MAX = 12 * (4 ** 12) * (2 ** 35)
+
+
+# Rows per job. The archive refuses anonymous jobs above some undocumented size: measured on
+# Gaia DR3, a range holding 245,910 rows fails server-side after ~116 s with a bare ERROR, while
+# 12,937 rows returns in one second. This sits well inside the known-good side of that gap.
+MAX_ROWS_PER_JOB = 50_000
+
+
+def fetch_range(gmax, lo, hi, columns, depth=0):
+    """
+    One source_id range, subdivided by COUNTING it first.
+
+    Counting before fetching is the whole point. Star density varies by two orders of magnitude
+    between the Galactic pole and the plane, so no fixed slice count is right everywhere, and
+    discovering a slice is too big by WAITING FOR IT TO FAIL costs ~112 seconds every time. A
+    COUNT(*) over the same range is a few seconds because it transfers nothing, so the size is
+    known before anything is downloaded and the subdivision is free.
+
+    The failure path is kept as a backstop, since the archive's limit is undocumented and may be
+    about something other than row count.
+    """
+    if depth < 16:
+        count = int(tap_query(f"SELECT COUNT(*) AS n FROM gaiadr3.gaia_source "
+                              f"WHERE phot_g_mean_mag < {gmax} "
+                              f"AND source_id >= {lo} AND source_id < {hi}", quiet=True)[0]["n"])
+        if count == 0:
+            return
+        if count > MAX_ROWS_PER_JOB:
+            mid = (lo + hi) // 2
+            yield from fetch_range(gmax, lo, mid, columns, depth + 1)
+            yield from fetch_range(gmax, mid, hi, columns, depth + 1)
+            return
+
+    try:
+        yield tap_query(f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
+                        f"AND source_id >= {lo} AND source_id < {hi}")
+        return
+    except Exception as e:
+        if depth >= 16:
+            raise RuntimeError(f"source_id range [{lo}, {hi}) still fails after 16 subdivisions") from e
+        print(f"      refused despite its size, splitting (depth {depth + 1})", flush=True)
+
+    mid = (lo + hi) // 2
+    yield from fetch_range(gmax, lo, mid, columns, depth + 1)
+    yield from fetch_range(gmax, mid, hi, columns, depth + 1)
+
+
 def fetch(gmax, cone, slices):
-    """Rows from the ESA archive, in declination slices small enough for one job each."""
+    """Rows from the ESA archive, in source_id slices small enough for one job each."""
     columns = "ra, dec, phot_g_mean_mag, bp_rp"
     if cone:
         ra, dec, radius = cone
@@ -238,20 +305,22 @@ def fetch(gmax, cone, slices):
                         f"AND 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{radius}))")
         return
 
-    # Equal-area declination slices, so each holds a comparable number of stars.
+    # Sliced on SOURCE_ID rather than declination. source_id encodes the star's HEALPix cell in
+    # its high bits and is the table's primary key, so a source_id range is a contiguous index
+    # range the archive seeks straight to. A declination range is not: dec is a plain column, so
+    # every slice re-scans the table looking for it.
     for i in range(slices):
-        lo = math.degrees(math.asin(2.0 * i / slices - 1.0))
-        hi = math.degrees(math.asin(2.0 * (i + 1) / slices - 1.0))
-        print(f"  slice {i + 1}/{slices}: dec {lo:+.2f} to {hi:+.2f}", flush=True)
-        yield tap_query(f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
-                        f"AND dec >= {lo} AND dec < {hi}")
+        lo = SOURCE_ID_MAX * i // slices
+        hi = SOURCE_ID_MAX * (i + 1) // slices
+        print(f"  slice {i + 1}/{slices}", flush=True)
+        yield from fetch_range(gmax, lo, hi, columns)
 
 
 def main():
     p = argparse.ArgumentParser(description="Pack Gaia DR3 into ExoInstruments' star catalogue format.")
     p.add_argument("--gmax", type=float, required=True, help="faint limit in Gaia G (see the depth table in this file's docstring)")
     p.add_argument("--out", required=True, help="output .bin path")
-    p.add_argument("--slices", type=int, default=24, help="declination slices to split the query into")
+    p.add_argument("--slices", type=int, default=48, help="source_id slices to split the query into; each is subdivided further if the archive refuses it")
     p.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS"),
                    help="restrict to a cone in degrees, for testing the pipeline end to end")
     args = p.parse_args()

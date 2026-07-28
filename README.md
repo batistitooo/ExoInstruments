@@ -206,6 +206,13 @@ python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 No packages to install: the ESA archive speaks plain HTTP, so this runs on the Python 3 that
 already ships with macOS and most Linux distributions.
 
+**Expect it to be slow, and expect to retry.** The anonymous archive limits how much one job may
+return and appears to throttle under sustained use: ranges that came back in a second in isolation
+failed after ~112 s when run back to back. The tool counts each range before fetching it and splits
+until it fits, and retries a range the archive refuses anyway, but a full `G < 13` pack is best
+measured in hours and may need restarting. A free ESA archive account raises those limits
+substantially if you plan to build a deep one.
+
 Then copy the result to:
 
 ```
