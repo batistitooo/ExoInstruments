@@ -209,7 +209,7 @@ def build_star(ra, dec, g, bp_rp):
 TAP_ASYNC = "https://gea.esac.esa.int/tap-server/tap/async"
 
 
-def tap_query(adql, timeout_s=3600, quiet=False):
+def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
     """Run one ADQL query as an async TAP job and return its rows as dicts."""
     body = urllib.parse.urlencode({
         "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv",
@@ -242,7 +242,7 @@ def tap_query(adql, timeout_s=3600, quiet=False):
 
     with urllib.request.urlopen(job + "/results/result") as r:
         text = r.read().decode()
-    return list(csv.DictReader(io.StringIO(text)))
+    return text if want_text else list(csv.DictReader(io.StringIO(text)))
 
 
 # HEALPix level 12 index space, shifted the way Gaia defines source_id. Splitting this range
@@ -255,47 +255,71 @@ SOURCE_ID_MAX = 12 * (4 ** 12) * (2 ** 35)
 # 12,937 rows returns in one second. This sits well inside the known-good side of that gap.
 MAX_ROWS_PER_JOB = 50_000
 
+# Retries per range, and the first back-off. The archive throttles rather than rejecting on
+# size, so the answer to a refusal is to wait and ask for the same thing again.
+MAX_ATTEMPTS = 5
+BACKOFF_SECONDS = 20
 
-def fetch_range(gmax, lo, hi, columns, depth=0):
+
+def cache_path(cache_dir, gmax, lo, hi):
+    return os.path.join(cache_dir, f"g{gmax}_{lo}_{hi}.csv")
+
+
+def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
     """
-    One source_id range, subdivided by COUNTING it first.
+    One source_id range: cached, counted, and RETRIED rather than subdivided on failure.
 
-    Counting before fetching is the whole point. Star density varies by two orders of magnitude
-    between the Galactic pole and the plane, so no fixed slice count is right everywhere, and
-    discovering a slice is too big by WAITING FOR IT TO FAIL costs ~112 seconds every time. A
-    COUNT(*) over the same range is a few seconds because it transfers nothing, so the size is
-    known before anything is downloaded and the subdivision is free.
+    Retrying rather than subdividing is the correction that matters. The archive's refusals are
+    not about size -- a range that failed inside a long run returned 32,261 rows in 14 s when
+    tried again in isolation minutes later. It throttles. Subdividing a refused range therefore
+    does exactly the wrong thing: it doubles the number of jobs against a server that is already
+    saying "too many", and the run spirals into ever smaller pieces, each still refused. Backing
+    off and asking again for the SAME range is what actually works.
 
-    The failure path is kept as a backstop, since the archive's limit is undocumented and may be
-    about something other than row count.
+    Counting first is kept, because it costs one cheap job and avoids the ~120 s a genuinely
+    oversized range burns before failing. Subdivision is kept only for ranges the count says are
+    too big, which is its real purpose.
     """
+    cached = cache_path(cache_dir, gmax, lo, hi)
+    if os.path.exists(cached):
+        with open(cached) as f:
+            rows = list(csv.DictReader(f))
+        print(f"      cached: {len(rows)} rows", flush=True)
+        yield rows
+        return
+
     if depth < 16:
         count = int(tap_query(f"SELECT COUNT(*) AS n FROM gaiadr3.gaia_source "
                               f"WHERE phot_g_mean_mag < {gmax} "
                               f"AND source_id >= {lo} AND source_id < {hi}", quiet=True)[0]["n"])
         if count == 0:
+            open(cached, "w").write("ra,dec,phot_g_mean_mag,bp_rp\n")
             return
         if count > MAX_ROWS_PER_JOB:
             mid = (lo + hi) // 2
-            yield from fetch_range(gmax, lo, mid, columns, depth + 1)
-            yield from fetch_range(gmax, mid, hi, columns, depth + 1)
+            yield from fetch_range(gmax, lo, mid, columns, cache_dir, depth + 1)
+            yield from fetch_range(gmax, mid, hi, columns, cache_dir, depth + 1)
             return
 
-    try:
-        yield tap_query(f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
-                        f"AND source_id >= {lo} AND source_id < {hi}")
-        return
-    except Exception as e:
-        if depth >= 16:
-            raise RuntimeError(f"source_id range [{lo}, {hi}) still fails after 16 subdivisions") from e
-        print(f"      refused despite its size, splitting (depth {depth + 1})", flush=True)
+    query = (f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
+             f"AND source_id >= {lo} AND source_id < {hi}")
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            text = tap_query(query, want_text=True)
+            with open(cached, "w") as f:   # written before yielding, so a crash still resumes
+                f.write(text)
+            yield list(csv.DictReader(io.StringIO(text)))
+            return
+        except Exception:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            wait = BACKOFF_SECONDS * (2 ** attempt)
+            print(f"      refused; backing off {wait}s and asking again "
+                  f"(attempt {attempt + 2}/{MAX_ATTEMPTS})", flush=True)
+            time.sleep(wait)
 
-    mid = (lo + hi) // 2
-    yield from fetch_range(gmax, lo, mid, columns, depth + 1)
-    yield from fetch_range(gmax, mid, hi, columns, depth + 1)
 
-
-def fetch(gmax, cone, slices):
+def fetch(gmax, cone, slices, cache_dir):
     """Rows from the ESA archive, in source_id slices small enough for one job each."""
     columns = "ra, dec, phot_g_mean_mag, bp_rp"
     if cone:
@@ -313,7 +337,7 @@ def fetch(gmax, cone, slices):
         lo = SOURCE_ID_MAX * i // slices
         hi = SOURCE_ID_MAX * (i + 1) // slices
         print(f"  slice {i + 1}/{slices}", flush=True)
-        yield from fetch_range(gmax, lo, hi, columns)
+        yield from fetch_range(gmax, lo, hi, columns, cache_dir)
 
 
 def main():
@@ -321,13 +345,17 @@ def main():
     p.add_argument("--gmax", type=float, required=True, help="faint limit in Gaia G (see the depth table in this file's docstring)")
     p.add_argument("--out", required=True, help="output .bin path")
     p.add_argument("--slices", type=int, default=48, help="source_id slices to split the query into; each is subdivided further if the archive refuses it")
+    p.add_argument("--cache", help="directory for completed slices, so a restart resumes (default: <out>.cache)")
     p.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS"),
                    help="restrict to a cone in degrees, for testing the pipeline end to end")
     args = p.parse_args()
 
     print(f"Querying Gaia DR3 for G < {args.gmax}")
     stars = []
-    for table in fetch(args.gmax, args.cone, args.slices):
+    cache_dir = args.cache or (args.out + ".cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    print(f"Resumable cache: {cache_dir} (delete it to start over)")
+    for table in fetch(args.gmax, args.cone, args.slices, cache_dir):
         for row in table:
             def value(name):
                 v = row.get(name)
