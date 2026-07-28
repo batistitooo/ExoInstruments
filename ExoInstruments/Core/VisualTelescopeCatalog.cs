@@ -34,6 +34,22 @@ namespace ExoInstruments.Core
         public double BarlowFactor;
         public double SecondaryObstructionFraction;
 
+        /// <summary>
+        /// Secondary-support spider: number of vanes, and their width in metres. Together these
+        /// give the pupil its diffraction spikes, computed by Core/PupilDiffraction rather than
+        /// drawn (see TECHNICAL_REFERENCE 7.112).
+        ///
+        /// Zero means "no spider modelled", and for each instrument that is either a physical fact
+        /// or a declared gap, never a convenience:
+        ///   * A refractor has no secondary and therefore no spider at all.
+        ///   * For the PlaneWave instruments the vanes exist but no manufacturer figure gives
+        ///     their width, and spike brightness scales as the vane area SQUARED, so guessing it
+        ///     would be guessing the effect itself. Left at zero and recorded in section 12,
+        ///     the same treatment the CDK1000's astigmatism already gets.
+        /// </summary>
+        public int SpiderVaneCount;
+        public double SpiderVaneWidthMeters;
+
         // Site (feeds the shared atmospheric/scintillation model in AtmosphericImagingNoise)
         public double SiteAltitudeMeters;
 
@@ -317,6 +333,10 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 0.51,
             FocalLengthMeters = 0.51 * 6.8,
+            // The RC20 has a real vane spider, but PlaneWave publishes no vane width and spike
+            // brightness goes as the vane area squared. Declared rather than guessed (section 12).
+            SpiderVaneCount = 0,
+            SpiderVaneWidthMeters = 0.0,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.39,
             // A Ritchey-Chretien is two mirrors, and both are in the imaging path. Aluminium at
@@ -436,6 +456,10 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 0.051,
             FocalLengthMeters = 0.250,
+            // A Petzval refractor: no secondary mirror, so no spider and no spikes. A physical
+            // fact about the design, not a missing measurement.
+            SpiderVaneCount = 0,
+            SpiderVaneWidthMeters = 0.0,
             BarlowFactor = 1.0,
             SecondaryObstructionFraction = 0.0,
             // A refractor has no mirrors, so there is no reflection loss to apply. What it does
@@ -545,6 +569,9 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 1.000,
             FocalLengthMeters = 6.000,
+            // Same as the RC20: real spider, no published vane width (section 12).
+            SpiderVaneCount = 0,
+            SpiderVaneWidthMeters = 0.0,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.47,
             // Two mirrors, same aluminium figure as the RC20. The CDK's defining third element is
@@ -703,6 +730,17 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 8.2,
             FocalLengthMeters = 24.556,
+            // VLT UT spider. The width comes from the scaled VLT pupil masks used throughout the
+            // coronagraphy literature: Martinez et al. (2011) cut a 3 mm mask for the 8 m pupil
+            // with "the spider-vane thickness is 15 um +/- 4 um", which at this telescope's 8.2 m
+            // is 4.1 +/- 1.1 cm. The scaling validates itself: the SAME paper's E-ELT mask uses
+            // 40 um vanes, which scaled to 39.3 m gives 52 cm against the 50 cm Schwartz et al.
+            // (2018) state in prose for the real ELT, a 4% agreement.
+            // The COUNT is weaker evidence than the width: ESO's technical prose says only that
+            // M2 is held "by means of metallic beams called spiders" without giving a number, so
+            // four is read from the telescope's own structure rather than quoted (section 12).
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.041,
             BarlowFactor = 2.0,
             SecondaryObstructionFraction = 1.116 / 8.2,
             // FORS2 sits at UT1's CASSEGRAIN focus (ESO's own caption for image eso9857a reads
@@ -878,6 +916,12 @@ namespace ExoInstruments.Core
             FocalLengthMeters = 1718.7,
             BarlowFactor = 1.0,
             SecondaryObstructionFraction = 1.116 / 8.2,
+            // Same telescope structure as UT1, so the same spider (see the FORS2 entry for the
+            // sourcing). It matters far more here: ZIMPOL is the only instrument in the roster
+            // whose plate scale actually RESOLVES the diffraction pattern, so it is the only one
+            // where the spikes are visible rather than sitting below one pixel.
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.041,
             // SPHERE is on UT3's NASMYTH platform, so its path is M1 -> M2 -> M3 flat -> focus:
             // three aluminium surfaces where Cassegrain-mounted FORS2 has two. At 0.87 per surface
             // that is 0.659 against FORS2's 0.757, i.e. the extra relay mirror alone costs 13% of

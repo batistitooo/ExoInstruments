@@ -53,6 +53,7 @@ class Program
         TestWcs();
         TestRadialPsfProfile();
         TestPupilDiffraction();
+        TestSpiderKernels();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -693,6 +694,106 @@ class Program
               + $"against 1.22 lambda/D = {1.22 * DirectImagingSimulator.LambdaOverDArcsec * 1000:F3} mas before");
 
         Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ Spider kernels
+    //
+    // The visual roster's PSF kernel was radially symmetric by construction, so none of these five
+    // telescopes could show a diffraction spike however real its spider. BuildKernel now takes the
+    // vane geometry and samples PupilDiffraction in two dimensions when there is one.
+
+    static void TestSpiderKernels()
+    {
+        Console.WriteLine("Visual roster: spider vanes in the PSF kernel");
+
+        var sphere = VisualTelescopeCatalog.Sphere;
+        double lambda = 554e-9;
+        // ZIMPOL's real native plate scale, from its focal length and pixel pitch.
+        double plate = sphere.NativePixelSizeMeters / sphere.FocalLengthMeters * (180.0 / Math.PI) * 3600.0;
+
+        // The vaneless path must be exactly what it was before this change existed.
+        float[] before = OpticalPsf.BuildKernel(plate, sphere.ApertureMeters,
+            sphere.SecondaryObstructionFraction, lambda, 0.0, 0.0, out int rBefore);
+        float[] viaNew = OpticalPsf.BuildKernel(plate, sphere.ApertureMeters,
+            sphere.SecondaryObstructionFraction, lambda, 0.0, 0.0, 0, 0.0, out int rNew);
+        bool identical = rBefore == rNew && before.Length == viaNew.Length;
+        if (identical)
+            for (int i = 0; i < before.Length; i++) if (before[i] != viaNew[i]) { identical = false; break; }
+        Check("a pupil with no vanes takes the radial path, bit for bit as before",
+              identical, $"radius {rBefore} px, {before.Length} taps identical");
+
+        // With vanes: still a normalised kernel, and now with spikes in it.
+        float[] vaned = OpticalPsf.BuildKernel(plate, sphere.ApertureMeters,
+            sphere.SecondaryObstructionFraction, lambda, 0.0, 0.0,
+            sphere.SpiderVaneCount, sphere.SpiderVaneWidthMeters, out int rVaned);
+        double sum = 0.0;
+        foreach (float v in vaned) sum += v;
+        Check("the vaned kernel still conserves flux",
+              Math.Abs(sum - 1.0) < 1e-6, $"sums to {sum:F9} over a {2 * rVaned + 1}x{2 * rVaned + 1} kernel");
+
+        // Four vanes at 0/90 degrees put spikes on the perpendicular axes, which for a
+        // four-fold spider are the same two axes. Compare along an axis against the diagonal.
+        // Measured as azimuthal STRUCTURE at a fixed radius rather than as flux summed along a
+        // line: summing along a line is dominated by the rings, which both kernels share. The
+        // decisive statement is that the vaned kernel varies with azimuth at all, and the vaneless
+        // one cannot, being radially symmetric by construction.
+        // Same PHYSICAL radius in both, since the two kernels have different supports.
+        double ring = 0.75 * Math.Min(rBefore, rVaned);
+        double vanedRatio = AzimuthalContrast(vaned, rVaned, ring);
+        double bareRatio = AzimuthalContrast(before, rBefore, ring);
+        Check("and it carries azimuthal structure the radial kernel cannot represent at all",
+              vanedRatio > 10.0 * bareRatio,
+              $"max/min around a ring at {ring:F0} px: {vanedRatio:F1}x vaned "
+              + $"against {bareRatio:F2}x vaneless");
+
+        // --- What this actually changes, per instrument ------------------------------------
+        //
+        // A spike can only be drawn if the plate scale resolves the diffraction pattern at all.
+        // Reported rather than asserted, because it is the honest scope of this change.
+        Console.WriteLine("         instrument            plate scale    Airy FWHM    px per FWHM   spikes visible?");
+        foreach (var spec in VisualTelescopeCatalog.All)
+        {
+            double ps = spec.NativePixelSizeMeters / spec.FocalLengthMeters * (180.0 / Math.PI) * 3600.0;
+            double fw = OpticalPsf.AiryFwhmArcsec(spec.ApertureMeters, spec.SecondaryObstructionFraction, lambda);
+            double perFwhm = fw / ps;
+            string verdict = spec.SpiderVaneCount == 0
+                ? (spec.SecondaryObstructionFraction <= 0 ? "no secondary" : "no vane width published")
+                : (perFwhm >= 1.0 ? "YES" : "below one pixel");
+            Console.WriteLine($"         {spec.Name,-20} {ps * 1000,8:F2} mas {fw * 1000,10:F2} mas {perFwhm,12:F2}   {verdict}");
+        }
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// Ratio of brightest to faintest value around a ring of the given radius in a kernel, sampled
+    /// by bilinear interpolation rather than at rounded pixel centres.
+    ///
+    /// The interpolation is what makes this a measurement of AZIMUTHAL structure. Rounding to whole
+    /// pixels makes the sampled radius wobble by up to half a pixel, and on the steep flank of a
+    /// diffraction ring that wobble alone produces a several-fold spread in a kernel that is
+    /// perfectly radially symmetric. Measured that way a vaneless kernel scored 3.11x, which was an
+    /// artifact of the sampling and nothing else.
+    /// </summary>
+    static double AzimuthalContrast(float[] kernel, int radius, double ringRadiusPx)
+    {
+        int size = 2 * radius + 1;
+        double hi = 0.0, lo = double.MaxValue;
+        for (double deg = 0; deg < 360; deg += 0.5)
+        {
+            double a = deg * Math.PI / 180.0;
+            double fx = radius + ringRadiusPx * Math.Cos(a);
+            double fy = radius + ringRadiusPx * Math.Sin(a);
+            int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+            if (x0 < 0 || x0 + 1 >= size || y0 < 0 || y0 + 1 >= size) continue;
+            double tx = fx - x0, ty = fy - y0;
+            double v = kernel[y0 * size + x0] * (1 - tx) * (1 - ty)
+                     + kernel[y0 * size + x0 + 1] * tx * (1 - ty)
+                     + kernel[(y0 + 1) * size + x0] * (1 - tx) * ty
+                     + kernel[(y0 + 1) * size + x0 + 1] * tx * ty;
+            if (v > hi) hi = v;
+            if (v < lo) lo = v;
+        }
+        return lo > 0.0 ? hi / lo : double.PositiveInfinity;
     }
 
     /// <summary>Larger of the two ratios, so a jump is measured whichever way it goes.</summary>

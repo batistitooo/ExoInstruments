@@ -549,6 +549,44 @@ The vanes are modelled as spanning **only the open annulus**, from the obstructi
 
 **How wrong the discarded constant was.** Along a spike at 6 λ/D the real vanes give `3.06e-4` of peak against `1.17e-5` without them, a factor **26**. The old constant asserted `4e-4` at 1 λ/D falling as 1/r², which is `1.11e-5` at that radius — it under-predicted the spike by a factor of 28, and put it in the wrong place.
 
+### 7.113 Spider vanes on the visual roster (`VisualTelescopeSpec.SpiderVaneCount/WidthMeters`)
+
+The visual roster's PSF kernel was radially symmetric by construction, so **none of these five telescopes could show a diffraction spike** however real its spider. `OpticalPsf.BuildKernel` now takes the vane geometry and samples `PupilDiffraction` (§7.112) in two dimensions when there is one; the atmospheric and defocus terms are unaffected and stay radial. With no vanes it takes the radial path and is bit-for-bit the previous behaviour, which the harness asserts tap by tap.
+
+**Sourcing, per instrument.**
+
+| Instrument | Vanes | Width | Basis |
+|---|---|---|---|
+| RedCat 51 | 0 | — | A Petzval **refractor**: no secondary, so no spider. A fact about the design. |
+| RC20 | 0 | — | Real spider, **no published vane width**. Declared, not guessed (§12). |
+| CDK1000 | 0 | — | Same. |
+| FORS2 (UT1) | 4 | 4.1 cm | See below. |
+| SPHERE (UT3) | 4 | 4.1 cm | Same telescope structure. |
+
+The VLT width comes from the scaled pupil masks the coronagraphy literature cuts for laboratory work. **Martinez et al. (2011)** describe theirs: the VLT pupil at Φ=3 mm "is designed with the central obscuration scaled to 0.47 mm ± 0.002 mm (14% linear ratio) and the spider-vane thickness is 15 µm ± 4 µm". At this telescope's 8.2 m that is **4.1 ± 1.1 cm**.
+
+**The scaling validates itself.** The same paper's E-ELT mask uses 40 µm vanes on a 29% obscuration. Scaled to 39.3 m that gives **52 cm**, against the **50 cm** Schwartz et al. (2018) state in prose for the real ELT (§7.112): a 4 % agreement on an independent telescope. That is what justifies applying the same scaling to the VLT mask rather than treating a laboratory mask as a loose analogy.
+
+The **count** is weaker evidence than the width, and is flagged as such: ESO's technical prose says only that M2 is held "by means of metallic beams called spiders" without giving a number, so four is read from the telescope's own structure rather than quoted. Listed in §12.
+
+**What this actually changes, which is less than it sounds.** A spike can only be drawn if the plate scale resolves the diffraction pattern at all. Measured across the roster at 554 nm:
+
+| Instrument | Plate scale | Airy FWHM | px per FWHM | Spikes |
+|---|---|---|---|---|
+| RedCat 51 | 3820 mas | 2306 mas | 0.60 | no secondary |
+| RC20 | 275.4 mas | 213.3 mas | 0.77 | no width published |
+| CDK1000 | 159.2 mas | 105.5 mas | 0.66 | no width published |
+| FORS2 | 126.0 mas | 14.19 mas | 0.11 | **below one pixel** |
+| SPHERE/ZIMPOL | 1.80 mas | 14.19 mas | **7.88** | **yes** |
+
+**ZIMPOL is the only instrument in the roster whose plate scale resolves its own diffraction pattern.** FORS2 sits at 0.11 px per Airy FWHM and is thoroughly seeing-limited, so its spider is real but its spikes fall far below one pixel; the model draws them anyway and the sampling erases them, which is the physically correct outcome rather than a shortcut. The amateur instruments are all undersampled by a factor around 1.3-1.7 at native resolution.
+
+The VLT spider also removes only **1.1 %** of the open pupil against the ELT's 3.8 %, and spike brightness scales as the vane area squared, so VLT spikes are intrinsically about an order of magnitude fainter than the ELT's relative to the peak.
+
+**Harness verification** (3 checks): the vaneless path is bit-identical to the previous kernel across all 2401 taps; the vaned kernel still sums to 1.000000005; and at a ring 18 px out it carries **227×** azimuthal contrast against the vaneless kernel's 5.9×. *(That 5.9 is itself a sampling artifact worth recording: sampling a ring at rounded pixel centres makes the sampled radius wobble by half a pixel, and on the steep flank of a diffraction ring that alone produced a 3.11× spread in a kernel that is exactly radially symmetric. The check interpolates bilinearly for that reason.)*
+
+**Truncation.** Spikes formally run across the whole frame while the kernel is bounded by `MaxKernelRadiusPx`. The kernel carries them only within its own support and is renormalised as always, so no flux is lost but the far spike wings are not drawn. Same computational bound the Airy wings already have (§7.11).
+
 ### 7.12 Display transfer function (`SolarSystemCameraTexture.DisplayStretch`)
 
 Selectable **Linear / Log / Asinh**, applied when a finished frame is turned into something the eye can read. **Display only**: `GetLastCaptureFullPrecision`, the FITS export (§7.7) and everything `AstroImageStack` consumes always receive the untouched linear signal — the same separation between viewer and data that every real observing tool keeps. Changing the mode restretches the frame already on screen instead of forcing a new exposure.
@@ -841,6 +879,8 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 8. **TTV/RM models are order-of-magnitude, single-dominant-perturber approximations** — only the strongest near-resonant pair is modeled; higher-order and secular effects are absent.
 9. **The direct-imaging frame's speckle and background are uniform pseudo-noise**, not physically-derived photon statistics. Each pixel's speckle term is a uniform deviate on `[0,1)` scaled by twice the local contrast floor, so it has the wrong distribution, a non-zero mean, and no photon noise on top. Real AO speckle intensity follows a modified Rician (**Aime & Soummer 2004**; **Soummer et al. 2007**) tending to a Gamma distribution as an exposure averages independent realisations, with the number of those set by the AO decorrelation time. Closing this needs that decorrelation time sourced for a real instrument, and is tracked as roadmap item 10 rather than approximated here.
    *(The optics half of this entry is closed. The frame now computes the diffraction pattern of the real ELT pupil, rings and spikes together, with no free parameter — §7.111, §7.112. What remains is the noise.)*
+   - **9d.** The **RC20 and CDK1000 have real spider vanes that are not modelled**, because PlaneWave publishes no vane width and spike brightness scales as the vane area squared: guessing the width would be guessing the effect. Both are set to zero vanes and declared, the same treatment the CDK1000's astigmatism already gets (§7.113).
+   - **9e.** The **VLT vane count of four is read from the telescope's structure, not quoted**: ESO's technical prose describes "metallic beams called spiders" without giving a number. The vane *width* is on firmer ground, being derived from published scaled pupil masks by a scaling that reproduces the ELT's independently published figure to 4 % (§7.113).
    - **9a.** The vane **width** is a literature value with real spread: 50 cm per Schwartz et al. (2018), against 54 cm in METIS phase D simulations and 40 cm in at least one published pupil figure. Spike brightness scales as the vane area squared, so that spread is a factor 1.8 on an effect of order 1e-4 of peak (§7.112).
    - **9b.** The profile's average over a pixel's azimuthal extent is exact within 6 px of the source and taken in its narrow-angle limit beyond, agreeing with a brute-force average over a real square pixel to **6.7×10⁻⁴ of peak intensity** across every plate scale the display produces (§7.111).
 10. **Every solar-system-photography instrument's sensor noise chain is anchored to real electron counts** (a real full well, read noise, and dark current, and a real photon-flux-calibrated signal — §7.0/§7.5), not abstract units — the remaining unanchored constant per instrument is astigmatism's pixel amplitude at the frame corner where a nonzero value is used (RC20 only; no published optical prescription specifies it to the needed precision), flagged individually in §7.1. (Optical throughput, absent entirely when this line was written, is now modelled where published and enumerated where not — see §7.001 and items 31-33 below.)
@@ -884,6 +924,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 - Cumming, A., Marcy, G. W. & Butler, R. P. (1999). RV semi-amplitude formalism (with Lovis & Fischer 2010 below).
 - Gillon, M. et al. (2018). SPECULOOS survey description.
 - Gilmozzi, R. & Spyromilio, J. (2007). ELT (39.3m, Cerro Armazones) description.
+- Martinez, P. et al. (2011). "Band-Limited Coronagraphs using a halftone-dot process: II." arXiv:1111.6956. Scaled VLT and E-ELT pupil masks: the VLT pupil at Φ=3 mm has "the central obscuration scaled to 0.47 mm ± 0.002 mm (14% linear ratio) and the spider-vane thickness is 15 µm ± 4 µm" — the source of the VLT's 4.1 cm vanes (§7.113). Its E-ELT mask independently reproduces the ELT's published 50 cm vanes to 4 %.
 - Schwartz, N., Sauvage, J.-F., Correia, C., Petit, C., Quiros-Pacheco, F., Fusco, T., Dohlen, K., El Hadi, K., Thatte, N., Clarke, F., Paufique, J. & Vernet, J. (2018). "Sensing and control of segmented mirrors with a pyramid wavefront sensor in the presence of spiders." *AO4ELT5*. The ELT's secondary "is supported by six 50-cm wide spiders" — the vane count and width the direct-imaging spikes are computed from (§7.112).
 - ESO, "The ELT's main structure" (elt.eso.org/telescope/structure/). The M2 crown "is connected to the top ring by means of six beams, forming the 'spider'" — independent confirmation of the vane count.
 - ESO, "E-ELT Optics" (www.eso.org/sci/facilities/eelt/telescope/mirrors/). The segmented primary "has a diameter of approximately 39 m" with "a 11.1 m central obstruction", filled from an inner radius of 5.5 m to an outer 18.5 m — the pupil obstruction ratio ε = 0.2824 the direct-imaging diffraction pattern is computed from (§7.111).

@@ -219,6 +219,32 @@ namespace ExoInstruments.Core
             double atmosphericFwhmArcsec,
             double defocusDiscRadiusPx,
             out int radiusPx)
+            => BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
+                           atmosphericFwhmArcsec, defocusDiscRadiusPx, 0, 0.0, out radiusPx);
+
+        /// <summary>
+        /// As above, but for a pupil whose secondary sits on a spider. With vanes the diffraction
+        /// term stops being radially symmetric -- it grows the spikes every real reflector shows --
+        /// so it is sampled in two dimensions from PupilDiffraction instead of from the radial
+        /// closed form. The atmospheric and defocus terms are unaffected and stay radial.
+        ///
+        /// vaneCount = 0 takes the radial path and is bit-for-bit the previous behaviour.
+        ///
+        /// Note on truncation: spikes formally run across the whole frame, while this kernel is
+        /// bounded by MaxKernelRadiusPx. The kernel therefore carries the spikes only within its
+        /// own support and is renormalised as always, so no flux is lost but the very far spike
+        /// wings are not drawn. That is the same computational bound the Airy wings already have.
+        /// </summary>
+        public static float[] BuildKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double wavelengthMeters,
+            double atmosphericFwhmArcsec,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            out int radiusPx)
         {
             radiusPx = 0;
             if (plateScaleArcsecPerPixel <= 0.0 || apertureMeters <= 0.0 || wavelengthMeters <= 0.0)
@@ -227,8 +253,22 @@ namespace ExoInstruments.Core
             // Component 1: diffraction. Always present -- it is the instrument's hard limit.
             double airyFwhm = AiryFwhmArcsec(apertureMeters, obstructionRatio, wavelengthMeters);
             int accR = RadiusFor(airyFwhm, plateScaleArcsecPerPixel);
-            double[] acc = SampleRadial(accR, plateScaleArcsecPerPixel,
-                theta => AiryIntensity(theta, apertureMeters, obstructionRatio, wavelengthMeters));
+            double[] acc;
+            bool hasVanes = vaneCount > 0 && vaneWidthMeters > 0.0;
+            if (hasVanes)
+            {
+                // Spikes reach far beyond the core, so the diffraction term is given the widest
+                // support the kernel budget allows rather than the core's own few pixels.
+                accR = Math.Min(MaxKernelRadiusPx, Math.Max(accR, (int)Math.Ceiling(8.0 * airyFwhm / plateScaleArcsecPerPixel)));
+                var pupil = new PupilDiffraction(apertureMeters, obstructionRatio, wavelengthMeters,
+                                                 vaneCount, vaneWidthMeters, 0.0);
+                acc = SampleTwoDimensional(accR, plateScaleArcsecPerPixel, pupil);
+            }
+            else
+            {
+                acc = SampleRadial(accR, plateScaleArcsecPerPixel,
+                    theta => AiryIntensity(theta, apertureMeters, obstructionRatio, wavelengthMeters));
+            }
 
             // Component 2: atmosphere. The effects act in series along the light path, so they
             // compose by convolution -- not by blending profiles or summing widths in quadrature.
@@ -375,6 +415,26 @@ namespace ExoInstruments.Core
                     double r = Math.Sqrt((double)dx * dx + (double)dy * dy);
                     double coverage = discRadiusPx + 0.5 - r; // linear ramp across the boundary pixel
                     k[(dy + radius) * size + (dx + radius)] = Math.Max(0.0, Math.Min(1.0, coverage));
+                }
+            }
+            return k;
+        }
+
+        /// <summary>
+        /// Samples a pupil's full two-dimensional pattern onto the kernel grid, pixel-averaged the
+        /// way PupilDiffraction defines it. No radial lookup table is possible here: with a spider
+        /// the pattern depends on azimuth as well as radius, which is the entire point.
+        /// </summary>
+        private static double[] SampleTwoDimensional(int radius, double plateScaleArcsecPerPixel, PupilDiffraction pupil)
+        {
+            int size = 2 * radius + 1;
+            var k = new double[size * size];
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    k[(dy + radius) * size + (dx + radius)] = pupil.PixelAveragedIntensityArcsec(
+                        dx * plateScaleArcsecPerPixel, dy * plateScaleArcsecPerPixel, plateScaleArcsecPerPixel);
                 }
             }
             return k;

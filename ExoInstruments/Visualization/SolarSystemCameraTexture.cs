@@ -1807,7 +1807,8 @@ namespace ExoInstruments.Visualization
             {
                 psfCacheCore = OpticalPsf.BuildKernel(
                     inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
-                    wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx, out psfCacheCoreRadius);
+                    wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx,
+                    Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, out psfCacheCoreRadius);
 
                 // A real adaptive-optics PSF is two-component: a corrected core carrying the
                 // system's Strehl ratio, plus the wide halo of everything it failed to correct.
