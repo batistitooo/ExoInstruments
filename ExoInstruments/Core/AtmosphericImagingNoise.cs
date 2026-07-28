@@ -134,26 +134,13 @@ namespace ExoInstruments.Core
             return Math.Sqrt(Math.Max(0.0, atAirmass * atAirmass - atZenith * atZenith));
         }
 
-        // Sensor noise: Poisson shot noise + dark current. The abstract [0,1] "signal
-        // fraction" this pipeline uses is defined as a fraction of the active telescope's real
-        // sensor full well (VisualTelescopeSpec.FullWellElectrons). With that anchor, shot
-        // noise and dark-current shot noise both reduce to pure Poisson statistics -- sigma
-        // (electrons) = sqrt(N), so as a fraction of full well: sigma_fraction =
-        // sqrt(signalFraction * Fw) / Fw = sqrt(signalFraction / Fw). No separate tuned
-        // coefficient is needed once a real Fw is chosen; the same 1/sqrt(Fw) relation applies
-        // to both shot noise and dark-current shot noise, since both are the same physical
-        // process (Poisson-distributed electron counts).
-
-        /// <summary>1-sigma shot noise for a pixel at the given (pre-gain) signal fraction, for a sensor with the given real full well (electrons).</summary>
-        public static double ShotNoiseSigma(double signalFraction, double fullWellElectrons)
-            => Math.Sqrt(Math.Max(0.0, signalFraction) / Math.Max(1.0, fullWellElectrons));
-
-        /// <summary>Dark-current pedestal + noise for the given exposure, on a sensor with the given real full well and dark current rate (both electrons). Pre-gain — accumulates regardless of gain setting.</summary>
-        public static void DarkCurrent(double exposureSeconds, double fullWellElectrons, double darkCurrentElectronsPerSecond, out double pedestalFraction, out double sigmaFraction)
-        {
-            double darkUnits = (darkCurrentElectronsPerSecond / Math.Max(1.0, fullWellElectrons)) * Math.Max(0.0, exposureSeconds);
-            pedestalFraction = darkUnits;
-            sigmaFraction = Math.Sqrt(darkUnits / Math.Max(1.0, fullWellElectrons)); // same Poisson process, same full-well-derived relation
-        }
+        // Sensor noise no longer lives here. The imaging pipeline now carries real ELECTRON
+        // counts rather than fractions of full well, so shot noise is drawn as a genuine Poisson
+        // deviate on the electron count itself (SolarSystemCameraTexture.SamplePoisson, PTRS per
+        // Hormann 1993) and dark current is simply a rate times an exposure. Both of the helpers
+        // that used to approximate those in normalised units -- ShotNoiseSigma and DarkCurrent --
+        // are gone with the normalisation that made them necessary: sqrt(N) is only the width of
+        // the Poisson distribution, not the distribution, and at the few electrons a faint sky
+        // reaches the difference is measurable and the Gaussian goes negative.
     }
 }

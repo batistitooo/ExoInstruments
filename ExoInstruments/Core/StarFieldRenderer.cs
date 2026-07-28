@@ -9,8 +9,8 @@ namespace ExoInstruments.Core
     /// </summary>
     public struct PointSource
     {
-        /// <summary>Signal in fractions of the sensor's full well, the unit the imaging pipeline works in.</summary>
-        public double SignalFraction;
+        /// <summary>Signal in ELECTRONS, the unit the imaging pipeline works in end to end.</summary>
+        public double SignalElectrons;
         public double StartPixelX, StartPixelY;
         public double EndPixelX, EndPixelY;
     }
@@ -60,7 +60,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static void Deposit(float[] plane, int width, int height, PointSource source)
         {
-            if (plane == null || source.SignalFraction <= 0.0) return;
+            if (plane == null || source.SignalElectrons <= 0.0) return;
 
             double dx = source.EndPixelX - source.StartPixelX;
             double dy = source.EndPixelY - source.StartPixelY;
@@ -70,7 +70,7 @@ namespace ExoInstruments.Core
             // rather than a dotted line. A stationary source is a single sample.
             int samples = (int)Math.Ceiling(trailLengthPx) + 1;
             if (samples > MaxTrailSamples) samples = MaxTrailSamples;
-            double perSample = source.SignalFraction / samples;
+            double perSample = source.SignalElectrons / samples;
 
             for (int s = 0; s < samples; s++)
             {
@@ -130,19 +130,18 @@ namespace ExoInstruments.Core
             GnomonicProjection projection,
             double startMeridianRaDeg, double endMeridianRaDeg,
             double observerLatitudeDeg,
-            double fullWellElectrons,
-            double signalCutoffFraction,
+            double signalCutoffElectrons,
             Func<RenderedStar, double> electronsFor)
         {
-            if (plane == null || stars == null || fullWellElectrons <= 0.0) return 0;
+            if (plane == null || stars == null) return 0;
 
             int drawn = 0;
             for (int i = 0; i < stars.Count; i++)
             {
                 RenderedStar star = stars[i];
 
-                double signal = electronsFor(star) / fullWellElectrons;
-                if (signal <= signalCutoffFraction) continue;
+                double signal = electronsFor(star);
+                if (signal <= signalCutoffElectrons) continue;
 
                 HorizontalCoordinates startAltAz = SkyCoordinates.EquatorialToHorizontal(
                     star.RaDeg, star.DecDeg, startMeridianRaDeg, observerLatitudeDeg);
@@ -173,7 +172,7 @@ namespace ExoInstruments.Core
 
                 Deposit(plane, width, height, new PointSource
                 {
-                    SignalFraction = signal,
+                    SignalElectrons = signal,
                     StartPixelX = sx,
                     StartPixelY = sy,
                     EndPixelX = ex,

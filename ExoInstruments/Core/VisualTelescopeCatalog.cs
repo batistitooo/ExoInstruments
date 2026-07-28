@@ -23,6 +23,19 @@ namespace ExoInstruments.Core
         // Site (feeds the shared atmospheric/scintillation model in AtmosphericImagingNoise)
         public double SiteAltitudeMeters;
 
+        /// <summary>
+        /// The site's own median seeing FWHM (arcsec) AT ZENITH, referred to 500nm -- the
+        /// convention every published DIMM figure uses. This is the dominant term in the
+        /// delivered image quality of any ground-based telescope without adaptive optics: a
+        /// 0.5m and an 8m telescope at the same site resolve a planet equally well, because
+        /// both are limited by this and not by their own apertures.
+        ///
+        /// Must be nonzero for every non-AO instrument. Zero means "no atmosphere", which is
+        /// only true for a space telescope; on the ground it produces a perfectly sharp,
+        /// diffraction-limited disk that no real telescope has ever recorded.
+        /// </summary>
+        public double ZenithSeeingFwhmArcsec;
+
         // Sensor
         public int NativeSensorWidthPx;
         public int NativeSensorHeightPx;
@@ -32,6 +45,32 @@ namespace ExoInstruments.Core
         public double ReadNoiseElectrons;
         /// <summary>Dark current at this sensor's own real cooled operating temperature (see each entry's comment for the actual temperature -- it varies by instrument, so it doesn't belong in the field name).</summary>
         public double DarkCurrentElectronsPerSecond;
+
+        /// <summary>
+        /// Bit depth of this camera's real analogue-to-digital converter. With
+        /// ElectronsPerAduAtUnityGain this fixes the digital saturation level in electrons,
+        /// K*(2^bits - 1), which is a DIFFERENT limit from the full well and is often the one
+        /// that actually bites: ESO's FORS2 manual states outright that "none of the CCDs will
+        /// saturate before reaching the numerical truncation limits (65535 adu)". A pipeline
+        /// working in fractions of full well cannot express that at all.
+        /// </summary>
+        public int AdcBits;
+
+        /// <summary>
+        /// Real conversion factor K in electrons per ADU, at gain multiplier 1. This is the
+        /// number that turns a simulated charge into a digital count, and the same number a real
+        /// observer needs to turn the counts back into electrons -- it is written to the FITS
+        /// EGAIN keyword, which is what makes the exported frame genuinely calibratable rather
+        /// than a picture of one.
+        /// </summary>
+        public double ElectronsPerAduAtUnityGain;
+
+        /// <summary>
+        /// Measured cosmic-ray event rate on this detector, events per minute per cm^2. Site
+        /// altitude matters here (the flux climbs steeply above sea level), so this is per
+        /// instrument rather than one pipeline-wide constant.
+        /// </summary>
+        public double CosmicRayEventsPerMinutePerCm2;
 
         // Capture range
         public float MinExposureSeconds;
@@ -75,7 +114,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Real AO-corrected resolution (FWHM, arcsec) this instrument achieves under good
         /// conditions, for an instrument with genuine adaptive optics -- see
-        /// SolarSystemCameraTexture.ComputeSeeingBlurPx, which uses this INSTEAD OF the plain
+        /// SolarSystemCameraTexture.ComputeGroundSeeingFwhmArcsec, which uses this INSTEAD OF the plain
         /// airmass-based seeing model when it's nonzero. 0 (default) means no adaptive optics:
         /// the plain ground-based seeing model applies, same as every telescope before SPHERE.
         /// </summary>
@@ -138,9 +177,15 @@ namespace ExoInstruments.Core
         /// Barlow for the "high power" end of the zoom range. Camera is a ZWO ASI294MM Pro mono
         /// CCD (zwoastro.com/product/asi294): 4144x2822 native resolution, 4.63um pixel pitch,
         /// 90% peak QE, 66,000 e- full well, 1.2 e- read noise (best case), 0.0022 e-/s/pixel
-        /// dark current at -20C, 32us-2000s exposure range. Site altitude is ETH Zurich's own
-        /// observatory, the real institution this instrument class is modeled on (see
-        /// Observatories.Rc20 for the career-economy side of this same instrument).
+        /// dark current at -20C, 32us-2000s exposure range. (See Observatories.Rc20 for the
+        /// career-economy side of this same instrument.)
+        ///
+        /// Site is the Observatoire de Haute-Provence, 650m. Previously this was left as a
+        /// generic "university observatory, e.g. ETH Zurich" -- a site named only by example,
+        /// which is fine for an altitude but not for seeing: seeing is a MEASURED property of a
+        /// specific mountain, so an unnamed site simply has no value that can be cited. OHP is a
+        /// real observatory of exactly this instrument's tier (a working national facility
+        /// hosting small telescopes, not a flagship), and it has published seeing statistics.
         ///
         /// Filters: a real LRGB astro filter wheel has no single published per-channel bandwidth
         /// the way a research instrument's named filters do, so R/G/B keep the even-third-of-L
@@ -164,7 +209,12 @@ namespace ExoInstruments.Core
             FocalLengthMeters = 0.51 * 6.8,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.39,
-            SiteAltitudeMeters = 560.0,
+            SiteAltitudeMeters = 650.0,
+            // OHP's own published median: Schmitt et al. 2024, A&A 687, A198 (the MISTRAL@OHP
+            // instrument paper) quotes performance "under a median seeing (for OHP) of 2.5
+            // arcsec". Taken as-is. The paper does not state a reference wavelength; 500nm is
+            // assumed, being the convention every seeing figure is quoted at.
+            ZenithSeeingFwhmArcsec = 2.5,
 
             NativeSensorWidthPx = 4144,
             NativeSensorHeightPx = 2822,
@@ -173,6 +223,18 @@ namespace ExoInstruments.Core
             FullWellElectrons = 66000.0,
             ReadNoiseElectrons = 1.2,
             DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
+
+            AdcBits = 14,                       // ZWO's published figure for this readout mode
+            // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
+            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // own published numbers; ZWO does not tabulate K itself for this camera.
+            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
+            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
+            // this is a floor rather than a measurement; unlike FORS2 no rate is published for
+            // this camera at its site.
+            CosmicRayEventsPerMinutePerCm2 = 1.0,
 
             MinExposureSeconds = 0.000032f,
             MaxExposureSeconds = 2000.0f,
@@ -197,6 +259,101 @@ namespace ExoInstruments.Core
 
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 3.0f,
+        };
+
+        /// <summary>
+        /// William Optics RedCat 51: a 51mm f/4.9 Petzval apochromatic astrograph, 250mm focal
+        /// length, quadruplet FPL-53 objective, flat corrected field over a 45mm image circle
+        /// (williamoptics.com / dealer product pages). The genuinely amateur end of the catalogue:
+        /// it costs less than a used car, weighs 1.8kg, and every other instrument here outguns
+        /// it on aperture by a factor of ten or more.
+        ///
+        /// It exists because APERTURE IS NOT THE ONLY AXIS, and this catalogue had only been
+        /// exploring one of them. Every other entry is a long-focus astrograph built to resolve:
+        /// the RC20's 3468mm gives a 0.32x0.22 degree field, and with its 4x Barlow, 0.08x0.05
+        /// degrees. At Tycho-2's 62 stars/deg^2 that is 4 stars in a frame, and 0.26 with the
+        /// Barlow in -- so three planetary frames in four contain no catalogue star at all, and
+        /// the star field the pipeline can draw is invisible for want of anything to draw.
+        /// 250mm of focal length through the same sensor gives 4.40x2.99 degrees, 13.2 deg^2,
+        /// and about 816 catalogue stars in every single exposure. Nothing about the renderer
+        /// changed; the instrument was simply pointed at the wrong end of the problem.
+        ///
+        /// Sampling: 3.82"/px unbinned, against 2.5" seeing at OHP. That is genuinely
+        /// UNDERSAMPLED -- a star lands on about one pixel and the PSF is narrower than the
+        /// pixel grid -- which is not a defect but the defining trade of every wide-field
+        /// astrograph: sky coverage bought with resolution. Do not "fix" it.
+        ///
+        /// Optics: a refractor, so SecondaryObstructionFraction is 0 -- there is no secondary
+        /// mirror in the light path, and the pupil is a filled circle rather than an annulus.
+        /// No Barlow (BarlowFactor 1): a wide-field astrograph has one field, and bolting a
+        /// Barlow onto it would simply undo the only reason to own it.
+        ///
+        /// Camera: the same ZWO ASI294MM Pro as the RC20, with every figure carried over
+        /// unchanged. This is not a shortcut but how amateur astrophotography actually works --
+        /// one camera, swapped between tubes -- and it isolates this entry's difference to the
+        /// optics alone.
+        ///
+        /// Filters: the same amateur LRGB + H-alpha wheel as the RC20, for the same reason.
+        ///
+        /// Astigmatism: 0px, and here that is documented rather than assumed. The Petzval design
+        /// exists specifically to deliver a flat, corrected field, and the manufacturer specifies
+        /// that correction across a 45mm image circle; the ASI294MM's sensor is 19.2x13.1mm, a
+        /// 23.2mm diagonal, so the whole frame sits inside the inner half of the corrected
+        /// circle. The RC20's 3.0px, by contrast, is a display calibration (see its own comment).
+        /// </summary>
+        public static readonly VisualTelescopeSpec RedCat51 = new VisualTelescopeSpec
+        {
+            Name = "RedCat51",
+
+            ApertureMeters = 0.051,
+            FocalLengthMeters = 0.250,
+            BarlowFactor = 1.0,
+            SecondaryObstructionFraction = 0.0,
+            SiteAltitudeMeters = 650.0,
+            // Same OHP site as the RC20, same published median (Schmitt et al. 2024, A&A 687,
+            // A198). An amateur rig is wherever its owner is, and putting it beside the RC20
+            // keeps the two instruments differing in optics alone.
+            ZenithSeeingFwhmArcsec = 2.5,
+
+            NativeSensorWidthPx = 4144,
+            NativeSensorHeightPx = 2822,
+            NativePixelSizeMeters = 4.63e-6,
+            QuantumEfficiency = 0.90,
+            FullWellElectrons = 66000.0,
+            ReadNoiseElectrons = 1.2,
+            DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
+
+            AdcBits = 14,                       // ZWO's published figure for this readout mode
+            // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
+            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // own published numbers; ZWO does not tabulate K itself for this camera.
+            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
+            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
+            // this is a floor rather than a measurement; unlike FORS2 no rate is published for
+            // this camera at its site.
+            CosmicRayEventsPerMinutePerCm2 = 1.0,
+
+            MinExposureSeconds = 0.000032f,
+            MaxExposureSeconds = 2000.0f,
+            MinGain = 0.7f,
+            MaxGain = 8.0f,
+
+            LuminanceBandwidthAngstrom = 2650.0,
+            RedBandwidthAngstrom = 2650.0 / 3.0,
+            GreenBandwidthAngstrom = 2650.0 / 3.0,
+            BlueBandwidthAngstrom = 2650.0 / 3.0,
+            HAlphaBandwidthAngstrom = 70.0,
+
+            LuminanceCentralWavelengthNm = 552.5,
+            RedCentralWavelengthNm = 640.8,
+            GreenCentralWavelengthNm = 552.5,
+            BlueCentralWavelengthNm = 464.2,
+            HAlphaCentralWavelengthNm = 656.3,
+
+            AvailableFilters = AllFilters,
+            AstigmatismStrengthPxAtCorner = 0.0f,
         };
 
         /// <summary>
@@ -245,6 +402,22 @@ namespace ExoInstruments.Core
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.47,
             SiteAltitudeMeters = 1712.0,
+            // Cenko et al. 2006, PASP 118, 1396 (the automated P60 paper) is the citable Palomar
+            // seeing measurement: "The average seeing at the P60 in the summer is ~1.1" in
+            // R-band". Two things that figure is NOT, and which the number below accounts for:
+            //
+            //   * It is not a 500nm figure. It is quoted in R, and seeing goes as lambda^(-1/5)
+            //     (r0 ~ lambda^(6/5), FWHM = 0.98*lambda/r0 -- the same relation
+            //     SolarSystemCameraTexture applies per-filter). Referred to 500nm through
+            //     Cousins R at 641nm (Bessell 1990, PASP 102, 1181), 1.1" becomes 1.16".
+            //   * It is not an annual median. The same paper gives ~1.6" in winter. The summer
+            //     value is used here because it is the one stated without qualification; this is
+            //     therefore the site's GOOD season, not its year-round typical.
+            //
+            // The paper also notes the P60 runs "~0.2" worse than the values reported at the
+            // 200" Hale" -- not applied, since that would be arithmetic on a second quoted
+            // figure to reach a number the paper never states.
+            ZenithSeeingFwhmArcsec = 1.16,
 
             NativeSensorWidthPx = 4144,
             NativeSensorHeightPx = 2822,
@@ -253,6 +426,18 @@ namespace ExoInstruments.Core
             FullWellElectrons = 66000.0,
             ReadNoiseElectrons = 1.2,
             DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
+
+            AdcBits = 14,                       // ZWO's published figure for this readout mode
+            // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
+            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // own published numbers; ZWO does not tabulate K itself for this camera.
+            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
+            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
+            // this is a floor rather than a measurement; unlike FORS2 no rate is published for
+            // this camera at its site.
+            CosmicRayEventsPerMinutePerCm2 = 1.0,
 
             MinExposureSeconds = 0.000032f,
             MaxExposureSeconds = 2000.0f,
@@ -359,14 +544,37 @@ namespace ExoInstruments.Core
             SecondaryObstructionFraction = 1.116 / 8.2,
             AlwaysAutoguided = true,
             SiteAltitudeMeters = 2635.0,
+            // Paranal's published median seeing, from ESO's own astroclimate page for the site
+            // (eso.org/sci/facilities/paranal/astroclimate): "The 50% percentile is 0.72" FWHM".
+            // This, not the 8.2m mirror, is what sets FORS2's delivered resolution -- the whole
+            // reason the instrument is described as seeing-limited.
+            ZenithSeeingFwhmArcsec = 0.72,
 
             NativeSensorWidthPx = 4096,
             NativeSensorHeightPx = 4128,
             NativePixelSizeMeters = 15e-6,
             QuantumEfficiency = 0.86,
             FullWellElectrons = 150000.0,
-            ReadNoiseElectrons = 1.89,
-            DarkCurrentElectronsPerSecond = 3.0 / 3600.0, // real FORS2 spec, -120C
+
+            // Detector figures below are the MIT mosaic's, in its real IMAGING readout: the
+            // manual states the imaging modes run at 200 kHz, which is the "low gain" column of
+            // its Table 2.8 (the 100 kHz / high gain column is the spectroscopic mode). All from
+            // the current ESO FORS2 User Manual, VLT-MAN-ESO-13100-1543.
+            //
+            // Two of these CORRECT earlier values in this file that did not match the manual:
+            // read noise was 1.89 e- (the manual's MIT chip-1 200 kHz figure is 3.8 e-), and
+            // dark current was 3.0 e-/px/h (the manual's Table 2.9 gives 2.1 +/- 0.4 e-/px/h for
+            // MIT chip 1 at -120C). The old numbers appear to come from an older manual revision.
+            ReadNoiseElectrons = 3.8,                       // Table 2.8, MIT chip 1, 200 kHz
+            DarkCurrentElectronsPerSecond = 2.1 / 3600.0,   // Table 2.9, MIT chip 1, -120C
+
+            AdcBits = 16,
+            ElectronsPerAduAtUnityGain = 1.25,              // Table 2.8, K for MIT chip 1, 200 kHz
+            // Table 2.9, measured on the MIT mosaic at Paranal (2635m). Nearly eight times the
+            // sea-level muon flux, which is what 2.6 km of altitude does to the cosmic-ray rate
+            // -- and a good illustration of why this belongs per instrument rather than as one
+            // global constant.
+            CosmicRayEventsPerMinutePerCm2 = 7.7,
 
             MinExposureSeconds = 0.25f,
             MaxExposureSeconds = 3600.0f,
@@ -433,7 +641,7 @@ namespace ExoInstruments.Core
         /// independent paper (Milli et al., search results for ZIMPOL H-alpha imaging) states
         /// SPHERE/ZIMPOL "routinely" reaches 22-28 mas FWHM across V/R/I -- 25 mas sits at the
         /// middle of that independently-confirmed range. Used as AdaptiveOpticsFwhmArcsec, this
-        /// REPLACES the plain ground-based seeing model (see ComputeSeeingBlurPx) with this
+        /// REPLACES the plain ground-based seeing model (see ComputeGroundSeeingFwhmArcsec) with this
         /// real, roughly airmass-independent achieved resolution -- about 24-40x finer than
         /// FORS2's typical seeing-limited blur, which is the entire reason this instrument can
         /// resolve targets FORS2 can only show as a barely-resolved smudge.
@@ -469,6 +677,10 @@ namespace ExoInstruments.Core
             SecondaryObstructionFraction = 1.116 / 8.2,
             SiteAltitudeMeters = 2635.0,
             AlwaysAutoguided = true,
+            // Same Paranal sky as FORS2, same ESO 50%-percentile figure. Recorded for
+            // completeness only: an instrument with AdaptiveOpticsFwhmArcsec set never takes the
+            // plain seeing path, because SAXO corrects this turbulence rather than suffering it.
+            ZenithSeeingFwhmArcsec = 0.72,
 
             NativeSensorWidthPx = 2048,
             NativeSensorHeightPx = 2048,
@@ -477,6 +689,16 @@ namespace ExoInstruments.Core
             FullWellElectrons = 640000.0,
             ReadNoiseElectrons = 20.0,
             DarkCurrentElectronsPerSecond = 0.2, // real ZIMPOL imaging-mode spec (Table 4)
+
+            AdcBits = 16,
+            // 10.5 e-/ADU is ZIMPOL's real published hardware conversion factor (Schmid et al.
+            // 2018, Table 4). The bit depth is not stated there, but 16 is the only value
+            // consistent with it: 10.5 x 65535 = 688,100 e-, just above this detector's own
+            // 640,000 e- full well, which is exactly how a well-matched CCD chain is specified
+            // (the ADC reaches the full well and barely more). 14 bits would truncate at
+            // 172,000 e-, throwing away three quarters of the well the paper documents.
+            ElectronsPerAduAtUnityGain = 10.5,
+            CosmicRayEventsPerMinutePerCm2 = 7.7, // same Paranal altitude and epoch as FORS2
 
             MinExposureSeconds = 1.1f,
             MaxExposureSeconds = 3600.0f,
@@ -504,15 +726,17 @@ namespace ExoInstruments.Core
 
             AdaptiveOpticsFwhmArcsec = 0.025,
             // Strehl ~40% in I band, the ZIMPOL system paper's own quoted performance alongside
-            // the 25 mas figure above. The halo is Paranal's real median seeing (0.65", ESO's
-            // published site figure -- the same site FORS2 above observes from), since the halo
-            // is by definition the fraction SAXO did not correct.
+            // the 25 mas figure above. The halo is Paranal's real median seeing, since the halo
+            // is by definition the fraction SAXO did not correct -- so it must be, and now is,
+            // the identical figure ZenithSeeingFwhmArcsec carries above: ESO's own published
+            // 50% percentile of 0.72" (eso.org/sci/facilities/paranal/astroclimate). This field
+            // previously read 0.65" while citing ESO, which is not the number ESO publishes.
             AdaptiveOpticsStrehlRatio = 0.40,
-            AdaptiveOpticsHaloSeeingFwhmArcsec = 0.65,
+            AdaptiveOpticsHaloSeeingFwhmArcsec = 0.72,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
 
         /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI -- see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
-        public static readonly VisualTelescopeSpec[] All = { Rc20, Cdk1000, Fors2Vlt, Sphere };
+        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere };
     }
 }

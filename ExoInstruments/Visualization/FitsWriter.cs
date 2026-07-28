@@ -24,6 +24,20 @@ namespace ExoInstruments.Visualization
             public double ExposureSeconds;
             public double PixelSizeMicrons;
             public double FullWellElectrons;
+            /// <summary>Real conversion factor K, electrons per ADU, at the gain this frame was taken with. Goes straight into EGAIN.</summary>
+            public double ElectronsPerAdu;
+            /// <summary>Bit depth of the real converter that produced these counts.</summary>
+            public int AdcBits;
+            /// <summary>Count at which this frame stopped responding -- the smaller of the physical well and the converter ceiling, expressed in ADU.</summary>
+            public double SaturationAdu;
+            /// <summary>
+            /// True for a raw single frame straight off the converter, where the counts really
+            /// are ADU and EGAIN really does return electrons. False for a processed product
+            /// (a stacked, aligned, luminance-transferred LRGB composite), where quoting a
+            /// conversion factor would be a lie: the pixel values have been through steps no
+            /// header keyword describes.
+            /// </summary>
+            public bool IsCalibratedAdu;
             public double FocalLengthMm;
             public float Gain;
             public string FilterName;
@@ -31,13 +45,22 @@ namespace ExoInstruments.Visualization
             public DateTime UtcTimestamp;
         }
 
-        /// <summary>Writes a grayscale Color[] (uses the red channel, values in [0,1]) as a 16-bit FITS file at path.</summary>
-        public static void WriteGrayscale(string path, Color[] pixels, int width, int height, FitsHeaderInfo info)
+        /// <summary>
+        /// Writes a frame of real ADU counts as a 16-bit FITS file.
+        ///
+        /// The values handed in are the detector's own digital output, not a display image: they
+        /// are written unaltered, so EGAIN really does convert them back to electrons and the
+        /// file can be reduced like an observed one. Writing a normalised [0,1] display frame
+        /// rescaled to 65535 -- which is what this used to receive -- produced a file whose
+        /// EGAIN was meaningless, because the counts had already been through a stretch and a
+        /// renormalisation that no header keyword described.
+        /// </summary>
+        public static void WriteGrayscale(string path, float[] aduCounts, int width, int height, FitsHeaderInfo info)
         {
             using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
             {
                 WriteHeader(stream, width, height, info);
-                WriteData(stream, pixels, width, height);
+                WriteData(stream, aduCounts, width, height);
             }
         }
 
@@ -54,8 +77,19 @@ namespace ExoInstruments.Visualization
             AppendCard(sb, "EXPTIME", info.ExposureSeconds.ToString("F6", CultureInfo.InvariantCulture), "exposure time (s)");
             AppendCard(sb, "XPIXSZ", info.PixelSizeMicrons.ToString("F3", CultureInfo.InvariantCulture), "pixel width (um)");
             AppendCard(sb, "YPIXSZ", info.PixelSizeMicrons.ToString("F3", CultureInfo.InvariantCulture), "pixel height (um)");
-            double eGain = info.FullWellElectrons / 65536.0;
-            AppendCard(sb, "EGAIN", eGain.ToString("F6", CultureInfo.InvariantCulture), "electrons per ADU");
+            AppendCard(sb, "FULLWELL", info.FullWellElectrons.ToString("F1", CultureInfo.InvariantCulture), "pixel full well (e-)");
+            AppendCard(sb, "ADCBITS", info.AdcBits.ToString(CultureInfo.InvariantCulture), "converter bit depth");
+            if (info.IsCalibratedAdu)
+            {
+                AppendCard(sb, "EGAIN", info.ElectronsPerAdu.ToString("F6", CultureInfo.InvariantCulture), "electrons per ADU (real conversion factor K)");
+                AppendCard(sb, "SATURATE", info.SaturationAdu.ToString("F1", CultureInfo.InvariantCulture), "saturation level (adu)");
+                AppendStringCard(sb, "BUNIT", "adu", "raw converter counts");
+            }
+            else
+            {
+                AppendStringCard(sb, "BUNIT", "", "processed product -- not raw counts");
+                AppendStringCard(sb, "HISTORY", "stacked/aligned composite; EGAIN omitted deliberately", "");
+            }
             AppendCard(sb, "FOCALLEN", info.FocalLengthMm.ToString("F2", CultureInfo.InvariantCulture), "focal length (mm)");
             AppendCard(sb, "GAIN", info.Gain.ToString("F3", CultureInfo.InvariantCulture), "camera gain setting");
             AppendStringCard(sb, "FILTER", info.FilterName, "filter name");
@@ -102,13 +136,13 @@ namespace ExoInstruments.Visualization
             return card.Length > CardSizeBytes ? card.Substring(0, CardSizeBytes) : card.PadRight(CardSizeBytes);
         }
 
-        private static void WriteData(FileStream stream, Color[] pixels, int width, int height)
+        private static void WriteData(FileStream stream, float[] aduCounts, int width, int height)
         {
             int n = width * height;
             byte[] buffer = new byte[n * 2];
             for (int i = 0; i < n; i++)
             {
-                int unsignedValue = Mathf.RoundToInt(Mathf.Clamp01(pixels[i].r) * 65535f);
+                int unsignedValue = Mathf.Clamp(Mathf.RoundToInt(aduCounts[i]), 0, 65535);
                 short signedValue = (short)(unsignedValue - 32768);
 
                 // FITS data is big-endian regardless of host byte order.

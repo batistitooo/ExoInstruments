@@ -58,7 +58,7 @@ namespace ExoInstruments.Visualization
     }
 
     /// <summary>
-    /// RC20 astrograph camera: clones KSP's scaled-space and galaxy cameras and
+    /// RC20 astrograph camera: clones KSP's scaled-space camera and
     /// points them at a solar-system body from KSC. Same technique as Tarsier Space
     /// Technology's TSTCameraModule, reimplemented here to avoid the dependency.
     /// Outputs a monochrome, noisy "single raw CCD frame" through a full physics
@@ -173,6 +173,36 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static double FullWellElectrons => Spec.FullWellElectrons * BinningFactor * BinningFactor;
 
+        /// <summary>Largest count this camera's real ADC can output: 2^AdcBits - 1.</summary>
+        public static int AdcMaxCount => (1 << Math.Max(1, Spec.AdcBits)) - 1;
+
+        /// <summary>Real conversion factor in electrons per ADU at the current gain setting. Gain amplifies the signal ahead of the converter, so a higher gain means FEWER electrons per count.</summary>
+        public static double ElectronsPerAdu(double gainMultiplier)
+            => Spec.ElectronsPerAduAtUnityGain / Math.Max(1e-6, gainMultiplier);
+
+        /// <summary>
+        /// Charge at which the ADC's top count is reached. Deliberately NOT scaled by binning:
+        /// on-chip binning sums charge ahead of one amplifier and one converter, so the digital
+        /// ceiling stays put in ADU while the well below it grows -- which is why binning a
+        /// sensor hard makes it digitally saturation-limited rather than well-limited.
+        /// </summary>
+        public static double DigitalSaturationElectrons(double gainMultiplier)
+            => ElectronsPerAdu(gainMultiplier) * AdcMaxCount;
+
+        /// <summary>
+        /// The charge a pixel actually stops responding at: whichever of the physical well and
+        /// the digital ceiling comes first.
+        ///
+        /// These are two different limits and real instruments live on both sides of the line.
+        /// ESO's FORS2 manual says plainly that "none of the CCDs will saturate before reaching
+        /// the numerical truncation limits (65535 adu)" -- its 150,000 e- well is never reached,
+        /// because at K = 1.25 e-/ADU the converter tops out at 81,919 e- first. A pipeline
+        /// carrying fractions of full well cannot represent that at all: it has only one ceiling,
+        /// and it is the wrong one.
+        /// </summary>
+        public static double SaturationElectrons(double gainMultiplier)
+            => Math.Min(FullWellElectrons, DigitalSaturationElectrons(gainMultiplier));
+
         /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch. Public because it's the single number that decides whether a target is resolvable at all -- real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it front and center for exactly that reason.</summary>
         public static float PlateScaleArcsecPerPixel
         {
@@ -190,7 +220,6 @@ namespace ExoInstruments.Visualization
         /// <summary>Field of view with a real Barlow -- the "high power" end of the zoom range.</summary>
         public static float MinFovDeg => MaxFovDeg / BarlowFactor;
 
-        private const string GalaxyCameraName = "GalaxyCamera";
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
 
         // Real filter bandwidths in Angstrom, matching FilterThroughput's ratios: L covers the
@@ -203,8 +232,16 @@ namespace ExoInstruments.Visualization
         public static float MaxExposureSeconds => Spec.MaxExposureSeconds;
 
         private const float MaxDefocusBlurPx = 7.0f;
-        private const float SeeingBlurPxPerAirmass = 1.4f;
-        private const float MaxSeeingBlurPx = 6.0f;
+
+        /// <summary>
+        /// Airmass at which the seeing power law stops growing. X = 6 is about 9.5 degrees
+        /// altitude -- already below where anyone would image, and far below where the
+        /// plane-parallel atmosphere the X^(3/5) law assumes still holds.
+        /// </summary>
+        private const double MaxSeeingAirmass = 6.0;
+
+        /// <summary>Wavelength every published seeing figure is referred to (500nm), and so the wavelength ZenithSeeingFwhmArcsec is quoted at.</summary>
+        private const double SeeingReferenceWavelengthMeters = 500e-9;
 
         // Sky brightness now comes from SkyBrightnessModel, in the real V mag/arcsec^2 the
         // quantity is measured and published in. The per-second, per-pixel rates that used to
@@ -213,7 +250,6 @@ namespace ExoInstruments.Visualization
         // silently depended on the plate scale, so binning the sensor or fitting a Barlow
         // changed how bright the night sky was.
         internal const double CloudMaxAttenuation = 0.85;                // thick cloud, never 100% opaque
-        private const float CloudBlurPxMax = 2.0f;
         // NOT amplified by gain (applied after the analog stage) -- the active telescope's real
         // read noise (a fixed per-readout-event electron figure, unaffected by binning) as a
         // fraction of the CURRENT BINNED full well (this class's own FullWellElectrons, not
@@ -221,7 +257,6 @@ namespace ExoInstruments.Visualization
         // dark-current noise. Binning genuinely reduces read noise's relative significance in a
         // real sensor (same read noise electrons, now a smaller slice of a bigger binned well),
         // which this correctly reflects.
-        private static float ReadNoiseSigmaValue => (float)(Spec.ReadNoiseElectrons / FullWellElectrons);
 
         /// <summary>
         /// Reference flux the moonlight term is expressed in: the home world's own brightest moon,
@@ -274,7 +309,6 @@ namespace ExoInstruments.Visualization
         // anti-blooming-gate asymmetry data, the textbook default is a charge-conserving,
         // symmetric split between the two vertical neighbors -- 0.5 to each means all of the
         // excess is conserved, none invented or discarded.
-        private const float FullWellValue = 1.0f;
         private const float BloomingSpillFraction = 0.5f;
 
         // Numerical convergence cap for the cascading overflow above (a spilled-over pixel can
@@ -317,7 +351,13 @@ namespace ExoInstruments.Visualization
         private static float CosmicRayHitsPerSecond => ComputeCosmicRayHitsPerSecond();
         private const int CosmicRayMinTrackPx = 2;
         private const int CosmicRayMaxTrackPx = 14;
-        private const float CosmicRayDepositValue = 0.85f;
+        /// <summary>
+        /// Charge a cosmic-ray track leaves in a pixel, as a fraction of the physical full well.
+        /// A minimum-ionising particle crossing the full depletion depth deposits far more than
+        /// a well can hold, which is why real cosmic rays read out saturated; 0.85 leaves them
+        /// just short of it so they stay distinguishable from a genuinely blown pixel.
+        /// </summary>
+        private const float CosmicRayDepositWellFraction = 0.85f;
 
         // Astigmatism: the radial-quadratic FORM (Seidel aberration theory: S_II/coma scales
         // linearly with field, S_III/astigmatism quadratically -- see Schroeder, "Astronomical
@@ -335,10 +375,13 @@ namespace ExoInstruments.Visualization
         private bool available;
 
         private GameObject root;
-        private Camera galaxyCam;
         private Camera scaledSpaceCam;
         private RenderTexture renderTexture;
         private Texture2D readbackTexture;
+
+        /// <summary>True when the device granted a half-float render target, i.e. the rendered scene reaches the physics unquantised. False means the 8-bit fallback is in use.</summary>
+        public bool HalfFloatCapture => halfFloatCapture;
+        private bool halfFloatCapture;
         private Texture2D outputTexture;
         private Texture2D capturedTexture;
         private Color[] pixelScratch;
@@ -393,8 +436,28 @@ namespace ExoInstruments.Visualization
         private float[] astigmatismScratch;
         private int lastStarsDrawnInternal;
 
-        private Renderer[] skyboxRenderers;
         private ScaledSpaceFader[] scaledSpaceFaders;
+
+        /// <summary>Enabled state of every ScaledSpaceFader as a capture found it, so RenderScene can put all of them back. Reused rather than reallocated, since a capture runs this on every shot.</summary>
+        private bool[] faderRestoreBuffer;
+
+        /// <summary>Conversion factor actually used by the last capture, electrons per ADU. Written to the FITS EGAIN keyword.</summary>
+        public double LastElectronsPerAdu => lastElectronsPerAdu;
+        private double lastElectronsPerAdu = 1.0;
+
+        /// <summary>Charge at which the last capture stopped responding -- the smaller of the physical well and the converter's ceiling.</summary>
+        public double LastSaturationElectrons => lastSaturationElectrons;
+        private double lastSaturationElectrons;
+
+        /// <summary>
+        /// The last capture as the detector's own ADU counts -- the calibratable data product.
+        ///
+        /// This is what FITS export writes, unaltered, so that EGAIN converts it back to
+        /// electrons and the frame reduces like an observed one. Distinct from CapturedPhoto and
+        /// GetLastCaptureFullPrecision, which are display frames normalised to [0,1].
+        /// </summary>
+        public float[] GetLastCaptureAdu() => lastAduFrame != null ? (float[])lastAduFrame.Clone() : null;
+        private float[] lastAduFrame;
 
         // Fixed hot/dead pixel map: a chip's defect pattern is persistent, so seeded
         // once from a constant, never from the target or UT.
@@ -465,7 +528,7 @@ namespace ExoInstruments.Visualization
 
         private Color[] lastCaptureSnapshot;
 
-        /// <summary>False only if KSP's own scaled-space/galaxy cameras can't be found (should not happen on a stock install).</summary>
+        /// <summary>False only if KSP's own scaled-space camera can't be found (should not happen on a stock install).</summary>
         public bool IsAvailable
         {
             get
@@ -770,13 +833,6 @@ namespace ExoInstruments.Visualization
 
             float fov = Mathf.Clamp(FovDeg, MinFovDeg, MaxFovDeg);
 
-            // The galaxy camera needs the same matrix resets as the scaled-space one below, for
-            // the same reason: CopyFrom inherits the live camera's own projection, and setting
-            // fieldOfView afterwards does not override an explicitly-set matrix. Without the
-            // reset the star field and skybox are rendered at the GAME's wide field instead of
-            // the telescope's, i.e. a hugely magnified patch of sky smeared behind the target.
-            // KSP itself keeps the two cameras' fields in lockstep (ScaledCamera.SetFoV sets
-            // fieldOfView on both), so treating them differently here was never right.
             // Force every body's scaled stand-in visible — KSP fades them by real-camera
             // distance, which has nothing to do with where our clone points.
             //
@@ -789,21 +845,49 @@ namespace ExoInstruments.Visualization
             // distance fade, whose thresholds are set per body and differ between planet packs
             // -- so the same code could look clean on one install and produce a coloured wash on
             // another. Restored afterwards, so the live scene is unaffected.
-            ScaledSpaceFader homeFader = null;
-            bool homeFaderWasEnabled = false;
-            foreach (ScaledSpaceFader fader in scaledSpaceFaders)
+            // Every fader touched is recorded and put back, not just the home body's. A capture
+            // is an observation and must leave the game exactly as it found it: forcing every
+            // body's stand-in on and walking away leaves the live scene drawing stand-ins KSP had
+            // deliberately faded out. That relied on ScaledSpaceFader re-deciding the flag on its
+            // own next frame -- probably true, never verified, and not something a capture should
+            // be betting the player's scene on.
+            if (faderRestoreBuffer == null || faderRestoreBuffer.Length != scaledSpaceFaders.Length)
+                faderRestoreBuffer = new bool[scaledSpaceFaders.Length];
+
+            for (int i = 0; i < scaledSpaceFaders.Length; i++)
             {
+                ScaledSpaceFader fader = scaledSpaceFaders[i];
                 if (fader == null || fader.r == null) continue;
-                if (home != null && fader.celestialBody == home)
-                {
-                    homeFader = fader;
-                    homeFaderWasEnabled = fader.r.enabled;
-                    fader.r.enabled = false;
-                    continue;
-                }
-                fader.r.enabled = true;
+
+                faderRestoreBuffer[i] = fader.r.enabled;
+                fader.r.enabled = !(home != null && fader.celestialBody == home);
             }
 
+            // KSP's galaxy camera is NOT rendered, and that is deliberate.
+            //
+            // It draws the game's painted sky cube, and a telescope cannot use it. The cube is
+            // 4096 pixels across a 90-degree face, i.e. 1.32 arcmin per texel, while FORS2's
+            // field is 8.6 arcmin: the frame covers about six texels and magnifies them 628x.
+            // What reaches the sensor is therefore not a sky but a bilinear interpolation of a
+            // handful of texels -- vast smooth blobs, which the 8-bit render target then slices
+            // into hard-edged contour bands as soon as any non-linear display stretch pulls the
+            // bottom of the range up. (This was latent until the galaxy camera's projection
+            // matrix was correctly reset to the telescope's own field; before that it rendered
+            // at the game's wide field, where the same cube is sampled near its native
+            // resolution and looks perfectly fine.)
+            //
+            // Magnification aside, it does not belong in a calibrated frame at all. It is an
+            // artistic texture with no photometric meaning, and the pipeline would fold it into
+            // the same electron budget as the target and scale it by whatever that target's
+            // brightness happened to be. It also double-counts: its painted stars would sit on
+            // top of the real, correctly-placed, correctly-illuminated Tycho-2 stars this
+            // pipeline now draws itself.
+            //
+            // Everything the background should contain is modelled instead, in real V surface
+            // brightness, by SkyBrightnessModel -- airglow (Patat 2003), zodiacal light (Leinert
+            // et al. 1998), moonlight (Krisciunas & Schaefer 1991) and twilight (Patat et al.
+            // 2006) -- and added after the optics, where a uniform sky belongs.
+            //
             // Rendered TWICE, and only the second pass is read back.
             //
             // The first capture after the window regains focus was reliably wrong -- a black disc
@@ -820,31 +904,47 @@ namespace ExoInstruments.Visualization
             // hundreds this capture already spends convolving the PSF), and it removes the whole
             // class of first-frame staleness instead of a state machine that has to guess which
             // events invalidate what.
-            for (int pass = 0; pass < 2; pass++)
+            // try/finally, not a plain sequence: if the render throws, the player's scene must
+            // still be handed back intact rather than left with every stand-in forced on.
+            try
             {
-                AimCamera(galaxyCam, GalaxyCameraName, camPos, look, fov);
-                galaxyCam.ResetWorldToCameraMatrix();
-                galaxyCam.ResetProjectionMatrix();
-                galaxyCam.Render();
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    // The matrix resets are critical: KSP's ScaledSpace camera carries a custom
+                    // view/projection matrix that CopyFrom inherits and silently overrides our
+                    // transform. Resetting them makes the clone's own transform authoritative.
+                    AimCamera(scaledSpaceCam, ScaledSpaceCameraName, camPos, look, fov);
+                    scaledSpaceCam.ResetWorldToCameraMatrix();
+                    scaledSpaceCam.ResetProjectionMatrix();
 
-                // The matrix resets are critical: KSP's ScaledSpace camera carries a custom
-                // view/projection matrix that CopyFrom inherits and silently overrides our
-                // transform. Resetting them makes the clone's own transform authoritative.
-                AimCamera(scaledSpaceCam, ScaledSpaceCameraName, camPos, look, fov);
-                scaledSpaceCam.ResetWorldToCameraMatrix();
-                scaledSpaceCam.ResetProjectionMatrix();
-                scaledSpaceCam.clearFlags = CameraClearFlags.Depth;
-                scaledSpaceCam.farClipPlane = 3e15f;
-                scaledSpaceCam.Render();
+                    // Solid black, not Depth. This used to clear only the depth buffer because
+                    // the galaxy camera ran first and filled the colour buffer with KSP's painted
+                    // sky; that pass is gone (see the comment above), so this camera now owns the
+                    // clear. An empty background is the correct starting point: everything that
+                    // belongs in it -- airglow, zodiacal light, moonlight, twilight, and every
+                    // catalogue star -- is added later by the physics, in real surface brightness.
+                    scaledSpaceCam.clearFlags = CameraClearFlags.SolidColor;
+                    scaledSpaceCam.backgroundColor = Color.black;
+                    scaledSpaceCam.farClipPlane = 3e15f;
+                    scaledSpaceCam.Render();
+                }
+
+                readbackTexture.ReadPixels(new Rect(0, 0, TextureWidth, TextureHeight), 0, 0);
+                readbackTexture.Apply();
             }
+            finally
+            {
+                RenderTexture.active = activeRT;
 
-            readbackTexture.ReadPixels(new Rect(0, 0, TextureWidth, TextureHeight), 0, 0);
-            readbackTexture.Apply();
-            RenderTexture.active = activeRT;
-
-            // Hand the home body's stand-in back exactly as it was found -- the live scene draws
-            // through it and must not be left switched off by a capture.
-            if (homeFader != null && homeFader.r != null) homeFader.r.enabled = homeFaderWasEnabled;
+                // Hand every stand-in back exactly as it was found -- the live scene draws
+                // through them and must not be left rearranged by a capture.
+                for (int i = 0; i < scaledSpaceFaders.Length; i++)
+                {
+                    ScaledSpaceFader fader = scaledSpaceFaders[i];
+                    if (fader == null || fader.r == null) continue;
+                    fader.r.enabled = faderRestoreBuffer[i];
+                }
+            }
         }
 
         /// <summary>Copies the live camera settings onto the clone, then sets position/rotation/FOV.</summary>
@@ -902,27 +1002,60 @@ namespace ExoInstruments.Visualization
 
             try
             {
-                Camera liveGalaxy = FindCameraByName(GalaxyCameraName);
                 Camera liveScaledSpace = FindCameraByName(ScaledSpaceCameraName);
-                if (liveGalaxy == null || liveScaledSpace == null)
+                if (liveScaledSpace == null)
                 {
-                    Debug.LogWarning("[ExoInstruments] Could not find KSP's galaxy/scaled-space cameras -- solar-system camera disabled.");
+                    Debug.LogWarning("[ExoInstruments] Could not find KSP's scaled-space camera -- solar-system camera disabled.");
                     available = false;
                     return;
                 }
 
                 root = new GameObject("ExoInstrumentsSolarSystemCamera");
 
-                // 24-bit depth + explicit sRGB, explicit .Create() — mirrors Tarsier's setup.
-                renderTexture = new RenderTexture(TextureWidth, TextureHeight, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
+                // Half-float capture, not 8-bit.
+                //
+                // The rendered scene supplies every bit of spatial structure this pipeline has --
+                // the belts, the terminator, the limb darkening, and any companion sharing the
+                // frame -- and the physics then multiplies the whole plane by a single
+                // calibration factor. Quantising it first therefore quantises the finished
+                // photograph, and 8 bits is nowhere near enough for the range a real frame holds:
+                // sRGB-encoded ARGB32 resolves 3295:1, i.e. 8.8 magnitudes, so Jupiter at V=-2.5
+                // and a Galilean moon at V=5.0 (a real 1000:1 ratio) put that moon on 3.3
+                // quantisation levels. Its limb, its phase and its shading are gone before the
+                // optics are even applied, and any non-linear display stretch then slices what
+                // remains into visible contour bands -- the same mechanism that made the painted
+                // sky cube's texels show up as hard-edged polygons (see RenderScene).
+                //
+                // Half float removes the quantisation and nothing else. It is NOT a claim that
+                // the values become linear radiance: KSP renders in Gamma colour space, so its
+                // shader output is display-referred, and no inverse transform recovers true
+                // radiance from it (in gamma space the lighting itself is computed on encoded
+                // albedos, so raising the result to 2.2 would darken the terminator without
+                // justification rather than linearise anything). That limitation is inherent to
+                // building on the game's own renderer and is documented rather than papered over;
+                // what changes here is only that this mod stops ADDING an error of its own.
+                // ReadWrite.Linear accordingly means "store what the renderer produced, verbatim",
+                // which is exactly the intent -- a float target needs no encoding to hold range.
+                //
+                // Falls back to the previous 8-bit target on a device that cannot give a
+                // half-float render surface, since a working capture beats no capture.
+                halfFloatCapture = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf);
+                if (!halfFloatCapture)
+                    Debug.LogWarning("[ExoInstruments] This graphics device has no half-float render target; "
+                                   + "falling back to 8-bit capture. Faint detail beside a bright body will band.");
+
+                renderTexture = new RenderTexture(TextureWidth, TextureHeight, 24,
+                                                  halfFloatCapture ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32,
+                                                  halfFloatCapture ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB)
                 {
                     name = "ExoInstrumentsSolarSystemCameraRT"
                 };
                 // Create() reports whether the graphics device actually granted the surface. At
-                // the largest instrument's native resolution this is a 4096x4128 ARGB32 target
-                // with a 24-bit depth buffer -- roughly 340 MB of VRAM for this one texture, on
-                // top of whatever the game already holds. A refusal here is silent otherwise: the
-                // camera still "renders", and the readback returns whatever was in memory.
+                // the largest instrument's native resolution this is a 4096x4128 half-float
+                // target with a 24-bit depth buffer -- 12 bytes per pixel, so about 203 MB of
+                // VRAM for this one texture, on top of whatever the game already holds. A
+                // refusal here is silent otherwise: the camera still "renders", and the readback
+                // returns whatever was in memory.
                 if (!renderTexture.Create())
                 {
                     Debug.LogError($"[ExoInstruments] The graphics device refused a {TextureWidth}x{TextureHeight} "
@@ -931,16 +1064,6 @@ namespace ExoInstruments.Visualization
                 }
                 else renderTextureRefused = false;
 
-                var galaxyObj = new GameObject("ExoInstrumentsGalaxyCamClone");
-                galaxyObj.transform.parent = root.transform; // explicit zero below — parent alone doesn't reset world position
-                galaxyObj.transform.localPosition = Vector3.zero;
-                galaxyObj.transform.localRotation = Quaternion.identity;
-                galaxyCam = galaxyObj.AddComponent<Camera>();
-                galaxyCam.CopyFrom(liveGalaxy);
-                galaxyCam.targetTexture = renderTexture;
-                galaxyCam.depth = 17; // same relative depth Tarsier uses for its galaxy-cam clone
-                galaxyCam.enabled = false;
-
                 var scaledSpaceObj = new GameObject("ExoInstrumentsScaledSpaceCamClone");
                 scaledSpaceObj.transform.parent = root.transform;
                 scaledSpaceObj.transform.localPosition = Vector3.zero;
@@ -948,16 +1071,23 @@ namespace ExoInstruments.Visualization
                 scaledSpaceCam = scaledSpaceObj.AddComponent<Camera>();
                 scaledSpaceCam.CopyFrom(liveScaledSpace);
                 scaledSpaceCam.targetTexture = renderTexture;
-                scaledSpaceCam.depth = 18; // one above galaxyCam, same relative ordering Tarsier uses
+                scaledSpaceCam.depth = 18; // same relative depth Tarsier uses for its scaled-space clone
                 scaledSpaceCam.enabled = false;
 
-                readbackTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
+                // Matches the render target: a half-float readback would be pointless through an
+                // 8-bit intermediate, which is exactly what this used to be. Marked linear so
+                // Unity applies no colour conversion on the way through -- the readback is a
+                // copy, not an interpretation.
+                readbackTexture = halfFloatCapture
+                    ? new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGBAHalf, false, true)
+                    : new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
+
+                // Display textures stay 8-bit on purpose: these are what goes to the screen, and
+                // a monitor has no more than that. The full-precision frame lives in
+                // lastCaptureSnapshot for FITS export (see GetLastCaptureFullPrecision).
                 outputTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
                 pixelScratch = new Color[TextureWidth * TextureHeight];
 
-                skyboxRenderers = (UnityEngine.Object.FindObjectsOfType(typeof(Renderer)) as Renderer[])
-                    ?.Where(r => r.name == "XP" || r.name == "XN" || r.name == "YP" || r.name == "YN" || r.name == "ZP" || r.name == "ZN")
-                    .ToArray() ?? new Renderer[0];
                 scaledSpaceFaders = UnityEngine.Object.FindObjectsOfType<ScaledSpaceFader>();
 
                 available = true;
@@ -1009,7 +1139,7 @@ namespace ExoInstruments.Visualization
             /// <summary>Scintillation for a POINT source: stars get no benefit from the extended-source averaging that quietens a resolved disk.</summary>
             public double PointSourceScintSigma;
             /// <summary>Signal below which a source cannot be told from the frame's own noise and is not drawn (see BuildStarSignalFloor).</summary>
-            public double SignalCutoffFraction;
+            public double SignalCutoffElectrons;
             // Photometric chain for a catalogue star, resolved on the main thread so the
             // background pass needs nothing but arithmetic.
             public double FilterCentralWavelengthMeters;
@@ -1064,13 +1194,26 @@ namespace ExoInstruments.Visualization
 
             double totalElectrons = ComputeCollectedElectrons(targetBody, extinction, exposureSeconds);
 
-            // Cloud cover degrades the delivered image quality on top of the clear-sky term;
-            // folded into the atmospheric FWHM (an angular quantity) rather than added as a
-            // separate pixel count, so it scales correctly with plate scale and binning. Only
-            // the plain ground-based term is resolved here, because only it needs the target's
-            // altitude; the adaptive-optics solve is pure arithmetic and happens off-thread.
-            double seeingFwhmArcsec = ComputeGroundSeeingFwhmArcsec(targetBody)
-                                    + coverage * CloudBlurPxMax * PlateScaleArcsecPerPixel;
+            // Seeing is the site's own atmospheric term and nothing else. Cloud cover used to add
+            // a blur here, and no longer does, for two independent reasons.
+            //
+            // It was quoted in PIXELS (a fixed 2px scaled by the plate scale), so the same
+            // overcast sky delivered four times the angular blur at binning 4 as at binning 1 --
+            // exactly the defect this function was rewritten to remove from the seeing term.
+            //
+            // And correcting the unit would only have moved the problem: there is no published
+            // coefficient relating cloud cover to delivered FWHM, because it is not an optical
+            // mechanism. Cloud ATTENUATES, and that is modelled -- CloudTransmission removes up
+            // to CloudMaxAttenuation of every source's flux, from EVE's real cloud texture
+            // sampled at the observatory's own zenith -- and cloud VEILS, which is modelled too
+            // (see CloudVeilingSkyGain). Bad seeing and cloud are correlated symptoms of unsettled
+            // weather, not one causing the other, so a blur term here would have been an invented
+            // constant standing in for a mechanism that does not exist.
+            //
+            // Only the plain ground-based term is resolved here, because only it needs the
+            // target's airmass; the adaptive-optics solve is pure arithmetic and happens
+            // off-thread.
+            double seeingFwhmArcsec = ComputeGroundSeeingFwhmArcsec(airmass);
             double defocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
 
             var inputs = new FrameComputeInputs
@@ -1217,7 +1360,7 @@ namespace ExoInstruments.Visualization
             inputs.CloudTransmission = 1.0 - inputs.CloudCoverage * CloudMaxAttenuation;
             inputs.StarTransmission = inputs.BandExtinction * inputs.CloudTransmission * NdFilterTransmission(NdFilter);
 
-            inputs.SignalCutoffFraction = BuildStarSignalFloor(inputs);
+            inputs.SignalCutoffElectrons = BuildStarSignalFloor(inputs);
 
             // Drift first: the unresolved bodies gathered next trail along the same vector.
             inputs.DriftPixelX = 0.0;
@@ -1380,13 +1523,11 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private double BuildStarSignalFloor(FrameComputeInputs inputs)
         {
-            double fullWell = FullWellElectrons;
             double skyElectrons = Math.Max(0.0, inputs.SkyElectronsPerPixel);
             double darkElectrons = Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor * inputs.ExposureSeconds;
             double noiseElectrons = Math.Sqrt(skyElectrons + darkElectrons) + Spec.ReadNoiseElectrons;
 
-            double floorElectrons = StarFieldRenderer.NoiseFloorCutoffFraction * Math.Max(1.0, noiseElectrons);
-            return floorElectrons / Math.Max(1.0, fullWell);
+            return StarFieldRenderer.NoiseFloorCutoffFraction * Math.Max(1.0, noiseElectrons);
         }
 
         /// <summary>
@@ -1433,7 +1574,7 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private double LimitingVMagFor(FrameComputeInputs inputs)
         {
-            double floorElectrons = inputs.SignalCutoffFraction * FullWellElectrons;
+            double floorElectrons = inputs.SignalCutoffElectrons;
             double perZeroMag = PhotonFluxModel.CollectedElectrons(
                 0.0, inputs.FilterBandwidthAngstrom, inputs.ApertureAreaCm2,
                 Spec.QuantumEfficiency, inputs.ExposureSeconds, inputs.StarTransmission);
@@ -1465,7 +1606,6 @@ namespace ExoInstruments.Visualization
             // atmospheric terms only; passing the full star chain would attenuate twice.
             float bodyTransmission = (float)(inputs.BandExtinction * inputs.CloudTransmission);
 
-            double fullWell = FullWellElectrons;
             foreach (CelestialBody body in FlightGlobals.Bodies)
             {
                 if (body == null || body == targetBody) continue;
@@ -1473,12 +1613,11 @@ namespace ExoInstruments.Visualization
                 if (!TryProjectBody(body, projection, out double px, out double py)) continue;
 
                 double electrons = ComputeCollectedElectrons(body, bodyTransmission, exposureSeconds);
-                double signal = electrons / Math.Max(1.0, fullWell);
-                if (signal <= inputs.SignalCutoffFraction) continue;
+                if (electrons <= inputs.SignalCutoffElectrons) continue;
 
                 sources.Add(new PointSource
                 {
-                    SignalFraction = signal,
+                    SignalElectrons = electrons,
                     // The body's live position is where the exposure ENDED, so its streak runs
                     // back from there. Over one exposure its own orbital motion is far below the
                     // diurnal drift, so the field centre's displacement is the whole of it.
@@ -1684,9 +1823,11 @@ namespace ExoInstruments.Visualization
             // resulting pedestal/sigma FRACTION (what DarkCurrent actually returns) comes out
             // identical either way; using the raw per-pixel numbers is just simpler than
             // multiplying both sides by the same factor for no change in the answer.
-            AtmosphericImagingNoise.DarkCurrent(inputs.ExposureSeconds, Spec.FullWellElectrons, Spec.DarkCurrentElectronsPerSecond, out double darkPedestalD, out double darkSigmaD);
-            float darkPedestal = (float)darkPedestalD;
-            float darkSigma = (float)darkSigmaD;
+            // A binned pixel collects the dark current of every physical pixel it merges, so the
+            // rate scales with the binned area. In electrons, like everything else here.
+            double darkElectrons = Spec.DarkCurrentElectronsPerSecond
+                                 * BinningFactor * BinningFactor
+                                 * Math.Max(0.0, inputs.ExposureSeconds);
 
             // New RNG seed every exposure — read noise differs shot to shot, unlike the fixed defect map.
             System.Random rng = new System.Random(unchecked(inputs.TargetSeed * 9973 + (int)(inputs.Ut * 997.0) + 17));
@@ -1718,8 +1859,11 @@ namespace ExoInstruments.Visualization
             double totalRenderedLuminance = 0.0;
             for (int i = 0; i < n; i++) totalRenderedLuminance += FilterSignal(src[i], CameraFilter.Luminance);
 
+            // Electrons, not fractions of full well. The rendered frame's luminance sum is the
+            // denominator, so this factor converts one unit of rendered brightness into the real
+            // electron count the physics computed for the scene.
             float calibratedSignalPerUnit = totalRenderedLuminance > 1e-6
-                ? (float)((inputs.TotalElectrons / FullWellElectrons) / totalRenderedLuminance)
+                ? (float)(inputs.TotalElectrons / totalRenderedLuminance)
                 : 0f;
 
             // --- 1. Signal plane -------------------------------------------------------
@@ -1762,38 +1906,62 @@ namespace ExoInstruments.Visualization
             // --- 3. Sky, then 4. detector ----------------------------------------------
             // The sky is uniform, and convolving a constant field with a unit-sum kernel returns
             // it unchanged, so adding it after the PSF is exact and saves a transform.
-            float skyBackground = (float)(inputs.SkyElectronsPerPixel / Math.Max(1.0, FullWellElectrons));
+            float skyElectrons = (float)Math.Max(0.0, inputs.SkyElectronsPerPixel);
 
+            // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
+            // counting process, and the two only agree once the count is large. At the few
+            // electrons per pixel a faint sky or a short dark reaches, a Gaussian goes negative
+            // and is measurably the wrong distribution -- the same reason GalSim and Pyxel both
+            // draw real Poisson deviates here.
             for (int i = 0; i < n; i++)
             {
-                float totalPhoton = signal[i] + skyBackground;
-
-                float shotSigma = (float)AtmosphericImagingNoise.ShotNoiseSigma(totalPhoton, FullWellElectrons);
-                float combinedPreGainSigma = Mathf.Sqrt(shotSigma * shotSigma + darkSigma * darkSigma);
-
-                float preGainValue = totalPhoton + darkPedestal + NextGaussian(rng, combinedPreGainSigma);
-                float postGain = preGainValue * inputs.IsoGain + NextGaussian(rng, ReadNoiseSigmaValue);
-
-                // Left unclamped here — blooming/CTI below need to see genuine
-                // above-full-well values before the sensor's own clipping applies.
-                rawScratch[i] = postGain;
+                double meanElectrons = Math.Max(0.0, signal[i] + skyElectrons + darkElectrons);
+                rawScratch[i] = (float)SamplePoisson(rng, meanElectrons);
             }
 
+            // Charge-domain effects, in the order the silicon applies them and now on real
+            // electron counts against a real well, so the thresholds mean something.
             ApplyCosmicRays(rawScratch, inputs.ExposureSeconds, rng);
-            ApplyBlooming(rawScratch);
+            ApplyBlooming(rawScratch, (float)FullWellElectrons);
             ApplyChargeTransferSmear(rawScratch);
 
-            // Saturation census BEFORE the clamp below throws the over-full-well information away
-            // -- once clipped, a blown pixel is indistinguishable from a legitimately bright one.
-            int saturated = 0;
-            for (int i = 0; i < n; i++) if (rawScratch[i] >= 1f) saturated++;
-            lastSaturatedFraction = n > 0 ? (float)saturated / n : 0f;
+            // Readout: the amplifier's own noise is added in electrons, ahead of the converter,
+            // which is where it physically enters.
+            float readNoiseElectrons = (float)Spec.ReadNoiseElectrons;
+            for (int i = 0; i < n; i++)
+                rawScratch[i] += NextGaussian(rng, readNoiseElectrons);
 
+            // Digitisation. This is the step the old pipeline had no way to express: charge is
+            // divided by the real conversion factor K, truncated to an integer count the way an
+            // ADC actually works, and clipped at the converter's own top code -- which for FORS2
+            // arrives well before its full well ever does.
+            double electronsPerAdu = ElectronsPerAdu(inputs.IsoGain);
+            int adcMax = AdcMaxCount;
+            double saturationElectrons = SaturationElectrons(inputs.IsoGain);
+
+            int saturated = 0;
             for (int i = 0; i < n; i++)
             {
-                float value = Mathf.Clamp01(rawScratch[i]);
+                if (rawScratch[i] >= saturationElectrons) saturated++;
+
+                double adu = Math.Floor(rawScratch[i] / electronsPerAdu);
+                if (adu < 0.0) adu = 0.0;
+                else if (adu > adcMax) adu = adcMax;
+
+                rawScratch[i] = (float)adu;
+
+                // Display only: the frame is normalised by the converter's range so the stretch
+                // functions keep working on [0,1]. The calibratable data is the ADU count above,
+                // which is what the FITS export and the stacker receive.
+                float value = (float)(adu / adcMax);
                 pixels[i] = new Color(value, value, value, 1f);
             }
+            lastSaturatedFraction = n > 0 ? (float)saturated / n : 0f;
+            lastElectronsPerAdu = electronsPerAdu;
+            lastSaturationElectrons = saturationElectrons;
+
+            if (lastAduFrame == null || lastAduFrame.Length != n) lastAduFrame = new float[n];
+            Array.Copy(rawScratch, lastAduFrame, n);
 
             // Defect overlay last: hot/dead pixels are a detector read-out artifact, not an
             // optical one, so they shouldn't be softened by the seeing/defocus/astigmatism blur the
@@ -1806,10 +1974,12 @@ namespace ExoInstruments.Visualization
             foreach (int idx in hotPixelIndices)
             {
                 float v = Mathf.Clamp01(0.9f + NextGaussian(rng, 0.05f));
+                if (lastAduFrame != null) lastAduFrame[idx] = v * AdcMaxCount;
                 pixels[idx] = new Color(v, v, v, 1f);
             }
             foreach (int idx in deadPixelIndices)
             {
+                if (lastAduFrame != null) lastAduFrame[idx] = 0f;
                 pixels[idx] = new Color(0f, 0f, 0f, 1f);
             }
 
@@ -1864,39 +2034,61 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Blur from looking through Kerbin's own atmosphere. For a plain (non-AO) instrument
-        /// this grows with airmass, sharply worse near the horizon, the same way real seeing
-        /// does. An instrument with real adaptive optics (VisualTelescopeSpec.AdaptiveOpticsFwhmArcsec,
-        /// e.g. SPHERE/ZIMPOL) instead returns its own real, roughly airmass-independent
-        /// corrected FWHM converted to pixels at the CURRENT plate scale -- real AO actively
-        /// cancels atmospheric distortion in front of the wavefront sensor, rather than just
-        /// blurring the image, so unlike the plain model it isn't a fixed pixel count: it scales
-        /// correctly with zoom/binning because it's derived from a real arcsec figure, not a
-        /// pixel one.
+        /// Blur from looking through the home world's own atmosphere: the site's real seeing,
+        /// at the airmass and wavelength this frame is actually being taken at.
+        ///
+        /// This is the term that decides what a ground-based image looks like. It is NOT a small
+        /// correction on top of diffraction -- for every instrument in the catalog it is three to
+        /// ten times larger than the telescope's own Airy FWHM, which is precisely why the whole
+        /// profession describes these telescopes as seeing-limited.
+        ///
+        /// Two things it must not do, both of which the previous model did:
+        ///
+        ///   * It must not vanish at the zenith. The old form was (airmass - 1) * k, i.e. zero
+        ///     blur for anything overhead, leaving a perfectly sharp diffraction-limited disk --
+        ///     the 8.2m FORS2 resolving Jupiter at 0.017" from the ground. Seeing is the
+        ///     atmosphere's own turbulence; looking straight up traverses less of it, not none.
+        ///     Zenith is where the site's median DIMM figure is quoted, so that figure IS the
+        ///     value here at airmass 1, not the point where the model returns nothing.
+        ///
+        ///   * It must not depend on the sensor. The old form built a pixel count and multiplied
+        ///     by the plate scale, so the same sky delivered four times the angular blur at
+        ///     binning 4 as at binning 1. Turbulence has never heard of the camera behind the
+        ///     telescope. Everything below is angles throughout.
+        ///
+        /// Airmass scaling is the standard Kolmogorov result: r0 goes as cos(z)^(3/5), and
+        /// FWHM = 0.98*lambda/r0, so FWHM goes as X^(3/5) -- the relation every site-monitoring
+        /// paper uses to reduce DIMM measurements to zenith.
+        ///
+        /// Wavelength scaling comes from the same two relations: r0 goes as lambda^(6/5), so the
+        /// delivered FWHM goes as lambda^(-1/5). Modest, but real and free: the blue channel of
+        /// an LRGB set is genuinely softer than the red one through the same air, which is why
+        /// planetary imagers stack far more blue frames to get a usable one.
+        ///
+        /// An instrument with real adaptive optics (VisualTelescopeSpec.AdaptiveOpticsFwhmArcsec,
+        /// e.g. SPHERE/ZIMPOL) never takes this path -- SAXO cancels the wavefront distortion in
+        /// front of the sensor rather than suffering it, so its atmospheric term is the residual
+        /// left after correction, solved for in EnsurePsfKernels.
         /// </summary>
-        private double ComputeGroundSeeingFwhmArcsec(CelestialBody targetBody)
+        private double ComputeGroundSeeingFwhmArcsec(double airmass)
         {
-            // An instrument with adaptive optics doesn't use this path at all -- its atmospheric
-            // term is the residual left after correction, solved for in EnsurePsfKernels.
             if (Spec.AdaptiveOpticsFwhmArcsec > 0.0) return 0.0;
 
-            if (!TryComputeAltitudeDeg(targetBody, out double altDeg)) return 0.0;
+            double zenithFwhm = Spec.ZenithSeeingFwhmArcsec;
+            if (!(zenithFwhm > 0.0)) return 0.0;
 
-            // The plain ground-based model stays calibrated exactly as before -- its airmass
-            // response is unchanged -- but is expressed as the ANGLE it always physically was.
-            // Seeing is a property of the atmosphere, not of the sensor, so quoting it in pixels
-            // made it wrongly depend on the plate scale and binning; converting once here at the
-            // current plate scale preserves the existing behaviour while letting OpticalPsf work
-            // in the units the Kolmogorov model actually needs.
-            float blurPx;
-            if (altDeg <= 0.0) blurPx = MaxSeeingBlurPx; // shouldn't be capturable this low, but cap defensively
-            else
-            {
-                double airmass = ImagingObservingConditions.AirmassAt(altDeg);
-                if (double.IsInfinity(airmass) || double.IsNaN(airmass)) blurPx = MaxSeeingBlurPx;
-                else blurPx = Mathf.Min(MaxSeeingBlurPx, Mathf.Max(0f, (float)airmass - 1f) * SeeingBlurPxPerAirmass);
-            }
-            return blurPx * PlateScaleArcsecPerPixel;
+            // Below the horizon or otherwise unusable geometry: cap rather than run the power
+            // law off to infinity. Imaging shouldn't be reachable there anyway.
+            if (double.IsNaN(airmass) || double.IsInfinity(airmass) || airmass < 1.0)
+                airmass = MaxSeeingAirmass;
+            airmass = Math.Min(airmass, MaxSeeingAirmass);
+
+            double lambda = FilterCentralWavelengthMeters(Filter);
+            double chromatic = lambda > 0.0
+                ? Math.Pow(lambda / SeeingReferenceWavelengthMeters, -0.2)
+                : 1.0;
+
+            return zenithFwhm * Math.Pow(airmass, 0.6) * chromatic;
         }
 
         /// <summary>Real central wavelength (metres) of the filter currently in the wheel -- the lambda in lambda/D. Falls back to Luminance for a position this instrument doesn't physically carry.</summary>
@@ -1941,8 +2133,7 @@ namespace ExoInstruments.Visualization
                     inputs.Stars, inputs.Projection,
                     inputs.StartMeridianRaDeg, inputs.EndMeridianRaDeg,
                     inputs.ObserverLatitudeDeg,
-                    FullWellElectrons,
-                    inputs.SignalCutoffFraction,
+                    inputs.SignalCutoffElectrons,
                     star => StellarPhotometry.CollectedElectrons(
                         star.VMag, star.ColorIndexBV, wavelength, bandwidth,
                         area, qe, exposure, transmission));
@@ -1953,7 +2144,7 @@ namespace ExoInstruments.Visualization
                 foreach (PointSource body in inputs.UnresolvedBodies)
                 {
                     PointSource scaled = body;
-                    scaled.SignalFraction *= scintillation;
+                    scaled.SignalElectrons *= scintillation;
                     StarFieldRenderer.Deposit(signal, TextureWidth, TextureHeight, scaled);
                 }
             }
@@ -2184,11 +2375,11 @@ namespace ExoInstruments.Visualization
         /// <summary>Real cosmic-ray hit rate: sea-level flux (~1/cm^2/min) over the sensor's real, native (binning-independent) physical silicon area.</summary>
         private static float ComputeCosmicRayHitsPerSecond()
         {
-            const double sealevelFluxPerCm2PerMinute = 1.0;
+            double fluxPerCm2PerMinute = Spec.CosmicRayEventsPerMinutePerCm2;
             double sideXCm = NativeTextureWidth * NativePixelSizeMeters * 100.0;
             double sideYCm = NativeTextureHeight * NativePixelSizeMeters * 100.0;
             double areaCm2 = sideXCm * sideYCm;
-            return (float)(sealevelFluxPerCm2PerMinute * areaCm2 / 60.0);
+            return (float)(fluxPerCm2PerMinute * areaCm2 / 60.0);
         }
 
         /// <summary>Real filter bandwidth in Angstrom for the active telescope's own real filter set (VisualTelescopeSpec) -- each filter's real bandwidth, not a fraction of Luminance, since a research instrument's R/G/B are each their own named filter with their own published FWHM (unlike an amateur LRGB wheel, where an even split is the real design -- see VisualTelescopeCatalog.Rc20's own comment).</summary>
@@ -2210,7 +2401,7 @@ namespace ExoInstruments.Visualization
         /// overflow in turn -- producing the familiar bloom trail through a saturated star or
         /// planet limb instead of a hard-clipped blob. Operates in place, pre-clamp.
         /// </summary>
-        private void ApplyBlooming(float[] raw)
+        private void ApplyBlooming(float[] raw, float fullWellElectrons)
         {
             int w = TextureWidth, h = TextureHeight;
             for (int iter = 0; iter < BloomingMaxIterations; iter++)
@@ -2222,10 +2413,10 @@ namespace ExoInstruments.Visualization
                     for (int x = 0; x < w; x++)
                     {
                         int i = row + x;
-                        float overflow = raw[i] - FullWellValue;
+                        float overflow = raw[i] - fullWellElectrons;
                         if (overflow <= 0f) continue;
                         anyOverflow = true;
-                        raw[i] = FullWellValue;
+                        raw[i] = fullWellElectrons;
                         float share = overflow * BloomingSpillFraction;
                         if (y > 0) raw[i - w] += share;
                         if (y < h - 1) raw[i + w] += share;
@@ -2273,7 +2464,7 @@ namespace ExoInstruments.Visualization
         {
             int w = TextureWidth, h = TextureHeight;
             double expectedHits = CosmicRayHitsPerSecond * exposureSeconds;
-            int hits = SamplePoisson(rng, expectedHits);
+            int hits = (int)SamplePoisson(rng, expectedHits);
 
             for (int n = 0; n < hits; n++)
             {
@@ -2289,25 +2480,88 @@ namespace ExoInstruments.Visualization
                     int y = y0 + (int)Math.Round(dy * s);
                     if (x < 0 || x >= w || y < 0 || y >= h) break;
                     int i = y * w + x;
-                    if (raw[i] < CosmicRayDepositValue) raw[i] = CosmicRayDepositValue;
+                    float deposit = CosmicRayDepositWellFraction * (float)FullWellElectrons;
+                    if (raw[i] < deposit) raw[i] = deposit;
                 }
             }
         }
 
         /// <summary>Knuth's algorithm: exact Poisson sample, fine for the small lambda cosmic rays use.</summary>
-        private static int SamplePoisson(System.Random rng, double lambda)
+        private static double SamplePoisson(System.Random rng, double lambda)
         {
-            if (lambda <= 0.0) return 0;
-            double l = Math.Exp(-lambda);
-            int k = 0;
-            double p = 1.0;
-            do
+            if (!(lambda > 0.0)) return 0.0;
+
+            // Knuth's product method: exact, and the cheapest thing available while the mean is
+            // small. It is O(lambda) and needs exp(-lambda), so it is confined to the range
+            // where both are harmless -- at a mean of 150,000 electrons it would run 150,000
+            // iterations per pixel against an exp() that has already underflowed to zero, and
+            // never terminate.
+            if (lambda < PtrsThreshold)
             {
-                k++;
-                p *= rng.NextDouble();
-            } while (p > l);
-            return k - 1;
+                double l = Math.Exp(-lambda);
+                int k = 0;
+                double p = 1.0;
+                do
+                {
+                    k++;
+                    p *= rng.NextDouble();
+                } while (p > l);
+                return k - 1;
+            }
+
+            // Above that, the transformed rejection method PTRS (Hormann 1993, "The transformed
+            // rejection method for generating Poisson random variables", Insurance: Mathematics
+            // and Economics 12, 39). This is a genuine Poisson generator, not a normal
+            // approximation: it is a rejection sampler whose accepted values are exactly Poisson
+            // distributed, at constant cost independent of the mean. It is the same algorithm
+            // NumPy uses above its own threshold, and therefore the one behind GalSim's and
+            // Pyxel's shot noise.
+            double smu = Math.Sqrt(lambda);
+            double b = 0.931 + 2.53 * smu;
+            double a = -0.059 + 0.02483 * b;
+            double invAlpha = 1.1239 + 1.1328 / (b - 3.4);
+            double vr = 0.9277 - 3.6224 / (b - 2.0);
+
+            while (true)
+            {
+                double u = rng.NextDouble() - 0.5;
+                double v = rng.NextDouble();
+                double us = 0.5 - Math.Abs(u);
+
+                double k = Math.Floor((2.0 * a / us + b) * u + lambda + 0.43);
+                if (us >= 0.07 && v <= vr) return k;
+                if (k < 0.0 || (us < 0.013 && v > us)) continue;
+
+                if (Math.Log(v * invAlpha / (a / (us * us) + b))
+                    <= k * Math.Log(lambda) - lambda - LogGamma(k + 1.0))
+                    return k;
+            }
         }
+
+        /// <summary>Mean above which SamplePoisson switches from Knuth's method to PTRS. Hormann's own paper recommends 10; NumPy uses the same value.</summary>
+        private const double PtrsThreshold = 10.0;
+
+        /// <summary>
+        /// log(Gamma(x)) for x &gt; 0, by the Lanczos approximation (Lanczos 1964, "A precision
+        /// approximation of the gamma function", SIAM J. Numer. Anal. B 1, 86) with the g=7,
+        /// n=9 coefficient set. Accurate to about 15 significant digits over the range PTRS
+        /// needs, which is the factorial term of the Poisson mass function.
+        /// </summary>
+        private static double LogGamma(double x)
+        {
+            double sum = LanczosCoefficients[0];
+            for (int i = 1; i < LanczosCoefficients.Length; i++) sum += LanczosCoefficients[i] / (x + i - 1.0);
+
+            double t = x + 6.5; // x + g - 0.5, with g = 7
+            return 0.5 * Math.Log(2.0 * Math.PI) + (x - 0.5) * Math.Log(t) - t + Math.Log(sum);
+        }
+
+        private static readonly double[] LanczosCoefficients =
+        {
+            0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+            771.32342877765313, -176.61502916214059, 12.507343278686905,
+            -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
+        };
 
         /// <summary>
         /// Third-order astigmatism: transverse blur scaling with the square of the normalized
@@ -2436,7 +2690,6 @@ namespace ExoInstruments.Visualization
             if (readbackTexture != null) { UnityEngine.Object.Destroy(readbackTexture); readbackTexture = null; }
             if (outputTexture != null) { UnityEngine.Object.Destroy(outputTexture); outputTexture = null; }
             if (capturedTexture != null) { UnityEngine.Object.Destroy(capturedTexture); capturedTexture = null; }
-            galaxyCam = null;
             scaledSpaceCam = null;
 
             // Every resolution-sized scratch buffer/state must be rebuilt fresh at whatever

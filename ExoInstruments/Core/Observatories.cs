@@ -175,6 +175,38 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 6.0,
         };
 
+        public static readonly InstrumentSpec RedCat51 = new InstrumentSpec
+        {
+            Name = "RedCat51",
+            DisplayName = "William Optics RedCat 51 (Wide-Field Astrograph)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "William Optics RedCat 51: 51 mm f/4.9 Petzval apochromatic astrograph, 250 mm focal length, quadruplet FPL-53 " +
+                       "objective, flat corrected field over a 45 mm image circle (williamoptics.com). Sited at the Observatoire de " +
+                       "Haute-Provence (650 m), median seeing 2.5 arcsec per Schmitt et al. 2024, A&A 687, A198.",
+            Description = "Fifty-one millimeters of glass, and the most useful telescope in this catalog for one specific job. Every other " +
+                          "instrument here is built to resolve -- long focus, narrow field, a planet filling the frame. This one is built to " +
+                          "COVER: 250 mm of focal length opens a 4.4 x 3.0 degree field, forty times wider than the RC20's, and roughly eight " +
+                          "hundred real catalog stars land in every exposure instead of four. Point it at a planet and you get a bright dot. " +
+                          "Point it at anything at all and you get a sky.",
+            IsSpaceBased = false,
+            ApertureMeters = VisualTelescopeCatalog.RedCat51.ApertureMeters,
+            SiteAltitudeMeters = VisualTelescopeCatalog.RedCat51.SiteAltitudeMeters, // Observatoire de Haute-Provence
+            VisualTelescope = VisualTelescopeCatalog.RedCat51,
+            // Placeholders -- balance à valider avec Baptiste. Priced below the RC20 and unlocked
+            // by default: it is the cheapest real instrument here, and it is what a player should
+            // have in hand before deciding whether resolution or coverage is what they want next.
+            UnlockedByDefault = true,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 20.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+        };
+
         public static readonly InstrumentSpec Rc20 = new InstrumentSpec
         {
             Name = "RC20",
@@ -186,7 +218,8 @@ namespace ExoInstruments.Core
             PrecisionExponent = 0.0,
             CadenceSeconds = 0.0,
             Citation = "PlaneWave Instruments RC20: 20-inch (0.51 m) Ritchey-Chretien astrograph, the class of telescope used at university " +
-                       "observatories (e.g. ETH Zurich) for hands-on amateur/semi-pro imaging.",
+                       "observatories for hands-on amateur/semi-pro imaging. Sited at the Observatoire de Haute-Provence (650 m), whose " +
+                       "median seeing of 2.5 arcsec is published in Schmitt et al. 2024, A&A 687, A198.",
             Description = "A 20-inch Ritchey-Chretien astrograph -- the kind of telescope a university observatory or a serious amateur actually " +
                           "owns, not a billion-Fund flagship. Point it at anything in the neighborhood -- Duna, Jool, the Mun -- and it takes a " +
                           "real photograph: true position, phase, and relative brightness, straight off the sensor. No spectra, no light curves, " +
@@ -194,7 +227,7 @@ namespace ExoInstruments.Core
                           "stacks and processes it.",
             IsSpaceBased = false,
             ApertureMeters = VisualTelescopeCatalog.Rc20.ApertureMeters,
-            SiteAltitudeMeters = VisualTelescopeCatalog.Rc20.SiteAltitudeMeters, // ETH Zurich's own observatory site
+            SiteAltitudeMeters = VisualTelescopeCatalog.Rc20.SiteAltitudeMeters, // Observatoire de Haute-Provence
             VisualTelescope = VisualTelescopeCatalog.Rc20,
             // Placeholders -- balance à valider avec Baptiste.
             UnlockedByDefault = false,
@@ -303,7 +336,7 @@ namespace ExoInstruments.Core
 
         public static readonly InstrumentSpec[] All =
         {
-            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, Rc20, Cdk1000, Fors2Vlt, Sphere
+            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere
         };
     }
 }

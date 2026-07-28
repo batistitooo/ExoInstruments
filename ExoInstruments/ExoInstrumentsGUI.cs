@@ -1914,15 +1914,29 @@ namespace ExoInstruments
                 ExposureSeconds = astroStack.TotalExposureSeconds(solarSystemCamera.Filter),
                 PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
                 FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
+                AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
+                ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
+                SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
                 FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
+                IsCalibratedAdu = false, // stacked composite, see FitsHeaderInfo.IsCalibratedAdu
                 FilterName = "LRGB",
                 ObjectName = selectedPhotographyBody.bodyName,
                 UtcTimestamp = DateTime.UtcNow,
             };
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.fits"),
-                lastComposedPixels, stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
+                ToAduScale(lastComposedPixels), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
+        }
+
+        /// <summary>Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit container. Not a calibration -- see FitsHeaderInfo.IsCalibratedAdu.</summary>
+        static float[] ToAduScale(Color[] pixels)
+        {
+            if (pixels == null) return null;
+            int max = SolarSystemCameraTexture.AdcMaxCount;
+            var outp = new float[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++) outp[i] = Mathf.Clamp01(pixels[i].r) * max;
+            return outp;
         }
 
         static string FilterLabel(CameraFilter f)
@@ -2022,15 +2036,19 @@ namespace ExoInstruments
                 ExposureSeconds = solarSystemCamera.ExposureSeconds,
                 PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
                 FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
+                AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
+                ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
+                SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
                 FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
+                IsCalibratedAdu = true, // single raw frame straight off the converter
                 FilterName = FilterLabel(solarSystemCamera.Filter),
                 ObjectName = selectedPhotographyBody.bodyName,
                 UtcTimestamp = DateTime.UtcNow,
             };
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.fits"),
-                solarSystemCamera.GetLastCaptureFullPrecision(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
+                solarSystemCamera.GetLastCaptureAdu(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
         }
 
         void DrawStarSelection()
