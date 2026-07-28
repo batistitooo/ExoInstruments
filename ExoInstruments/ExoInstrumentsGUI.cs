@@ -1506,8 +1506,22 @@ namespace ExoInstruments
                 GUI.enabled = true;
             }
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
-            GUILayout.Label($"({w}x{h}, {(double)w * h / 1e6:F1} Mpx)", smallCaptionStyle);
+            double captureMb = SolarSystemCameraTexture.EstimatedCaptureMemoryBytes / (1024.0 * 1024.0);
+            GUILayout.Label($"({w}x{h}, {(double)w * h / 1e6:F1} Mpx, ~{captureMb:F0} MB)", smallCaptionStyle);
             GUILayout.EndHorizontal();
+
+            // The cost is quartic in the binning factor and nothing used to say so. It matters more
+            // than an ordinary performance note because the failure is not graceful: a managed
+            // out-of-memory is caught and reported, but a native allocation failure at this size
+            // closes the game outright, with no exception and no log entry.
+            if (SolarSystemCameraTexture.EstimatedCaptureMemoryBytes > SolarSystemCameraTexture.CaptureMemoryWarningBytes)
+            {
+                GUILayout.Label(
+                    $"WARNING: one capture at this binning needs about {captureMb:F0} MB across the heap and the "
+                    + "graphics device, on top of what KSP already holds. If the machine cannot find it, the game "
+                    + "closes instantly rather than reporting an error. Bin down unless you know you have the room.",
+                    smallCaptionStyle);
+            }
 
             if (solarSystemCamera.RenderTargetRefused)
             {

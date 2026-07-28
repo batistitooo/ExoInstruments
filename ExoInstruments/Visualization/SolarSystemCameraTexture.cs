@@ -159,6 +159,52 @@ namespace ExoInstruments.Visualization
         public static int TextureWidth => NativeTextureWidth / BinningFactor;
         public static int TextureHeight => NativeTextureHeight / BinningFactor;
 
+        /// <summary>
+        /// Bytes of MANAGED memory this pipeline holds per pixel of the frame, counted from the
+        /// buffers it actually allocates rather than estimated:
+        ///
+        ///   Color[] at 16 bytes each -- pixelScratch, displayScratch, frameScratch,
+        ///                               lastCaptureSnapshot                        = 64
+        ///   float[] at 4 bytes each  -- rawScratch, signalScratch, lastAduFrame,
+        ///                               smearScratch, psfHaloScratch,
+        ///                               astigmatismScratch                         = 24
+        ///   float[] transient        -- FourierConvolution's overlap-add accumulator =  4
+        ///
+        /// Keep this in step with the buffers themselves; it is what the panel warns from, and a
+        /// warning that has drifted from the allocation is worse than none.
+        /// </summary>
+        private const long ManagedBytesPerPixel = 92;
+
+        /// <summary>
+        /// Bytes of TEXTURE memory per pixel: the half-float render target and its 24-bit depth
+        /// buffer (12), the half-float readback texture (8), and the two 8-bit display textures
+        /// (4 each). Graphics memory rather than heap, and the part a driver refuses hardest.
+        /// </summary>
+        private const long TextureBytesPerPixel = 28;
+
+        /// <summary>
+        /// What one capture at the current instrument and binning will cost, in bytes.
+        ///
+        /// This exists because the cost is quartic in the binning factor -- halving the binning
+        /// quadruples the pixel count -- and nothing told the player. At its native resolution the
+        /// largest instrument in the roster needs about two gigabytes across the heap and the
+        /// graphics device together, on top of everything KSP already holds, and a native
+        /// allocation failure at that size does not raise a catchable exception: the process
+        /// simply goes away. A managed OutOfMemoryException is caught and reported (see
+        /// PollProcessTask); this is the case that cannot be.
+        /// </summary>
+        public static long EstimatedCaptureMemoryBytes
+        {
+            get
+            {
+                long pixels = (long)TextureWidth * TextureHeight;
+                return pixels * (ManagedBytesPerPixel + TextureBytesPerPixel);
+            }
+        }
+
+        /// <summary>Above this, the panel warns: the combination is one where a failure kills the process rather than raising an error.</summary>
+        public const long CaptureMemoryWarningBytes = 1_200L * 1024 * 1024;
+
         /// <summary>Real (binned) pixel pitch in microns -- for FITS XPIXSZ/YPIXSZ header keywords.</summary>
         public static double PixelSizeMicrons => NativePixelSizeMeters * BinningFactor * 1e6;
 
@@ -862,6 +908,18 @@ namespace ExoInstruments.Visualization
                 return;
             }
             LastProcessingError = null;
+
+            // The empty-render failure, reported here rather than from the background pass that
+            // detected it: the target's own electron count was computed and the render drew none
+            // of it, so the frame carries its sky, its noise and its stars but no body.
+            if (lastTargetElectrons > 0.0 && lastRenderedLuminanceSum <= 1e-6)
+            {
+                Debug.LogError(
+                    $"[ExoInstruments] The scene render came back empty at {TextureWidth}x{TextureHeight} "
+                  + $"(binning {BinningFactor}): summed luminance {lastRenderedLuminanceSum:E3}, while the physics "
+                  + $"computed {lastTargetElectrons:E3} electrons from the target. It is absent from this frame. "
+                  + "Use a higher binning factor.");
+            }
 
             pixelScratch = processTask.Result;
             processTask = null;
@@ -2099,14 +2157,9 @@ namespace ExoInstruments.Visualization
                 ? (float)(inputs.TotalElectrons / totalRenderedLuminance)
                 : 0f;
 
-            if (!(totalRenderedLuminance > 1e-6) && inputs.TotalElectrons > 0.0)
-            {
-                Debug.LogError(
-                    $"[ExoInstruments] The scene render came back empty at {TextureWidth}x{TextureHeight} "
-                  + $"(binning {BinningFactor}): summed luminance {totalRenderedLuminance:E3} over {n} pixels, "
-                  + $"while the physics computed {inputs.TotalElectrons:E3} electrons from the target. "
-                  + "The target will be absent from this frame. Try a higher binning factor.");
-            }
+            // NOT logged from here. This method runs on a background Task, and every other
+            // Debug call in this file is on the main thread; the fields above are read by
+            // PollProcessTask, which is where the report belongs.
 
             // --- 1. Signal plane -------------------------------------------------------
             // The rendered bodies first: the renderer supplies the spatial shading, the physics
