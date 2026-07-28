@@ -163,24 +163,27 @@ namespace ExoInstruments.Visualization
         /// Bytes of MANAGED memory this pipeline holds per pixel of the frame, counted from the
         /// buffers it actually allocates rather than estimated:
         ///
-        ///   Color[] at 16 bytes each -- pixelScratch, displayScratch, frameScratch,
-        ///                               lastCaptureSnapshot                        = 64
-        ///   float[] at 4 bytes each  -- rawScratch, signalScratch, lastAduFrame,
-        ///                               smearScratch, psfHaloScratch,
-        ///                               astigmatismScratch                         = 24
+        ///   float[] at 4 bytes each  -- pixelScratch, frameScratch, lastCaptureSnapshot,
+        ///                               rawScratch, signalScratch, lastAduFrame,
+        ///                               passScratch                                = 28
+        ///   byte[]                   -- displayScratch, three bytes for an RGB24 texture =  3
         ///   float[] transient        -- FourierConvolution's overlap-add accumulator =  4
+        ///
+        /// The rendered Color[] is NOT counted: it is released before the optics run (see
+        /// pendingSrc), so it does not coincide with the convolution's own peak. It is 16 bytes a
+        /// pixel while it lives.
         ///
         /// Keep this in step with the buffers themselves; it is what the panel warns from, and a
         /// warning that has drifted from the allocation is worse than none.
         /// </summary>
-        private const long ManagedBytesPerPixel = 92;
+        private const long ManagedBytesPerPixel = 35;
 
         /// <summary>
         /// Bytes of TEXTURE memory per pixel: the half-float render target and its 24-bit depth
-        /// buffer (12), the half-float readback texture (8), and the two 8-bit display textures
-        /// (4 each). Graphics memory rather than heap, and the part a driver refuses hardest.
+        /// buffer (12), the half-float readback texture (8), and the 8-bit display texture (4).
+        /// Graphics memory rather than heap, and the part a driver refuses hardest.
         /// </summary>
-        private const long TextureBytesPerPixel = 28;
+        private const long TextureBytesPerPixel = 24;
 
         /// <summary>
         /// What one capture at the current instrument and binning will cost, in bytes.
@@ -442,12 +445,41 @@ namespace ExoInstruments.Visualization
         /// <summary>True when the device granted a half-float render target, i.e. the rendered scene reaches the physics unquantised. False means the 8-bit fallback is in use.</summary>
         public bool HalfFloatCapture => halfFloatCapture;
         private bool halfFloatCapture;
-        private Texture2D outputTexture;
         private Texture2D capturedTexture;
-        private Color[] pixelScratch;
-        private Color[] frameScratch;
-        private float[] psfHaloScratch;
-        private Color[] displayScratch;
+        /// <summary>
+        /// The Unity render handed to the background pass, held in a field rather than inside
+        /// FrameComputeInputs so that the pass can RELEASE it the moment it is done reading.
+        ///
+        /// It is a Color[] over the whole frame -- 270 MB on the largest instrument at native
+        /// resolution -- and it is read exactly once, at the very start, before the expensive
+        /// optics. Carried in the struct it stayed reachable from the task's closure for the whole
+        /// capture, holding that memory across the convolution that needs it most.
+        /// </summary>
+        private Color[] pendingSrc;
+
+        // The pipeline is MONOCHROME end to end -- every write was new Color(v, v, v, 1f) and
+        // every read was .r -- so these carried four copies of one number plus a constant alpha,
+        // at 16 bytes a pixel where 4 will do. Nothing is lost: the float stored is the identical
+        // float that used to sit in Color.r.
+        private float[] pixelScratch;
+        private float[] frameScratch;
+        /// <summary>
+        /// One scratch plane shared by every pass that needs a full-frame temporary:
+        /// ApplyLinearSmear, ApplyPsf's halo component and ApplyAstigmatismBlur.
+        ///
+        /// They run strictly in sequence and each one fills the whole buffer before reading it
+        /// (Array.Clear for the smear, Array.Copy for the other two), so none can observe another's
+        /// leftovers. Three separate planes cost three times the memory for no benefit -- 135 MB of
+        /// it on the largest instrument at native resolution.
+        /// </summary>
+        private float[] passScratch;
+
+        private float[] EnsurePassScratch(int n)
+        {
+            if (passScratch == null || passScratch.Length != n) passScratch = new float[n];
+            return passScratch;
+        }
+        private byte[] displayScratch;
 
         /// <summary>
         /// Display transfer function for finished frames. Affects only what is shown and the PNG
@@ -491,9 +523,7 @@ namespace ExoInstruments.Visualization
         private float[] rawScratch;
         /// <summary>The frame's signal plane, in fractions of full well: rendered bodies plus every point source, before any noise exists.</summary>
         private float[] signalScratch;
-        private float[] smearScratch;
         private float[] smearLineScratch;
-        private float[] astigmatismScratch;
         private int lastStarsDrawnInternal;
 
         private ScaledSpaceFader[] scaledSpaceFaders;
@@ -655,7 +685,7 @@ namespace ExoInstruments.Visualization
         // --- Background processing state (the heavy per-pixel physics pipeline runs off the
         // main thread once the exposure's integration time has elapsed -- see GatherFrameInputs
         // /ComputeFramePixels/PollProcessTask) ------------------------------
-        private Task<Color[]> processTask;
+        private Task<float[]> processTask;
         private bool isProcessing;
 
         /// <summary>True while a timed exposure is integrating (between BeginExposure and completion).</summary>
@@ -667,7 +697,7 @@ namespace ExoInstruments.Visualization
         /// <summary>True once a timed exposure has completed and a finished photo is available.</summary>
         public bool HasCapturedPhoto { get; private set; }
 
-        private Color[] lastCaptureSnapshot;
+        private float[] lastCaptureSnapshot;
 
         /// <summary>False only if KSP's own scaled-space camera can't be found (should not happen on a stock install).</summary>
         public bool IsAvailable
@@ -764,23 +794,18 @@ namespace ExoInstruments.Visualization
         /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
         public double LastDiffractionFwhmArcsec { get; private set; }
 
-        /// <summary>Last capture as a grayscale float[] (row-major, y-down), for AstroImageStack. Null before the first capture. Fresh copy every call.</summary>
-        public float[] GetLastCaptureGray()
-        {
-            if (lastCaptureSnapshot == null) return null;
-            var gray = new float[lastCaptureSnapshot.Length];
-            for (int i = 0; i < gray.Length; i++) gray[i] = lastCaptureSnapshot[i].r;
-            return gray;
-        }
-
         /// <summary>
         /// Last capture at full float precision, straight from the physics pipeline -- NOT
-        /// CapturedPhoto/GetPixels(), which round-trips through an 8-bit RGB24 Texture2D and
-        /// destroys nearly all of the real, physically-computed noise (shot/dark/read noise
-        /// live at a small fraction of full well, far below 1/255). FITS export needs this
-        /// full-precision source to actually be the 16-bit file it claims to be.
+        /// CapturedPhoto, which round-trips through an 8-bit RGB24 Texture2D and destroys nearly
+        /// all of the real, physically-computed noise (shot/dark/read noise live at a small
+        /// fraction of full well, far below 1/255). This is what AstroImageStack consumes.
+        ///
+        /// Row-major, y-down, one float per pixel. Null before the first capture; a fresh copy
+        /// every call, so a caller can hold it while the next exposure overwrites the pipeline's
+        /// own buffers.
         /// </summary>
-        public Color[] GetLastCaptureFullPrecision() => lastCaptureSnapshot != null ? (Color[])lastCaptureSnapshot.Clone() : null;
+        public float[] GetLastCaptureGray()
+            => lastCaptureSnapshot != null ? (float[])lastCaptureSnapshot.Clone() : null;
 
         /// <summary>Starts a timed exposure on targetBody. Nothing renders until the exposure completes.</summary>
         public void BeginExposure(CelestialBody targetBody)
@@ -928,7 +953,9 @@ namespace ExoInstruments.Visualization
             // The snapshot is taken from the LINEAR pipeline output, before any display transfer
             // function -- it is what the FITS export and AstroImageStack consume, and stretching
             // it would corrupt every downstream measurement.
-            lastCaptureSnapshot = (Color[])pixelScratch.Clone();
+            if (lastCaptureSnapshot == null || lastCaptureSnapshot.Length != pixelScratch.Length)
+                lastCaptureSnapshot = new float[pixelScratch.Length];
+            Array.Copy(pixelScratch, lastCaptureSnapshot, pixelScratch.Length);
 
             HasCapturedPhoto = true;
             UploadDisplayTextures();
@@ -942,24 +969,36 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public void UploadDisplayTextures()
         {
-            if (lastCaptureSnapshot == null || outputTexture == null) return;
+            if (lastCaptureSnapshot == null) return;
 
             int n = lastCaptureSnapshot.Length;
-            if (displayScratch == null || displayScratch.Length != n) displayScratch = new Color[n];
-            for (int i = 0; i < n; i++)
+            if (capturedTexture == null || capturedTexture.width != TextureWidth || capturedTexture.height != TextureHeight)
             {
-                float v = ApplyDisplayStretch(lastCaptureSnapshot[i].r);
-                displayScratch[i] = new Color(v, v, v, 1f);
-            }
-
-            outputTexture.SetPixels(displayScratch);
-            outputTexture.Apply();
-
-            if (capturedTexture == null)
-            {
+                if (capturedTexture != null) UnityEngine.Object.Destroy(capturedTexture);
                 capturedTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
             }
-            capturedTexture.SetPixels(displayScratch);
+
+            // Straight into the texture's own raw bytes rather than through a Color[] staging
+            // array. The destination is RGB24 -- three bytes a pixel, which is all a monitor can
+            // show and all this path ever claimed to carry -- so a 16-byte Color per pixel was
+            // buying nothing on the way there. On the largest instrument at native resolution that
+            // staging array alone was 270 MB.
+            //
+            // Nothing is lost that was not already being lost: this is the DISPLAY path, and the
+            // linear full-precision frame it is built from stays untouched in lastCaptureSnapshot
+            // for the FITS export and the stacker.
+            if (displayScratch == null || displayScratch.Length != n * 3) displayScratch = new byte[n * 3];
+            for (int i = 0; i < n; i++)
+            {
+                float v = ApplyDisplayStretch(lastCaptureSnapshot[i]);
+                byte b = (byte)(Mathf.Clamp01(v) * 255f + 0.5f);
+                int o = i * 3;
+                displayScratch[o] = b;
+                displayScratch[o + 1] = b;
+                displayScratch[o + 2] = b;
+            }
+
+            capturedTexture.LoadRawTextureData(displayScratch);
             capturedTexture.Apply();
         }
 
@@ -1299,8 +1338,7 @@ namespace ExoInstruments.Visualization
                 // Display textures stay 8-bit on purpose: these are what goes to the screen, and
                 // a monitor has no more than that. The full-precision frame lives in
                 // lastCaptureSnapshot for FITS export (see GetLastCaptureFullPrecision).
-                outputTexture = new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGB24, false);
-                pixelScratch = new Color[TextureWidth * TextureHeight];
+                pixelScratch = new float[TextureWidth * TextureHeight];
 
                 scaledSpaceFaders = UnityEngine.Object.FindObjectsOfType<ScaledSpaceFader>();
 
@@ -1317,7 +1355,6 @@ namespace ExoInstruments.Visualization
         /// <summary>Plain-data snapshot of everything ComputeFramePixels needs -- gathered on the main thread (it touches CelestialBody/Unity APIs), then handed to a background Task that touches none of that, mirroring the StartImagingRefresh/PollImagingRenderTask pattern used elsewhere in this mod.</summary>
         private struct FrameComputeInputs
         {
-            public Color[] Src;
             public int TargetSeed;
             public double Ut;
             public float ExposureSeconds;
@@ -1383,7 +1420,9 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private FrameComputeInputs GatherFrameInputs(CelestialBody targetBody)
         {
-            Color[] src = readbackTexture.GetPixels();
+            // Handed to the background pass through a field rather than through the inputs struct,
+            // so that pass can drop it as soon as it has read it -- see pendingSrc.
+            pendingSrc = readbackTexture.GetPixels();
             EnsureDefectMap();
 
             float exposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
@@ -1442,7 +1481,6 @@ namespace ExoInstruments.Visualization
 
             var inputs = new FrameComputeInputs
             {
-                Src = src,
                 TargetSeed = targetBody.flightGlobalsIndex,
                 Ut = ut,
                 ExposureSeconds = exposureSeconds,
@@ -2056,9 +2094,9 @@ namespace ExoInstruments.Visualization
         /// this runs on a background Task; only the gather step and the texture upload need the
         /// main thread.
         /// </summary>
-        private Color[] ComputeFramePixels(FrameComputeInputs inputs)
+        private float[] ComputeFramePixels(FrameComputeInputs inputs)
         {
-            Color[] src = inputs.Src;
+            Color[] src = pendingSrc;
 
             int n = TextureWidth * TextureHeight;
             if (rawScratch == null || rawScratch.Length != n) rawScratch = new float[n];
@@ -2070,8 +2108,8 @@ namespace ExoInstruments.Visualization
             // per shot, on top of the several other frame-sized buffers this pipeline already
             // holds. The result is handed straight to PollProcessTask on the main thread and
             // copied out there, so one buffer is enough.
-            if (frameScratch == null || frameScratch.Length != n) frameScratch = new Color[n];
-            Color[] pixels = frameScratch;
+            if (frameScratch == null || frameScratch.Length != n) frameScratch = new float[n];
+            float[] pixels = frameScratch;
             float[] signal = signalScratch;
 
             // Deliberately the NATIVE (unbinned) Spec.FullWellElectrons here, paired with the
@@ -2135,8 +2173,24 @@ namespace ExoInstruments.Visualization
             // the body's true color ratio through calibration and into the later luminance-
             // transfer step in AstroImageStack.ComposeLRGB (which already assumes R/G/B carry
             // real relative color, not independently-normalized ones).
+            // ONE pass over the render, taking both things this needs from it: the luminance sum
+            // that calibrates the frame, and this filter's own channel parked in the signal plane
+            // awaiting that calibration. Two passes read a 270 MB array twice for no reason, and
+            // more importantly they kept it alive until the second one.
             double totalRenderedLuminance = 0.0;
-            for (int i = 0; i < n; i++) totalRenderedLuminance += FilterSignal(src[i], CameraFilter.Luminance);
+            for (int i = 0; i < n; i++)
+            {
+                Color rendered = src[i];
+                totalRenderedLuminance += FilterSignal(rendered, CameraFilter.Luminance);
+                signal[i] = FilterSignal(rendered, inputs.Filter);
+            }
+
+            // Finished with the render. Released HERE, before the optics, because the PSF
+            // convolution that follows allocates the largest working set of the whole capture and
+            // there is no reason for these two peaks to coincide. Both references have to go: the
+            // local, and the field the background task reaches it through.
+            src = null;
+            pendingSrc = null;
 
             // Electrons, not fractions of full well. The rendered frame's luminance sum is the
             // denominator, so this factor converts one unit of rendered brightness into the real
@@ -2162,12 +2216,11 @@ namespace ExoInstruments.Visualization
             // PollProcessTask, which is where the report belongs.
 
             // --- 1. Signal plane -------------------------------------------------------
-            // The rendered bodies first: the renderer supplies the spatial shading, the physics
-            // supplies the scale.
-            for (int i = 0; i < n; i++)
-            {
-                signal[i] = FilterSignal(src[i], inputs.Filter) * calibratedSignalPerUnit * scintJitter * cloudTransmission;
-            }
+            // The rendered bodies first: the renderer supplied the spatial shading above, the
+            // physics supplies the scale here. Identical arithmetic to before, only with the
+            // rendered channel already in place and the render itself already let go.
+            float sceneScale = calibratedSignalPerUnit * scintJitter * cloudTransmission;
+            for (int i = 0; i < n; i++) signal[i] *= sceneScale;
 
             // The rendered scene is a snapshot at one instant; an unguided mount lets the sky
             // slide across the sensor during the exposure, so the whole scene draws a streak
@@ -2275,7 +2328,7 @@ namespace ExoInstruments.Visualization
         private DetectorChainResult RunDetectorChain(
             float[] signal, float skyElectrons, double darkElectrons,
             float exposureSeconds, float isoGain,
-            ulong seed, float[] raw, Color[] displayPixels)
+            ulong seed, float[] raw, float[] displayPixels)
         {
             int n = raw.Length;
 
@@ -2368,7 +2421,7 @@ namespace ExoInstruments.Visualization
                     // pedestal included, which is what the FITS export receives.
                     float value = (float)((adu - result.BiasLevelAdu) / displayRange);
                     if (value < 0f) value = 0f; else if (value > 1f) value = 1f;
-                    displayPixels[i] = new Color(value, value, value, 1f);
+                    displayPixels[i] = value;
                 }
             }
             result.SaturatedFraction = n > 0 ? (float)saturated / n : 0f;
@@ -2672,7 +2725,7 @@ namespace ExoInstruments.Visualization
             double length = Math.Sqrt(driftX * driftX + driftY * driftY);
             if (length < 1.0) return;
 
-            if (smearScratch == null || smearScratch.Length != plane.Length) smearScratch = new float[plane.Length];
+            float[] smearScratch = EnsurePassScratch(plane.Length);
             Array.Clear(smearScratch, 0, smearScratch.Length);
 
             // The axis the drift travels furthest along is stepped one pixel at a time, so the
@@ -2753,9 +2806,8 @@ namespace ExoInstruments.Visualization
             float[] haloPlane = null;
             if (hasHalo)
             {
-                if (psfHaloScratch == null || psfHaloScratch.Length != n) psfHaloScratch = new float[n];
-                Array.Copy(plane, psfHaloScratch, n);
-                haloPlane = psfHaloScratch;
+                haloPlane = EnsurePassScratch(n);
+                Array.Copy(plane, haloPlane, n);
                 FourierConvolution.Convolve(haloPlane, TextureWidth, TextureHeight, haloKernel, haloRadius);
             }
 
@@ -3150,7 +3202,7 @@ namespace ExoInstruments.Visualization
         {
             int w = TextureWidth, h = TextureHeight;
             int n = w * h;
-            if (astigmatismScratch == null || astigmatismScratch.Length != n) astigmatismScratch = new float[n];
+            float[] astigmatismScratch = EnsurePassScratch(n);
             Array.Copy(plane, astigmatismScratch, n);
 
             float cx = w / 2f, cy = h / 2f;
@@ -3269,7 +3321,6 @@ namespace ExoInstruments.Visualization
                 renderTexture = null;
             }
             if (readbackTexture != null) { UnityEngine.Object.Destroy(readbackTexture); readbackTexture = null; }
-            if (outputTexture != null) { UnityEngine.Object.Destroy(outputTexture); outputTexture = null; }
             if (capturedTexture != null) { UnityEngine.Object.Destroy(capturedTexture); capturedTexture = null; }
             scaledSpaceCam = null;
 
@@ -3277,12 +3328,10 @@ namespace ExoInstruments.Visualization
             // resolution EnsureSceneBuilt runs next at (native size change on a binning switch).
             pixelScratch = null;
             frameScratch = null;
-            psfHaloScratch = null;
+            passScratch = null;
             displayScratch = null;
             rawScratch = null;
-            astigmatismScratch = null;
             signalScratch = null;
-            smearScratch = null;
             smearLineScratch = null;
             hotPixelIndices = null;
             deadPixelIndices = null;
