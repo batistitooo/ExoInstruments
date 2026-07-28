@@ -5,6 +5,16 @@ namespace ExoInstruments.Core
     /// instrument's own papers (see Citation). Career economy fields are ALL PLACEHOLDERS —
     /// balance à valider avec Baptiste; relative ordering (bigger investment → bigger payoff)
     /// is the only constraint honored here.
+    ///
+    /// PHOTOMETRIC PRECISION: every transit instrument here still uses the fitted magnitude
+    /// scaling (InstrumentSpec.EstimatePrecision), because none of them yet carries a
+    /// PhotometricDetector. The machinery to compute precision from the real electron budget
+    /// instead — the CCD equation of Merline &amp; Howell (1995) over the same integrated bandpass,
+    /// sky model and extinction the imaging half already uses — is implemented in CcdEquation and
+    /// TransitPhotometry, and switches on per instrument the moment a complete detector block is
+    /// added here. It stays off until then by design: PhotometricDetector explains why a partly
+    /// sourced block is worse than the empirical relation it would replace, and MissingFields()
+    /// names exactly which quantities are still needed.
     /// </summary>
     public static class Observatories
     {
@@ -30,6 +40,69 @@ namespace ExoInstruments.Core
             UnlockScienceThreshold = 0.0,
             ScanCostFunds = 500.0,
             ScienceRewardMultiplier = 1.0,
+
+            // Every figure below is from Murray et al. 2020 (MNRAS 495, 2446, "Photometry and
+            // performance of SPECULOOS-South") Table 1, except where noted. With this block
+            // present, SPECULOOS's photometry runs on the CCD equation instead of the fitted
+            // scaling above -- see TransitPhotometry.
+            Detector = new PhotometricDetector
+            {
+                ApertureMeters = 1.0,                      // "1 m diameter primary"
+                CentralObstructionFraction = 0.28,         // "28 cm diameter secondary" / 1 m primary
+
+                // Two aluminium mirrors (f/8 Ritchey-Chretien) at the mid-recoating-cycle 87%
+                // this codebase already uses everywhere, from Ma & Cai (arXiv:1708.01257) Sect.
+                // 4.2 -- see VisualTelescopeSpec.MirrorReflectivity for the full sourcing --
+                // times the I+z' filter's own published ">90 per cent" transmittance.
+                //   0.87^2 * 0.90 = 0.681
+                OpticsTransmission = 0.87 * 0.87 * 0.90,
+
+                PlateScaleArcsecPerPixel = 0.35,           // "0.35 arcsec pixel^-1", 12x12 arcmin FOV
+                ReadNoiseElectrons = 6.2,                  // "6.2 e-" in the 1 MHz readout mode
+                DarkCurrentElectronsPerSecond = 0.1,       // "~0.1 e- s^-1 pixel^-1 ... at -60 C"
+                GainElectronsPerAdu = 1.04,                // "1.04 e- ADU^-1"
+
+                // The I+z' band, bounded at BOTH ends by published numbers: the filter's own
+                // cut-on at 750 nm (Murray et al. 2020 Sect. 2, "transmittance >90 per cent from
+                // 750 nm to beyond 1000 nm") and the detector's stated sensitivity limit near
+                // 950 nm (Table 1, QE range "~350 (near-UV) to ~950 nm (near-IR)"). The filter's
+                // red edge is therefore set by the CCD, not the glass, which is why the band is
+                // not carried out to 1000 nm.
+                FilterCentralWavelengthNm = 850.0,         // midpoint of 750-950
+                FilterWidthNm = 200.0,                     // 950 - 750
+
+                // KNOWN UPPER BOUND, and the one soft number in this block. The published figures
+                // are a 94% peak at 740 nm (Murray et al. 2020 Table 1) and ">90% at 750 nm" for
+                // the Andor BEX2-DD sensor -- both at the BLUE EDGE of the band above, where this
+                // detector is at its best. The real curve falls away toward 950 nm, so holding
+                // 0.90 flat across 750-950 nm overstates the collected electrons and makes the
+                // resulting precision optimistic; the error is signed and bounded, unlike the
+                // empirical relation this replaces, but it is real.
+                //
+                // Removing it needs the measured BEX2-DD curve digitised into a SpectralCurve and
+                // assigned to QuantumEfficiencyCurve below -- exactly what FilterCurves.cs already
+                // does for FORS2, and exactly the error SystemBandpass.cs was written to fix
+                // (using QE_peak there overstated FORS2's b_HIGH band by 1.33x). Until then this
+                // is deliberately the band's blue edge rather than its 94% peak.
+                QuantumEfficiency = 0.90,
+
+                // Paranal DIMM median, from the 2016-DIMM over 2016 April - 2018 April; the
+                // 1998-DIMM's older 0.98 arcsec figure is known to over-estimate poor seeing
+                // (Butterley et al. 2024, MNRAS 529, 320, comparison of turbulence profilers at
+                // Paranal). SPECULOOS-South sits on the same platform.
+                MedianZenithSeeingArcsec = 0.69,
+
+                // ExposureSeconds left null, so CadenceSeconds (30 s) is used as the open-shutter
+                // time. That sits inside the "10-60s" typical range Murray et al. 2020 Sect. 3
+                // quotes, and SPECULOOS reads out once per point, so IntegrationsPerMeasurement
+                // stays 1.
+
+                Citation = "Murray et al. 2020, MNRAS 495, 2446, Table 1 (aperture, obstruction, plate scale, "
+                         + "read noise, dark current, gain, QE range, I+z' filter); Ma & Cai arXiv:1708.01257 "
+                         + "Sect. 4.2 (aluminium coating 87%/surface); Butterley et al. 2024, MNRAS 529, 320 "
+                         + "(Paranal 2016-DIMM median seeing 0.69 arcsec). QE held at the band's blue-edge "
+                         + "figure -- see the comment above, it is an upper bound.",
+            },
         };
 
         public static readonly InstrumentSpec Wasp = new InstrumentSpec
@@ -53,6 +126,25 @@ namespace ExoInstruments.Core
             UnlockScienceThreshold = 0.0,
             ScanCostFunds = 250.0,
             ScienceRewardMultiplier = 1.0,
+
+            // NO Detector BLOCK: SuperWASP is two numbers short of one, so it stays on the fitted
+            // scaling above. Sourced already, from Pollacco et al. 2006 (PASP 118, 1407), for
+            // whoever finishes it:
+            //   aperture 111 mm (Canon 200 mm f/1.8 lens), obstruction 0 (refractive, no secondary)
+            //   e2v 2048x2048, 13.5 um pixels, in an Andor DW436     (Sect. 2.3)
+            //   plate scale 13.7 arcsec/pixel, FOV 7.8 x 7.8 deg     (Sect. 2.4)
+            //   read noise "~8-10 electrons", gain "~2" e-/ADU       (Sect. 2.3)
+            //   dark current ~72 e- pixel^-1 hr^-1 at -50 C = 0.020 e-/pixel/s   (Sect. 2.3)
+            //   peak QE >90%, back-illuminated                       (Sect. 2.3)
+            //   passband 400-700 nm -> central 550 nm, width 300 nm  (Sect. 2.4)
+            //   ExposureSeconds = 30, against the 600 s CadenceSeconds above (Sect. 2.3/4.1)
+            //
+            // WHAT BLOCKS IT: at 13.7 arcsec/pixel against sub-arcsecond seeing this instrument is
+            // drastically undersampled, so CcdEquation's seeing-derived optimal aperture is
+            // meaningless -- the aperture is set by the pixel grid and by the survey's own
+            // reduction. It needs PhotometricApertureRadiusPixels and a delivered PSF FWHM, and
+            // neither is in Pollacco et al. 2006. Optics transmission for the Canon lens is not
+            // published either, and a camera lens is not a mirror train the 0.87^N rule covers.
         };
 
         public static readonly InstrumentSpec Tess = new InstrumentSpec
@@ -74,6 +166,30 @@ namespace ExoInstruments.Core
             UnlockScienceThreshold = 100.0,
             ScanCostFunds = 2_500.0,
             ScienceRewardMultiplier = 2.0,
+
+            // NO Detector BLOCK: one number short. Sourced already, from Ricker et al. 2015
+            // (JATIS 1, 014003), Sullivan et al. 2015 (ApJ 809, 77) Sect. 2, and the TESS
+            // telescope information page:
+            //   entrance pupil 105 mm -> 86.6 cm^2 geometric; effective collecting area 69 cm^2
+            //     "after accounting for transmissive losses in the lenses and their coatings",
+            //     which makes OpticsTransmission = 69/86.6 = 0.797 and obstruction 0 (refractive)
+            //   MIT/LL CCID-80 deep-depletion, 15 um pixels, 2048x2048, 21.1 arcsec/pixel
+            //   read noise 10 e- pixel^-1 RMS, incurred on EVERY 2 s image
+            //   ExposureSeconds = 2, IntegrationsPerMeasurement = 60 for the 2-min cadence
+            //   bandpass 600-1000 nm, centred on Cousins I_C, effective wavelength 786.5 nm
+            //   dark current: not published as a value; CCDs run at -75 C to suppress it
+            //
+            // WHAT BLOCKS IT: no band-averaged quantum efficiency is published. Sullivan et al.
+            // 2015 state outright that the 69 cm^2 covers lens transmission ONLY and that the CCD
+            // QE is treated separately, but give no figure for it; the only QE number found is 40%
+            // at 1 um, which is the extreme red edge and not a band average. The mission publishes
+            // a full spectral response function instead, and digitising that into a SpectralCurve
+            // is the right fix -- it would also make the 786.5 nm effective wavelength fall out of
+            // the integral rather than being asserted.
+            //
+            // Secondly, TESS is deliberately undersampled: its PSF is quoted as a "50%
+            // ensquared-energy half-width of 15 micron", i.e. one pixel, which is not a FWHM and
+            // does not convert into one without assuming a profile.
         };
 
         public static readonly InstrumentSpec Harps = new InstrumentSpec

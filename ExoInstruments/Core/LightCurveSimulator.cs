@@ -43,13 +43,49 @@ namespace ExoInstruments.Core
             return baseline - totalDip + noise;
         }
 
-        /// <summary>1-sigma noise for one exposure: instrument precision + scintillation + moonlit-sky excess in quadrature. Also reported as the per-sample uncertainty.</summary>
+        /// <summary>
+        /// 1-sigma noise for one exposure, as a fractional flux uncertainty. Also reported as the
+        /// per-sample uncertainty on every FluxSample.
+        ///
+        /// TWO PATHS, and which one runs depends on whether the instrument's hardware has been
+        /// sourced (see PhotometricDetector):
+        ///
+        ///   * PHYSICAL. With a complete detector, the whole budget comes from the CCD equation
+        ///     (Merline &amp; Howell 1995) over this instrument's real collecting area, throughput,
+        ///     QE, plate scale, read noise and dark current, against the real sky brightness at
+        ///     this airmass and lunar phase, plus Young (1967) scintillation. Sky and moonlight
+        ///     enter as electrons in the aperture, which is what they physically are.
+        ///
+        ///   * EMPIRICAL. Without one, the previous behaviour is used unchanged: the fitted
+        ///     magnitude scaling, plus the scintillation EXCESS above zenith (because that fit
+        ///     already contains typical-conditions scintillation) and MoonlightPollution's own
+        ///     excess-noise term. Both of those exist to patch a relation that has no sky in it;
+        ///     the physical path does not use either, and must not, or the moon would be counted
+        ///     twice.
+        /// </summary>
         public static double TotalNoiseSigma(StarTarget star, InstrumentSpec instrument, double airmass, double moonSkyFactor = 0.0)
         {
+            TransitPhotometry.Budget budget;
+            if (TransitPhotometry.TryEstimate(star, instrument, airmass, moonSkyFactor, out budget))
+                return budget.TotalSigma;
+
             double instrumentSigma = instrument.EstimatePrecision(star.ApparentMagnitude) / 1_000_000.0;
             double scintillationSigma = AtmosphericNoise.ScintillationExcessSigma(instrument, airmass);
             double moonSigma = MoonlightPollution.ExcessNoiseSigma(instrument, star.ApparentMagnitude, moonSkyFactor);
             return Math.Sqrt(instrumentSigma * instrumentSigma + scintillationSigma * scintillationSigma + moonSigma * moonSigma);
+        }
+
+        /// <summary>
+        /// The full electron budget behind one exposure's error bar, when the instrument has a
+        /// sourced detector -- for a diagnostic readout, the same way the imaging pipeline exposes
+        /// its own last-capture figures. False when the empirical path is in use, in which case
+        /// there is no budget to show.
+        /// </summary>
+        public static bool TryGetNoiseBudget(
+            StarTarget star, InstrumentSpec instrument, double airmass, double moonSkyFactor,
+            out TransitPhotometry.Budget budget)
+        {
+            return TransitPhotometry.TryEstimate(star, instrument, airmass, moonSkyFactor, out budget);
         }
 
         public static List<FluxSample> GenerateSamples(StarTarget star, InstrumentSpec instrument, double startUt, double endUt, double cadenceSeconds, Random rng)

@@ -94,7 +94,28 @@ namespace ExoInstruments.Core
         /// <summary>Multiplier on the detection Science award. Set explicitly alongside unlock cost — NOT derived from precision, which would perversely make the free starter (SPECULOOS) pay more than TESS.</summary>
         public double ScienceRewardMultiplier { get; set; } = 1.0;
 
-        /// <summary>1-sigma measurement precision at the given apparent magnitude, in this instrument's native unit.</summary>
+        /// <summary>
+        /// The real optics and detector this instrument photographs with, when they have been
+        /// sourced. Present ONLY for transit photometers, and only where every field could be
+        /// looked up: with it, LightCurveSimulator computes each exposure's noise from the CCD
+        /// equation (see TransitPhotometry); without it, EstimatePrecision below is used unchanged.
+        ///
+        /// Null is the normal state for an instrument nobody has entered the hardware for, and for
+        /// every radial-velocity and direct-imaging instrument, whose precision is not an
+        /// aperture-photometry S/N at all and would need its own model (Bouchy et al. 2001 for the
+        /// RV photon-noise limit; a contrast curve for imaging).
+        /// </summary>
+        public PhotometricDetector Detector { get; set; }
+
+        /// <summary>
+        /// 1-sigma measurement precision at the given apparent magnitude, in this instrument's
+        /// native unit, from the fitted scaling sigma = sigma_ref * 10^(k (m - m_ref)).
+        ///
+        /// This is the EMPIRICAL path, kept as the fallback for every instrument with no sourced
+        /// Detector. Its limits are stated in CcdEquation's summary: with k = 0.2 it is the pure
+        /// source-shot-noise limit, so it carries no sky, no read noise and no dependence on the
+        /// hardware, and it cannot bend toward the sky-limited slope at the faint end.
+        /// </summary>
         public double EstimatePrecision(double apparentMagnitude)
         {
             return ReferencePrecision * Math.Pow(10.0, PrecisionExponent * (apparentMagnitude - ReferenceMagnitude));
