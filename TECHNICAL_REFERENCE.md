@@ -505,6 +505,16 @@ None of that can ship. All of it can sit on a user's disk, so `pack_gaia_catalog
 
 **Search cost does not scale with catalogue size.** The format is banded in declination and binary-searched in RA, so a cone search touches only the stars near the field. What scales is the rendering.
 
+**Cost, measured rather than assumed.** Removing the shipped catalogue multiplied the sources in a frame by fifty and more, on a path that had never run with more than about four stars in it. All three costs were measured on the real code:
+
+| | Measured |
+|---|---|
+| Deposition, worst realistic frame (RedCat 51, 13.2 deg², 43 084 stars, 54 px trails, unguided) | **8 ms** |
+| Load, G < 13 / G < 14 / G < 16 | **2.0 s / 4.4 s / 18.8 s** |
+| Memory | **12 bytes/star exactly**, so the file size is the RAM cost |
+
+The star field is not the expensive part of a capture and does not become it: the PSF convolution over the same frame is 552 ms (§7.11), roughly seventy times the deposition. Load is a one-time cost paid at scene entry, and it scales linearly, so the depth table in the README is also a startup-time table. Guarded by a harness check that fails if the worst frame ever exceeds 2 s.
+
 #### A pre-existing search bug this surfaced
 
 `RenderedStarCatalog.Search` brackets each declination band's RA range from a single declination inside that band. It used the band edge **nearest the equator**, on the reasoning that the RA half-width grows as `1/cos(dec)`. That reasoning holds for the small-angle approximation `radius/cos(dec)` but not for the exact relation the search actually uses,

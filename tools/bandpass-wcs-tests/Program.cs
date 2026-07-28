@@ -57,6 +57,7 @@ class Program
         TestFilterCurves();
         TestGaiaPhotometry();
         TestGaiaCatalogueFormat();
+        TestStarFieldThroughput();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -1002,6 +1003,88 @@ class Program
         double areaDeg2 = Math.PI * 0.3 * 0.3;
         Console.WriteLine($"         density {found.Count / areaDeg2:F0} stars/deg2 toward the Galactic centre at G < 15, "
                           + $"against the 61.9 all-sky of the Tycho-2 file this replaced");
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ Rendering cost
+    //
+    // Removing the shipped catalogue and pointing the renderer at Gaia multiplied the number of
+    // sources in a frame by fifty and more. The star path had never run with more than about four
+    // stars in it. This measures it at the densities a real Gaia build produces, on the same pure
+    // Core code the game calls, so it does not need Unity or KSP to be trusted.
+    //
+    // The worst case in the roster is the RedCat 51: 13.2 deg^2 of sky in one frame, and the
+    // longest trails, because a wide field on an unguided mount smears every star.
+
+    static void TestStarFieldThroughput()
+    {
+        Console.WriteLine("Star-field rendering cost at Gaia densities");
+
+        // Realistic densities, measured from a real Gaia cone toward the Galactic centre:
+        // 3264 stars/deg^2 at G < 15. A G < 14 build is about 2.2x shallower.
+        foreach (var scenario in new[] {
+            ("RC20, G<14 in the plane", 0.068, 1500.0, 4144 / 4, 2822 / 4, 0.0),
+            ("RC20, G<15 in the plane", 0.068, 3264.0, 4144 / 4, 2822 / 4, 54.0),
+            ("RedCat 51, G<14 in the plane", 13.2, 1500.0, 4144 / 4, 2822 / 4, 0.0),
+            ("RedCat 51, G<15 in the plane", 13.2, 3264.0, 4144 / 4, 2822 / 4, 54.0),
+        })
+        {
+            var (label, areaDeg2, density, w, h, trailPx) = scenario;
+            int count = (int)(areaDeg2 * density);
+
+            // Sources placed pseudo-randomly across the frame, with the given trail length.
+            var plane = new float[w * h];
+            var sources = new PointSource[count];
+            uint seed = 12345;
+            for (int i = 0; i < count; i++)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                double x = (seed >> 8) % (uint)w;
+                seed = seed * 1664525u + 1013904223u;
+                double y = (seed >> 8) % (uint)h;
+                sources[i] = new PointSource
+                {
+                    SignalElectrons = 5000.0,
+                    StartPixelX = x, StartPixelY = y,
+                    EndPixelX = x + trailPx, EndPixelY = y + 0.3 * trailPx,
+                };
+            }
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < count; i++) StarFieldRenderer.Deposit(plane, w, h, sources[i]);
+            watch.Stop();
+
+            Console.WriteLine($"         {label,-30}{count,8} stars, trail {trailPx,4:F0} px "
+                              + $"-> {watch.Elapsed.TotalMilliseconds,8:F1} ms");
+        }
+
+        // The number that decides whether this is a problem: the worst realistic frame.
+        {
+            int w = 4144 / 4, h = 2822 / 4;
+            int count = (int)(13.2 * 3264.0);
+            var plane = new float[w * h];
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            uint seed = 999;
+            for (int i = 0; i < count; i++)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                double x = (seed >> 8) % (uint)w;
+                seed = seed * 1664525u + 1013904223u;
+                double y = (seed >> 8) % (uint)h;
+                StarFieldRenderer.Deposit(plane, w, h, new PointSource
+                {
+                    SignalElectrons = 5000.0,
+                    StartPixelX = x, StartPixelY = y,
+                    EndPixelX = x + 54.0, EndPixelY = y + 16.0,
+                });
+            }
+            watch.Stop();
+            double ms = watch.Elapsed.TotalMilliseconds;
+            Check("the worst realistic frame stays well inside one capture's budget",
+                  ms < 2000.0,
+                  $"RedCat 51, 13.2 deg2 at 3264 stars/deg2 unguided: {count} stars, "
+                  + $"{ms:F0} ms on the background thread (the PSF convolution alone is 552 ms, section 7.11)");
+        }
         Console.WriteLine();
     }
 

@@ -35,5 +35,6 @@
     <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/GaiaPhotometry.cs" />
     <Compile Include="$(Core)/RenderedStarCatalog.cs" />
+    <Compile Include="$(Core)/StarFieldRenderer.cs" />
   </ItemGroup>
 </Project>

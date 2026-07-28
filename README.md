@@ -184,13 +184,15 @@ hundreds. It was the worst of both worlds, 29.3 MB carried to deliver a sky that
 A real star field means Gaia, and Gaia's own measured counts say what that weighs at the 12
 bytes/star this format uses:
 
-| Faint limit | Stars | File, and RAM while playing |
-|---|---|---|
-| G < 13 | 16.8 M | **202 MB** |
-| G < 14 | 36.9 M | **443 MB** |
-| G < 15 | 78.0 M | **935 MB** |
-| G < 16 | 157.7 M | **1.9 GB** |
-| G < 18 | 577.2 M | **6.9 GB** |
+| Faint limit | Stars | File, and RAM while playing | One-time load at startup |
+|---|---|---|---|
+| G < 13 | 16.8 M | **202 MB** | ~2 s |
+| G < 14 | 36.9 M | **443 MB** | ~4.4 s |
+| G < 15 | 78.0 M | **935 MB** | ~9 s |
+| G < 16 | 157.7 M | **1.9 GB** | ~19 s |
+| G < 18 | 577.2 M | **6.9 GB** | ~70 s |
+
+Load times measured on the real reader; memory is exactly 12 bytes/star, confirmed by measurement.
 
 None of that belongs in a mod download. On your own disk it is fine. So the choice is a real star
 field or an honestly empty one, rather than a heavy download that delivers neither.
@@ -220,7 +222,11 @@ doing.
 
 Search cost does *not* grow with catalogue size (the format is banded in declination and
 binary-searched in right ascension, so a frame only ever touches the stars near it). What does grow
-is how many stars get drawn per frame, which is the entire point.
+is how many stars get drawn per frame, which is the entire point, and that has been measured too:
+the worst realistic case in the whole roster is the RedCat 51's 13.2 deg² field at `G < 15` toward
+the Galactic plane, 43 000 stars in one unguided frame with 54-pixel trails, which deposits in
+**8 ms**. The instrument's PSF convolution over the same frame costs 552 ms, so the star field is
+not the expensive part and never becomes it.
 
 ### What you actually get
 
