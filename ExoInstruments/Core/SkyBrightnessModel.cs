@@ -131,26 +131,39 @@ namespace ExoInstruments.Core
         /// Electrons a sky of the given V surface brightness deposits in one pixel per second,
         /// through the given filter on the given telescope.
         ///
-        /// The same photometric chain a point source goes through (PhotonFluxModel), applied to
-        /// the flux inside one pixel's solid angle, so the sky and the stars sitting on it are
-        /// on one flux scale by construction, which is what makes a computed signal-to-noise
-        /// ratio mean anything. No colour term is applied: unlike a star the night sky is not a
-        /// continuum source (airglow is line emission, moonlight is reflected sunlight), and the
-        /// flat-in-band approximation PhotonFluxModel already documents is the standard
-        /// exposure-time-calculator treatment.
+        /// The same photometric chain a point source goes through (SystemResponse and
+        /// PhotonFluxModel), applied to the flux inside one pixel's solid angle, so the sky and
+        /// the stars sitting on it are on one flux scale by construction, which is what makes a
+        /// computed signal-to-noise ratio mean anything -- including the real optical throughput
+        /// and QE curve, which the sky must lose exactly as the sources do.
+        ///
+        /// The response is used in its NO-EXTINCTION form and transmission is applied by the
+        /// caller, because the sky's terms are not attenuated alike: airglow is emitted inside the
+        /// atmosphere, zodiacal light arrives from outside it, and moonlight and twilight are
+        /// scattered sunlight whose published surface brightnesses were measured through the air
+        /// already. Folding one extinction factor into all four would erase that distinction. See
+        /// the caller in SolarSystemCameraTexture.GatherSkyBackground.
+        ///
+        /// spectrumTeffK sets the spectral shape the summed sky is integrated with. The night sky
+        /// is not one source: moonlight, zodiacal light and twilight are all scattered sunlight
+        /// and genuinely have the solar shape (SourceSpectra.SolarPhotosphereTemperatureK), while
+        /// airglow is line emission with no continuum shape this pipeline could integrate. Pass 0
+        /// to integrate flat and assume nothing.
         /// </summary>
         public static double ElectronsPerPixelPerSecond(
             double vMagPerArcsec2, double plateScaleArcsecPerPixel,
-            double filterBandwidthAngstrom, double apertureAreaCm2,
-            double quantumEfficiency, double transmission)
+            SystemResponse response, double apertureAreaCm2,
+            double transmission, double spectrumTeffK)
         {
+            if (response == null) return 0.0;
             if (double.IsPositiveInfinity(vMagPerArcsec2) || double.IsNaN(vMagPerArcsec2)) return 0.0;
             double pixelSolidAngleArcsec2 = plateScaleArcsecPerPixel * plateScaleArcsecPerPixel;
             if (pixelSolidAngleArcsec2 <= 0.0) return 0.0;
 
+            double width = response.EffectiveWidthAngstromForTemperatureNoExtinction(spectrumTeffK);
+
             double perArcsec2 = PhotonFluxModel.CollectedElectrons(
-                vMagPerArcsec2, filterBandwidthAngstrom, apertureAreaCm2,
-                quantumEfficiency, 1.0, transmission);
+                vMagPerArcsec2, width, apertureAreaCm2, 1.0) * Math.Max(0.0, transmission);
 
             return perArcsec2 * pixelSolidAngleArcsec2;
         }

@@ -590,6 +590,34 @@ namespace ExoInstruments.Visualization
         private float lastScintillationSigma;
 
         /// <summary>Atmospheric FWHM (arcsec) fed to the PSF for the last capture -- the residual left by adaptive optics, or the plain ground-based seeing figure. 0 means diffraction-limited.</summary>
+        /// <summary>
+        /// Where the last capture actually pointed, as a FITS world coordinate system. Invalid
+        /// (and therefore not written to the header) when the field geometry could not be
+        /// resolved -- outside the scenes where the observatory site is available, for instance.
+        /// </summary>
+        public Core.FitsWcs LastWcs { get; private set; }
+
+        /// <summary>Airmass the last capture was taken through; +Infinity if the target was below the horizon.</summary>
+        public double LastAirmass { get; private set; }
+
+        /// <summary>
+        /// The effective photometric width (Angstrom) the last capture was calibrated with, for a
+        /// flat source spectrum -- the single number that turns an apparent magnitude into
+        /// electrons through this instrument at this airmass (see SystemBandpass). Recorded in the
+        /// exported header because with it, the aperture area and the exposure time, a reader can
+        /// reproduce this frame's photometry exactly rather than having to trust it.
+        /// </summary>
+        public double LastEffectiveWidthAngstrom { get; private set; }
+
+        /// <summary>Central wavelength (nm) of the fitted filter.</summary>
+        public double ActiveFilterCentralWavelengthNm => FilterCentralWavelengthMeters(Filter) * 1e9;
+
+        /// <summary>Published FWHM (nm) of the fitted filter.</summary>
+        public double ActiveFilterBandwidthNm => FilterBandwidthAngstrom(Filter) * 0.1;
+
+        /// <summary>True when the last capture ran unguided long enough for the sky to turn under the sensor, so its sources are trailed and its WCS describes only the exposure's start.</summary>
+        public bool LastFrameTrailed { get; private set; }
+
         public double LastAtmosphericFwhmArcsec { get; private set; }
 
         /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
@@ -1109,7 +1137,6 @@ namespace ExoInstruments.Visualization
             public float ExposureSeconds;
             public float IsoGain;
             public CameraFilter Filter;
-            public float Extinction;
             public double ScintSigma;
             public double MoonSkyExcess;
             public float CloudCoverage;
@@ -1142,14 +1169,18 @@ namespace ExoInstruments.Visualization
             public double SignalCutoffElectrons;
             // Photometric chain for a catalogue star, resolved on the main thread so the
             // background pass needs nothing but arithmetic.
-            public double FilterCentralWavelengthMeters;
-            public double FilterBandwidthAngstrom;
+            /// <summary>The instrument's integrated spectral response for this filter and airmass -- optics, filter, QE curve and extinction in one object (see SystemBandpass). Built on the main thread, read-only thereafter.</summary>
+            public SystemResponse Response;
             public double ApertureAreaCm2;
             /// <summary>Atmospheric extinction at the fitted filter's own wavelength: extinction alone, no ND filter, no cloud.</summary>
-            public double BandExtinction;
             public double CloudTransmission;
-            /// <summary>Full transmission chain for a catalogue star: band extinction, cloud, and the ND filter.</summary>
-            public double StarTransmission;
+            /// <summary>
+            /// Transmission a catalogue star loses OUTSIDE the spectral response: cloud and the ND
+            /// filter. Atmospheric extinction is deliberately not here -- it is wavelength
+            /// dependent and now lives inside Response's integral, so including it again would
+            /// attenuate every source twice.
+            /// </summary>
+            public double StarNonAtmosphericTransmission;
 
             // --- Diurnal drift, as a real vector on the sensor ---------------------------
             /// <summary>Pixel displacement of the field centre over the exposure. Zero when the mount tracks.</summary>
@@ -1192,7 +1223,14 @@ namespace ExoInstruments.Visualization
             double moonSkyExcess = ComputeMoonSkyExcess(targetBody);
             float coverage = ComputeCloudCoverage();
 
-            double totalElectrons = ComputeCollectedElectrons(targetBody, extinction, exposureSeconds);
+            // The instrument's whole spectral response for this filter and airmass, integrated
+            // once here and then reused by every source in the frame -- bodies, stars and sky
+            // alike, which is what keeps them on one flux scale (see SystemBandpass).
+            SystemResponse response = BuildSystemResponse(Filter, airmass);
+            LastAirmass = airmass;
+            LastEffectiveWidthAngstrom = response.EffectiveWidthAngstromFlat;
+
+            double totalElectrons = ComputeCollectedElectrons(targetBody, response, 1.0, exposureSeconds);
 
             // Seeing is the site's own atmospheric term and nothing else. Cloud cover used to add
             // a blur here, and no longer does, for two independent reasons.
@@ -1224,11 +1262,11 @@ namespace ExoInstruments.Visualization
                 ExposureSeconds = exposureSeconds,
                 IsoGain = isoGain,
                 Filter = Filter,
-                Extinction = extinction,
                 ScintSigma = scintSigma,
                 MoonSkyExcess = moonSkyExcess,
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
+                Response = response,
                 PlateScaleArcsec = PlateScaleArcsecPerPixel,
                 SeeingFwhmArcsec = seeingFwhmArcsec,
                 DefocusDiscRadiusPx = defocusDiscRadiusPx,
@@ -1267,37 +1305,53 @@ namespace ExoInstruments.Visualization
             double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
             double transmission = AtmosphericImagingNoise.ExtinctionTransmissionAt(airmass, wavelength, Spec.SiteAltitudeMeters);
 
+            // The sky is summed in two groups, because its terms do not share a spectrum. Three of
+            // the four are sunlight scattered off something -- the zodiacal dust cloud, the Moon,
+            // and the daytime atmosphere itself -- so they genuinely carry the solar spectral
+            // shape. Airglow does not: it is atmospheric line emission (the OI 557.7nm line and
+            // the OH Meinel bands), with no continuum shape this pipeline could integrate, so it
+            // is integrated flat and assumes nothing. Summing all four and integrating once would
+            // have forced one spectrum on all of them.
+
             // Airglow is emitted inside the atmosphere: the van Rhijn path lengthening brightens
             // it toward the horizon while extinction over the same path dims it, and the two
             // largely cancel, which is why both are applied and neither alone.
-            double flux = Math.Pow(10.0, -0.4 * SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2)
-                        * SkyBrightnessModel.AirglowVanRhijnFactor(zenithAngleDeg, planetRadius)
-                        * transmission;
+            double fluxFlat = Math.Pow(10.0, -0.4 * SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2)
+                            * SkyBrightnessModel.AirglowVanRhijnFactor(zenithAngleDeg, planetRadius)
+                            * transmission;
 
             // Zodiacal light originates outside the atmosphere, so it is simply attenuated by it.
-            flux += Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
+            double fluxSolar = Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
 
             // Moonlight and twilight are both sunlight scattered WITHIN the atmosphere, so the
             // extinction along the line of sight is already part of the measured surface
             // brightness the model is calibrated against and is not applied again.
-            flux = SkyBrightnessModel.AddMagnitude(flux, SkyBrightnessModel.MoonlightVMagPerArcsec2(inputs.MoonSkyExcess));
-            if (haveSunAlt) flux = SkyBrightnessModel.AddMagnitude(flux, SkyBrightnessModel.TwilightVMagPerArcsec2(sunAltDeg));
+            fluxSolar = SkyBrightnessModel.AddMagnitude(fluxSolar, SkyBrightnessModel.MoonlightVMagPerArcsec2(inputs.MoonSkyExcess));
+            if (haveSunAlt) fluxSolar = SkyBrightnessModel.AddMagnitude(fluxSolar, SkyBrightnessModel.TwilightVMagPerArcsec2(sunAltDeg));
 
             // Cloud veiling: cloud scatters ground and sky light back down, which is why an
             // overcast night sky is brighter than a clear one rather than darker. Modelled as a
-            // multiplier on the sky that is already there, since that light is its source.
-            flux *= 1.0 + cloudCoverage * CloudVeilingSkyGain;
+            // multiplier on the sky that is already there, since that light is its source -- so it
+            // applies to both groups alike.
+            double veiling = 1.0 + cloudCoverage * CloudVeilingSkyGain;
+            fluxFlat *= veiling;
+            fluxSolar *= veiling;
 
-            double perSecond = SkyBrightnessModel.ElectronsPerPixelPerSecond(
-                SkyBrightnessModel.FluxToMagPerArcsec2(flux),
-                inputs.PlateScaleArcsec,
-                FilterBandwidthAngstrom(inputs.Filter),
-                RealApertureAreaCm2(),
-                Spec.QuantumEfficiency,
-                NdFilterTransmission(NdFilter));
+            // The response is used without extinction here and the transmission above is applied
+            // per term instead, since each of the four is attenuated differently.
+            double area = RealApertureAreaCm2();
+            double nd = NdFilterTransmission(NdFilter);
+            double perSecond =
+                SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat),
+                    inputs.PlateScaleArcsec, inputs.Response, area, nd, 0.0)
+              + SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxSolar),
+                    inputs.PlateScaleArcsec, inputs.Response, area, nd,
+                    SourceSpectra.SolarPhotosphereTemperatureK);
 
             inputs.SkyElectronsPerPixel = perSecond * inputs.ExposureSeconds;
-            LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(flux);
+            LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat + fluxSolar);
         }
 
         /// <summary>
@@ -1348,17 +1402,25 @@ namespace ExoInstruments.Visualization
                 ? meridianRaDeg
                 : meridianRaDeg - 360.0 * exposureSeconds / rotationPeriod;
 
-            inputs.FilterCentralWavelengthMeters = FilterCentralWavelengthMeters(inputs.Filter);
-            inputs.FilterBandwidthAngstrom = FilterBandwidthAngstrom(inputs.Filter);
+            // The exported frame's pointing, measured from the very projection that places the
+            // stars in it, so the header and the image cannot disagree. Referred to the START of
+            // the exposure, which is what DATE-OBS timestamps.
+            LastWcs = Core.FitsWcs.Build(projection, inputs.StartMeridianRaDeg, latitudeDeg);
+            LastFrameTrailed = inputs.EndMeridianRaDeg != inputs.StartMeridianRaDeg;
+
             inputs.ApertureAreaCm2 = RealApertureAreaCm2();
 
-            // Extinction at the FILTER's own wavelength, not one grey figure: a site loses far
-            // more blue light than red, so the same star really is a different brightness
-            // through each filter of an LRGB set.
-            inputs.BandExtinction = AtmosphericImagingNoise.ExtinctionTransmissionAt(
-                airmass, inputs.FilterCentralWavelengthMeters, Spec.SiteAltitudeMeters);
+            // Extinction is integrated ACROSS the filter's passband inside Response rather than
+            // sampled at its central wavelength: a site loses far more blue light than red, and on
+            // the widest bands here (FORS2's 7700 Angstrom unfiltered position) the coefficient
+            // varies threefold from one edge to the other, so a single sample cannot stand for the
+            // band. Which is why the per-filter wavelength, bandwidth and single extinction figure
+            // this struct used to carry are gone: the response holds all three, integrated, and
+            // keeping duplicates of them here would let a caller reach for the sampled version by
+            // accident. The sky background still needs a central-wavelength figure, and computes
+            // its own locally, because its four terms are each attenuated differently.
             inputs.CloudTransmission = 1.0 - inputs.CloudCoverage * CloudMaxAttenuation;
-            inputs.StarTransmission = inputs.BandExtinction * inputs.CloudTransmission * NdFilterTransmission(NdFilter);
+            inputs.StarNonAtmosphericTransmission = inputs.CloudTransmission * NdFilterTransmission(NdFilter);
 
             inputs.SignalCutoffElectrons = BuildStarSignalFloor(inputs);
 
@@ -1391,8 +1453,9 @@ namespace ExoInstruments.Visualization
         private double ComputeSceneElectrons(FrameComputeInputs inputs, CelestialBody targetBody,
                                              GnomonicProjection projection, float exposureSeconds)
         {
-            float bodyTransmission = (float)(inputs.BandExtinction * inputs.CloudTransmission);
-            double total = ComputeCollectedElectrons(targetBody, bodyTransmission, exposureSeconds);
+            // Extinction is inside inputs.Response, so only the cloud term is handed over here.
+            double bodyTransmission = inputs.CloudTransmission;
+            double total = ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds);
             if (FlightGlobals.Bodies == null) return total;
 
             foreach (CelestialBody body in FlightGlobals.Bodies)
@@ -1402,7 +1465,7 @@ namespace ExoInstruments.Visualization
                 if (!TryProjectBody(body, projection, out double px, out double py)) continue;
                 if (px < 0.0 || px > projection.WidthPx || py < 0.0 || py > projection.HeightPx) continue;
 
-                total += ComputeCollectedElectrons(body, bodyTransmission, exposureSeconds);
+                total += ComputeCollectedElectrons(body, inputs.Response, bodyTransmission, exposureSeconds);
             }
             return total;
         }
@@ -1570,14 +1633,20 @@ namespace ExoInstruments.Visualization
         /// The apparent magnitude whose collected signal equals the frame's noise floor, which is the
         /// faintest star this exposure can show. Inverts PhotonFluxModel's own flux relation
         /// rather than approximating it, so it stays consistent with what the sources are
-        /// actually drawn at.
+        /// actually drawn at -- including the optical throughput, which makes this figure
+        /// shallower than it used to be and correctly so.
+        ///
+        /// Evaluated for a flat spectrum: this sets the catalogue search's depth cut, and the
+        /// search must not depend on the colour of a star it has not read yet.
         /// </summary>
         private double LimitingVMagFor(FrameComputeInputs inputs)
         {
+            if (inputs.Response == null) return 0.0;
             double floorElectrons = inputs.SignalCutoffElectrons;
             double perZeroMag = PhotonFluxModel.CollectedElectrons(
-                0.0, inputs.FilterBandwidthAngstrom, inputs.ApertureAreaCm2,
-                Spec.QuantumEfficiency, inputs.ExposureSeconds, inputs.StarTransmission);
+                0.0, inputs.Response.EffectiveWidthAngstromFlat,
+                inputs.ApertureAreaCm2, inputs.ExposureSeconds)
+                * inputs.StarNonAtmosphericTransmission;
 
             if (floorElectrons <= 0.0 || perZeroMag <= 0.0) return 0.0;
             return -2.5 * Math.Log10(floorElectrons / perZeroMag);
@@ -1602,9 +1671,10 @@ namespace ExoInstruments.Visualization
             var sources = new List<PointSource>();
             if (FlightGlobals.Bodies == null) return sources;
 
-            // ComputeCollectedElectrons applies the ND filter itself, so it is handed the
-            // atmospheric terms only; passing the full star chain would attenuate twice.
-            float bodyTransmission = (float)(inputs.BandExtinction * inputs.CloudTransmission);
+            // ComputeCollectedElectrons applies the ND filter itself and takes extinction from the
+            // response, so it is handed the cloud term only; passing the full star chain would
+            // attenuate twice.
+            double bodyTransmission = inputs.CloudTransmission;
 
             foreach (CelestialBody body in FlightGlobals.Bodies)
             {
@@ -1612,7 +1682,7 @@ namespace ExoInstruments.Visualization
                 if (IsResolvedByOptics(body, inputs.PlateScaleArcsec)) continue;
                 if (!TryProjectBody(body, projection, out double px, out double py)) continue;
 
-                double electrons = ComputeCollectedElectrons(body, bodyTransmission, exposureSeconds);
+                double electrons = ComputeCollectedElectrons(body, inputs.Response, bodyTransmission, exposureSeconds);
                 if (electrons <= inputs.SignalCutoffElectrons) continue;
 
                 sources.Add(new PointSource
@@ -2121,12 +2191,10 @@ namespace ExoInstruments.Visualization
 
             if (inputs.Stars != null && inputs.Stars.Count > 0)
             {
-                double wavelength = inputs.FilterCentralWavelengthMeters;
-                double bandwidth = inputs.FilterBandwidthAngstrom;
+                SystemResponse response = inputs.Response;
                 double area = inputs.ApertureAreaCm2;
-                double qe = Spec.QuantumEfficiency;
                 double exposure = inputs.ExposureSeconds;
-                double transmission = inputs.StarTransmission * scintillation;
+                double transmission = inputs.StarNonAtmosphericTransmission * scintillation;
 
                 drawn = StarFieldRenderer.DepositStars(
                     signal, TextureWidth, TextureHeight,
@@ -2135,8 +2203,7 @@ namespace ExoInstruments.Visualization
                     inputs.ObserverLatitudeDeg,
                     inputs.SignalCutoffElectrons,
                     star => StellarPhotometry.CollectedElectrons(
-                        star.VMag, star.ColorIndexBV, wavelength, bandwidth,
-                        area, qe, exposure, transmission));
+                        star.VMag, star.ColorIndexBV, response, area, exposure, transmission));
             }
 
             if (inputs.UnresolvedBodies != null)
@@ -2318,11 +2385,24 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Real electrons collected from the imaged body this exposure: its real apparent
         /// magnitude (PhotonFluxModel.ApparentMagnitude, from real albedo/radius/positions),
-        /// converted via the real RC20 aperture/obstruction/QE/filter-bandwidth/extinction
-        /// chain (PhotonFluxModel.CollectedElectrons). Zero if any required geometry is missing.
+        /// converted through the instrument's integrated spectral response -- aperture and
+        /// obstruction, mirror and relay throughput, filter profile, the detector's own QE curve,
+        /// and atmospheric extinction across the whole passband (see SystemBandpass).
+        ///
+        /// The body's spectrum is the Sun's, because that is what it is: a planet shines by
+        /// reflected sunlight, so its photon spectrum is the solar one modulated by the surface's
+        /// reflectance. The reflectance is treated as grey, since a KSP CelestialBody carries a
+        /// single albedo and no wavelength dependence to read (see SourceSpectra).
+        ///
+        /// nonAtmosphericTransmission carries the losses the response does not: cloud cover. The
+        /// ND filter is applied here, as it always was.
+        ///
+        /// Zero if any required geometry is missing.
         /// </summary>
-        private double ComputeCollectedElectrons(CelestialBody targetBody, float extinctionTransmission, float exposureSeconds)
+        private double ComputeCollectedElectrons(CelestialBody targetBody, SystemResponse response,
+                                                 double nonAtmosphericTransmission, float exposureSeconds)
         {
+            if (response == null) return 0.0;
             CelestialBody home = FlightGlobals.GetHomeBody();
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || targetBody == null) return 0.0;
@@ -2339,12 +2419,12 @@ namespace ExoInstruments.Visualization
             double magnitude = PhotonFluxModel.ApparentMagnitude(
                 targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad);
 
-            double bandwidthAngstrom = FilterBandwidthAngstrom(Filter);
+            double width = response.EffectiveWidthAngstromForTemperature(SourceSpectra.SolarPhotosphereTemperatureK);
             double apertureAreaCm2 = RealApertureAreaCm2();
-            double combinedTransmission = extinctionTransmission * NdFilterTransmission(NdFilter);
+            double greyTransmission = Math.Max(0.0, nonAtmosphericTransmission) * NdFilterTransmission(NdFilter);
 
-            return PhotonFluxModel.CollectedElectrons(
-                magnitude, bandwidthAngstrom, apertureAreaCm2, Spec.QuantumEfficiency, exposureSeconds, combinedTransmission);
+            return PhotonFluxModel.CollectedElectrons(magnitude, width, apertureAreaCm2, exposureSeconds)
+                 * greyTransmission;
         }
 
         /// <summary>
@@ -2393,6 +2473,48 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.HAlpha: return Spec.HAlphaBandwidthAngstrom;
                 default:                  return LuminanceBandwidthAngstrom;
             }
+        }
+
+        /// <summary>
+        /// Peak transmission of the fitted filter. A non-positive value means the instrument's
+        /// maker publishes no figure for that filter, in which case the loss is left unmodelled
+        /// (1.0) rather than invented -- see VisualTelescopeSpec's own field comment.
+        /// </summary>
+        private static double FilterPeakTransmission(CameraFilter filter)
+        {
+            double t;
+            switch (filter)
+            {
+                case CameraFilter.Red:    t = Spec.RedFilterPeakTransmission; break;
+                case CameraFilter.Green:  t = Spec.GreenFilterPeakTransmission; break;
+                case CameraFilter.Blue:   t = Spec.BlueFilterPeakTransmission; break;
+                case CameraFilter.HAlpha: t = Spec.HAlphaFilterPeakTransmission; break;
+                default:                  t = Spec.LuminanceFilterPeakTransmission; break;
+            }
+            return t > 0.0 ? t : 1.0;
+        }
+
+        /// <summary>
+        /// The instrument's total spectral response for this filter at this airmass: filter
+        /// profile, optical throughput, detector QE curve and atmospheric extinction, ready to be
+        /// integrated against any source's spectrum (see SystemBandpass).
+        ///
+        /// Built once per capture on the main thread and then read by the background pipeline for
+        /// every source in the frame. The ND filter is deliberately NOT included: it is applied
+        /// per source, because the resolved bodies and the star field pass through different
+        /// transmission chains (a body's chain omits the star field's cloud term, and vice versa),
+        /// and folding it in here would make it impossible to keep those apart.
+        /// </summary>
+        private static SystemResponse BuildSystemResponse(CameraFilter filter, double airmass)
+        {
+            return new SystemResponse(
+                FilterCentralWavelengthMeters(filter),
+                FilterBandwidthAngstrom(filter),
+                FilterPeakTransmission(filter) * Spec.OpticsTransmission,
+                Spec.QuantumEfficiencyCurve,
+                Spec.QuantumEfficiency,
+                airmass,
+                Spec.SiteAltitudeMeters);
         }
 
         /// <summary>

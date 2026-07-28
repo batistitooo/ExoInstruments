@@ -14,6 +14,20 @@ namespace ExoInstruments.Core
     {
         public string Name;
 
+        /// <summary>
+        /// The detector, named separately from the optics, because on this roster they genuinely
+        /// come apart: one ZWO camera is shared between three different tubes, exactly as amateur
+        /// astrophotography works. Goes to the FITS INSTRUME keyword while Name goes to TELESCOP,
+        /// which is the distinction those two keywords are for.
+        /// </summary>
+        public string CameraName;
+
+        /// <summary>The observatory this instrument stands at, for the FITS OBSERVAT keyword. The same site the altitude and seeing figures below are measured at, named rather than implied.</summary>
+        public string SiteName;
+
+        /// <summary>Detector operating temperature in Celsius -- the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
+        public double DetectorTemperatureCelsius = double.NaN;
+
         // Optics
         public double ApertureMeters;
         public double FocalLengthMeters;
@@ -36,11 +50,91 @@ namespace ExoInstruments.Core
         /// </summary>
         public double ZenithSeeingFwhmArcsec;
 
+        // --- Optical throughput -------------------------------------------------------------
+        // How much of the light entering the aperture actually reaches the detector. This used to
+        // be absent entirely: the photometry collected every photon the aperture intercepted, so
+        // every instrument in the roster reached about 1.5 magnitudes deeper than a real one of
+        // the same size does. It is split into the factors that are separately published, rather
+        // than one lumped efficiency, so each can be sourced or declared unmodelled on its own.
+
+        /// <summary>
+        /// Number of reflecting surfaces in the light path. This is a property of where the
+        /// instrument sits on the telescope, not of the telescope alone: FORS2 is at UT1's
+        /// CASSEGRAIN focus and sees M1+M2 only, while SPHERE is on UT3's NASMYTH platform and
+        /// picks up the M3 flat as well -- so the same 8.2m telescope delivers measurably
+        /// different throughput to the two instruments. Zero for a refractor, which has no
+        /// mirrors at all.
+        /// </summary>
+        public int MirrorCount;
+
+        /// <summary>
+        /// Reflectivity of one mirror surface, band-averaged over the optical range.
+        ///
+        /// The throughput of a mirror train is r^N times the obstruction factor (1 - eps^2) --
+        /// Ma &amp; Cai, "Scientific performance analysis of the SYZ telescope design vs. the RC
+        /// telescope design" (MNRAS; arXiv:1708.01257), Sect. 4.2, whose Eq. 3 is exactly the form
+        /// used here and whose obstruction term this pipeline already applied. That paper also
+        /// supplies the value: aluminium is "about 90%" in the 300-1000nm range when fresh and
+        /// "will degrade from 90% to about 87% after 1 year and to 84% after two years (Magrath
+        /// 1997)", from which the authors "take the reflectivity of aluminum coating for the full
+        /// optical wavelength range as 87% during a 2-year lifetime".
+        ///
+        /// 0.87 is used throughout for that reason: it is an operating figure over a realistic
+        /// re-coating cycle, not a laboratory best case for a mirror on the day it was coated.
+        /// Independently consistent with ESO's own measurement of the VLT coating, which
+        /// Ettlinger, Giordano &amp; Schneermann (1999, The Messenger 97, 4-8, "Performance of the
+        /// VLT Mirror Coating Unit") place between Bennett et al.'s (1963, JOSA 53, 1089) fresh
+        /// and aged evaporated-aluminium samples across 300-2500nm.
+        ///
+        /// Deliberately grey: the source quotes it as a band average over the full optical range,
+        /// so resolving it in wavelength would mean inventing a curve the citation does not give.
+        /// PlaneWave's optional enhanced coatings are likewise not modelled, since no measured
+        /// curve is published for them.
+        /// </summary>
+        public double MirrorReflectivity;
+
+        /// <summary>
+        /// Everything else in the light path, as one factor: relay optics, correctors, beam
+        /// splitters, Barlow glass, dewar windows.
+        ///
+        /// 1.0 means NOT MODELLED, not lossless, and it is the honest value wherever no figure is
+        /// published -- see each entry's own comment for which case it is in. The one instrument
+        /// with a real number here is SPHERE, whose grey beam splitter's 79% transmission to
+        /// ZIMPOL is published (Schmid et al. 2018).
+        /// </summary>
+        public double RelayOpticsTransmission;
+
+        /// <summary>Reflection and relay losses combined: r^N times the relay factor. The aperture obstruction is NOT here -- it is already in EffectiveApertureAreaM2, which is where the collecting area belongs.</summary>
+        public double OpticsTransmission
+        {
+            get
+            {
+                double reflection = MirrorCount > 0 && MirrorReflectivity > 0.0
+                    ? System.Math.Pow(MirrorReflectivity, MirrorCount)
+                    : 1.0;
+                double relay = RelayOpticsTransmission > 0.0 ? RelayOpticsTransmission : 1.0;
+                return reflection * relay;
+            }
+        }
+
         // Sensor
         public int NativeSensorWidthPx;
         public int NativeSensorHeightPx;
         public double NativePixelSizeMeters;
+
+        /// <summary>
+        /// The detector's PEAK quantum efficiency. Used across the whole band only when
+        /// QuantumEfficiencyCurve is null, i.e. when the manufacturer publishes nothing else.
+        /// </summary>
         public double QuantumEfficiency;
+
+        /// <summary>
+        /// The detector's published QE curve, when one exists. Null means only a peak figure is
+        /// published and the peak is used flat across the band -- which overstates every filter
+        /// away from the peak, and is recorded as such rather than papered over with a borrowed
+        /// curve from a different sensor.
+        /// </summary>
+        public SpectralCurve QuantumEfficiencyCurve;
         public double FullWellElectrons;
         public double ReadNoiseElectrons;
         /// <summary>Dark current at this sensor's own real cooled operating temperature (see each entry's comment for the actual temperature -- it varies by instrument, so it doesn't belong in the field name).</summary>
@@ -100,6 +194,19 @@ namespace ExoInstruments.Core
         public double GreenCentralWavelengthNm;
         public double BlueCentralWavelengthNm;
         public double HAlphaCentralWavelengthNm;
+
+        // Peak transmission at each filter position. A filter's published FWHM says how WIDE its
+        // passband is, not how much light it lets through at the top of it, and a real interference
+        // filter is well short of 1: ESO publishes 0.70 for FORS2's own H_Alpha+83 in its standard
+        // collimator. 1.0 here means the figure is NOT PUBLISHED for that filter and the loss is
+        // therefore unmodelled -- it is not a claim of a perfect filter. Combined with the top-hat
+        // of the published FWHM, peak transmission fixes the filter's equivalent width, which is
+        // the quantity the photometry integral actually needs (see SystemBandpass).
+        public double LuminanceFilterPeakTransmission;
+        public double RedFilterPeakTransmission;
+        public double GreenFilterPeakTransmission;
+        public double BlueFilterPeakTransmission;
+        public double HAlphaFilterPeakTransmission;
 
         /// <summary>
         /// Which CameraFilter positions actually exist as a real filter on this instrument --
@@ -203,12 +310,22 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Rc20 = new VisualTelescopeSpec
         {
-            Name = "RC20",
+            Name = "PlaneWave RC20",
+            CameraName = "ZWO ASI294MM Pro",
+            SiteName = "Observatoire de Haute-Provence",
+            DetectorTemperatureCelsius = -20.0,
 
             ApertureMeters = 0.51,
             FocalLengthMeters = 0.51 * 6.8,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.39,
+            // A Ritchey-Chretien is two mirrors, and both are in the imaging path. Aluminium at
+            // the mid-recoating-cycle figure (see MirrorReflectivity) gives 0.87^2 = 0.757.
+            MirrorCount = 2,
+            MirrorReflectivity = 0.87,
+            // Not modelled: the real 4x Barlow's glass and the camera's own window both cost
+            // light, and neither PlaneWave nor ZWO publishes a transmission for them.
+            RelayOpticsTransmission = 1.0,
             SiteAltitudeMeters = 650.0,
             // OHP's own published median: Schmitt et al. 2024, A&A 687, A198 (the MISTRAL@OHP
             // instrument paper) quotes performance "under a median seeing (for OHP) of 2.5
@@ -257,6 +374,15 @@ namespace ExoInstruments.Core
             BlueCentralWavelengthNm = 464.2,
             HAlphaCentralWavelengthNm = 656.3,
 
+            // Not published: amateur LRGB and narrowband filter makers advertise "high
+            // transmission" without a figure per filter, so the loss is unmodelled here rather
+            // than assigned an invented number. See the field comments on FilterPeakTransmission.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
+
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 3.0f,
         };
@@ -303,12 +429,22 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec RedCat51 = new VisualTelescopeSpec
         {
-            Name = "RedCat51",
+            Name = "William Optics RedCat 51",
+            CameraName = "ZWO ASI294MM Pro",
+            SiteName = "Observatoire de Haute-Provence",
+            DetectorTemperatureCelsius = -20.0,
 
             ApertureMeters = 0.051,
             FocalLengthMeters = 0.250,
             BarlowFactor = 1.0,
             SecondaryObstructionFraction = 0.0,
+            // A refractor has no mirrors, so there is no reflection loss to apply. What it does
+            // have is eight air-glass surfaces (a Petzval quadruplet) and the camera window, and
+            // William Optics publishes no transmission figure for the objective -- so this
+            // instrument's glass path is the roster's one wholly unmodelled optical loss, and it
+            // is flagged rather than filled with a plausible-looking coating assumption.
+            MirrorCount = 0,
+            RelayOpticsTransmission = 1.0,
             SiteAltitudeMeters = 650.0,
             // Same OHP site as the RC20, same published median (Schmitt et al. 2024, A&A 687,
             // A198). An amateur rig is wherever its owner is, and putting it beside the RC20
@@ -351,6 +487,13 @@ namespace ExoInstruments.Core
             GreenCentralWavelengthNm = 552.5,
             BlueCentralWavelengthNm = 464.2,
             HAlphaCentralWavelengthNm = 656.3,
+
+            // Same unpublished amateur filter set as the RC20 -- see that entry.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
 
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 0.0f,
@@ -395,12 +538,22 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Cdk1000 = new VisualTelescopeSpec
         {
-            Name = "CDK1000",
+            Name = "PlaneWave CDK1000",
+            CameraName = "ZWO ASI294MM Pro",
+            SiteName = "Palomar Observatory",
+            DetectorTemperatureCelsius = -20.0,
 
             ApertureMeters = 1.000,
             FocalLengthMeters = 6.000,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.47,
+            // Two mirrors, same aluminium figure as the RC20. The CDK's defining third element is
+            // a refractive corrector near the focal plane, not a third mirror, so it costs
+            // transmission rather than reflection -- and PlaneWave publishes no figure for it, so
+            // that loss sits in the unmodelled RelayOpticsTransmission below alongside the Barlow.
+            MirrorCount = 2,
+            MirrorReflectivity = 0.87,
+            RelayOpticsTransmission = 1.0,
             SiteAltitudeMeters = 1712.0,
             // Cenko et al. 2006, PASP 118, 1396 (the automated P60 paper) is the citable Palomar
             // seeing measurement: "The average seeing at the P60 in the summer is ~1.1" in
@@ -457,6 +610,13 @@ namespace ExoInstruments.Core
             GreenCentralWavelengthNm = 552.5,
             BlueCentralWavelengthNm = 464.2,
             HAlphaCentralWavelengthNm = 656.3,
+
+            // Same unpublished amateur filter set as the RC20 -- see that entry.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
 
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 0.0f,
@@ -536,12 +696,26 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Fors2Vlt = new VisualTelescopeSpec
         {
-            Name = "VLT FORS2",
+            Name = "ESO-VLT-U1",
+            CameraName = "FORS2",
+            SiteName = "Paranal Observatory",
+            DetectorTemperatureCelsius = -120.0,
 
             ApertureMeters = 8.2,
             FocalLengthMeters = 24.556,
             BarlowFactor = 2.0,
             SecondaryObstructionFraction = 1.116 / 8.2,
+            // FORS2 sits at UT1's CASSEGRAIN focus (ESO's own caption for image eso9857a reads
+            // "FORS at VLT UT1 Cassegrain focus"), and the VLT's Cassegrain path is M1 -> M2 ->
+            // focus. Two aluminium surfaces, therefore, against SPHERE's three at the Nasmyth
+            // focus of UT3 -- the same telescope delivering measurably different throughput to
+            // the two instruments purely because of where they are bolted on.
+            MirrorCount = 2,
+            MirrorReflectivity = 0.87,
+            // Not modelled: FORS2's own collimator + camera relay is a multi-element refractive
+            // train, and ESO's manual publishes the resulting plate scale (which this entry uses)
+            // but no transmission for the relay itself.
+            RelayOpticsTransmission = 1.0,
             AlwaysAutoguided = true,
             SiteAltitudeMeters = 2635.0,
             // Paranal's published median seeing, from ESO's own astroclimate page for the site
@@ -554,6 +728,14 @@ namespace ExoInstruments.Core
             NativeSensorHeightPx = 4128,
             NativePixelSizeMeters = 15e-6,
             QuantumEfficiency = 0.86,
+            // ESO's own published QE curve for the MIT/LL CCID20 mosaic
+            // (eso.org/sci/php/optdet/instruments/fors2/Fors2old/qe.html). This is why the curve
+            // matters rather than the 86% peak alone: b_HIGH sits at 440nm where the detector is
+            // at 58%, so using the peak credited a blue exposure with about 1.5x the electrons it
+            // really collects. Now integrated across the passband (see SystemBandpass).
+            QuantumEfficiencyCurve = new SpectralCurve(
+                new[] { 400.0, 500.0, 600.0, 700.0, 800.0, 900.0 },
+                new[] { 0.58,  0.74,  0.86,  0.83,  0.66,  0.39 }),
             FullWellElectrons = 150000.0,
 
             // Detector figures below are the MIT mosaic's, in its real IMAGING readout: the
@@ -581,21 +763,40 @@ namespace ExoInstruments.Core
             MinGain = 1.0f,
             MaxGain = 1.0f,
 
+            // FORS2's own real broadband filters, from ESO's current FORS Filter Specifications
+            // page: b_HIGH+113 at 440nm/103.5nm FWHM, v_HIGH+114 at 557nm/123.5nm, R_SPECIAL+76
+            // at 655nm/165.0nm, and the narrowband H_Alpha+83 at 656.3nm/6.1nm in the standard
+            // collimator. Luminance is FORS2's own full sensitivity range (~330-1100nm, i.e. 7700
+            // Angstrom), centre 715nm -- a genuine unfiltered exposure, since FORS2 has no
+            // amateur-style clear "L" filter.
+            //
+            // Two of these CORRECT earlier values in this file, which were the standard Bessell B
+            // and V figures (429nm/88nm and 554nm/111nm) rather than FORS2's own b_HIGH and
+            // v_HIGH: same passband names, different real filters, and ESO's page is the
+            // authority for the ones actually in this instrument's wheel.
             LuminanceBandwidthAngstrom = 7700.0,
             RedBandwidthAngstrom = 1650.0,
-            GreenBandwidthAngstrom = 1110.0,
-            BlueBandwidthAngstrom = 880.0,
+            GreenBandwidthAngstrom = 1235.0,
+            BlueBandwidthAngstrom = 1035.0,
             HAlphaBandwidthAngstrom = 61.0,
 
-            // Real FORS2 broadband set, the same filters the bandwidths above come from: Bessell
-            // B (429nm/88nm), V (554nm/111nm), R (655nm/165nm) and the narrowband H-alpha
-            // (656.3nm/6.1nm). Luminance is FORS2's own full sensitivity range (~330-1100nm,
-            // i.e. the 7700 Angstrom width above), whose centre is 715nm.
             LuminanceCentralWavelengthNm = 715.0,
             RedCentralWavelengthNm = 655.0,
-            GreenCentralWavelengthNm = 554.0,
-            BlueCentralWavelengthNm = 429.0,
+            GreenCentralWavelengthNm = 557.0,
+            BlueCentralWavelengthNm = 440.0,
             HAlphaCentralWavelengthNm = 656.3,
+
+            // The one published peak transmission anywhere in this roster: ESO's FORS filter page
+            // tabulates H_Alpha+83 at 0.70 in the standard-resolution collimator (0.76 in the HR
+            // collimator, which this pipeline models as the tight end of the zoom range -- 0.70 is
+            // used as the value for the default configuration rather than switching between them,
+            // since the pipeline applies one filter transmission per exposure). The broadband
+            // filters have no published peak transmission and are therefore unmodelled.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 0.70,
 
             AvailableFilters = AllFilters,
             AstigmatismStrengthPxAtCorner = 0.0f,
@@ -669,12 +870,29 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Sphere = new VisualTelescopeSpec
         {
-            Name = "VLT SPHERE",
+            Name = "ESO-VLT-U3",
+            CameraName = "SPHERE/ZIMPOL",
+            SiteName = "Paranal Observatory",
 
             ApertureMeters = 8.2,
             FocalLengthMeters = 1718.7,
             BarlowFactor = 1.0,
             SecondaryObstructionFraction = 1.116 / 8.2,
+            // SPHERE is on UT3's NASMYTH platform, so its path is M1 -> M2 -> M3 flat -> focus:
+            // three aluminium surfaces where Cassegrain-mounted FORS2 has two. At 0.87 per surface
+            // that is 0.659 against FORS2's 0.757, i.e. the extra relay mirror alone costs 13% of
+            // the light -- the same "an extra mirror yields 13% extra light loss with Al coating"
+            // that Ma & Cai (arXiv:1708.01257) state explicitly.
+            MirrorCount = 3,
+            MirrorReflectivity = 0.87,
+            // Real, published, and the largest single throughput term on this instrument: the grey
+            // zonal beam splitter (zw.BS) transmits "about 79% of the light to ZIMPOL and 21% to
+            // the WFS" (Schmid et al. 2018, Sect. 2) -- an extreme-AO system must spend a fifth of
+            // its light on sensing the wavefront it is correcting, which is a real cost of the
+            // correction, not an inefficiency. SPHERE's other internal optics are not separately
+            // published, so only this factor is modelled. Polarimetric mode, which the same paper
+            // says costs a further factor 0.85, is not simulated here -- this pipeline images.
+            RelayOpticsTransmission = 0.79,
             SiteAltitudeMeters = 2635.0,
             AlwaysAutoguided = true,
             // Same Paranal sky as FORS2, same ESO 50%-percentile figure. Recorded for
@@ -686,6 +904,14 @@ namespace ExoInstruments.Core
             NativeSensorHeightPx = 2048,
             NativePixelSizeMeters = 15e-6,
             QuantumEfficiency = 0.95,
+            // Schmid et al. 2018: "The quantum efficiencies of the (bare) CCDs are about 0.95,
+            // 0.90 and 0.65 at lambda = 600 nm, 700 nm and 800 nm respectively." Three points is
+            // all the paper gives, and flat extrapolation below 600nm is the honest reading -- but
+            // it is enough to matter, since ZIMPOL's own Luminance regime runs to 900nm where the
+            // detector has clearly fallen away from its peak.
+            QuantumEfficiencyCurve = new SpectralCurve(
+                new[] { 600.0, 700.0, 800.0 },
+                new[] { 0.95,  0.90,  0.65 }),
             FullWellElectrons = 640000.0,
             ReadNoiseElectrons = 20.0,
             DarkCurrentElectronsPerSecond = 0.2, // real ZIMPOL imaging-mode spec (Table 4)
@@ -721,6 +947,17 @@ namespace ExoInstruments.Core
             GreenCentralWavelengthNm = 554.0,
             BlueCentralWavelengthNm = 0.0,
             HAlphaCentralWavelengthNm = 655.6,
+
+            // Not published per filter: Schmid et al. 2018 states that total instrument throughput
+            // per filter "should be determined for flux measurements" and refers the reader to
+            // Schmid et al. (2017) for preliminary values, so no per-filter figure is taken from
+            // the cited paper. The instrument's own dominant throughput term, the 79% beam
+            // splitter, is real and applied above in RelayOpticsTransmission instead.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0, // no real ZIMPOL blue filter -- unreachable, see AvailableFilters
+            HAlphaFilterPeakTransmission = 1.0,
 
             AvailableFilters = new[] { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.HAlpha },
 

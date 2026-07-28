@@ -1923,10 +1923,55 @@ namespace ExoInstruments
                 FilterName = "LRGB",
                 ObjectName = selectedPhotographyBody.bodyName,
                 UtcTimestamp = DateTime.UtcNow,
+                ImageType = "Light Frame",
             };
+            FillCommonFitsMetadata(ref fitsInfo);
+
+            // Deliberately NO world coordinate system on the composite. Every sub was registered
+            // on the target body's own centroid (see AstroImageStack), and the body moves against
+            // the stars between subs, so no single pointing describes the stack: the planet is
+            // aligned and the field around it is not. Writing the last sub's WCS here would give a
+            // plate solve or a catalogue cross-match a pointing that is wrong by however far the
+            // body travelled, silently. Same standard as the omitted EGAIN above -- a processed
+            // product does not get keywords that describe a raw one.
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.fits"),
                 ToAduScale(lastComposedPixels), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
+        }
+
+        /// <summary>
+        /// Fills the header fields that describe the instrument, the site, and the conditions the
+        /// exposure was taken through -- everything common to a raw sub and a stacked composite.
+        ///
+        /// Kept in one place because these are the fields a reduction pipeline actually keys off,
+        /// and having two save paths fill them independently is how they drift apart. What differs
+        /// between the two paths (the WCS, the frame type, the calibration flag) is set by each
+        /// caller instead.
+        /// </summary>
+        void FillCommonFitsMetadata(ref FitsWriter.FitsHeaderInfo info)
+        {
+            VisualTelescopeSpec spec = SolarSystemCameraTexture.ActiveTelescope;
+
+            info.TelescopeName = spec.Name;
+            info.InstrumentName = spec.CameraName;
+            info.ObservatoryName = spec.SiteName;
+            info.ApertureMeters = spec.ApertureMeters;
+            info.BinningFactor = SolarSystemCameraTexture.BinningFactor;
+            info.ReadNoiseElectrons = spec.ReadNoiseElectrons;
+            info.DarkCurrentElectronsPerSecond = spec.DarkCurrentElectronsPerSecond;
+            info.DetectorTemperatureCelsius = spec.DetectorTemperatureCelsius;
+
+            info.SiteLatitudeDeg = ObservatorySite.LatitudeDeg;
+            info.SiteLongitudeDeg = ObservatorySite.LongitudeDeg;
+            info.SiteElevationMeters = spec.SiteAltitudeMeters;
+
+            info.Airmass = solarSystemCamera.LastAirmass;
+            info.SeeingFwhmArcsec = solarSystemCamera.LastAtmosphericFwhmArcsec;
+            info.DiffractionFwhmArcsec = solarSystemCamera.LastDiffractionFwhmArcsec;
+            info.SkyBrightnessVMagPerArcsec2 = solarSystemCamera.LastSkyBrightnessVMagPerArcsec2;
+
+            info.OpticalThroughput = spec.OpticsTransmission;
+            info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;
         }
 
         /// <summary>Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit container. Not a calibration -- see FitsHeaderInfo.IsCalibratedAdu.</summary>
@@ -2045,7 +2090,15 @@ namespace ExoInstruments
                 FilterName = FilterLabel(solarSystemCamera.Filter),
                 ObjectName = selectedPhotographyBody.bodyName,
                 UtcTimestamp = DateTime.UtcNow,
+                ImageType = "Light Frame",
+                // A raw sub is one pointing at one instant, so it can carry a real WCS -- measured
+                // from the same projection that placed the stars in it (see Core.FitsWcs).
+                Wcs = solarSystemCamera.LastWcs,
+                TrailedByDrift = solarSystemCamera.LastFrameTrailed,
+                FilterCentralWavelengthNm = solarSystemCamera.ActiveFilterCentralWavelengthNm,
+                FilterBandwidthNm = solarSystemCamera.ActiveFilterBandwidthNm,
             };
+            FillCommonFitsMetadata(ref fitsInfo);
             FitsWriter.WriteGrayscale(
                 System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.fits"),
                 solarSystemCamera.GetLastCaptureAdu(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);

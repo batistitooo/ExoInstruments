@@ -20,8 +20,16 @@ namespace ExoInstruments.Core
         /// Real V-band zero-magnitude photon flux density (Vega calibration), 948
         /// photons/cm^2/s/Angstrom at the V effective wavelength (5556 Angstrom) -- the
         /// standard reference value used across observational photometry and exposure-time
-        /// calculators. Applied here across each filter's own bandwidth as a flat-spectrum
-        /// approximation (the same simplification real back-of-envelope ETC calculations use).
+        /// calculators.
+        ///
+        /// This is a MONOCHROMATIC flux density at 5556 Angstrom, and it is used as one: it fixes
+        /// the absolute scale of a source's spectrum at that single wavelength, and SystemResponse
+        /// then integrates the spectrum's own shape across the instrument's passband from there.
+        /// The one thing this does not reproduce is the definition of the V magnitude itself,
+        /// which is properly an integral over the Johnson V transmission curve rather than a
+        /// sample at its effective wavelength; closing that would need the V passband tabulated
+        /// (Bessell 1990) and its integrated photon zero point, and is recorded as a remaining
+        /// simplification rather than approximated.
         /// </summary>
         public const double ZeroMagPhotonFluxPerAngstrom = 948.0;
 
@@ -66,26 +74,51 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Real electrons collected from a source of the given apparent magnitude, through a
-        /// real telescope aperture, filter bandpass, detector QE, exposure time, and
-        /// atmospheric extinction transmission. Zero for a non-signal (infinite magnitude).
+        /// Real electrons collected from a source of the given apparent magnitude, through a real
+        /// telescope aperture over a real exposure.
+        ///
+        /// Everything spectral is carried by effectiveWidthAngstrom, the system's effective
+        /// photometric width from SystemResponse: the filter profile, the optical throughput, the
+        /// detector's QE curve, atmospheric extinction and the source's own colour, integrated
+        /// over the passband rather than sampled at one wavelength. See SystemBandpass for the
+        /// derivation and for why this single number is enough.
+        ///
+        /// Zero for a non-signal (infinite magnitude).
         /// </summary>
         public static double CollectedElectrons(
-            double apparentMagnitude, double filterBandwidthAngstrom,
-            double apertureAreaCm2, double quantumEfficiency,
-            double exposureSeconds, double extinctionTransmission)
+            double apparentMagnitude, double effectiveWidthAngstrom,
+            double apertureAreaCm2, double exposureSeconds)
         {
             if (double.IsPositiveInfinity(apparentMagnitude) || double.IsNaN(apparentMagnitude)) return 0.0;
 
             double photonFluxPerCm2PerSecond = ZeroMagPhotonFluxPerAngstrom
                 * Math.Pow(10.0, -0.4 * apparentMagnitude)
-                * Math.Max(0.0, filterBandwidthAngstrom);
+                * Math.Max(0.0, effectiveWidthAngstrom);
 
             return photonFluxPerCm2PerSecond
                 * Math.Max(0.0, apertureAreaCm2)
-                * Math.Max(0.0, quantumEfficiency)
-                * Math.Max(0.0, exposureSeconds)
-                * Math.Max(0.0, extinctionTransmission);
+                * Math.Max(0.0, exposureSeconds);
+        }
+
+        /// <summary>
+        /// The superseded grey-band form: one rectangular bandwidth, one scalar QE, one
+        /// transmission, no spectral integration at all.
+        ///
+        /// Kept for exactly one purpose, and not called from the pipeline: the headless harness
+        /// asserts that SystemResponse's integral reduces to THIS expression when the source
+        /// spectrum is flat, the QE is grey and the atmosphere is transparent. That makes the new
+        /// model a provable generalisation of the old one rather than a replacement that merely
+        /// resembles it, which is the kind of claim a paper has to be able to back.
+        /// </summary>
+        public static double CollectedElectronsGreyBand(
+            double apparentMagnitude, double filterBandwidthAngstrom,
+            double apertureAreaCm2, double quantumEfficiency,
+            double exposureSeconds, double extinctionTransmission)
+        {
+            return CollectedElectrons(
+                apparentMagnitude,
+                Math.Max(0.0, filterBandwidthAngstrom) * Math.Max(0.0, quantumEfficiency) * Math.Max(0.0, extinctionTransmission),
+                apertureAreaCm2, exposureSeconds);
         }
     }
 }

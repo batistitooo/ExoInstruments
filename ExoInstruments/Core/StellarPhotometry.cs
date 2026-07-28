@@ -55,7 +55,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>Planck photon spectral density up to a constant factor; only ratios of this are ever used.</summary>
-        private static double PhotonSpectralDensity(double wavelengthMeters, double teffK)
+        public static double PhotonSpectralDensity(double wavelengthMeters, double teffK)
         {
             double x = PlanckH * SpeedOfLight / (wavelengthMeters * BoltzmannK * teffK);
             if (x > 700.0) return 0.0;                 // exp() would overflow; the density is zero to any precision that matters
@@ -65,33 +65,44 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Electrons a star of the given V magnitude and B-V colour deposits over the exposure,
-        /// through the given filter and telescope. Pass double.NaN for colourIndexBV when the
-        /// catalogue has no colour: the colour term is then dropped rather than guessed.
+        /// through the given instrument response. Pass double.NaN for colourIndexBV when the
+        /// catalogue has no colour: the star is then integrated as a flat spectrum rather than
+        /// one at a guessed temperature.
         ///
-        /// Everything after the colour term is the same real photometric chain the resolved
-        /// bodies already go through (PhotonFluxModel.CollectedElectrons), so a star and a
-        /// planet in the same frame are on one consistent flux scale, which is the whole
-        /// point of building the frame from a source list instead of scaling a rendered image.
+        /// The colour term is no longer a separate multiplier. It emerged as a ratio of photon
+        /// spectral densities at two wavelengths because the photometry was a product of scalars;
+        /// now that SystemResponse integrates the source spectrum across the real passband, the
+        /// colour is simply part of that integral (SystemBandpass explains why this is the same
+        /// quantity done properly). ColorTerm above is retained as the two-wavelength ratio it
+        /// always was, because it is still the right tool for a display tint and for the harness
+        /// check that the integral reduces to it on a narrow band.
+        ///
+        /// extraTransmission carries anything the response was not built with -- currently the
+        /// per-exposure scintillation draw, which is a real modulation of the incoming intensity
+        /// and has no wavelength dependence in Young's formula.
+        ///
+        /// Everything here is the same photometric chain the resolved bodies go through, so a
+        /// star and a planet in the same frame are on one consistent flux scale, which is the
+        /// whole point of building the frame from a source list instead of scaling a rendered
+        /// image.
         /// </summary>
         public static double CollectedElectrons(
-            double vMag, double colorIndexBV,
-            double filterCentralWavelengthMeters, double filterBandwidthAngstrom,
-            double apertureAreaCm2, double quantumEfficiency,
-            double exposureSeconds, double transmission)
+            double vMag, double colorIndexBV, SystemResponse response,
+            double apertureAreaCm2, double exposureSeconds, double extraTransmission)
         {
-            double colorTerm = 1.0;
+            if (response == null) return 0.0;
+
+            double teffK = 0.0;
             if (!double.IsNaN(colorIndexBV))
             {
                 double? teff = StellarColor.TeffFromColorIndexBV(colorIndexBV);
-                if (teff.HasValue && teff.Value > 0.0)
-                    colorTerm = ColorTerm(filterCentralWavelengthMeters, teff.Value);
+                if (teff.HasValue && teff.Value > 0.0) teffK = teff.Value;
             }
 
-            double electrons = PhotonFluxModel.CollectedElectrons(
-                vMag, filterBandwidthAngstrom, apertureAreaCm2, quantumEfficiency,
-                exposureSeconds, transmission);
+            double width = response.EffectiveWidthAngstromForTemperature(teffK);
 
-            return electrons * colorTerm;
+            return PhotonFluxModel.CollectedElectrons(vMag, width, apertureAreaCm2, exposureSeconds)
+                 * Math.Max(0.0, extraTransmission);
         }
     }
 }
