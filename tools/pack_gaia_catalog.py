@@ -60,7 +60,8 @@ USAGE
 -----
     python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 
-Requires astroquery ("pip install astroquery"). The ESA archive is queried in declination
+No third-party packages: the ESA archive speaks TAP, which is plain HTTP, so this runs on a
+stock Python 3. The archive is queried in declination
 slices, because a single anonymous job cannot return tens of millions of rows; each slice
 is sized to stay under the archive's row cap. Expect this to take a while and to move a
 few hundred MB over the network.
@@ -86,9 +87,15 @@ That is the only star catalogue the renderer looks for. See the README.
 """
 
 import argparse
+import csv
+import io
+import math
 import os
 import struct
 import sys
+import time
+import urllib.parse
+import urllib.request
 
 # --- The packed format ----------------------------------------------------------------
 # These used to be imported from the Tycho-2 packer, which was the only other writer of
@@ -163,6 +170,12 @@ def build_star(ra, dec, g, bp_rp):
         # No colour measured: G is used as V unconverted and the colour is flagged.
         # Honest rather than tidy -- G and V differ by up to 1.5 mag for a red star,
         # so this is a real error bar on that star, not a rounding choice.
+        #
+        # Reading the archive's CSV directly is what makes this correct. An earlier version
+        # went through astroquery, whose tables expose a missing bp_rp as a MASKED value --
+        # and float() on a masked entry returns the fill sitting under the mask, not NaN.
+        # A NaN guard therefore let it through, and 7 stars of 923 in the test cone were
+        # given a colour that had never been measured. An empty CSV field cannot do that.
         v, bv_milli = g, BV_UNKNOWN
     else:
         v = g - g_minus_v(bp_rp)
@@ -178,29 +191,60 @@ def build_star(ra, dec, g, bp_rp):
     return (ra_fixed, dec_fixed, v_milli, bv_milli, dec)
 
 
+# --- ESA archive access, with no third-party dependency -------------------------------
+# The Gaia archive speaks TAP, which is plain HTTP: POST a query, poll a phase, GET a CSV.
+# astroquery wraps that nicely but is not in a stock Python, and asking someone to install
+# a scientific stack to download a star catalogue is a bad trade for three HTTP calls.
+
+TAP_ASYNC = "https://gea.esac.esa.int/tap-server/tap/async"
+
+
+def tap_query(adql, timeout_s=1800):
+    """Run one ADQL query as an async TAP job and return its rows as dicts."""
+    body = urllib.parse.urlencode({
+        "REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv",
+        "PHASE": "RUN", "QUERY": adql,
+    }).encode()
+
+    with urllib.request.urlopen(urllib.request.Request(TAP_ASYNC, data=body, method="POST")) as r:
+        job = r.geturl().split("?")[0]
+
+    deadline = time.time() + timeout_s
+    while True:
+        with urllib.request.urlopen(job + "/phase") as r:
+            phase = r.read().decode().strip()
+        if phase in ("COMPLETED", "ERROR", "ABORTED"):
+            break
+        if time.time() > deadline:
+            raise RuntimeError(f"TAP job {job} still {phase} after {timeout_s}s")
+        time.sleep(2)
+
+    if phase != "COMPLETED":
+        with urllib.request.urlopen(job + "/error") as r:
+            raise RuntimeError(f"TAP job {phase}: {r.read().decode()[:500]}")
+
+    with urllib.request.urlopen(job + "/results/result") as r:
+        text = r.read().decode()
+    return list(csv.DictReader(io.StringIO(text)))
+
+
 def fetch(gmax, cone, slices):
     """Rows from the ESA archive, in declination slices small enough for one job each."""
-    from astroquery.gaia import Gaia
-
     columns = "ra, dec, phot_g_mean_mag, bp_rp"
-    rows = []
     if cone:
         ra, dec, radius = cone
-        q = (f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
-             f"AND 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{radius}))")
-        print(f"  cone {ra} {dec} r={radius} deg, G < {gmax}")
-        rows.append(Gaia.launch_job_async(q).get_results())
-    else:
-        # Equal-area declination slices, so each holds a comparable number of stars.
-        import math
-        for i in range(slices):
-            lo = math.degrees(math.asin(2.0 * i / slices - 1.0))
-            hi = math.degrees(math.asin(2.0 * (i + 1) / slices - 1.0))
-            q = (f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
-                 f"AND dec >= {lo} AND dec < {hi}")
-            print(f"  slice {i + 1}/{slices}: dec {lo:+.2f} to {hi:+.2f}", flush=True)
-            rows.append(Gaia.launch_job_async(q).get_results())
-    return rows
+        print(f"  cone {ra} {dec} r={radius} deg, G < {gmax}", flush=True)
+        yield tap_query(f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
+                        f"AND 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{radius}))")
+        return
+
+    # Equal-area declination slices, so each holds a comparable number of stars.
+    for i in range(slices):
+        lo = math.degrees(math.asin(2.0 * i / slices - 1.0))
+        hi = math.degrees(math.asin(2.0 * (i + 1) / slices - 1.0))
+        print(f"  slice {i + 1}/{slices}: dec {lo:+.2f} to {hi:+.2f}", flush=True)
+        yield tap_query(f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
+                        f"AND dec >= {lo} AND dec < {hi}")
 
 
 def main():
@@ -217,11 +261,14 @@ def main():
     for table in fetch(args.gmax, args.cone, args.slices):
         for row in table:
             def value(name):
-                v = row[name]
-                try:
-                    return None if v is None or v != v else float(v)   # NaN-safe
-                except TypeError:
+                v = row.get(name)
+                if v is None or v == "":
                     return None
+                try:
+                    f = float(v)
+                except ValueError:
+                    return None
+                return None if f != f else f   # NaN-safe
             star = build_star(value("ra"), value("dec"), value("phot_g_mean_mag"), value("bp_rp"))
             if star:
                 stars.append(star)

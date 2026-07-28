@@ -200,9 +200,11 @@ field or an honestly empty one, rather than a heavy download that delivers neith
 ### Building it
 
 ```
-pip install astroquery
 python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 ```
+
+No packages to install: the ESA archive speaks plain HTTP, so this runs on the Python 3 that
+already ships with macOS and most Linux distributions.
 
 Then copy the result to:
 
