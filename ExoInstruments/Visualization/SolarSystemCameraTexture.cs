@@ -682,6 +682,19 @@ namespace ExoInstruments.Visualization
         /// pipeline off onto a background Task (see PollProcessTask); when already processing,
         /// polls that task for completion instead. No-op when neither capturing nor processing.
         /// </summary>
+        /// <summary>
+        /// Frames waited so far for the target's scaled-space textures to become resident before
+        /// the shutter fires. Reset on every capture.
+        /// </summary>
+        private int textureWaitFrames;
+
+        /// <summary>
+        /// How long the shutter will wait for those textures. The real gap measured between a
+        /// Kopernicus unload and its matching reload was 1.9 s, so this is set well past it at
+        /// 60 fps; beyond the cap the frame is taken regardless rather than the capture hanging.
+        /// </summary>
+        private const int MaxTextureWaitFrames = 240;
+
         public void TickCapture(float deltaTime)
         {
             if (isProcessing)
@@ -694,6 +707,26 @@ namespace ExoInstruments.Visualization
             captureElapsed += deltaTime;
             if (captureElapsed < captureDuration) return;
 
+            // The exposure has elapsed, but the target's scaled-space textures may not be bound.
+            // Kopernicus unloads them when no camera IT knows about can see the body, and this
+            // telescope renders through clones it does not know about; the reload it then
+            // performs on request is DEFERRED, not synchronous (see
+            // KopernicusOnDemandIntegration for the log that establishes this). Rendering into
+            // that gap draws the body's geometry with no colour map: a black disc with a lit rim.
+            //
+            // So the capture waits for residency rather than racing it. Bounded, because a body
+            // whose loader never flips its own isLoaded flag must not hang the shutter forever --
+            // after the cap the frame is taken regardless, which is exactly the old behaviour.
+            if (!KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(pendingTarget))
+            {
+                if (++textureWaitFrames <= MaxTextureWaitFrames) return;
+
+                Debug.LogWarning($"[ExoInstruments] Scaled-space textures for {pendingTarget?.bodyName} did not "
+                               + $"become resident within {MaxTextureWaitFrames} frames; capturing anyway. "
+                               + "The body may render without its colour map.");
+            }
+
+            textureWaitFrames = 0;
             isCapturing = false;
             RenderExposure(pendingTarget);
         }

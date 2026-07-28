@@ -201,16 +201,18 @@ field or an honestly empty one, rather than a heavy download that delivers neith
 
 ```
 pip install astroquery
-python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.bin
+python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 ```
 
 Then copy the result to:
 
 ```
-<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin
+<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat
 ```
 
-That is the only star catalogue the renderer looks for. The log line on startup tells you whether
+The `.starcat` extension matters: Kopernicus reads every `*.bin` in GameData as a scaled-space
+mesh, and would try that on a 200-450 MB catalogue at every startup. That is the only star
+catalogue the renderer looks for. The log line on startup tells you whether
 it found one. To go back to an empty sky, delete or rename the file.
 
 ### Choosing a depth

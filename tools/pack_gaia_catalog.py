@@ -58,20 +58,30 @@ in-game time.
 
 USAGE
 -----
-    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.bin
+    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
 
 Requires astroquery ("pip install astroquery"). The ESA archive is queried in declination
 slices, because a single anonymous job cannot return tens of millions of rows; each slice
 is sized to stay under the archive's row cap. Expect this to take a while and to move a
 few hundred MB over the network.
 
-    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.bin --cone 266.4 -29.0 1.0
+    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --cone 266.4 -29.0 1.0
 
 restricts to a cone (RA, Dec, radius in degrees) instead, which is what the test in
 tools/bandpass-wcs-tests uses and is a quick way to check the pipeline end to end.
 
 Then copy the result to:
-    <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin
+    <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat
+
+The .starcat extension is deliberate and must not be changed to .bin. Kopernicus walks
+GameData and tries to read every *.bin it finds as a scaled-space mesh; a real KSP.log
+shows it doing exactly that to this mod's old catalogue:
+
+    [Kopernicus] Could not load '.../ExoInstruments/PluginData/RenderedStarCatalog.bin'
+    [Kopernicus] Loaded '.../ParallaxContinued/Models/ScaledMesh.bin'
+
+Harmless at 30 MB. Not harmless when the file is 200-450 MB and gets read at every
+startup before failing.
 That is the only star catalogue the renderer looks for. See the README.
 """
 
@@ -249,7 +259,7 @@ def main():
     size_mb = os.path.getsize(args.out) / (1024 * 1024)
     no_colour = sum(1 for s in stars if s[3] == BV_UNKNOWN)
     print(f"{len(stars)} stars -> {args.out} ({size_mb:.1f} MB), {no_colour} without a colour index")
-    print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin")
+    print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat")
     return 0
 
 

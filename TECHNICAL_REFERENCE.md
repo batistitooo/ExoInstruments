@@ -497,13 +497,22 @@ Gaia's own measured counts, queried from `gaiadr3.gaia_source`, at this format's
 | G < 16 | 157.7 M | 1.9 GB |
 | G < 18 | 577.2 M | 6.9 GB |
 
-None of that can ship. All of it can sit on a user's disk, so `pack_gaia_catalog.py` builds it on demand and the loader reads `GaiaStarCatalog.bin`, logging a pointer to the tool when it finds none. `pack_gaia_catalog.py` is now the single definition of the packed format that `RenderedStarCatalog.cs` reads; its `VERSION` must be kept in step with `RenderedStarCatalog.FormatVersion`.
+None of that can ship. All of it can sit on a user's disk, so `pack_gaia_catalog.py` builds it on demand and the loader reads `GaiaStarCatalog.starcat`, logging a pointer to the tool when it finds none. `pack_gaia_catalog.py` is now the single definition of the packed format that `RenderedStarCatalog.cs` reads; its `VERSION` must be kept in step with `RenderedStarCatalog.FormatVersion`.
 
 **Photometry** crosses from Gaia's system to the Johnson V / B-V everything else uses, by Gaia's own published relations (§7.015). Measured on a real packed cone toward the Galactic centre: a `G < 15` cut yields V from 9.03 to **18.53**, because a heavily reddened bulge star at BP-RP = 5 has `G − V = −3.56`. Stars with no Gaia colour keep G as V and are flagged colourless rather than given an invented one; 785 of 923 in that cone carry a colour.
 
 **Density delivered**: 3264 stars/deg² in that cone against Tycho-2's 61.9 all-sky, so about 220 stars in an RC20 frame instead of four.
 
 **Search cost does not scale with catalogue size.** The format is banded in declination and binary-searched in RA, so a cone search touches only the stars near the field. What scales is the rendering.
+
+**Why the extension is `.starcat` and not `.bin`.** Kopernicus walks GameData and tries to read every `*.bin` it finds as a scaled-space mesh. A real KSP.log shows it doing that to this mod's own catalogue, immediately before succeeding on a real one:
+
+```
+[Kopernicus] Could not load '.../ExoInstruments/PluginData/RenderedStarCatalog.bin'
+[Kopernicus] Loaded  '.../ParallaxContinued/Models/ScaledMesh.bin'
+```
+
+Harmless while the file was 30 MB. Not harmless at the 202-443 MB a useful Gaia build weighs, which Kopernicus would read at every startup before failing on it.
 
 **Cost, measured rather than assumed.** Removing the shipped catalogue multiplied the sources in a frame by fifty and more, on a path that had never run with more than about four stars in it. All three costs were measured on the real code:
 

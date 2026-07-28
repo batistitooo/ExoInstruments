@@ -281,7 +281,7 @@ namespace ExoInstruments
             // format. So the choice is a real star field or an honestly empty one, and building
             // it is one command: see tools/pack_gaia_catalog.py and the README.
             string path = KSPUtil.ApplicationRootPath
-                        + "GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin";
+                        + "GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat";
             try
             {
                 if (!System.IO.File.Exists(path))

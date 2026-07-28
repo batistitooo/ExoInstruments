@@ -937,7 +937,7 @@ class Program
     {
         Console.WriteLine("Optional Gaia catalogue: packer and reader agree on the format");
 
-        const string fixture = "fixtures/gaia_cone_test.bin";
+        const string fixture = "fixtures/gaia_cone_test.starcat";
         if (!System.IO.File.Exists(fixture))
         {
             Check("the packed Gaia fixture is present", false, $"missing {fixture}");

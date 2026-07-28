@@ -43,45 +43,73 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Makes sure body's scaled-space textures (and those of anything sharing its field --
-        /// its own moons) are loaded. No-op without Kopernicus, or for a body it doesn't manage
-        /// on demand. Safe to call every capture: it checks the loader's own isLoaded flag first,
-        /// so an already-resident body costs a field read.
+        /// Requests that body's scaled-space textures (and those of anything sharing its field --
+        /// its own moons) be resident, and reports whether they ALREADY WERE.
+        ///
+        /// **The return value is the point.** The original version of this returned void, on the
+        /// documented belief that "ScaledSpaceOnDemand.LoadTextures() is public and synchronous --
+        /// it pumps its own loader coroutine to completion before returning", so that calling it
+        /// immediately before the render guaranteed the texture was bound. A KSP.log from a real
+        /// session says otherwise:
+        ///
+        ///     16:27:28.875  [ExoInstruments] Kopernicus on-demand ... detected
+        ///     16:27:29.204  [OD] Loaded texture Jupiter_Dummy.dds
+        ///
+        /// 329 ms between the call and the load, and elsewhere in the same log 1.9 s between an
+        /// unload and the matching reload. The load is DEFERRED, so rendering in the same
+        /// synchronous block draws a body whose colour map is not bound yet: a black disc with a
+        /// lit rim, intermittent, because a body that happened to be resident already needs no
+        /// load and comes out perfectly.
+        ///
+        /// Returning residency lets the caller wait a frame instead of rendering into that gap.
+        ///
+        /// No-op returning true without Kopernicus, or for a body it doesn't manage on demand:
+        /// in both cases there is nothing to wait for.
         /// </summary>
-        public static void EnsureScaledSpaceTexturesLoaded(CelestialBody body)
+        public static bool EnsureScaledSpaceTexturesLoaded(CelestialBody body)
         {
             EnsureInitialized();
-            if (!available || body == null) return;
+            if (!available || body == null) return true;
 
-            LoadFor(body);
+            bool resident = LoadFor(body);
 
             // A moon of the target sits in the same frame at any realistic field of view, and is
             // unloaded by exactly the same mechanism -- a Galilean moon rendering as a black dot
             // beside a correctly-rendered Jupiter is the same bug, just less obvious.
             if (body.orbitingBodies != null)
             {
-                for (int i = 0; i < body.orbitingBodies.Count; i++) LoadFor(body.orbitingBodies[i]);
+                // Deliberately not short-circuited: every moon must have its load REQUESTED even
+                // once one is known to be missing, or waiting would restart the queue each frame.
+                for (int i = 0; i < body.orbitingBodies.Count; i++)
+                    resident &= LoadFor(body.orbitingBodies[i]);
             }
+            return resident;
         }
 
-        private static void LoadFor(CelestialBody body)
+        /// <summary>Requests this one body's textures; true when they were already resident.</summary>
+        private static bool LoadFor(CelestialBody body)
         {
-            if (body == null || body.scaledBody == null) return;
+            if (body == null || body.scaledBody == null) return true;
 
             try
             {
                 Component demand = body.scaledBody.GetComponent(scaledSpaceOnDemandType);
-                if (demand == null) return; // not an on-demand body (small pack, or textures kept resident)
+                if (demand == null) return true; // not an on-demand body (small pack, or textures kept resident)
 
-                if (isLoadedField != null && isLoadedField.GetValue(demand) is bool loaded && loaded) return;
+                if (isLoadedField != null && isLoadedField.GetValue(demand) is bool loaded && loaded) return true;
 
                 loadTexturesMethod.Invoke(demand, null);
+                return false; // requested, not yet resident
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[ExoInstruments] Could not force-load scaled-space textures for {body.bodyName}, "
-                               + "disabling on-demand integration for this session: " + e.Message);
-                available = false;
+                // NOT disabled for the session any more. A single transient failure used to set
+                // available = false permanently, silently removing the protection from every
+                // later capture in that session -- the failure mode is "it worked, then it
+                // stopped", which is far harder to diagnose than a warning per occurrence.
+                Debug.LogWarning($"[ExoInstruments] Could not force-load scaled-space textures for {body.bodyName}: "
+                               + e.Message);
+                return true; // nothing to wait for; do not stall the capture on a body that throws
             }
         }
 
