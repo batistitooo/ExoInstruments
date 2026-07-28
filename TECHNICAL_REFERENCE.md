@@ -464,6 +464,38 @@ Fixed by calibrating every filter (R/G/B/Hα) against the same shared reference,
   - **VLT FORS2** (0px): a real, well-corrected two-mirror Cassegrain system, but no published VLT optical prescription gives a field-dependent astigmatism coefficient to the precision this pipeline's display model would need.
   - **VLT SPHERE** (0px): ZIMPOL's real field of view is only 3.6"×3.6", far too narrow for off-axis astigmatism to grow to any meaningful amplitude regardless of the telescope's own prescription — justified by the field size alone, not just the "no published coefficient" reasoning the other zero entries use.
 
+### 7.02 Real measured filter curves (`Core/FilterCurves.cs`)
+
+Every filter in the roster was a **top-hat**: a rectangle of its published FWHM at its published central wavelength, scaled by its published peak transmission. That remains the honest treatment when nothing else exists, and it is still what the amateur LRGB set and the H-alpha positions get. But ESO measured FORS2's filters *in the instrument* and publishes the tables, so for those three there is no reason to keep guessing a shape.
+
+**Source**: ESO, FORS2 filter transmission curves (`.../fors/inst/Filters/curves.html`), which states that "the transmission curves for many of the FORS interference filters have been measured within the instruments". `M_BESS_B`, `M_BESS_V`, `M_BESS_R`, sampled at 10 nm from 330 to 1200 nm.
+
+| Filter | Peak T | at | Half-power points |
+|---|---|---|---|
+| Bessell B | 0.6871 | 420 nm | 380-470 nm |
+| Bessell V | 0.8887 | 530 nm | 500-600 nm |
+| Bessell R | 0.8555 | 600 nm | 580-720 nm |
+
+**What the shape changes, given the pipeline already integrates across the band.** Three things a rectangle cannot express: the equivalent width is not the FWHM once the shoulders slope; the colour term is weighted by where the filter really transmits rather than uniformly across a box; and since extinction and QE both vary across the band, *where* inside the band the light passes changes how much atmosphere and how much detector it sees.
+
+Measured against the top-hat each filter would otherwise get:
+
+| Filter | Top-hat W | Curve W | Change | Colour term (3500 K / 20000 K) |
+|---|---|---|---|---|
+| Bessell B | 347.2 Å | 303.0 Å | **−12.7 %** | 0.235 → 0.193 |
+| Bessell V | 669.8 Å | 601.2 Å | **−10.2 %** | 1.021 → 0.998 |
+| Bessell R | 891.2 Å | 853.8 Å | −4.2 % | 2.244 → 2.332 |
+
+The B band's colour term moves by 18 %, which is the part that matters: it is the difference between an M dwarf and a hot star as this instrument records them.
+
+**The full 330-1200 nm range is kept rather than trimmed to the passband**, because the red leak is real: **0.77 % (B), 1.34 % (V) and 3.21 % (R)** of each filter's integrated transmission sits more than 100 nm beyond its red half-power point, rising again towards 1200 nm the way every real interference filter does. Whether that leak reaches the detector is the QE curve's business, not the filter's. Measured: the CCD's own QE curve **suppresses 61 %** of R's integrated 900-1200 nm leak. Trimming the curve would have answered that question by assumption; integrating the product answers it.
+
+**Reducibility**: `SystemResponse` takes the curve as an optional argument, and `null` takes the top-hat path unchanged. Fed a literal rectangle, the curve path reproduces the top-hat to **0.26 %**, the residual being Simpson's rule crossing the rectangle's two discontinuities at arbitrary node positions rather than any difference in model.
+
+*Careful with double-counting*: a measured curve carries the filter's own transmission, so the published peak must not be applied on top of it. `BuildSystemResponse` drops `FilterPeakTransmission` whenever a curve is present.
+
+**Not done**: SPHERE/ZIMPOL keeps top-hats. Its filter curves were not located in this pass, so its three positions stay on published FWHM and peak (§12).
+
 ### 7.11 Instrument point-spread function (`Core/OpticalPsf.cs`, `Core/FourierConvolution.cs`)
 
 The frame is convolved with the instrument's real PSF, computed from first principles. Both files are pure C# with no Unity dependency, like the rest of `Core/`, so they are exercised by a standalone harness against published reference values.
@@ -879,6 +911,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 8. **TTV/RM models are order-of-magnitude, single-dominant-perturber approximations** — only the strongest near-resonant pair is modeled; higher-order and secular effects are absent.
 9. **The direct-imaging frame's speckle and background are uniform pseudo-noise**, not physically-derived photon statistics. Each pixel's speckle term is a uniform deviate on `[0,1)` scaled by twice the local contrast floor, so it has the wrong distribution, a non-zero mean, and no photon noise on top. Real AO speckle intensity follows a modified Rician (**Aime & Soummer 2004**; **Soummer et al. 2007**) tending to a Gamma distribution as an exposure averages independent realisations, with the number of those set by the AO decorrelation time. Closing this needs that decorrelation time sourced for a real instrument, and is tracked as roadmap item 10 rather than approximated here.
    *(The optics half of this entry is closed. The frame now computes the diffraction pattern of the real ELT pupil, rings and spikes together, with no free parameter — §7.111, §7.112. What remains is the noise.)*
+   - **9f.** **SPHERE/ZIMPOL's filters are still top-hats** of their published FWHM and peak, while FORS2's three broadband filters now carry ESO's measured curves. Not a modelling choice: the ZIMPOL curves were simply not located, and the top-hat is the correct treatment until they are (§7.02).
    - **9d.** The **RC20 and CDK1000 have real spider vanes that are not modelled**, because PlaneWave publishes no vane width and spike brightness scales as the vane area squared: guessing the width would be guessing the effect. Both are set to zero vanes and declared, the same treatment the CDK1000's astigmatism already gets (§7.113).
    - **9e.** The **VLT vane count of four is read from the telescope's structure, not quoted**: ESO's technical prose describes "metallic beams called spiders" without giving a number. The vane *width* is on firmer ground, being derived from published scaled pupil masks by a scaling that reproduces the ELT's independently published figure to 4 % (§7.113).
    - **9a.** The vane **width** is a literature value with real spread: 50 cm per Schwartz et al. (2018), against 54 cm in METIS phase D simulations and 40 cm in at least one published pupil figure. Spike brightness scales as the vane area squared, so that spread is a factor 1.8 on an effect of order 1e-4 of peak (§7.112).
@@ -924,6 +957,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 - Cumming, A., Marcy, G. W. & Butler, R. P. (1999). RV semi-amplitude formalism (with Lovis & Fischer 2010 below).
 - Gillon, M. et al. (2018). SPECULOOS survey description.
 - Gilmozzi, R. & Spyromilio, J. (2007). ELT (39.3m, Cerro Armazones) description.
+- ESO, FORS2 filter transmission curves (www.eso.org/sci/facilities/paranal/instruments/fors/inst/Filters/curves.html). "The transmission curves for many of the FORS interference filters have been measured within the instruments" — the Bessell B/V/R tables the FORS2 bandpass is integrated over (§7.02).
 - Martinez, P. et al. (2011). "Band-Limited Coronagraphs using a halftone-dot process: II." arXiv:1111.6956. Scaled VLT and E-ELT pupil masks: the VLT pupil at Φ=3 mm has "the central obscuration scaled to 0.47 mm ± 0.002 mm (14% linear ratio) and the spider-vane thickness is 15 µm ± 4 µm" — the source of the VLT's 4.1 cm vanes (§7.113). Its E-ELT mask independently reproduces the ELT's published 50 cm vanes to 4 %.
 - Schwartz, N., Sauvage, J.-F., Correia, C., Petit, C., Quiros-Pacheco, F., Fusco, T., Dohlen, K., El Hadi, K., Thatte, N., Clarke, F., Paufique, J. & Vernet, J. (2018). "Sensing and control of segmented mirrors with a pyramid wavefront sensor in the presence of spiders." *AO4ELT5*. The ELT's secondary "is supported by six 50-cm wide spiders" — the vane count and width the direct-imaging spikes are computed from (§7.112).
 - ESO, "The ELT's main structure" (elt.eso.org/telescope/structure/). The M2 crown "is connected to the top ring by means of six beams, forming the 'spider'" — independent confirmation of the vane count.

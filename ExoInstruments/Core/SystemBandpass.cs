@@ -126,12 +126,48 @@ namespace ExoInstruments.Core
         /// across the band -- the honest treatment for a detector whose manufacturer publishes
         /// only a peak figure, which is the case for this roster's amateur camera.
         /// </summary>
+        /// <summary>Measured filter transmission, or null for the published-numbers-only top-hat.</summary>
+        private readonly SpectralCurve filterTransmissionCurve;
+
+        /// <summary>
+        /// Quadrature nodes when a measured curve is used. Four times the top-hat count: the
+        /// support is an 870 nm range rather than one passband, and it contains a steep-shouldered
+        /// peak plus a red leak, so the integrand is far from the smooth product a rectangle gives.
+        /// </summary>
+        private const int CurveIntegrationSteps = 256;
+
         public SystemResponse(
             double centralWavelengthMeters, double widthAngstrom,
             double greyOpticsTransmission,
             SpectralCurve quantumEfficiencyCurve, double scalarQuantumEfficiency,
             double airmass, double siteAltitudeMeters)
+            : this(centralWavelengthMeters, widthAngstrom, greyOpticsTransmission,
+                   null, quantumEfficiencyCurve, scalarQuantumEfficiency, airmass, siteAltitudeMeters)
         {
+        }
+
+        /// <summary>
+        /// As above, but with the filter's REAL measured transmission curve in place of the
+        /// top-hat (see FilterCurves).
+        ///
+        /// When a curve is supplied it carries the filter's shape AND its transmission, so
+        /// greyOpticsTransmission must then be the optical train alone, without the filter's peak
+        /// transmission folded in; the integration also runs over the curve's own support rather
+        /// than over a nominal FWHM. centralWavelengthMeters and widthAngstrom are still carried,
+        /// because the PSF and the display quote them, but they no longer drive the integral.
+        ///
+        /// filterTransmissionCurve = null takes the top-hat path and is exactly the previous
+        /// behaviour, which is the right treatment for a filter whose maker publishes only a
+        /// central wavelength, a width and a peak.
+        /// </summary>
+        public SystemResponse(
+            double centralWavelengthMeters, double widthAngstrom,
+            double greyOpticsTransmission,
+            SpectralCurve filterTransmissionCurve,
+            SpectralCurve quantumEfficiencyCurve, double scalarQuantumEfficiency,
+            double airmass, double siteAltitudeMeters)
+        {
+            this.filterTransmissionCurve = filterTransmissionCurve;
             this.centralWavelengthMeters = centralWavelengthMeters;
             widthMeters = Math.Max(0.0, widthAngstrom) * 1e-10;
             greyTransmission = Math.Max(0.0, greyOpticsTransmission);
@@ -214,23 +250,36 @@ namespace ExoInstruments.Core
         /// </summary>
         private double Integrate(double teffK, bool includeExtinction)
         {
-            if (widthMeters <= 0.0 || greyTransmission <= 0.0) return 0.0;
-            if (centralWavelengthMeters <= 0.0) return 0.0;
+            if (greyTransmission <= 0.0) return 0.0;
 
-            double start = centralWavelengthMeters - 0.5 * widthMeters;
-            double end = centralWavelengthMeters + 0.5 * widthMeters;
+            double start, end;
+            if (filterTransmissionCurve != null)
+            {
+                // Integrate over the measured curve's own support. More nodes than the top-hat
+                // path uses, because a real curve has structure -- shoulders, and a red leak far
+                // from the passband -- that a rectangle does not, and the support is wider.
+                start = filterTransmissionCurve.MinWavelengthMeters;
+                end = filterTransmissionCurve.MaxWavelengthMeters;
+            }
+            else
+            {
+                if (widthMeters <= 0.0 || centralWavelengthMeters <= 0.0) return 0.0;
+                start = centralWavelengthMeters - 0.5 * widthMeters;
+                end = centralWavelengthMeters + 0.5 * widthMeters;
+            }
             // A filter's stated central wavelength and width can in principle place its blue
             // edge at or below zero for an extremely wide nominal band; clamp rather than
             // integrate through a wavelength that has no physical meaning.
             if (start < 1e-9) start = 1e-9;
             if (end <= start) return 0.0;
 
-            double stepMeters = (end - start) / IntegrationSteps;
+            int steps = filterTransmissionCurve != null ? CurveIntegrationSteps : IntegrationSteps;
+            double stepMeters = (end - start) / steps;
             double sum = 0.0;
-            for (int i = 0; i <= IntegrationSteps; i++)
+            for (int i = 0; i <= steps; i++)
             {
                 double lambda = start + i * stepMeters;
-                double weight = (i == 0 || i == IntegrationSteps) ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0);
+                double weight = (i == 0 || i == steps) ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0);
                 sum += weight * Integrand(lambda, teffK, includeExtinction);
             }
 
@@ -262,7 +311,11 @@ namespace ExoInstruments.Core
                 ? AtmosphericImagingNoise.ExtinctionTransmissionAt(airmass, lambda, siteAltitudeMeters)
                 : 1.0;
 
-            return shape * greyTransmission * qe * atmosphere;
+            // With a measured curve the filter carries its own transmission at this wavelength;
+            // with a top-hat it is flat across the band and already inside greyTransmission.
+            double filter = filterTransmissionCurve != null ? filterTransmissionCurve.At(lambda) : 1.0;
+
+            return shape * filter * greyTransmission * qe * atmosphere;
         }
     }
 

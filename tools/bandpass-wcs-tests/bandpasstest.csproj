@@ -32,5 +32,6 @@
     <Compile Include="$(Core)/DirectImagingSimulator.cs" />
     <Compile Include="$(Core)/DirectImagingResult.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
   </ItemGroup>
 </Project>

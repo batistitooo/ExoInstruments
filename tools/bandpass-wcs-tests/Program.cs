@@ -54,6 +54,7 @@ class Program
         TestRadialPsfProfile();
         TestPupilDiffraction();
         TestSpiderKernels();
+        TestFilterCurves();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -794,6 +795,74 @@ class Program
             if (v < lo) lo = v;
         }
         return lo > 0.0 ? hi / lo : double.PositiveInfinity;
+    }
+
+    // ------------------------------------------------------------------ FilterCurves
+    //
+    // Every filter was a top-hat of its published FWHM and peak. ESO measured FORS2's in the
+    // instrument and publishes the tables, so those three are now carried as real curves. These
+    // checks establish that a rectangular curve reproduces the top-hat exactly (so the curve path
+    // is a generalisation, not a second model), and measure what the real shapes actually change.
+
+    static void TestFilterCurves()
+    {
+        Console.WriteLine("Real measured filter curves (FORS2 Bessell B/V/R)");
+
+        // Reducibility: feed the curve path a literal rectangle and it must reproduce the
+        // top-hat path it generalises.
+        double centre = 554e-9, widthA = 1000.0, peak = 0.85;
+        double halfNm = 0.5 * widthA * 1e-10 * 1e9;
+        var rect = new SpectralCurve(
+            new double[] { centre * 1e9 - halfNm - 1e-4, centre * 1e9 - halfNm, centre * 1e9 + halfNm, centre * 1e9 + halfNm + 1e-4 },
+            new double[] { 0.0, peak, peak, 0.0 });
+        var viaTopHat = new SystemResponse(centre, widthA, peak, null, QE, 1.0, SiteAltitude);
+        var viaCurve = new SystemResponse(centre, widthA, 1.0, rect, null, QE, 1.0, SiteAltitude);
+        double a = viaTopHat.EffectiveWidthAngstromFlatNoExtinction;
+        double b = viaCurve.EffectiveWidthAngstromFlatNoExtinction;
+        Check("a rectangular curve reproduces the top-hat it generalises",
+              Math.Abs(b / a - 1.0) < 5e-3, $"{b:F3} vs {a:F3} Angstrom ({(b / a - 1) * 100:+0.000;-0.000}%)");
+
+        var spec = VisualTelescopeCatalog.Fors2Vlt;
+        Console.WriteLine("         filter      top-hat W     curve W    change    colour 3500K/20000K");
+        var cases = new[] {
+            ("Bessell B", FilterCurves.Fors2B, spec.BlueCentralWavelengthNm * 1e-9, spec.BlueBandwidthAngstrom, 0.6871),
+            ("Bessell V", FilterCurves.Fors2V, spec.GreenCentralWavelengthNm * 1e-9, spec.GreenBandwidthAngstrom, 0.8887),
+            ("Bessell R", FilterCurves.Fors2R, spec.RedCentralWavelengthNm * 1e-9, spec.RedBandwidthAngstrom, 0.8555),
+        };
+        bool anyMoved = false;
+        foreach (var c in cases)
+        {
+            var topHat = new SystemResponse(c.Item3, c.Item4, c.Item5 * spec.OpticsTransmission,
+                                            spec.QuantumEfficiencyCurve, spec.QuantumEfficiency, 1.0, spec.SiteAltitudeMeters);
+            var real = new SystemResponse(c.Item3, c.Item4, spec.OpticsTransmission, c.Item2,
+                                          spec.QuantumEfficiencyCurve, spec.QuantumEfficiency, 1.0, spec.SiteAltitudeMeters);
+            double wt = topHat.EffectiveWidthAngstromFlatNoExtinction;
+            double wc = real.EffectiveWidthAngstromFlatNoExtinction;
+            double colTop = topHat.EffectiveWidthAngstromForTemperatureNoExtinction(3500)
+                          / topHat.EffectiveWidthAngstromForTemperatureNoExtinction(20000);
+            double colReal = real.EffectiveWidthAngstromForTemperatureNoExtinction(3500)
+                           / real.EffectiveWidthAngstromForTemperatureNoExtinction(20000);
+            if (Math.Abs(wc / wt - 1.0) > 0.02) anyMoved = true;
+            Console.WriteLine($"         {c.Item1,-10}{wt,10:F1} A{wc,10:F1} A{(wc / wt - 1) * 100,9:+0.0;-0.0}%      {colTop:F3} -> {colReal:F3}");
+        }
+        Check("the measured shapes move the photometry, which is why they are worth carrying",
+              anyMoved, "at least one band shifts by more than 2% against its top-hat");
+
+        // The red leak is real in the filter and must be largely killed by the detector. That
+        // interaction is the whole argument for integrating the product rather than the parts.
+        double leakInFilter = 0.0, leakThroughQe = 0.0;
+        for (double nm = 900; nm <= 1200; nm += 1.0)
+        {
+            double t = FilterCurves.Fors2R.At(nm * 1e-9);
+            leakInFilter += t;
+            leakThroughQe += t * (spec.QuantumEfficiencyCurve != null
+                ? spec.QuantumEfficiencyCurve.At(nm * 1e-9) : spec.QuantumEfficiency);
+        }
+        Check("the detector suppresses the filter's near-infrared red leak",
+              leakThroughQe < 0.5 * leakInFilter,
+              $"integrated 900-1200 nm leak drops {(1 - leakThroughQe / Math.Max(leakInFilter, 1e-30)) * 100:F1}% once the CCD's QE curve is applied");
+
+        Console.WriteLine();
     }
 
     /// <summary>Larger of the two ratios, so a jump is measured whichever way it goes.</summary>

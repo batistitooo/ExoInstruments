@@ -1,6 +1,6 @@
 # bandpass-wcs-tests
 
-Headless verification of three pieces of `Core/`:
+Headless verification of five pieces of `Core/`:
 
 - **`SystemBandpass.cs`** — the integrated system response that replaced the grey-band photometry
   (`W = FWHM x QE_peak x T(lambda_c)`) with an integral of the source spectrum against the real
@@ -12,6 +12,8 @@ Headless verification of three pieces of `Core/`:
   display used to synthesise its own PSF from.
 - **`PupilDiffraction.cs`** — the full two-dimensional pattern of a real pupil, vanes included,
   which replaced the three invented constants that used to draw the display's diffraction spikes.
+- **`FilterCurves.cs`** — ESO's measured FORS2 filter transmission curves, which replaced the
+  top-hats of published FWHM the bandpass integral used to assume a shape from.
 
 No Unity, no KSP, no game. Everything under test is pure `Core/` C#.
 
@@ -28,7 +30,7 @@ layer but carries no Unity dependency itself. That is deliberate and worth knowi
 harness compile the **real** `VisualTelescopeCatalog`, so the throughput and filter figures it
 checks are the ones the mod ships rather than a second copy free to drift from them.
 
-## What the 55 checks establish
+## What the 59 checks establish
 
 **The new photometry is a generalisation of the old one, not a replacement.** With a flat source
 spectrum, a grey QE and no atmosphere, the integral reproduces `FWHM x QE` exactly (to 1e-12), and
@@ -99,6 +101,14 @@ machine precision. With them in place, on-axis intensity is exactly 1, the vanes
 vanes that cast them, standing 9.6×10⁶ above the faintest azimuth at 6 λ/D. The simulator's
 diffraction limit is now its own pupil's first null, 9.440 mas, rather than the unobstructed
 Rayleigh criterion's 10.245 mas.
+
+**Measured filter curves move the photometry.** Against the top-hat each FORS2 filter would
+otherwise get, the real shape changes the effective width by −12.7 % (B), −10.2 % (V) and −4.2 %
+(R), and the B band's colour term between an M dwarf and a hot star by 18 %. Fed a literal
+rectangle the curve path reproduces the top-hat to 0.26 %, the residual being Simpson's rule
+crossing the rectangle's discontinuities. The curves are carried over their full 330–1200 nm range
+because the red leak is real (0.77 / 1.34 / 3.21 % of each band), and the CCD's own QE curve is
+measured to suppress 61 % of R's — an interaction only the integrated product can show.
 
 ## Note on the sibling harness
 

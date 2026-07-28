@@ -50,6 +50,19 @@ namespace ExoInstruments.Core
         public int SpiderVaneCount;
         public double SpiderVaneWidthMeters;
 
+        /// <summary>
+        /// Measured transmission curves for this instrument's Red/Green/Blue filter positions,
+        /// when the observatory publishes them. Null means the filter is carried as a top-hat of
+        /// its published FWHM and peak instead, which is the honest treatment when nothing else
+        /// exists (see FilterCurves and SystemBandpass).
+        ///
+        /// When a curve IS supplied it carries the filter's own transmission, so the matching
+        /// FilterPeakTransmission must not be applied on top of it.
+        /// </summary>
+        public SpectralCurve RedFilterCurve;
+        public SpectralCurve GreenFilterCurve;
+        public SpectralCurve BlueFilterCurve;
+
         // Site (feeds the shared atmospheric/scintillation model in AtmosphericImagingNoise)
         public double SiteAltitudeMeters;
 
@@ -730,6 +743,13 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 8.2,
             FocalLengthMeters = 24.556,
+            // ESO measured these three in the instrument and publishes the tables, so they are
+            // carried as real curves rather than as top-hats of their published FWHM. The other
+            // two filter positions (Luminance = unfiltered, H-alpha) keep the top-hat treatment.
+            BlueFilterCurve = FilterCurves.Fors2B,
+            GreenFilterCurve = FilterCurves.Fors2V,
+            RedFilterCurve = FilterCurves.Fors2R,
+
             // VLT UT spider. The width comes from the scaled VLT pupil masks used throughout the
             // coronagraphy literature: Martinez et al. (2011) cut a 3 mm mask for the 8 m pupil
             // with "the spider-vane thickness is 15 um +/- 4 um", which at this telescope's 8.2 m

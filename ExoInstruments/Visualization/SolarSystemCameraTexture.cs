@@ -2508,14 +2508,35 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private static SystemResponse BuildSystemResponse(CameraFilter filter, double airmass)
         {
+            SpectralCurve filterCurve = FilterTransmissionCurve(filter);
+
+            // A measured curve carries the filter's own transmission, so the published peak must
+            // NOT be applied on top of it -- that would count the filter twice.
+            double transmission = filterCurve != null
+                ? Spec.OpticsTransmission
+                : FilterPeakTransmission(filter) * Spec.OpticsTransmission;
+
             return new SystemResponse(
                 FilterCentralWavelengthMeters(filter),
                 FilterBandwidthAngstrom(filter),
-                FilterPeakTransmission(filter) * Spec.OpticsTransmission,
+                transmission,
+                filterCurve,
                 Spec.QuantumEfficiencyCurve,
                 Spec.QuantumEfficiency,
                 airmass,
                 Spec.SiteAltitudeMeters);
+        }
+
+        /// <summary>The instrument's measured curve for this filter position, or null when only published numbers exist and the top-hat applies.</summary>
+        private static SpectralCurve FilterTransmissionCurve(CameraFilter filter)
+        {
+            switch (filter)
+            {
+                case CameraFilter.Red: return Spec.RedFilterCurve;
+                case CameraFilter.Green: return Spec.GreenFilterCurve;
+                case CameraFilter.Blue: return Spec.BlueFilterCurve;
+                default: return null; // Luminance is unfiltered; H-alpha has no published curve here
+            }
         }
 
         /// <summary>
