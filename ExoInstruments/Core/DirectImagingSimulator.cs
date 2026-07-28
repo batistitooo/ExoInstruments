@@ -12,6 +12,20 @@ namespace ExoInstruments.Core
     {
         public const double WavelengthMeters = 1.6e-6;   // H band
         public const double ApertureMeters = 39.3;       // ELT primary
+
+        /// <summary>
+        /// Linear central obstruction of the ELT pupil. ESO's own E-ELT optics page states the
+        /// segmented primary "has a diameter of approximately 39 m" with "a 11.1 m central
+        /// obstruction" (the filled primary runs from an inner radius of 5.5 m to an outer 18.5 m).
+        /// The ratio is formed against the 39.3 m this class already uses everywhere else, so the
+        /// pupil stays internally consistent: 11.1/39.3 = 0.2824, against 0.2846 if ESO's rounded
+        /// 39 m were used instead, a 0.8% difference far below anything the pattern shows.
+        ///
+        /// This is what makes a real diffraction pattern computable here at all. Without an
+        /// obstruction ratio the pupil is undefined, and the imaging display had to invent a
+        /// profile; see RadialPsfProfile.
+        /// </summary>
+        public const double ObstructionRatio = 11.1 / 39.3;
         public const double AssumedBondAlbedo = 0.3;     // assumption, not measurement -- no catalog column
         public const double DeepContrastLimit = 1.0e-8;  // post-processing floor far from the star
         public const double DetectionSnrThreshold = 5.0; // standard imaging detection criterion

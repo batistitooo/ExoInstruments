@@ -5,16 +5,21 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Visualization
 {
     /// <summary>
-    /// Simulated high-contrast image: log-stretched stellar PSF with diffraction rings,
-    /// six spider spikes (ELT pupil), a wind-driven anisotropic speckle halo that fades
+    /// Simulated high-contrast image: log-stretched stellar PSF with its real diffraction
+    /// rings, six spider spikes (ELT pupil), a wind-driven anisotropic speckle halo that fades
     /// as sqrt(t_eff), sky+detector background, hot pixels, and the planet as a faint PSF
     /// at real separation/contrast. All parameters deterministic per target so refreshes
     /// don't strobe. Star magnitude scales the whole starlight field; temperature false-colors it.
+    ///
+    /// The stellar and planetary profiles are the exact annular-pupil Airy pattern of the real
+    /// ELT pupil, sampled through Core's RadialPsfProfile -- the same closed form the rest of the
+    /// project convolves as a kernel (Core/OpticalPsf.cs). This class used to carry its own
+    /// Gaussian core plus an invented ring envelope, which was a second and mutually inconsistent
+    /// answer to a question Core already answered exactly. There is now one diffraction model.
     /// </summary>
     public static class DirectImagingTexture
     {
         private const double LogStretchDecades = 9.0;  // display maps intensities 1e-9..1 onto 0..1
-        private const double FirstAiryRingPeak = 0.017; // relative to PSF peak, at ~1.63 lambda/D
 
         // Apparent magnitude at which the stellar PSF peak saturates the display
         // scale. Brighter stars clamp to 1; fainter ones dim as 10^(-0.4*dm),
@@ -28,6 +33,13 @@ namespace ExoInstruments.Visualization
         private const double MaxPointingOffsetFovFraction = 0.12;
 
         // Spider spikes: 6 vanes (ELT), Gaussian angular profile, 1/r^2 falloff.
+        //
+        // NOT sourced, and deliberately left that way for now: the vane count is real (the ELT's
+        // M2 sits on six arms), but the amplitude below is a display constant, not a computed one.
+        // Deriving it means the two-dimensional Fourier transform of the real pupil including its
+        // 0.5 m vanes, which is a different piece of machinery from the radially symmetric closed
+        // form the rings come from. Flagged as an assumed value in TECHNICAL_REFERENCE §12 rather
+        // than dressed up as physics.
         private const int SpikeCount = 6;
         private const double SpikeAmplitude = 4.0e-4;   // relative to PSF peak at 1 lambda/D
         private const double SpikeSigmaDeg = 1.3;
@@ -133,7 +145,17 @@ namespace ExoInstruments.Visualization
             double spikeBaseRad = Hash01(star.Name + "#pupil") * (Math.PI / SpikeCount * 2.0);
             double windPaRad = Hash01(star.Name + "#wind") * Math.PI;
 
-            double psfSigma = 0.45 * lambdaOverD; // Gaussian core approximating the Airy core width
+            // The instrument's real diffraction pattern, tabulated once for this frame's plate
+            // scale. Built out to 1.2x the raster width so that the far corner of the frame is
+            // still tabulated for a star at its maximum pointing offset and for a planet at its
+            // maximum separation, rather than falling back on the profile's held last value.
+            var psf = RadialPsfProfile.Build(
+                DirectImagingSimulator.ApertureMeters,
+                DirectImagingSimulator.ObstructionRatio,
+                DirectImagingSimulator.WavelengthMeters,
+                arcsecPerPixel,
+                size * 1.2);
+
             double spikeSigmaRad = SpikeSigmaDeg * Math.PI / 180.0;
             double spikeSectorRad = Math.PI / SpikeCount * 2.0; // 60 deg between spikes
 
@@ -152,14 +174,11 @@ namespace ExoInstruments.Visualization
                     double dys = yArc - starY;
                     double r = Math.Sqrt(dxs * dxs + dys * dys);
 
-                    // Stellar PSF: Gaussian core + Airy-like ring envelope. Same order of approximation as the rest of the mod, not exact Bessel math.
-                    double starIntensity = Math.Exp(-r * r / (2.0 * psfSigma * psfSigma));
-                    if (r > lambdaOverD)
-                    {
-                        double envelope = FirstAiryRingPeak * Math.Pow(1.63 * lambdaOverD / r, 3.0);
-                        double ringPhase = Math.Cos(Math.PI * (r / lambdaOverD - 1.63));
-                        starIntensity += envelope * ringPhase * ringPhase;
-                    }
+                    // Stellar PSF: the exact annular-pupil Airy pattern of the real ELT pupil,
+                    // averaged over the pixel the way a detector integrates it. Core radius, ring
+                    // radii and ring amplitudes are all consequences of D, the obstruction and
+                    // lambda; none of them is a free parameter here any more.
+                    double starIntensity = psf.AtArcsec(r);
 
                     double theta = Math.Atan2(dys, dxs);
 
@@ -192,10 +211,13 @@ namespace ExoInstruments.Visualization
                     double planetIntensity = 0.0;
                     if (placePlanet)
                     {
+                        // Same instrument, same pupil, so the companion carries the same pattern --
+                        // rings included. It had none under the old Gaussian, which is why a
+                        // marginally resolved companion used to read as a featureless blob.
                         double dx = xArc - planetX;
                         double dy = yArc - planetY;
-                        double rp2 = dx * dx + dy * dy;
-                        planetIntensity = assessment.ContrastRatio * peakScale * Math.Exp(-rp2 / (2.0 * psfSigma * psfSigma));
+                        double rp = Math.Sqrt(dx * dx + dy * dy);
+                        planetIntensity = assessment.ContrastRatio * peakScale * psf.AtArcsec(rp);
                     }
 
                     Color starColor = hasStarColor

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>dumppsf</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpPsf.cs" />
+    <!-- The real shipped Core, not a copy: this harness must measure what the mod computes. -->
+    <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/RadialPsfProfile.cs" />
+  </ItemGroup>
+</Project>
