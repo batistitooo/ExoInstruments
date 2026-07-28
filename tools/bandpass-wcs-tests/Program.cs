@@ -56,6 +56,7 @@ class Program
         TestSpiderKernels();
         TestFilterCurves();
         TestGaiaPhotometry();
+        TestGaiaCatalogueFormat();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -921,6 +922,86 @@ class Program
               double.IsNaN(GaiaPhotometry.BMinusVFromBpRp(12.0)),
               "BP-RP = 12 is outside anything the B-V polynomial spans");
 
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ Gaia catalogue
+    //
+    // The optional Gaia catalogue (tools/pack_gaia_catalog.py) writes the SAME binary format the
+    // shipped Tycho-2 one uses, so the runtime cannot tell which it loaded. The fixture is a real
+    // packed Gaia DR3 cone toward the Galactic centre, 923 stars in 0.3 degrees, kept small enough
+    // to commit. If the packer and the reader ever disagree about the format, this is where it shows.
+
+    static void TestGaiaCatalogueFormat()
+    {
+        Console.WriteLine("Optional Gaia catalogue: packer and reader agree on the format");
+
+        const string fixture = "fixtures/gaia_cone_test.bin";
+        if (!System.IO.File.Exists(fixture))
+        {
+            Check("the packed Gaia fixture is present", false, $"missing {fixture}");
+            Console.WriteLine();
+            return;
+        }
+
+        var catalogue = new RenderedStarCatalog();
+        catalogue.Load(fixture);
+        Check("a Gaia-packed catalogue loads through the shipped reader",
+              catalogue.IsLoaded && catalogue.Count == 923,
+              $"{catalogue.Count} stars from a 0.3 deg cone at RA 266.4 Dec -29.0");
+
+        // Everything must come back inside the cone it was packed from.
+        var found = new System.Collections.Generic.List<RenderedStar>();
+        catalogue.Search(266.4, -29.0, 0.35, 99.0, found);
+        // Regression guard on the declination-band RA bracket. A cone search must not lose
+        // stars near its own edge; this exact fixture lost 8 of 923 until
+        // WidestRaDeclinationInBand stopped bracketing from the band edge nearest the EQUATOR
+        // and started bracketing from the edge nearest the CONE CENTRE.
+        var wider = new System.Collections.Generic.List<RenderedStar>();
+        catalogue.Search(266.4, -29.0, 1.0, 99.0, wider);
+        Check("a cone search loses no star near its own edge",
+              found.Count == wider.Count && found.Count == catalogue.Count,
+              $"{found.Count} at r=0.35 against {wider.Count} at r=1.0 and {catalogue.Count} packed");
+
+        Check("every packed star is recovered by a cone search covering it",
+              found.Count == catalogue.Count, $"{found.Count} of {catalogue.Count}");
+
+        double worstSep = 0.0;
+        foreach (var star in found)
+        {
+            double d1 = star.DecDeg * Math.PI / 180.0, d0 = -29.0 * Math.PI / 180.0;
+            double dRa = (star.RaDeg - 266.4) * Math.PI / 180.0;
+            double sep = Math.Acos(Math.Min(1.0, Math.Sin(d0) * Math.Sin(d1)
+                       + Math.Cos(d0) * Math.Cos(d1) * Math.Cos(dRa))) * 180.0 / Math.PI;
+            worstSep = Math.Max(worstSep, sep);
+        }
+        Check("positions survive the fixed-point round trip",
+              worstSep < 0.301, $"furthest star {worstSep:F5} deg from the cone centre, packed radius 0.3");
+
+        // The depth cut must actually cut, and the photometry must land in Johnson V.
+        var bright = new System.Collections.Generic.List<RenderedStar>();
+        catalogue.Search(266.4, -29.0, 0.35, 13.0, bright);
+        double faintest = 0.0, brightest = 99.0;
+        int withColour = 0;
+        foreach (var star in found)
+        {
+            faintest = Math.Max(faintest, star.VMag);
+            brightest = Math.Min(brightest, star.VMag);
+            if (star.HasColor) withColour++;
+        }
+        Check("the magnitude cut selects a real subset",
+              bright.Count > 0 && bright.Count < found.Count,
+              $"{bright.Count} of {found.Count} stars brighter than V = 13");
+        Check("photometry is in Johnson V, converted from G by Gaia's own relation",
+              brightest > 5.0 && faintest > 16.0 && faintest < 20.0 && withColour > found.Count / 2,
+              $"V from {brightest:F2} to {faintest:F2} at a G < 15 cut -- the faint tail is real: "
+              + $"a heavily reddened bulge star at BP-RP = 5 has G - V = {GaiaPhotometry.GMinusV(5.0):F2}, "
+              + $"so G = 15 is V = {15.0 - GaiaPhotometry.GMinusV(5.0):F1}. {withColour} of {found.Count} carry a colour index");
+
+        // The density is the whole point of the exercise.
+        double areaDeg2 = Math.PI * 0.3 * 0.3;
+        Console.WriteLine($"         density {found.Count / areaDeg2:F0} stars/deg2 toward the Galactic centre at G < 15, "
+                          + $"against Tycho-2's 61.9 all-sky");
         Console.WriteLine();
     }
 

@@ -481,6 +481,40 @@ valid over `−0.5 < x < 5.0` (Table 5.10) with a residual scatter of **0.03017 
 
 **Harness verification** (6 checks): the polynomial reproduces the Sun's own `G − V = −0.14` (independently known from V = −26.76 and G = −26.90) to within the relation's own scatter, giving −0.1525; a red star's offset is 1.54 mag, which is why the transformation exists; clamping holds beyond the range instead of diverging; V↔G inverts exactly; the colour inversion closes on itself to 2×10⁻¹⁶; and an out-of-range colour returns NaN rather than a plausible default.
 
+### 7.016 Optional Gaia DR3 star field (`tools/pack_gaia_catalog.py`)
+
+§12 entry 28 records that the rendered star field stops at Tycho-2's V ≈ 11.5, so a frame holds about four real stars where a real one holds hundreds, and states that closing it "needs a Galactic star-count model generating a statistical faint population, not a larger catalogue". **That conclusion was about what can be SHIPPED, and it is now separable from what can be USED.**
+
+Gaia's own measured counts, queried from `gaiadr3.gaia_source`, at this format's 12 bytes/star:
+
+| Limit | Stars | File / RAM |
+|---|---|---|
+| G < 13 | 16.8 M | 202 MB |
+| G < 14 | 36.9 M | 443 MB |
+| G < 15 | 78.0 M | 935 MB |
+| G < 16 | 157.7 M | 1.9 GB |
+| G < 18 | 577.2 M | 6.9 GB |
+
+None of that can ship. All of it can sit on a user's disk, so `pack_gaia_catalog.py` builds it on demand into **the same binary format** the Tycho-2 catalogue uses, and the loader prefers `GaiaStarCatalog.bin` over `RenderedStarCatalog.bin` when present. Nothing downstream can tell which it got. Format constants are *imported* from `pack_star_catalog.py` rather than restated, so the two packers cannot drift.
+
+**Photometry** crosses from Gaia's system to the Johnson V / B-V everything else uses, by Gaia's own published relations (§7.015). Measured on a real packed cone toward the Galactic centre: a `G < 15` cut yields V from 9.03 to **18.53**, because a heavily reddened bulge star at BP-RP = 5 has `G − V = −3.56`. Stars with no Gaia colour keep G as V and are flagged colourless rather than given an invented one; 785 of 923 in that cone carry a colour.
+
+**Density delivered**: 3264 stars/deg² in that cone against Tycho-2's 61.9 all-sky, so about 220 stars in an RC20 frame instead of four.
+
+**Search cost does not scale with catalogue size.** The format is banded in declination and binary-searched in RA, so a cone search touches only the stars near the field. What scales is the rendering.
+
+#### A pre-existing search bug this surfaced
+
+`RenderedStarCatalog.Search` brackets each declination band's RA range from a single declination inside that band. It used the band edge **nearest the equator**, on the reasoning that the RA half-width grows as `1/cos(dec)`. That reasoning holds for the small-angle approximation `radius/cos(dec)` but not for the exact relation the search actually uses,
+
+```
+cos(radius) = sin(dec₀)·sin(dec) + cos(dec₀)·cos(dec)·cos(ΔRA)
+```
+
+where proximity to `dec₀` dominates: a cone's RA extent is widest at **its own centre declination** and shrinks to zero at its extremes. For every band on the equator side of the cone centre the two choices disagree, and the equator-nearest edge is the farthest from the centre, so it produced the narrowest bracket exactly where the widest was needed.
+
+The effect was a thin crescent of stars silently dropped at the edge of every search cone. It was invisible at Tycho-2's four stars per frame; against a Gaia catalogue a 0.3° cone lost **8 of 923**. Fixed by bracketing from the band edge nearest the cone centre, and guarded by a harness regression check on that exact fixture.
+
 ### 7.02 Real measured filter curves (`Core/FilterCurves.cs`)
 
 Every filter in the roster was a **top-hat**: a rectangle of its published FWHM at its published central wavelength, scaled by its published peak transmission. That remains the honest treatment when nothing else exists, and it is still what the amateur LRGB set and the H-alpha positions get. But ESO measured FORS2's filters *in the instrument* and publishes the tables, so for those three there is no reason to keep guessing a shape.
@@ -952,7 +986,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 26. **VLT SPHERE's Blue filter slot is omitted rather than approximated** (§7.012) — ZIMPOL genuinely has no real broadband blue filter, so rather than reuse a nearby real filter's numbers under a misleading label, that filter position simply isn't offered for this instrument.
 27. **Solar-system body marker decluttering (§8.1) is a chart-display convenience, not real astrometry** — the small on-screen separation it introduces between an overlapping planet and its moons has no physical meaning and is never used by anything outside chart rendering and click hit-testing.
 
-28. **The rendered star field stops at Tycho-2's V≈11.5 limit** — a real 30 s RC20 sub reaches several magnitudes fainter, so a frame holds about five real stars where a real one would hold hundreds. Closing this needs a Galactic star-count model generating a statistical faint population (Bahcall & Soneira 1980; Besançon; TRILEGAL), not a larger catalogue (§7.14).
+28. **The SHIPPED rendered star field stops at Tycho-2's V≈11.5 limit** (an optional user-built Gaia DR3 catalogue lifts this entirely, §7.016; it cannot ship, at 202 MB for G<13 and 1.9 GB for G<16) — a real 30 s RC20 sub reaches several magnitudes fainter, so a frame holds about five real stars where a real one would hold hundreds. Closing this needs a Galactic star-count model generating a statistical faint population (Bahcall & Soneira 1980; Besançon; TRILEGAL), not a larger catalogue (§7.14).
 29. **Cloud veiling is a gain on the existing sky (×3 at full coverage), not an absolute cloud brightness** — the pipeline has no ground-light model to derive one from, and scaling the term whose light the cloud is actually reflecting is preferable to inventing an absolute figure (§7.3).
 30. **The twilight brightness gradient (0.6 mag per degree of solar altitude) is a straight-line approximation** to Patat et al. (2006)'s measured curve over the -18° to -12° span, not a fit to it (§7.3).
 31. **Optical throughput is modelled only where a figure is published**, and the unmodelled factors are enumerated per instrument in §7.001's table rather than lumped into one fudge: the RedCat 51's whole refractive glass path, every instrument's relay/corrector/Barlow train, FORS2's collimator+camera relay, and every broadband filter's peak transmission except FORS2's Hα. Each of those sits at 1.0, which means *not modelled*, not lossless — so the limiting magnitudes remain optimistic, by less than before but not by zero.

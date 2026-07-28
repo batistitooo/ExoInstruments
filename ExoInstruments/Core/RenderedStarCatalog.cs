@@ -143,7 +143,7 @@ namespace ExoInstruments.Core
                 // RA half-width of the cone at this band's declination. Near a pole the
                 // denominator vanishes and every RA is inside the cone, so the whole band is
                 // scanned rather than bracketed.
-                double bandDec = BandCentreDeg(band);
+                double bandDec = WidestRaDeclinationInBand(band, centreDecDeg);
                 double cosBandDec = Math.Cos(bandDec * Math.PI / 180.0);
                 double raHalfWidthDeg = 180.0;
                 if (cosBandDec > 1e-6)
@@ -239,15 +239,34 @@ namespace ExoInstruments.Core
             return b < 0 ? 0 : (b >= bandCount ? bandCount - 1 : b);
         }
 
-        private double BandCentreDeg(int band)
+        /// <summary>
+        /// The declination inside this band at which the search cone spans the most right
+        /// ascension, which is what the RA bracket must be computed from if it is not to exclude
+        /// stars the cone really contains.
+        ///
+        /// That declination is the one CLOSEST TO THE CONE'S OWN CENTRE, because a cone's RA
+        /// extent is widest at its centre declination and shrinks to zero at its northern and
+        /// southern extremes. This previously returned the band edge nearest the EQUATOR, on the
+        /// reasoning that the RA half-width grows as 1/cos(dec). That reasoning holds for the
+        /// small-angle approximation radius/cos(dec), but not for the exact relation the search
+        /// actually uses,
+        ///
+        ///     cos(radius) = sin(dec0)sin(dec) + cos(dec0)cos(dec)cos(dRA)
+        ///
+        /// where proximity to dec0 dominates. For every band on the equator side of the cone
+        /// centre the two choices disagree, and the equator-nearest edge is the FARTHEST from the
+        /// centre, so it produced the narrowest bracket exactly where the widest was needed.
+        ///
+        /// The effect was a thin crescent of stars silently dropped at the edge of every search
+        /// cone. It went unnoticed while the shipped Tycho-2 catalogue put about four stars in a
+        /// frame; it surfaced immediately against an optional Gaia catalogue, where a 0.3 degree
+        /// cone holds 923 stars and 8 of them went missing.
+        /// </summary>
+        private double WidestRaDeclinationInBand(int band, double centreDecDeg)
         {
-            // The declination in the band whose RA half-width is widest, which is the edge
-            // nearest the equator; using the centre would under-bracket half the band.
             double low = -90.0 + band * bandWidthDeg;
             double high = low + bandWidthDeg;
-            if (low > 0.0) return low;
-            if (high < 0.0) return high;
-            return 0.0;
+            return centreDecDeg < low ? low : (centreDecDeg > high ? high : centreDecDeg);
         }
 
         private static ushort ToMagMilli(double vMag)

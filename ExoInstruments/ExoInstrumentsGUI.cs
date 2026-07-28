@@ -274,7 +274,17 @@ namespace ExoInstruments
         /// </summary>
         private void LoadRenderedStarCatalog()
         {
-            string path = KSPUtil.ApplicationRootPath + "GameData/ExoInstruments/PluginData/RenderedStarCatalog.bin";
+            // An optional, user-supplied Gaia catalogue takes precedence over the shipped
+            // Tycho-2 one. It cannot ship: Gaia's own counts put G < 14 at 443 MB and G < 16 at
+            // 1.9 GB in this format, so anyone who wants that depth builds it themselves with
+            // tools/pack_gaia_catalog.py. Both files use the same format and the same Johnson
+            // V / B-V photometry, so nothing downstream can tell which one it got.
+            string pluginData = KSPUtil.ApplicationRootPath + "GameData/ExoInstruments/PluginData/";
+            string gaiaPath = pluginData + "GaiaStarCatalog.bin";
+            string tychoPath = pluginData + "RenderedStarCatalog.bin";
+
+            bool usingGaia = System.IO.File.Exists(gaiaPath);
+            string path = usingGaia ? gaiaPath : tychoPath;
             try
             {
                 if (!System.IO.File.Exists(path))
@@ -286,7 +296,9 @@ namespace ExoInstruments
                 var catalog = new RenderedStarCatalog();
                 catalog.Load(path);
                 SolarSystemCameraTexture.StarCatalog = catalog;
-                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Tycho-2 stars loaded.");
+                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} "
+                        + (usingGaia ? "Gaia DR3" : "Tycho-2") + " stars loaded"
+                        + (usingGaia ? " (optional catalogue, see the README)." : "."));
             }
             catch (Exception e)
             {

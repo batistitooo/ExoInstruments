@@ -169,6 +169,65 @@ A capture is monochrome — one value per pixel — but the pipeline currently s
 
 **2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
+## Optional: a deeper star field with Gaia DR3
+
+The mod ships a **Tycho-2** catalogue (29.3 MB, 2.5 million stars, complete to about V = 11.5).
+That is 61.9 stars/deg², so an RC20 frame holds roughly **four** real stars where a real 30-second
+sub-exposure holds hundreds. Everything fainter is simply not there.
+
+You can replace it with **Gaia DR3** and get the real thing. It is not shipped because of what it
+weighs. These are Gaia's own measured counts, at the 12 bytes/star this format uses:
+
+| Faint limit | Stars | File, and RAM while playing |
+|---|---|---|
+| G < 13 | 16.8 M | **202 MB** |
+| G < 14 | 36.9 M | **443 MB** |
+| G < 15 | 78.0 M | **935 MB** |
+| G < 16 | 157.7 M | **1.9 GB** |
+| G < 18 | 577.2 M | **6.9 GB** |
+
+None of that belongs in a mod download. On your own disk it is fine.
+
+### Building it
+
+```
+pip install astroquery
+python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.bin
+```
+
+Then copy the result to:
+
+```
+<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin
+```
+
+The mod prefers that file whenever it exists and falls back to the shipped Tycho-2 one when it does
+not. The log line on startup tells you which one it loaded. To go back, delete or rename the file.
+
+### Choosing a depth
+
+The whole catalogue is held in memory, so the table above is also the RAM cost, **on top of KSP
+itself**. `G < 13` is a safe first try and is already about seven times Tycho-2's density; `G < 14`
+is as deep as most machines will want. Beyond that, know what your RAM is doing.
+
+Search cost does *not* grow with catalogue size (the format is banded in declination and
+binary-searched in right ascension, so a frame only ever touches the stars near it). What does grow
+is how many stars get drawn per frame, which is the entire point.
+
+### What you actually get
+
+A 0.3° cone toward the Galactic centre at `G < 15` holds **3264 stars/deg²** against Tycho-2's 61.9
+all-sky: about **220 stars in a single RC20 frame** instead of four.
+
+Photometry is converted from Gaia's G and G_BP − G_RP to the Johnson V and B−V the rest of the mod
+works in, using **Gaia's own published relations** (DR3 documentation Table 5.9). This matters more
+than it sounds: a heavily reddened bulge star has `G − V = −3.56`, so a `G < 15` cut reaches
+V = 18.6 for the reddest stars. Stars with no measured Gaia colour keep G as V and are flagged as
+colourless rather than given an invented colour.
+
+Proper motions are dropped, as they are for Tycho-2: at the finest plate scale modelled here they
+would move a typical field star by one pixel every few years of in-game time.
+
 ## Future Roadmap
 
 Not yet implemented in the current build:

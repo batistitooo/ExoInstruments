@@ -34,5 +34,6 @@
     <Compile Include="$(Core)/PupilDiffraction.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/GaiaPhotometry.cs" />
+    <Compile Include="$(Core)/RenderedStarCatalog.cs" />
   </ItemGroup>
 </Project>
