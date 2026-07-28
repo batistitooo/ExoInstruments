@@ -103,6 +103,7 @@ That is the only star catalogue the renderer looks for. See the README.
 import argparse
 import csv
 import getpass
+import http.client
 import http.cookiejar
 import io
 import math
@@ -221,6 +222,49 @@ TAP_LOGIN = "https://gea.esac.esa.int/tap-server/login"
 _opener = urllib.request.build_opener(
     urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
+# A G < 13 run makes several hundred jobs over hours, so it WILL meet a bad minute of network.
+# Observed: a TCP connect that never completes (WinError 10060) part-way through a run, on a
+# slice that then succeeds immediately on restart. That is the network, not the archive refusing
+# anything, so it is handled here at the socket rather than by the per-range logic below -- which
+# matters because the per-range retry only ever wrapped the data fetch, leaving the COUNT and the
+# phase polling bare. Both of those are single points of failure for a multi-hour run.
+#
+# The body is read inside the retry, so a connection that dies mid-transfer is retried too rather
+# than escaping as a short read. The timeout is per socket operation, not per call, so it bounds
+# a hang without capping how long a large result may legitimately take to stream.
+HTTP_TIMEOUT_S = 120
+HTTP_ATTEMPTS = 6
+HTTP_BACKOFF_SECONDS = 10
+
+
+def transient(e):
+    """True for failures worth repeating: the network, or a server saying 'not now'."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code in (408, 429, 500, 502, 503, 504)
+    return isinstance(e, (OSError, http.client.HTTPException))
+
+
+def http_call(url, data=None, method=None):
+    """
+    One HTTP call, retried through transient failures; returns (final URL, body text).
+
+    A 4xx is not retried: a bad query, or a session that has expired, says the same thing however
+    many times it is asked. Re-POSTing a job whose response was lost can orphan a job server-side,
+    which costs nothing and is cheaper than losing the run.
+    """
+    for attempt in range(HTTP_ATTEMPTS):
+        try:
+            request = urllib.request.Request(url, data=data, method=method)
+            with _opener.open(request, timeout=HTTP_TIMEOUT_S) as r:
+                return r.geturl(), r.read().decode()
+        except Exception as e:
+            if attempt == HTTP_ATTEMPTS - 1 or not transient(e):
+                raise
+            wait = HTTP_BACKOFF_SECONDS * (2 ** attempt)
+            print(f"      network: {type(e).__name__}; retrying in {wait}s "
+                  f"(attempt {attempt + 2}/{HTTP_ATTEMPTS})", flush=True)
+            time.sleep(wait)
+
 
 def login(username):
     """
@@ -244,9 +288,7 @@ def login(username):
 
     body = urllib.parse.urlencode({"username": username, "password": password}).encode()
     try:
-        with _opener.open(urllib.request.Request(TAP_LOGIN, data=body, method="POST")) as r:
-            if r.status not in (200, 303):
-                raise RuntimeError(f"login returned HTTP {r.status}")
+        http_call(TAP_LOGIN, data=body, method="POST")
     except urllib.error.HTTPError as e:
         raise SystemExit(f"ESA archive login failed for '{username}': HTTP {e.code}. "
                          "Check the username and password, and that the account is activated "
@@ -264,15 +306,14 @@ def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
         "PHASE": "RUN", "QUERY": adql,
     }).encode()
 
-    with _opener.open(urllib.request.Request(TAP_ASYNC, data=body, method="POST")) as r:
-        job = r.geturl().split("?")[0]
+    job, _ = http_call(TAP_ASYNC, data=body, method="POST")
+    job = job.split("?")[0]
 
     # Progress is printed while polling. Without it a slice that legitimately takes minutes is
     # indistinguishable from a hang, which is exactly how this first looked.
     started = time.time()
     while True:
-        with _opener.open(job + "/phase") as r:
-            phase = r.read().decode().strip()
+        phase = http_call(job + "/phase")[1].strip()
         elapsed = time.time() - started
         if phase in ("COMPLETED", "ERROR", "ABORTED"):
             if not quiet or phase != "COMPLETED":
@@ -285,11 +326,9 @@ def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
         time.sleep(3)
 
     if phase != "COMPLETED":
-        with _opener.open(job + "/error") as r:
-            raise RuntimeError(f"TAP job {phase}: {r.read().decode()[:500]}")
+        raise RuntimeError(f"TAP job {phase}: {http_call(job + '/error')[1][:500]}")
 
-    with _opener.open(job + "/results/result") as r:
-        text = r.read().decode()
+    text = http_call(job + "/results/result")[1]
     return text if want_text else list(csv.DictReader(io.StringIO(text)))
 
 
@@ -311,6 +350,27 @@ BACKOFF_SECONDS = 20
 
 def cache_path(cache_dir, gmax, lo, hi):
     return os.path.join(cache_dir, f"g{gmax}_{lo}_{hi}.csv")
+
+
+def with_retries(what, action):
+    """
+    Repeat a whole TAP job through a refusal the archive may not repeat.
+
+    This wraps the job, not the HTTP call: http_call already covers the socket, and what is left
+    here is the archive killing a job server-side, which comes back as a COMPLETED-less phase, not
+    as a network error. Both the count and the fetch go through it -- the count used to be bare,
+    which is enough to end a run that has already spent hours getting there.
+    """
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return action()
+        except Exception:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            wait = BACKOFF_SECONDS * (2 ** attempt)
+            print(f"      {what} refused; backing off {wait}s and asking again "
+                  f"(attempt {attempt + 2}/{MAX_ATTEMPTS})", flush=True)
+            time.sleep(wait)
 
 
 def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
@@ -337,9 +397,10 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
         return
 
     if depth < 16:
-        count = int(tap_query(f"SELECT COUNT(*) AS n FROM gaiadr3.gaia_source "
-                              f"WHERE phot_g_mean_mag < {gmax} "
-                              f"AND source_id >= {lo} AND source_id < {hi}", quiet=True)[0]["n"])
+        count_query = (f"SELECT COUNT(*) AS n FROM gaiadr3.gaia_source "
+                       f"WHERE phot_g_mean_mag < {gmax} "
+                       f"AND source_id >= {lo} AND source_id < {hi}")
+        count = int(with_retries("count", lambda: tap_query(count_query, quiet=True))[0]["n"])
         if count == 0:
             open(cached, "w").write("ra,dec,phot_g_mean_mag,bp_rp\n")
             return
@@ -351,20 +412,10 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
 
     query = (f"SELECT {columns} FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {gmax} "
              f"AND source_id >= {lo} AND source_id < {hi}")
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            text = tap_query(query, want_text=True)
-            with open(cached, "w") as f:   # written before yielding, so a crash still resumes
-                f.write(text)
-            yield list(csv.DictReader(io.StringIO(text)))
-            return
-        except Exception:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            wait = BACKOFF_SECONDS * (2 ** attempt)
-            print(f"      refused; backing off {wait}s and asking again "
-                  f"(attempt {attempt + 2}/{MAX_ATTEMPTS})", flush=True)
-            time.sleep(wait)
+    text = with_retries("fetch", lambda: tap_query(query, want_text=True))
+    with open(cached, "w") as f:   # written before yielding, so a crash still resumes
+        f.write(text)
+    yield list(csv.DictReader(io.StringIO(text)))
 
 
 def fetch(gmax, cone, slices, cache_dir):
