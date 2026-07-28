@@ -1690,6 +1690,42 @@ namespace ExoInstruments
                 SolarSystemCameraTexture.MinGain, SolarSystemCameraTexture.MaxGain);
             GUILayout.EndHorizontal();
 
+            // Cooler setpoint. Only offered where the observer really has the control: the ZWO
+            // camera's thermoelectric cooler is a dial, while FORS2's and SPHERE's cryogenic
+            // detectors sit at a fixed temperature nobody at a VLT is invited to change.
+            //
+            // This is a real physical control, not a readout. Dark current follows it through the
+            // depletion-generation law (Core.DarkCurrentModel), hot pixels follow with it because
+            // they are dark current, and CCD-TEMP in the exported header reports what was used.
+            GUILayout.BeginHorizontal();
+            if (SolarSystemCameraTexture.HasAdjustableCooler)
+            {
+                double setpoint = SolarSystemCameraTexture.DetectorTemperatureCelsius;
+                double reference = SolarSystemCameraTexture.ActiveTelescope.DetectorTemperatureCelsius;
+                double darkNow = Core.DarkCurrentModel.ElectronsPerSecond(
+                    SolarSystemCameraTexture.ActiveTelescope.DarkCurrentElectronsPerSecond, reference, setpoint);
+
+                GUILayout.Label($"Cooler ({setpoint:F0} C)", GUILayout.Width(150));
+                float newSetpoint = GUILayout.HorizontalSlider(
+                    (float)setpoint,
+                    (float)SolarSystemCameraTexture.CoolerMinimumTemperatureCelsius,
+                    (float)SolarSystemCameraTexture.CoolerMaximumTemperatureCelsius);
+                if (Mathf.Abs(newSetpoint - (float)setpoint) > 0.01f)
+                    SolarSystemCameraTexture.DetectorTemperatureCelsius = newSetpoint;
+                GUILayout.Label($"{darkNow:G3} e-/px/s", GUILayout.Width(110));
+            }
+            else
+            {
+                double fixedTemp = SolarSystemCameraTexture.ActiveTelescope.DetectorTemperatureCelsius;
+                GUILayout.Label("Cooler", GUILayout.Width(150));
+                GUILayout.Label(
+                    double.IsNaN(fixedTemp)
+                        ? "not modelled for this instrument -- no published operating temperature"
+                        : $"fixed at {fixedTemp:F0} C -- cryogenic detector, not an observer control",
+                    smallCaptionStyle);
+            }
+            GUILayout.EndHorizontal();
+
             // Filter wheel -- only the active telescope's real filters (VisualTelescopeSpec.
             // AvailableFilters). Most instruments have all five; one that genuinely lacks a
             // filter (e.g. SPHERE/ZIMPOL has no real blue filter) simply doesn't offer it here,
@@ -1782,11 +1818,102 @@ namespace ExoInstruments
             }
             GUILayout.EndHorizontal();
 
+            // Calibration frames. Deliberately NOT gated on canExpose: the shutter stays closed, so
+            // there is nothing to be night for and nothing to be above the horizon. That is the
+            // point of them -- a real observer takes darks with the dome shut, in daylight, whenever
+            // the detector is at the temperature the lights were taken at.
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
+            if (GUILayout.Button("Save bias frame", GUILayout.Height(24), GUILayout.Width(180)))
+                SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType.Bias);
+            if (GUILayout.Button($"Save dark ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Height(24), GUILayout.Width(180)))
+                SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType.Dark);
+            GUI.enabled = true;
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+            GUILayout.Label(
+                "A dark is only valid for lights of the same exposure, gain, binning and cooler setpoint.",
+                smallCaptionStyle);
+            if (!string.IsNullOrEmpty(lastCalibrationFrameMessage))
+                GUILayout.Label(lastCalibrationFrameMessage, smallCaptionStyle);
+
             if (!canExpose)
             {
                 GUILayout.Label("Can't expose right now: it must be night and the body above the horizon.", smallCaptionStyle);
             }
             GUILayout.EndVertical();
+        }
+
+        /// <summary>Status line under the calibration buttons: where the last frame went, or why it didn't.</summary>
+        string lastCalibrationFrameMessage;
+
+        /// <summary>
+        /// Writes a shutter-closed calibration frame to disk as FITS.
+        ///
+        /// It goes through the same detector chain a science frame does (see
+        /// SolarSystemCameraTexture.CaptureCalibrationFrameAdu), so subtracting it from a light of
+        /// matching exposure, gain, binning and temperature removes exactly what it should: the
+        /// pedestal, the dark current, and the hot pixels that are made of dark current.
+        ///
+        /// No WCS and no zero point: the shutter was shut, so the frame points nowhere and measures
+        /// no flux. Writing either would describe a frame this is not -- the same standard the
+        /// stacked composite is already held to.
+        /// </summary>
+        void SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType type)
+        {
+            float exposureUsed;
+            double biasLevel;
+            float[] adu = solarSystemCamera.CaptureCalibrationFrameAdu(
+                type, solarSystemCamera.ExposureSeconds, out exposureUsed, out biasLevel);
+
+            if (adu == null)
+            {
+                lastCalibrationFrameMessage = "Calibration frame unavailable: the camera has not been built yet.";
+                return;
+            }
+
+            string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
+            System.IO.Directory.CreateDirectory(dir);
+            string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
+            bool isDark = type == SolarSystemCameraTexture.CalibrationFrameType.Dark;
+            string kind = isDark ? "dark" : "bias";
+
+            var fitsInfo = new FitsWriter.FitsHeaderInfo
+            {
+                ExposureSeconds = exposureUsed,
+                PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
+                FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
+                AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
+                ElectronsPerAdu = solarSystemCamera.LastCalibrationElectronsPerAdu,
+                SaturationAdu = solarSystemCamera.LastCalibrationSaturationElectrons
+                                / Math.Max(1e-9, solarSystemCamera.LastCalibrationElectronsPerAdu),
+                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                Gain = solarSystemCamera.Gain,
+                IsCalibratedAdu = true,   // genuinely raw converter counts, which is the whole point
+                FilterName = FilterLabel(solarSystemCamera.Filter),
+                ObjectName = kind.ToUpperInvariant(),
+                UtcTimestamp = DateTime.UtcNow,
+                ImageType = isDark ? "Dark Frame" : "Bias Frame",
+            };
+            FillCommonFitsMetadata(ref fitsInfo);
+
+            // Overwrite the light-frame values FillCommonFitsMetadata copied from the last science
+            // capture: this frame has its own seed and its own conversion, and no zero point at all.
+            fitsInfo.RandomSeed = solarSystemCamera.LastCalibrationSeed;
+            fitsInfo.BiasLevelAdu = biasLevel;
+            fitsInfo.PhotometricZeroPoint = double.NaN;
+            fitsInfo.DarkCurrentElectronsPerSecond = solarSystemCamera.LastCalibrationDarkPerSecond;
+            fitsInfo.Airmass = double.NaN;
+            fitsInfo.SeeingFwhmArcsec = double.NaN;
+            fitsInfo.SkyBrightnessVMagPerArcsec2 = double.NaN;
+
+            string path = System.IO.Path.Combine(dir, $"ExoInstruments_{kind}_{stamp}.fits");
+            FitsWriter.WriteGrayscale(path, adu,
+                SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
+
+            lastCalibrationFrameMessage = isDark
+                ? $"Dark frame saved ({FormatExposure(exposureUsed)}, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}"
+                : $"Bias frame saved (0 s, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}";
         }
 
         /// <summary>

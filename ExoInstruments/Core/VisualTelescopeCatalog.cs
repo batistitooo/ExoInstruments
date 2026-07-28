@@ -78,6 +78,43 @@ namespace ExoInstruments.Core
             return DefaultBiasLevelAdu(ReadNoiseElectrons, electronsPerAdu);
         }
 
+        /// <summary>
+        /// How far below ambient this camera's thermoelectric cooler can hold the sensor, in
+        /// degrees. Zero means the setpoint is NOT adjustable, which for this roster is the honest
+        /// description of the professional instruments: FORS2 and SPHERE run their detectors at a
+        /// fixed cryogenic temperature, and no observer at a VLT unit telescope is offered a dial.
+        ///
+        /// A TEC figure is published as a DELTA rather than an absolute temperature because that is
+        /// what the device can actually do -- it pumps heat, so where it lands depends on where it
+        /// starts. That is also the caveat on it: ZWO measure their delta at 30 C ambient and state
+        /// that it falls as ambient does, so at a cold mountain site the true reachable minimum is
+        /// warmer than SiteAmbientTemperatureCelsius minus this. The cold end of the range below is
+        /// therefore optimistic, by an amount no manufacturer publishes.
+        /// </summary>
+        public double CoolerDeltaBelowAmbientC;
+
+        /// <summary>
+        /// Ambient air temperature at the site, Celsius -- the temperature the cooler works against.
+        ///
+        /// An annual mean from published climate records for the site's own location, NOT a
+        /// night-time or observatory-logged figure: a real observer cools against the air at 3 a.m.
+        /// in whatever season it is, and neither KSP nor this mod has a weather model to derive that
+        /// from. So it is a single representative number, stated as one, and it moves the reachable
+        /// floor rather than any measurement made through the instrument.
+        /// </summary>
+        public double SiteAmbientTemperatureCelsius = double.NaN;
+
+        /// <summary>True when this instrument's detector temperature is a control the observer actually has.</summary>
+        public bool HasAdjustableCooler =>
+            CoolerDeltaBelowAmbientC > 0.0 && !double.IsNaN(SiteAmbientTemperatureCelsius);
+
+        /// <summary>Coldest setpoint the cooler can hold at this site.</summary>
+        public double CoolerMinimumTemperatureCelsius =>
+            SiteAmbientTemperatureCelsius - CoolerDeltaBelowAmbientC;
+
+        /// <summary>Warmest setpoint worth offering: ambient, since a cooler cannot heat the sensor above the air around it.</summary>
+        public double CoolerMaximumTemperatureCelsius => SiteAmbientTemperatureCelsius;
+
         // Optics
         public double ApertureMeters;
         public double FocalLengthMeters;
@@ -393,6 +430,13 @@ namespace ExoInstruments.Core
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Observatoire de Haute-Provence",
             DetectorTemperatureCelsius = -20.0,
+            // Two-stage TEC, "more than 35 degrees Celsius below ambient" (zwoastro.com ASI294 Pro
+            // series), which ZWO measure at 30 C ambient and state falls as ambient does -- so the
+            // cold end this implies at a mountain site is optimistic, as CoolerDeltaBelowAmbientC
+            // records. Ambient is the annual mean air temperature at Saint-Michel-l'Observatoire,
+            // 11.8 C (climate-data.org), the commune OHP stands in.
+            CoolerDeltaBelowAmbientC = 35.0,
+            SiteAmbientTemperatureCelsius = 11.8,
 
             ApertureMeters = 0.51,
             FocalLengthMeters = 0.51 * 6.8,
@@ -517,6 +561,8 @@ namespace ExoInstruments.Core
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Observatoire de Haute-Provence",
             DetectorTemperatureCelsius = -20.0,
+            CoolerDeltaBelowAmbientC = 35.0,        // same camera and same site as the RC20 -- see its comment
+            SiteAmbientTemperatureCelsius = 11.8,
 
             ApertureMeters = 0.051,
             FocalLengthMeters = 0.250,
@@ -630,6 +676,11 @@ namespace ExoInstruments.Core
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Palomar Observatory",
             DetectorTemperatureCelsius = -20.0,
+            // Same ZWO camera as the RC20 (see its comment for the delta and its caveat); different
+            // site, so a different ambient to cool against. Palomar Mountain's published annual
+            // high and low are 65 F and 47 F (usclimatedata.com), a mean of 56 F = 13.3 C.
+            CoolerDeltaBelowAmbientC = 35.0,
+            SiteAmbientTemperatureCelsius = 13.3,
 
             ApertureMeters = 1.000,
             FocalLengthMeters = 6.000,

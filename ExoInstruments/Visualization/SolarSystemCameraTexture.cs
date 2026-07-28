@@ -123,6 +123,11 @@ namespace ExoInstruments.Visualization
             Gain = Mathf.Clamp(Gain, MinGain, MaxGain);
             if (spec.AlwaysAutoguided) Autoguiding = true;
             if (Array.IndexOf(spec.AvailableFilters, Filter) < 0) Filter = CameraFilter.Luminance;
+
+            // A cooler setpoint belongs to the camera that was on the telescope, not to the
+            // observer: carrying -30 C from a TEC-cooled ZWO onto FORS2's cryogenic detector would
+            // be meaningless, and the two instruments' reachable ranges do not even overlap.
+            ResetCoolerSetpoint();
         }
 
         /// <summary>Real effective light-collecting area (m^2): full aperture minus the real secondary-mirror obstruction. Shared by SetActiveTelescope's exposure rescaling and RealApertureAreaCm2's per-frame photon-flux calc -- same physical quantity, different units for each caller's convenience.</summary>
@@ -482,22 +487,43 @@ namespace ExoInstruments.Visualization
         private ulong lastCaptureSeed;
 
         /// <summary>
-        /// The detector's actual temperature in Celsius. Defaults to the instrument's own published
-        /// operating temperature, which is what every instrument runs at today, so the dark-current
-        /// scaling in Core.DarkCurrentModel is currently an identity.
+        /// The detector's actual temperature in Celsius: the cooler setpoint on an instrument that
+        /// has one, and the instrument's fixed operating temperature on one that does not.
         ///
-        /// It is settable because the cooler setpoint is a real control on a real camera and this
-        /// is the hook a GUI slider would drive: once one exists, dark current, hot pixels and the
-        /// CCD-TEMP header all follow it through published physics with no further plumbing.
+        /// Setting it moves real physics, not a label. Dark current follows the depletion-generation
+        /// law (Core.DarkCurrentModel), hot pixels follow with it because they ARE dark current, and
+        /// CCD-TEMP in the exported header reports what was actually used. Clamped to what the
+        /// instrument's own cooler can reach, so the control cannot promise a temperature the
+        /// hardware could not hold.
         /// </summary>
         public static double DetectorTemperatureCelsius
         {
-            get => double.IsNaN(detectorTemperatureOverrideCelsius)
-                 ? Spec.DetectorTemperatureCelsius
-                 : detectorTemperatureOverrideCelsius;
-            set => detectorTemperatureOverrideCelsius = value;
+            get
+            {
+                if (double.IsNaN(detectorTemperatureOverrideCelsius)) return Spec.DetectorTemperatureCelsius;
+                return ClampToCoolerRange(detectorTemperatureOverrideCelsius);
+            }
+            set => detectorTemperatureOverrideCelsius = ClampToCoolerRange(value);
         }
         private static double detectorTemperatureOverrideCelsius = double.NaN;
+
+        /// <summary>True when the active instrument's detector temperature is a control the observer has (see VisualTelescopeSpec.CoolerDeltaBelowAmbientC).</summary>
+        public static bool HasAdjustableCooler => Spec.HasAdjustableCooler;
+
+        /// <summary>Coldest and warmest setpoint the active instrument's cooler can hold.</summary>
+        public static double CoolerMinimumTemperatureCelsius => Spec.CoolerMinimumTemperatureCelsius;
+        public static double CoolerMaximumTemperatureCelsius => Spec.CoolerMaximumTemperatureCelsius;
+
+        /// <summary>Returns the setpoint to the instrument's own published operating temperature -- the one its catalogued dark current was measured at, so the model is back on its calibration point.</summary>
+        public static void ResetCoolerSetpoint() => detectorTemperatureOverrideCelsius = double.NaN;
+
+        private static double ClampToCoolerRange(double celsius)
+        {
+            if (double.IsNaN(celsius)) return celsius;
+            if (!Spec.HasAdjustableCooler) return Spec.DetectorTemperatureCelsius;
+            return Math.Max(Spec.CoolerMinimumTemperatureCelsius,
+                            Math.Min(Spec.CoolerMaximumTemperatureCelsius, celsius));
+        }
 
         /// <summary>Charge at which the last capture stopped responding -- the smaller of the physical well and the converter's ceiling.</summary>
         public double LastSaturationElectrons => lastSaturationElectrons;
@@ -2009,9 +2035,6 @@ namespace ExoInstruments.Visualization
                 inputs.TargetSeed, (long)(inputs.Ut * 1000.0), (long)inputs.Filter, BinningFactor);
             lastCaptureSeed = captureSeed;
 
-            var rng = new Pcg32(captureSeed, Pcg32.StreamShotNoise);
-            var rngRead = new Pcg32(captureSeed, Pcg32.StreamReadNoise);
-            var rngCosmic = new Pcg32(captureSeed, Pcg32.StreamCosmicRays);
             var rngScint = new Pcg32(captureSeed, Pcg32.StreamScintillation);
 
             float scintJitter = ScintillationMultiplier(rngScint, inputs.ScintSigma);
@@ -2091,6 +2114,88 @@ namespace ExoInstruments.Visualization
             // it unchanged, so adding it after the PSF is exact and saves a transform.
             float skyElectrons = (float)Math.Max(0.0, inputs.SkyElectronsPerPixel);
 
+            // Everything from charge collection to the converter's output, in one place so that a
+            // calibration frame (CaptureCalibrationFrameAdu) goes through the SAME chain rather
+            // than a second copy of it free to drift.
+            DetectorChainResult chain = RunDetectorChain(
+                signal, skyElectrons, darkElectrons,
+                inputs.ExposureSeconds, inputs.IsoGain, captureSeed, rawScratch, pixels);
+
+            lastSaturatedFraction = chain.SaturatedFraction;
+            lastElectronsPerAdu = chain.ElectronsPerAdu;
+            lastSaturationElectrons = chain.SaturationElectrons;
+            lastBiasLevelAdu = chain.BiasLevelAdu;
+
+            // The zero point, so the exported frame can actually be turned back into magnitudes:
+            //   m = -2.5 log10(ADU/s) + ZP,   ZP = 2.5 log10(F0 * W * A * T_nd / K)
+            // which is just the pipeline's own photometry equation solved for m. Quoted for a FLAT
+            // source spectrum, as a zero point always is -- a real star's own colour enters through
+            // its own effective width, which is the colour term (see SystemBandpass). It lives here
+            // rather than in the detector chain because it describes the OPTICS as much as the
+            // sensor, and a calibration frame taken with the shutter closed has no zero point.
+            double ndTransmission = NdFilterTransmission(NdFilter);
+            double apertureAreaCm2 = RealApertureAreaCm2();
+            double flatWidthAngstrom = inputs.Response != null ? inputs.Response.EffectiveWidthAngstromFlat : 0.0;
+            lastPhotometricZeroPoint =
+                (flatWidthAngstrom > 0.0 && apertureAreaCm2 > 0.0 && chain.ElectronsPerAdu > 0.0 && ndTransmission > 0.0)
+                    ? 2.5 * Math.Log10(PhotonFluxModel.ZeroMagPhotonFluxPerAngstrom
+                                       * flatWidthAngstrom * apertureAreaCm2 * ndTransmission / chain.ElectronsPerAdu)
+                    : double.NaN;
+
+            if (lastAduFrame == null || lastAduFrame.Length != n) lastAduFrame = new float[n];
+            Array.Copy(rawScratch, lastAduFrame, n);
+
+            // No defect overlay here any more. Hot and dead pixels are applied in the charge domain
+            // (ApplyPixelDefects, above) where they physically originate, so by this point they
+            // have already been through blooming, charge transfer, read noise and digitisation like
+            // every other pixel -- which is what makes them removable by a dark frame and a bad
+            // pixel map instead of being permanent marks on the data.
+            //
+            // The frame stays genuinely raw and uncorrected: AstroImageStack.AddSub still receives
+            // it and cosmetically corrects it against the same fixed defect map before aligning and
+            // stacking, the order real calibration pipelines (PixInsight, IRAF/ccdproc, ESO Reflex)
+            // use -- raw frame -> bad-pixel-map correction -> registration -> stacking.
+
+            return pixels;
+        }
+
+        /// <summary>What the detector chain reports back about the exposure it just digitised.</summary>
+        private struct DetectorChainResult
+        {
+            public double ElectronsPerAdu;
+            public double SaturationElectrons;
+            public double BiasLevelAdu;
+            public float SaturatedFraction;
+        }
+
+        /// <summary>
+        /// Everything between the light landing on the silicon and the converter's output, in the
+        /// order the sensor applies it: charge collection, defects, cosmic rays, full-well overflow,
+        /// charge transfer, readout noise, and digitisation.
+        ///
+        /// Extracted so that a shutter-closed calibration frame runs the SAME code as a science
+        /// frame. That is the whole point of the exercise: a dark frame is only worth subtracting if
+        /// it was produced by the same chain, and a second implementation of the chain -- however
+        /// carefully written -- is free to drift from the first the moment either is edited.
+        ///
+        /// signal may be null, which means no scene light reached the sensor at all. That is not a
+        /// convenience: it is exactly what a closed shutter is.
+        ///
+        /// displayPixels may be null when the caller wants only the converter counts.
+        /// </summary>
+        private DetectorChainResult RunDetectorChain(
+            float[] signal, float skyElectrons, double darkElectrons,
+            float exposureSeconds, float isoGain,
+            ulong seed, float[] raw, Color[] displayPixels)
+        {
+            int n = raw.Length;
+
+            // Each stochastic process on its own stream of the exposure's seed, so that they cannot
+            // correlate and so that adding a draw to one cannot shift the others.
+            var rng = new Pcg32(seed, Pcg32.StreamShotNoise);
+            var rngRead = new Pcg32(seed, Pcg32.StreamReadNoise);
+            var rngCosmic = new Pcg32(seed, Pcg32.StreamCosmicRays);
+
             // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
             // counting process, and the two only agree once the count is large. At the few
             // electrons per pixel a faint sky or a short dark reaches, a Gaussian goes negative
@@ -2098,8 +2203,9 @@ namespace ExoInstruments.Visualization
             // draw real Poisson deviates here.
             for (int i = 0; i < n; i++)
             {
-                double meanElectrons = Math.Max(0.0, signal[i] + skyElectrons + darkElectrons);
-                rawScratch[i] = (float)SamplePoisson(rng, meanElectrons);
+                double sceneElectrons = signal != null ? signal[i] : 0.0;
+                double meanElectrons = Math.Max(0.0, sceneElectrons + skyElectrons + darkElectrons);
+                raw[i] = (float)SamplePoisson(rng, meanElectrons);
             }
 
             // The sensor's own defects, applied HERE -- in the charge domain, alongside the dark
@@ -2119,95 +2225,137 @@ namespace ExoInstruments.Visualization
             // A dead pixel is the converse: no photo response at all, so it collects no signal and
             // no sky, but its silicon still generates dark charge like any other pixel. It reads
             // near the pedestal rather than at exactly zero, and a flat frame is what identifies it.
-            ApplyPixelDefects(rawScratch, signal, skyElectrons, darkElectrons,
-                              binnedDarkPerSecond, inputs.IsoGain, rng);
+            ApplyPixelDefects(raw, signal, skyElectrons, darkElectrons, isoGain, rng);
 
             // Charge-domain effects, in the order the silicon applies them and now on real
             // electron counts against a real well, so the thresholds mean something.
-            ApplyCosmicRays(rawScratch, inputs.ExposureSeconds, rngCosmic);
-            ApplyBlooming(rawScratch, (float)FullWellElectrons);
-            ApplyChargeTransferSmear(rawScratch);
+            ApplyCosmicRays(raw, exposureSeconds, rngCosmic);
+            ApplyBlooming(raw, (float)FullWellElectrons);
+            ApplyChargeTransferSmear(raw);
 
             // Readout: the amplifier's own noise is added in electrons, ahead of the converter,
             // which is where it physically enters.
             float readNoiseElectrons = (float)Spec.ReadNoiseElectrons;
             for (int i = 0; i < n; i++)
-                rawScratch[i] += NextGaussian(rngRead, readNoiseElectrons);
+                raw[i] += NextGaussian(rngRead, readNoiseElectrons);
 
-            // Digitisation. This is the step the old pipeline had no way to express: charge is
-            // divided by the real conversion factor K, truncated to an integer count the way an
-            // ADC actually works, and clipped at the converter's own top code -- which for FORS2
-            // arrives well before its full well ever does.
-            double electronsPerAdu = ElectronsPerAdu(inputs.IsoGain);
+            // Digitisation: charge divided by the real conversion factor K, truncated to an integer
+            // count the way an ADC actually works, and clipped at the converter's own top code --
+            // which for FORS2 arrives well before its full well ever does.
+            var result = new DetectorChainResult
+            {
+                ElectronsPerAdu = ElectronsPerAdu(isoGain),
+                SaturationElectrons = SaturationElectrons(isoGain),
+            };
             int adcMax = AdcMaxCount;
-            double saturationElectrons = SaturationElectrons(inputs.IsoGain);
 
             // The bias pedestal, added ahead of the converter exactly where the readout electronics
             // add it. Without one, the clip at zero below removed the negative half of the read
             // noise wherever a pixel's total charge sat within a read noise of zero -- biasing it
             // upward, destroying the Gaussian shape at the faint floor, and leaving the read noise
             // unmeasurable from the exported data. That regime is rare in a long exposure on a
-            // bright sky, common in a short one, and universal in a dark or bias frame, which is
-            // why the pedestal is a precondition for calibration frames rather than a cosmetic fix.
-            // See VisualTelescopeSpec.BiasLevelAdu for why its VALUE is arbitrary and its PRESENCE
-            // is not.
-            double biasAdu = Spec.EffectiveBiasLevelAdu(electronsPerAdu);
-            lastBiasLevelAdu = biasAdu;
-            double displayRange = Math.Max(1.0, adcMax - biasAdu);
-
-            // The zero point, so the exported frame can actually be turned back into magnitudes:
-            //   m = -2.5 log10(ADU/s) + ZP,   ZP = 2.5 log10(F0 * W * A * T_nd / K)
-            // which is just the pipeline's own photometry equation solved for m. Quoted for a FLAT
-            // source spectrum, as a zero point always is -- a real star's own colour enters through
-            // its own effective width, which is the colour term (see SystemBandpass).
-            double ndTransmission = NdFilterTransmission(NdFilter);
-            double apertureAreaCm2 = RealApertureAreaCm2();
-            double flatWidthAngstrom = inputs.Response != null ? inputs.Response.EffectiveWidthAngstromFlat : 0.0;
-            lastPhotometricZeroPoint =
-                (flatWidthAngstrom > 0.0 && apertureAreaCm2 > 0.0 && electronsPerAdu > 0.0 && ndTransmission > 0.0)
-                    ? 2.5 * Math.Log10(PhotonFluxModel.ZeroMagPhotonFluxPerAngstrom
-                                       * flatWidthAngstrom * apertureAreaCm2 * ndTransmission / electronsPerAdu)
-                    : double.NaN;
+            // bright sky, common in a short one, and UNIVERSAL in the calibration frames this
+            // method now also produces. See VisualTelescopeSpec.BiasLevelAdu for why its VALUE is
+            // arbitrary and its PRESENCE is not.
+            result.BiasLevelAdu = Spec.EffectiveBiasLevelAdu(result.ElectronsPerAdu);
+            double displayRange = Math.Max(1.0, adcMax - result.BiasLevelAdu);
 
             int saturated = 0;
             for (int i = 0; i < n; i++)
             {
-                if (rawScratch[i] >= saturationElectrons) saturated++;
+                if (raw[i] >= result.SaturationElectrons) saturated++;
 
-                double adu = Math.Floor(rawScratch[i] / electronsPerAdu + biasAdu);
+                double adu = Math.Floor(raw[i] / result.ElectronsPerAdu + result.BiasLevelAdu);
                 if (adu < 0.0) adu = 0.0;
                 else if (adu > adcMax) adu = adcMax;
 
-                rawScratch[i] = (float)adu;
+                raw[i] = (float)adu;
 
-                // Display only: bias-subtracted and normalised by the range left above the
-                // pedestal, so the stretch functions keep working on [0,1] and the pedestal does
-                // not read as a grey floor. The calibratable data is the RAW ADU count above,
-                // pedestal included, which is what the FITS export receives.
-                float value = (float)((adu - biasAdu) / displayRange);
-                if (value < 0f) value = 0f; else if (value > 1f) value = 1f;
-                pixels[i] = new Color(value, value, value, 1f);
+                if (displayPixels != null)
+                {
+                    // Display only: bias-subtracted and normalised by the range left above the
+                    // pedestal, so the stretch functions keep working on [0,1] and the pedestal does
+                    // not read as a grey floor. The calibratable data is the RAW ADU count above,
+                    // pedestal included, which is what the FITS export receives.
+                    float value = (float)((adu - result.BiasLevelAdu) / displayRange);
+                    if (value < 0f) value = 0f; else if (value > 1f) value = 1f;
+                    displayPixels[i] = new Color(value, value, value, 1f);
+                }
             }
-            lastSaturatedFraction = n > 0 ? (float)saturated / n : 0f;
-            lastElectronsPerAdu = electronsPerAdu;
-            lastSaturationElectrons = saturationElectrons;
-
-            if (lastAduFrame == null || lastAduFrame.Length != n) lastAduFrame = new float[n];
-            Array.Copy(rawScratch, lastAduFrame, n);
-
-            // No defect overlay here any more. Hot and dead pixels are applied in the charge domain
-            // (ApplyPixelDefects, above) where they physically originate, so by this point they
-            // have already been through blooming, charge transfer, read noise and digitisation like
-            // every other pixel -- which is what makes them removable by a dark frame and a bad
-            // pixel map instead of being permanent marks on the data.
-            //
-            // The frame stays genuinely raw and uncorrected: AstroImageStack.AddSub still receives
-            // it and cosmetically corrects it against the same fixed defect map before aligning and
-            // stacking, the order real calibration pipelines (PixInsight, IRAF/ccdproc, ESO Reflex)
-            // use -- raw frame -> bad-pixel-map correction -> registration -> stacking.
-
-            return pixels;
+            result.SaturatedFraction = n > 0 ? (float)saturated / n : 0f;
+            return result;
         }
+
+        /// <summary>The kind of shutter-closed frame CaptureCalibrationFrameAdu produces.</summary>
+        public enum CalibrationFrameType
+        {
+            /// <summary>Zero exposure: the pedestal and the read noise, and nothing else. What a bias frame is for is measuring exactly those two.</summary>
+            Bias,
+            /// <summary>A real exposure with the shutter closed: everything a bias has, plus dark current, hot pixels and cosmic rays.</summary>
+            Dark,
+        }
+
+        /// <summary>
+        /// A calibration frame, in the detector's own ADU -- the shutter-closed companion to a
+        /// science exposure, and what makes one reducible.
+        ///
+        /// It runs the same RunDetectorChain a science frame does, with no scene light and no sky,
+        /// so what it records is exactly what a real bias or dark records: the pedestal, the read
+        /// noise, and (for a dark) the dark current with its hot pixels and whatever cosmic rays
+        /// arrived. Subtracting a dark of matching exposure and temperature from a light frame
+        /// removes all of it, which is now true of this pipeline in the way it is true of a real
+        /// one -- it was not while hot pixels were stamped on after digitisation.
+        ///
+        /// The exposure is what a dark must match: a dark frame is only valid for lights of the
+        /// SAME exposure time, gain, binning and detector temperature, which is why the caller
+        /// passes the exposure explicitly rather than this reaching for the camera's current one.
+        ///
+        /// Deliberately allocates its own buffer instead of borrowing the capture scratch: this is
+        /// invoked straight from the GUI and a science capture may be in flight on the background
+        /// thread. Returns null if the scene has never been built (no sensor dimensions yet).
+        /// </summary>
+        public float[] CaptureCalibrationFrameAdu(CalibrationFrameType type, float exposureSeconds,
+                                                  out float exposureUsedSeconds, out double biasLevelAdu)
+        {
+            exposureUsedSeconds = type == CalibrationFrameType.Bias
+                ? 0f
+                : Mathf.Clamp(exposureSeconds, MinExposureSeconds, MaxExposureSeconds);
+            biasLevelAdu = 0.0;
+
+            int width = TextureWidth, height = TextureHeight;
+            if (width <= 0 || height <= 0) return null;
+
+            var raw = new float[width * height];
+
+            double darkPerSecond = DarkCurrentModel.ElectronsPerSecond(
+                Spec.DarkCurrentElectronsPerSecond, Spec.DetectorTemperatureCelsius, DetectorTemperatureCelsius);
+            double darkElectrons = darkPerSecond * BinningFactor * BinningFactor * exposureUsedSeconds;
+
+            // Its own seed, mixed from the frame type and exposure as well as the clock, so a bias
+            // and a dark taken in the same instant are not the same noise realisation.
+            ulong seed = Pcg32.MixSeed(
+                DateTime.UtcNow.Ticks, (long)type, (long)(exposureUsedSeconds * 1000f), BinningFactor);
+
+            DetectorChainResult chain = RunDetectorChain(
+                null, 0f, darkElectrons, exposureUsedSeconds, Gain, seed, raw, null);
+
+            biasLevelAdu = chain.BiasLevelAdu;
+            lastCalibrationSeed = seed;
+            lastCalibrationElectronsPerAdu = chain.ElectronsPerAdu;
+            lastCalibrationSaturationElectrons = chain.SaturationElectrons;
+            lastCalibrationDarkPerSecond = darkPerSecond;
+            return raw;
+        }
+
+        /// <summary>Seed, conversion factor, saturation and dark rate of the last calibration frame -- the header fields its FITS export needs, kept apart from the science frame's own.</summary>
+        public ulong LastCalibrationSeed => lastCalibrationSeed;
+        public double LastCalibrationElectronsPerAdu => lastCalibrationElectronsPerAdu;
+        public double LastCalibrationSaturationElectrons => lastCalibrationSaturationElectrons;
+        public double LastCalibrationDarkPerSecond => lastCalibrationDarkPerSecond;
+        private ulong lastCalibrationSeed;
+        private double lastCalibrationElectronsPerAdu = 1.0;
+        private double lastCalibrationSaturationElectrons;
+        private double lastCalibrationDarkPerSecond;
 
         /// <summary>
         /// Redraws the sensor's known defective pixels with their own charge statistics. See the
@@ -2218,19 +2366,28 @@ namespace ExoInstruments.Visualization
         /// sample would keep the array's variance and merely stretch it.
         /// </summary>
         private void ApplyPixelDefects(float[] raw, float[] signal, float skyElectrons,
-                                       double darkElectrons, double binnedDarkPerSecond,
-                                       float isoGain, System.Random rng)
+                                       double darkElectrons, float isoGain, System.Random rng)
         {
             EnsureDefectMap();
             if (raw == null) return;
 
+            // The multiplier is derived at the detector's REFERENCE temperature, not its current
+            // one, and this distinction is the whole physics of it: a hot pixel is hot because of a
+            // fixed impurity concentration in its own silicon, so what it owns is a RATIO to the
+            // array around it. Deriving the ratio from the current rate instead would make it fall
+            // by exactly as much as the dark current rose, and a hot pixel would then look identical
+            // at -20 C and at ambient -- which is the opposite of what warming a sensor does.
+            double referenceBinnedDarkPerSecond =
+                Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor;
+
             double hotMultiplier = DarkCurrentModel.HotPixelDarkMultiplier(
-                binnedDarkPerSecond, Spec.MaxExposureSeconds, SaturationElectrons(isoGain));
+                referenceBinnedDarkPerSecond, Spec.MaxExposureSeconds, SaturationElectrons(isoGain));
 
             foreach (int idx in hotPixelIndices)
             {
                 if (idx < 0 || idx >= raw.Length) continue;
-                double mean = Math.Max(0.0, signal[idx] + skyElectrons + darkElectrons * hotMultiplier);
+                double sceneElectrons = signal != null ? signal[idx] : 0.0;   // null = shutter closed
+                double mean = Math.Max(0.0, sceneElectrons + skyElectrons + darkElectrons * hotMultiplier);
                 raw[idx] = (float)SamplePoisson(rng, mean);
             }
 
