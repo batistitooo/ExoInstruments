@@ -30,7 +30,7 @@ layer but carries no Unity dependency itself. That is deliberate and worth knowi
 harness compile the **real** `VisualTelescopeCatalog`, so the throughput and filter figures it
 checks are the ones the mod ships rather than a second copy free to drift from them.
 
-## What the 65 checks establish
+## What the 64 checks establish
 
 **The new photometry is a generalisation of the old one, not a replacement.** With a flat source
 spectrum, a grey QE and no atmosphere, the integral reproduces `FWHM x QE` exactly (to 1e-12), and
