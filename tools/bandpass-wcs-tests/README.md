@@ -14,6 +14,8 @@ Headless verification of five pieces of `Core/`:
   which replaced the three invented constants that used to draw the display's diffraction spikes.
 - **`FilterCurves.cs`** — ESO's measured FORS2 filter transmission curves, which replaced the
   top-hats of published FWHM the bandpass integral used to assume a shape from.
+- **`GaiaPhotometry.cs`** and the packed-catalogue format — the Gaia-to-Johnson transformations
+  and the binary the user-built star catalogue is written in.
 
 No Unity, no KSP, no game. Everything under test is pure `Core/` C#.
 

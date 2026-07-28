@@ -927,8 +927,8 @@ class Program
 
     // ------------------------------------------------------------------ Gaia catalogue
     //
-    // The optional Gaia catalogue (tools/pack_gaia_catalog.py) writes the SAME binary format the
-    // shipped Tycho-2 one uses, so the runtime cannot tell which it loaded. The fixture is a real
+    // The star catalogue is user-built (tools/pack_gaia_catalog.py); nothing ships. These checks
+    // are the only guard that the packer and the reader still agree. The fixture is a real
     // packed Gaia DR3 cone toward the Galactic centre, 923 stars in 0.3 degrees, kept small enough
     // to commit. If the packer and the reader ever disagree about the format, this is where it shows.
 
@@ -1001,7 +1001,7 @@ class Program
         // The density is the whole point of the exercise.
         double areaDeg2 = Math.PI * 0.3 * 0.3;
         Console.WriteLine($"         density {found.Count / areaDeg2:F0} stars/deg2 toward the Galactic centre at G < 15, "
-                          + $"against Tycho-2's 61.9 all-sky");
+                          + $"against the 61.9 all-sky of the Tycho-2 file this replaced");
         Console.WriteLine();
     }
 

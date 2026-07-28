@@ -26,12 +26,18 @@ namespace ExoInstruments.Core
     /// 9110 naked-eye stars and why that choice is deliberately left alone. A rendered frame
     /// wants completeness over a small solid angle: at 0.22 BSC stars per square degree, a
     /// 0.07 deg^2 frame contains one BSC star about once in every 65 exposures, which is why
-    /// the sky came out empty. Tycho-2 (Hog et al. 2000, A&amp;A 355, L27) carries 2.56 million
-    /// stars complete to V=11.0, or 61 per square degree, so a real and correctly-placed star
-    /// field lands in every frame. Nothing here touches the detection pipeline.
+    /// the sky came out empty. A Gaia DR3 catalogue built with tools/pack_gaia_catalog.py carries
+    /// thousands of stars per square degree, so a real and correctly-placed star field lands in
+    /// every frame. Nothing here touches the detection pipeline.
     ///
-    /// Loaded once and held: the packed file is ~29 MB and a cone search reads only the
-    /// declination bands the field of view actually overlaps.
+    /// NOTHING SHIPS. The catalogue is user-supplied, because the useful depths cannot be
+    /// distributed: Gaia's own counts put G &lt; 14 at 443 MB and G &lt; 16 at 1.9 GB in this
+    /// format. A Tycho-2 file used to ship and was the worst of both worlds, 29.3 MB carried to
+    /// deliver about four stars per RC20 frame. With no file installed the sky behind a
+    /// photographed body is simply empty, which is honest rather than misleadingly sparse.
+    ///
+    /// Loaded once and held; a cone search reads only the declination bands the field of view
+    /// actually overlaps, so search cost tracks the field rather than the catalogue.
     ///
     /// Pure C# apart from the file read, with no Unity or KSP types, so a search can run on the
     /// background imaging thread.
@@ -40,7 +46,7 @@ namespace ExoInstruments.Core
     {
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'S', (byte)'T', (byte)'A', (byte)'R', (byte)'1' };
 
-        // Must match tools/pack_star_catalog.py, which writes the file.
+        // Must match tools/pack_gaia_catalog.py, which writes the file.
         private const int FormatVersion = 2;
         private const double VMagOffset = 2.0;
         private const short BvUnknown = -32768;
@@ -258,9 +264,9 @@ namespace ExoInstruments.Core
         /// centre, so it produced the narrowest bracket exactly where the widest was needed.
         ///
         /// The effect was a thin crescent of stars silently dropped at the edge of every search
-        /// cone. It went unnoticed while the shipped Tycho-2 catalogue put about four stars in a
-        /// frame; it surfaced immediately against an optional Gaia catalogue, where a 0.3 degree
-        /// cone holds 923 stars and 8 of them went missing.
+        /// cone. It went unnoticed while the catalogue then shipped put about four stars in a
+        /// frame; it surfaced immediately against Gaia, where a 0.3 degree cone holds 923 stars
+        /// and 8 of them went missing.
         /// </summary>
         private double WidestRaDeclinationInBand(int band, double centreDecDeg)
         {

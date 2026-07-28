@@ -62,9 +62,9 @@ This project uses a proprietary license. It is not a Creative Commons license: r
   - **VLT FORS2**: the real Very Large Telescope, Unit Telescope 1 "Antu", 8.2m, carrying FORS2's real imager: a mosaic of two MIT/Lincoln-Lab CCID20 CCDs at their own real published plate scale, full well, gain, and read noise; always autoguided, since a real 8.2m research telescope has no unguided operating mode.
   - **VLT SPHERE**: the same VLT, Unit Telescope 3 "Melipal", carrying the real SPHERE/ZIMPOL extreme-adaptive-optics imaging polarimeter. Where FORS2 is limited by ordinary atmospheric seeing no matter the mirror size, SPHERE's SAXO adaptive-optics system corrects that turbulence in real time, reaching a real, published resolution around 25 milliarcseconds, tens of times finer. The tradeoff is real too: ZIMPOL's actual field of view is barely 3.6 arcseconds wide, and it has no blue filter at all.
 
-- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied — instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from **Tycho-2** (Høg et al. 2000), 2.5 million real stars complete to eleventh magnitude, placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails — along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
+- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied — instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from a **Gaia DR3** catalogue you build yourself (see below; nothing ships, and without one the sky is simply empty), placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails — along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
 
-  *Note: the exoplanet detection pipeline is untouched. It keeps searching the small Bright Star Catalogue on purpose, so finding a transit stays a tractable hunt; the Tycho-2 catalogue exists only to fill in what a camera sees.*
+  *Note: the exoplanet detection pipeline is untouched. It keeps searching the small Bright Star Catalogue on purpose, so finding a transit stays a tractable hunt; the rendered star catalogue exists only to fill in what a camera sees.*
 
 - **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: cosmetic (bad-pixel-map) correction before alignment (the same calibration step real pipelines like PixInsight and IRAF/ccdproc run before registration), optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail; the same reason real astrophotographers shoot many short exposures instead of one long one. An optional **lucky imaging** mode keeps only the sharpest subs (ranked by a real variance-of-Laplacian focus metric, Pech-Pacheco et al. 2000) before stacking, following the same selective-frame principle real lucky imaging uses to beat atmospheric seeing (Fried 1978).
 
@@ -169,14 +169,20 @@ A capture is monochrome — one value per pixel — but the pipeline currently s
 
 **2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
-## Optional: a deeper star field with Gaia DR3
+## The star field is user-supplied: build it from Gaia DR3
 
-The mod ships a **Tycho-2** catalogue (29.3 MB, 2.5 million stars, complete to about V = 11.5).
-That is 61.9 stars/deg², so an RC20 frame holds roughly **four** real stars where a real 30-second
-sub-exposure holds hundreds. Everything fainter is simply not there.
+**No star catalogue ships with the mod.** Without one, the sky behind a photographed body is empty.
+Building one is a single command and gives you a real, correctly-placed, correctly-coloured star
+field in every frame.
 
-You can replace it with **Gaia DR3** and get the real thing. It is not shipped because of what it
-weighs. These are Gaia's own measured counts, at the 12 bytes/star this format uses:
+### Why nothing ships
+
+The mod used to ship **Tycho-2**: 29.3 MB for 2.5 million stars complete to about V = 11.5. That is
+61.9 stars/deg², so an RC20 frame held roughly **four** stars where a real 30-second sub holds
+hundreds. It was the worst of both worlds, 29.3 MB carried to deliver a sky that still looked empty.
+
+A real star field means Gaia, and Gaia's own measured counts say what that weighs at the 12
+bytes/star this format uses:
 
 | Faint limit | Stars | File, and RAM while playing |
 |---|---|---|
@@ -186,7 +192,8 @@ weighs. These are Gaia's own measured counts, at the 12 bytes/star this format u
 | G < 16 | 157.7 M | **1.9 GB** |
 | G < 18 | 577.2 M | **6.9 GB** |
 
-None of that belongs in a mod download. On your own disk it is fine.
+None of that belongs in a mod download. On your own disk it is fine. So the choice is a real star
+field or an honestly empty one, rather than a heavy download that delivers neither.
 
 ### Building it
 
@@ -201,14 +208,15 @@ Then copy the result to:
 <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin
 ```
 
-The mod prefers that file whenever it exists and falls back to the shipped Tycho-2 one when it does
-not. The log line on startup tells you which one it loaded. To go back, delete or rename the file.
+That is the only star catalogue the renderer looks for. The log line on startup tells you whether
+it found one. To go back to an empty sky, delete or rename the file.
 
 ### Choosing a depth
 
 The whole catalogue is held in memory, so the table above is also the RAM cost, **on top of KSP
-itself**. `G < 13` is a safe first try and is already about seven times Tycho-2's density; `G < 14`
-is as deep as most machines will want. Beyond that, know what your RAM is doing.
+itself**. `G < 13` is a safe first try and already about seven times the density of the Tycho-2 file
+this replaces; `G < 14` is as deep as most machines will want. Beyond that, know what your RAM is
+doing.
 
 Search cost does *not* grow with catalogue size (the format is banded in declination and
 binary-searched in right ascension, so a frame only ever touches the stars near it). What does grow
@@ -216,8 +224,8 @@ is how many stars get drawn per frame, which is the entire point.
 
 ### What you actually get
 
-A 0.3° cone toward the Galactic centre at `G < 15` holds **3264 stars/deg²** against Tycho-2's 61.9
-all-sky: about **220 stars in a single RC20 frame** instead of four.
+A 0.3° cone toward the Galactic centre at `G < 15` holds **3264 stars/deg²**: about **220 stars in a
+single RC20 frame**.
 
 Photometry is converted from Gaia's G and G_BP − G_RP to the Johnson V and B−V the rest of the mod
 works in, using **Gaia's own published relations** (DR3 documentation Table 5.9). This matters more
@@ -225,8 +233,8 @@ than it sounds: a heavily reddened bulge star has `G − V = −3.56`, so a `G <
 V = 18.6 for the reddest stars. Stars with no measured Gaia colour keep G as V and are flagged as
 colourless rather than given an invented colour.
 
-Proper motions are dropped, as they are for Tycho-2: at the finest plate scale modelled here they
-would move a typical field star by one pixel every few years of in-game time.
+Proper motions are dropped: at the finest plate scale modelled here they would move a typical field
+star by one pixel every few years of in-game time.
 
 ## Future Roadmap
 
@@ -234,7 +242,7 @@ Not yet implemented in the current build:
 
 - **Autoguiding as a paid career upgrade** for the RC20, rather than a free toggle.
 - **Further real astrograph features** surveyed but not built: plate-solving, flat-frame calibration, meridian flip, dithering.
-- **Stars fainter than the catalogue.** Tycho-2 stops around eleventh magnitude, but a half-minute exposure on a 20-inch telescope reaches far fainter, so a real frame would hold hundreds of stars where this one holds a handful. Filling that in means generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) rather than shipping a larger catalogue — the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
+- **A faint population without the download.** Building a Gaia catalogue solves depth for anyone willing to spend the disk and the RAM, but a player who installs nothing still gets an empty sky. Generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) would give a plausible field at zero download — the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
 - **Naming rights & a discovery archive.** Player-named planets on confirmation, plus an auto-generated logbook entry (light curve, date, instrument) per detection.
 - **Weather in the generic instrument forecast.** EVE cloud cover is already hooked into the RC20's solar-system forecast; extending it to the exoplanet-instrument heatmap (SPECULOOS, ELT, and the other ground-based facilities) is still open.
 - **Two additional KSC observatory buildings**, each a different real telescope type, planned as further additions alongside the current one.

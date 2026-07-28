@@ -434,7 +434,8 @@ namespace ExoInstruments.Core
         /// Barlow in -- so three planetary frames in four contain no catalogue star at all, and
         /// the star field the pipeline can draw is invisible for want of anything to draw.
         /// 250mm of focal length through the same sensor gives 4.40x2.99 degrees, 13.2 deg^2,
-        /// and about 816 catalogue stars in every single exposure. Nothing about the renderer
+        /// and about 800 stars in every single exposure at that same density, far more with a
+        /// deep Gaia catalogue installed. Nothing about the renderer
         /// changed; the instrument was simply pointed at the wrong end of the problem.
         ///
         /// Sampling: 3.82"/px unbinned, against 2.5" seeing at OHP. That is genuinely

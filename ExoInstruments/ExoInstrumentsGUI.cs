@@ -274,31 +274,28 @@ namespace ExoInstruments
         /// </summary>
         private void LoadRenderedStarCatalog()
         {
-            // An optional, user-supplied Gaia catalogue takes precedence over the shipped
-            // Tycho-2 one. It cannot ship: Gaia's own counts put G < 14 at 443 MB and G < 16 at
-            // 1.9 GB in this format, so anyone who wants that depth builds it themselves with
-            // tools/pack_gaia_catalog.py. Both files use the same format and the same Johnson
-            // V / B-V photometry, so nothing downstream can tell which one it got.
-            string pluginData = KSPUtil.ApplicationRootPath + "GameData/ExoInstruments/PluginData/";
-            string gaiaPath = pluginData + "GaiaStarCatalog.bin";
-            string tychoPath = pluginData + "RenderedStarCatalog.bin";
-
-            bool usingGaia = System.IO.File.Exists(gaiaPath);
-            string path = usingGaia ? gaiaPath : tychoPath;
+            // The star catalogue is USER-SUPPLIED and nothing ships. A Tycho-2 file used to,
+            // and it was the worst of both worlds: 29.3 MB carried to deliver about four stars
+            // per RC20 frame, where a real 30 s sub holds hundreds. Gaia can deliver the real
+            // thing but cannot ship either, at 443 MB for G < 14 and 1.9 GB for G < 16 in this
+            // format. So the choice is a real star field or an honestly empty one, and building
+            // it is one command: see tools/pack_gaia_catalog.py and the README.
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin";
             try
             {
                 if (!System.IO.File.Exists(path))
                 {
-                    Debug.LogWarning($"[ExoInstruments] Rendered star catalog not found at {path}. "
-                                   + "Photographs will have an empty sky background.");
+                    Debug.Log("[ExoInstruments] No star catalogue installed, so photographs will "
+                            + "have an empty sky behind their subject. To render a real star "
+                            + "field, build one with tools/pack_gaia_catalog.py and place it at "
+                            + path + " -- see the README for depths and their memory cost.");
                     return;
                 }
                 var catalog = new RenderedStarCatalog();
                 catalog.Load(path);
                 SolarSystemCameraTexture.StarCatalog = catalog;
-                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} "
-                        + (usingGaia ? "Gaia DR3" : "Tycho-2") + " stars loaded"
-                        + (usingGaia ? " (optional catalogue, see the README)." : "."));
+                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Gaia DR3 stars loaded.");
             }
             catch (Exception e)
             {

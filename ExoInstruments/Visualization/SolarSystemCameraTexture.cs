@@ -908,7 +908,7 @@ namespace ExoInstruments.Visualization
             // artistic texture with no photometric meaning, and the pipeline would fold it into
             // the same electron budget as the target and scale it by whatever that target's
             // brightness happened to be. It also double-counts: its painted stars would sit on
-            // top of the real, correctly-placed, correctly-illuminated Tycho-2 stars this
+            // top of the real, correctly-placed, correctly-illuminated catalogue stars this
             // pipeline now draws itself.
             //
             // Everything the background should contain is modelled instead, in real V surface

@@ -8,7 +8,7 @@ It compiles the `Core/` sources directly (they carry no Unity or KSP dependency,
 point of keeping them pure) so none of this needs the game running.
 
 ```bash
-dotnet run -c Release -p:Core=../../ExoInstruments/Core -- ../../ExoInstruments/PluginData/RenderedStarCatalog.bin
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- ../../ExoInstruments/PluginData/GaiaStarCatalog.bin
 ```
 
 The catalogue argument is optional; without it the catalogue and end-to-end sections are

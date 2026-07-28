@@ -3,13 +3,16 @@
 Packs Gaia DR3 into the same compact binary RenderedStarCatalog reads, as an OPTIONAL
 replacement for the shipped Tycho-2 catalogue.
 
-WHY THIS IS OPTIONAL, AND WHY IT CANNOT SHIP
---------------------------------------------
-The shipped Tycho-2 file is 29.3 MB for 2.5M stars complete to V~11.5, which is 61.9
-stars/deg^2: about 4 real stars in an RC20 frame, where a real 30 s sub holds hundreds.
-Closing that gap means going several magnitudes deeper, and Gaia's own measured counts
-say what that costs (queried from gaiadr3.gaia_source, cumulative, at this format's
-12 bytes/star):
+WHY NOTHING SHIPS
+-----------------
+The mod ships NO rendered star catalogue at all. It used to ship Tycho-2, 29.3 MB for
+2.5M stars complete to V~11.5, which is 61.9 stars/deg^2: about 4 real stars in an RC20
+frame where a real 30 s sub holds hundreds. That is not a star field, it is a rounding
+error, and carrying 29.3 MB to deliver it was the worst of both worlds. The choice is now
+a real star field or none.
+
+Gaia's own measured counts say what a real one costs (queried from gaiadr3.gaia_source,
+cumulative, at this format's 12 bytes/star):
 
     G < 13   16.8M stars    202 MB
     G < 14   36.9M stars    443 MB
@@ -18,8 +21,9 @@ say what that costs (queried from gaiadr3.gaia_source, cumulative, at this forma
     G < 18  577.2M stars    6.9 GB
 
 None of that can go in a mod download. It CAN sit on the disk of someone who wants it,
-which is what this tool is for: run it once, drop the result in PluginData, and the mod
-uses it instead of Tycho-2. Nothing else changes.
+which is what this tool is for: run it once, drop the result in PluginData, and frames
+get a real star field. Without it the sky behind a photographed body is simply empty,
+which is at least honestly empty rather than misleadingly sparse.
 
 CHOOSING A DEPTH
 ----------------
@@ -46,11 +50,11 @@ polynomials Core/GaiaPhotometry.cs applies at runtime:
 valid for -0.5 < x < 5.0 (Table 5.10), scatter 0.03017 mag. B-V is obtained by inverting
 the second polynomial numerically, because Gaia publishes only that direction. A star with
 no measured colour keeps its G as V and is flagged as colourless rather than given an
-invented colour, exactly as the Tycho-2 packer does for a star with no BT.
+invented colour.
 
-PROPER MOTIONS are dropped, for the same reason as in the Tycho-2 packer: the finest plate
-scale modelled here is ~0.03 arcsec/px and Gaia's proper motions would move a typical field
-star by one pixel every few years of in-game time.
+PROPER MOTIONS are dropped: the finest plate scale modelled here is ~0.03 arcsec/px and
+Gaia's proper motions would move a typical field star by one pixel every few years of
+in-game time.
 
 USAGE
 -----
@@ -68,8 +72,7 @@ tools/bandpass-wcs-tests uses and is a quick way to check the pipeline end to en
 
 Then copy the result to:
     <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.bin
-The mod prefers that file when it exists and falls back to the shipped Tycho-2 one when
-it does not. See the README.
+That is the only star catalogue the renderer looks for. See the README.
 """
 
 import argparse
@@ -77,15 +80,31 @@ import os
 import struct
 import sys
 
-# --- The packed format ---------------------------------------------------------------
-# Imported from the Tycho-2 packer rather than restated, so the two can never drift into
-# writing subtly different files that the same reader accepts. Restating them here is
-# exactly how this file first shipped a wrong band width and a wrong version number.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pack_star_catalog import (  # noqa: E402
-    MAGIC, VERSION, DEC_BAND_COUNT, DEC_BAND_WIDTH_DEG,
-    RA_SCALE, DEC_SCALE, V_MAG_OFFSET, BV_UNKNOWN,
-)
+# --- The packed format ----------------------------------------------------------------
+# These used to be imported from the Tycho-2 packer, which was the only other writer of
+# this format. That packer is gone, so they live here now, and this file is the single
+# definition of the format Core/RenderedStarCatalog.cs reads. Keep VERSION in step with
+# RenderedStarCatalog.FormatVersion.
+MAGIC = b"EXOSTAR1"
+VERSION = 2
+
+# Positions are stored as fixed-point integers over the full turn rather than as float32
+# degrees. A float32 near RA = 360 deg has an ULP of 2.1e-5 deg = 0.077 arcsec, which is a
+# fourteenth of a pixel on the RC20 but FORTY-THREE pixels at SPHERE/ZIMPOL's ~1.8 mas
+# plate scale, where the same star would land in a visibly wrong place on the
+# highest-resolution instrument in the roster. Fixed point over 32 bits gives a uniform
+# 360/2^32 = 8.4e-8 deg = 0.3 mas everywhere, six times finer than ZIMPOL's own pixel, at
+# exactly the same four bytes.
+RA_SCALE = 2 ** 32 / 360.0
+DEC_SCALE = 2 ** 32 / 180.0
+
+DEC_BAND_WIDTH_DEG = 0.1
+DEC_BAND_COUNT = int(round(180.0 / DEC_BAND_WIDTH_DEG))
+
+# V magnitude is stored as an unsigned millimagnitude offset by this much, so the
+# brightest real star (Sirius, V = -1.46) still lands on a positive value.
+V_MAG_OFFSET = 2.0
+BV_UNKNOWN = -32768  # sentinel: this star has no Gaia colour, so its B-V is unknown
 
 # --- Gaia DR3 Table 5.9, exactly as published ---------------------------------------
 G_MINUS_V = (-0.02704, 0.01424, -0.2156, 0.01426)     # in (G_BP - G_RP)
