@@ -1967,8 +1967,19 @@ namespace ExoInstruments
             info.ApertureMeters = spec.ApertureMeters;
             info.BinningFactor = SolarSystemCameraTexture.BinningFactor;
             info.ReadNoiseElectrons = spec.ReadNoiseElectrons;
-            info.DarkCurrentElectronsPerSecond = spec.DarkCurrentElectronsPerSecond;
-            info.DetectorTemperatureCelsius = spec.DetectorTemperatureCelsius;
+            // The rate the capture ACTUALLY used, at the detector's actual temperature, rather than
+            // the catalogue's reference figure -- the two are the same today and would silently
+            // disagree the moment a cooler setpoint exists (see Core.DarkCurrentModel).
+            info.DarkCurrentElectronsPerSecond = solarSystemCamera.LastDarkCurrentElectronsPerSecond > 0.0
+                ? solarSystemCamera.LastDarkCurrentElectronsPerSecond
+                : spec.DarkCurrentElectronsPerSecond;
+            info.DetectorTemperatureCelsius = SolarSystemCameraTexture.DetectorTemperatureCelsius;
+
+            info.PhotometricZeroPoint = solarSystemCamera.LastPhotometricZeroPoint;
+            info.BiasLevelAdu = solarSystemCamera.LastBiasLevelAdu;
+            info.RandomSeed = solarSystemCamera.LastCaptureSeed;
+            info.SoftwareVersion = "ExoInstruments "
+                + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
 
             info.SiteLatitudeDeg = ObservatorySite.LatitudeDeg;
             info.SiteLongitudeDeg = ObservatorySite.LongitudeDeg;

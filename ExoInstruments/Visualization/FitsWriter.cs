@@ -105,6 +105,40 @@ namespace ExoInstruments.Visualization
             public double OpticalThroughput;
             public double EffectiveWidthAngstrom;
 
+            /// <summary>
+            /// Photometric zero point, MAGZERO: m = -2.5 log10(ADU/s) + MAGZERO, for a flat source
+            /// spectrum. NaN when not computed (a stacked product has none -- see IsCalibratedAdu).
+            ///
+            /// This is the keyword that makes the frame a MEASUREMENT rather than a picture. The
+            /// pipeline could always have produced it -- it is the system response, the real
+            /// obstructed collecting area and the conversion gain, all of which it computes for
+            /// every capture -- and until now it published the ingredients without the result, so a
+            /// reader had to reconstruct the photometry equation to use them.
+            /// </summary>
+            public double PhotometricZeroPoint;
+
+            /// <summary>
+            /// Bias pedestal in ADU, BIASLVL. The constant the readout adds ahead of the converter,
+            /// so a reader can pedestal-correct the frame without a separate bias exposure -- and,
+            /// more to the point, so the frame's zero level is a stated quantity rather than
+            /// something to be inferred from the histogram.
+            /// </summary>
+            public double BiasLevelAdu;
+
+            /// <summary>
+            /// The 64-bit seed every stochastic element of this frame was drawn from, RANDSEED.
+            ///
+            /// With the rest of the header this makes the exposure exactly reproducible, which is
+            /// the property a simulated data product needs and a real one cannot have. It is also
+            /// what any regression test on this pipeline stands on: without a recorded seed and a
+            /// generator whose sequence is fixed across platforms (see Core.Pcg32), a stochastic
+            /// output can only be checked statistically, never exactly.
+            /// </summary>
+            public ulong RandomSeed;
+
+            /// <summary>Version of the mod that produced the frame, for the HISTORY provenance cards. Null omits them.</summary>
+            public string SoftwareVersion;
+
             // --- World coordinate system --------------------------------------------------
             /// <summary>Where this frame pointed. Written only when Wcs.IsValid: a wrong WCS is worse than none.</summary>
             public Core.FitsWcs Wcs;
@@ -172,6 +206,7 @@ namespace ExoInstruments.Visualization
             WriteInstrumentCards(sb, info);
             WriteConditionCards(sb, info);
             WriteWcsCards(sb, info);
+            WriteProvenanceCards(sb, info);
 
             AppendEnd(sb);
 
@@ -243,6 +278,41 @@ namespace ExoInstruments.Visualization
                 AppendCard(sb, "THROUGHP", info.OpticalThroughput.ToString("F5", CultureInfo.InvariantCulture), "optics throughput (mirrors x relay x filter)");
             if (info.EffectiveWidthAngstrom > 0.0)
                 AppendCard(sb, "PHOTWIDT", info.EffectiveWidthAngstrom.ToString("F3", CultureInfo.InvariantCulture), "effective photometric width, flat SED (A)");
+
+            // The zero point and the pedestal: the two numbers a reduction needs before it can turn
+            // this frame's counts into a magnitude. Written together and only for a raw frame --
+            // a processed composite has neither, for the same reason it has no EGAIN.
+            if (info.IsCalibratedAdu)
+            {
+                if (IsFinite(info.PhotometricZeroPoint))
+                {
+                    AppendCard(sb, "MAGZERO", info.PhotometricZeroPoint.ToString("F4", CultureInfo.InvariantCulture), "m = -2.5*log10(adu/s) + MAGZERO, flat SED");
+                    AppendCommentaryCard(sb, "COMMENT", "MAGZERO is for a flat source spectrum; a star's own colour");
+                    AppendCommentaryCard(sb, "COMMENT", "enters through its own effective width (see PHOTWIDT).");
+                }
+                if (IsFinite(info.BiasLevelAdu) && info.BiasLevelAdu > 0.0)
+                    AppendCard(sb, "BIASLVL", info.BiasLevelAdu.ToString("F1", CultureInfo.InvariantCulture), "bias pedestal included in the data (adu)");
+            }
+        }
+
+        /// <summary>
+        /// Provenance: what made this frame, and how to make it again.
+        ///
+        /// A simulated data product can offer something a real one cannot -- exact reproducibility --
+        /// and it is worth almost nothing unless the seed is written down next to the result. This
+        /// is the same reason Pyxel serialises its YAML configuration into its own outputs.
+        /// </summary>
+        private static void WriteProvenanceCards(StringBuilder sb, FitsHeaderInfo info)
+        {
+            if (!string.IsNullOrEmpty(info.SoftwareVersion))
+                AppendStringCard(sb, "CREATOR", info.SoftwareVersion, "software that produced this frame");
+
+            if (info.IsCalibratedAdu && info.RandomSeed != 0UL)
+            {
+                // As a string card: a FITS integer is signed 64-bit and this seed uses the full
+                // unsigned range, so writing it as a number would wrap for half of all seeds.
+                AppendStringCard(sb, "RANDSEED", info.RandomSeed.ToString(CultureInfo.InvariantCulture), "RNG seed (PCG32); frame is reproducible from it");
+            }
         }
 
         /// <summary>

@@ -28,6 +28,56 @@ namespace ExoInstruments.Core
         /// <summary>Detector operating temperature in Celsius -- the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
         public double DetectorTemperatureCelsius = double.NaN;
 
+        /// <summary>
+        /// Bias pedestal (offset) in ADU: the constant the readout electronics add ahead of the
+        /// converter so that a pixel carrying no charge still digitises to a positive count.
+        ///
+        /// WHY IT MATTERS, WHICH IS NOT WHAT IT LOOKS LIKE. Read noise is symmetric about zero. A
+        /// converter cannot represent a negative count. Without a pedestal, the negative half of
+        /// the read-noise distribution is clipped away, which for a pixel holding no charge biases
+        /// the result upward by sigma/sqrt(2*pi) = 0.40 sigma (the ADC's own downward truncation
+        /// then gives back half a count, leaving about +0.21 sigma net at 1.2 e- read noise), makes
+        /// the noise non-Gaussian exactly at the floor where faint detail lives, and -- the real
+        /// cost -- leaves the read noise unmeasurable from the exported data and dark subtraction
+        /// wrong. Every real camera has a pedestal for precisely this reason.
+        ///
+        /// The bias is SIGNAL-DEPENDENT, which is what makes it pernicious rather than merely
+        /// present: it only bites where a pixel's total charge sits within a read noise of zero. In
+        /// a long exposure on a bright sky that is no pixel at all; in a short one it is many; and
+        /// in a bias or dark frame it is EVERY pixel. So the pedestal is not a cosmetic fix, it is
+        /// a precondition for the calibration frames being worth taking.
+        ///
+        /// ITS VALUE IS ARBITRARY BY CONSTRUCTION, and that is why leaving this NaN is not a gap
+        /// in the way an unsourced read noise would be. The pedestal is a fixed additive constant
+        /// that calibration subtracts, so it cancels out of every measurement made from the frame;
+        /// what matters physically is only that it is large enough not to clip. NaN therefore
+        /// takes DefaultBiasLevelAdu below rather than disabling the pedestal.
+        /// </summary>
+        public double BiasLevelAdu = double.NaN;
+
+        /// <summary>
+        /// The pedestal to use when none is quoted for the device: five times the read noise,
+        /// rounded up to a whole count.
+        ///
+        /// Five sigma is a design rule, not a measurement, and is labelled as one -- it is the
+        /// margin at which clipping stops mattering (the probability of a read-noise excursion
+        /// below the pedestal is 2.9e-7 per pixel, so a 17-megapixel frame clips about five pixels
+        /// rather than eight million). Since the pedestal cancels in calibration, no measurable
+        /// quantity depends on the choice; only the raw ADU values do.
+        /// </summary>
+        public static double DefaultBiasLevelAdu(double readNoiseElectrons, double electronsPerAdu)
+        {
+            if (!(readNoiseElectrons > 0.0) || !(electronsPerAdu > 0.0)) return 0.0;
+            return System.Math.Ceiling(5.0 * readNoiseElectrons / electronsPerAdu);
+        }
+
+        /// <summary>This instrument's pedestal in ADU at the given conversion gain: its own published figure, or the default rule above.</summary>
+        public double EffectiveBiasLevelAdu(double electronsPerAdu)
+        {
+            if (!double.IsNaN(BiasLevelAdu) && BiasLevelAdu >= 0.0) return BiasLevelAdu;
+            return DefaultBiasLevelAdu(ReadNoiseElectrons, electronsPerAdu);
+        }
+
         // Optics
         public double ApertureMeters;
         public double FocalLengthMeters;
