@@ -58,23 +58,27 @@ in-game time.
 
 USAGE
 -----
-    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
+    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
 
 No third-party packages: the ESA archive speaks TAP, which is plain HTTP, so this runs on a
 stock Python 3.
 
-The sky is fetched in source_id slices, because a single anonymous job cannot return tens of
-millions of rows. Each range is COUNTED first (cheap, transfers nothing) and split until it
-fits, so dense sky near the Galactic plane subdivides further than empty sky near the poles
-without any tuning.
+REGISTER FIRST, at https://cosmos.esa.int/web/gaia-users/register, and pass --user. This is
+not a nicety. Anonymous access is the archive's degraded mode and hits a wall that neither
+subdividing nor retrying gets past: measured on Gaia DR3, one source_id range whose COUNT
+answers in 5 s, holding 2.6M rows of which 38,179 pass G < 13, fails its data fetch at 116 s
+on EVERY attempt, while the range next to it -- 2.2M rows, 32,261 selected -- returns in 7 s.
+Same size, same selectivity. The planner picks a scan for some ranges and the anonymous job
+limit kills it before it finishes. A registered account raises that limit.
 
-BE PATIENT, AND EXPECT TO RETRY. The anonymous archive is not only size-limited but appears
-to throttle: ranges that returned in one second when tried in isolation failed after ~112 s
-when run back to back. A full G < 13 pack is therefore best measured in hours rather than
-minutes, and may need to be restarted. Two ways to make that better, neither done here:
-  * An ESA archive account raises the anonymous limits substantially. The TAP endpoint takes
-    a login; adding that here means the tool prompting for your own credentials.
-  * Caching each completed slice to disk so a restart resumes rather than begins again.
+The password is never taken on the command line, which would put it in shell history: it is
+prompted for without echo, or read from the GAIA_PASSWORD environment variable if you set one.
+
+The sky is fetched in source_id slices, since one job cannot return tens of millions of rows.
+Each range is COUNTED first (cheap, transfers nothing) and split until it fits, so dense sky
+near the Galactic plane subdivides further than empty sky near the poles without any tuning.
+Every completed range is cached to <out>.cache before being used, so a run that dies resumes
+instead of starting over; delete that directory to start fresh.
 
     python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --cone 266.4 -29.0 1.0
 
@@ -299,8 +303,8 @@ SOURCE_ID_MAX = 12 * (4 ** 12) * (2 ** 35)
 # 12,937 rows returns in one second. This sits well inside the known-good side of that gap.
 MAX_ROWS_PER_JOB = 50_000
 
-# Retries per range, and the first back-off. The archive throttles rather than rejecting on
-# size, so the answer to a refusal is to wait and ask for the same thing again.
+# Retries per range, and the first back-off. These cover transient refusals; they do NOT cover
+# the deterministic anonymous-access wall described in the header, which no retry gets past.
 MAX_ATTEMPTS = 5
 BACKOFF_SECONDS = 20
 
@@ -313,14 +317,14 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
     """
     One source_id range: cached, counted, and RETRIED rather than subdivided on failure.
 
-    Retrying rather than subdividing is the correction that matters. The archive's refusals are
-    not about size -- a range that failed inside a long run returned 32,261 rows in 14 s when
-    tried again in isolation minutes later. It throttles. Subdividing a refused range therefore
-    does exactly the wrong thing: it doubles the number of jobs against a server that is already
-    saying "too many", and the run spirals into ever smaller pieces, each still refused. Backing
-    off and asking again for the SAME range is what actually works.
+    Retrying rather than subdividing is the right shape for a transient refusal: subdividing
+    doubles the number of jobs, which is the wrong response to a server that just said no.
 
-    Counting first is kept, because it costs one cheap job and avoids the ~120 s a genuinely
+    It does not rescue an anonymous session. Measured on Gaia DR3, a range whose COUNT answers
+    in 5 s fails its fetch at 116 s on every attempt while its neighbour of almost identical
+    size returns in 7 s, so the wall is deterministic per range, not load-dependent. Use --user.
+
+    Counting first is kept because it costs one cheap job and avoids the ~120 s a genuinely
     oversized range burns before failing. Subdivision is kept only for ranges the count says are
     too big, which is its real purpose.
     """
