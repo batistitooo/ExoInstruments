@@ -98,12 +98,15 @@ That is the only star catalogue the renderer looks for. See the README.
 
 import argparse
 import csv
+import getpass
+import http.cookiejar
 import io
 import math
 import os
 import struct
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -207,6 +210,47 @@ def build_star(ra, dec, g, bp_rp):
 # a scientific stack to download a star catalogue is a bad trade for three HTTP calls.
 
 TAP_ASYNC = "https://gea.esac.esa.int/tap-server/tap/async"
+TAP_LOGIN = "https://gea.esac.esa.int/tap-server/login"
+
+# One opener for the whole run, so the session cookie a login sets is carried by every later
+# request. Anonymous use goes through the same opener with no cookie.
+_opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+
+def login(username):
+    """
+    Authenticate against the ESA archive.
+
+    WHY THIS IS WORTH THE TROUBLE. Anonymous access is deliberately the degraded mode: limited
+    rows, a job wall around two minutes, no server-side storage. Measured against Gaia DR3, that
+    wall is not about size and cannot be retried away -- one source_id range whose COUNT answers
+    in 5 seconds, holding 2.6M rows of which 38,179 pass G < 13, fails its fetch at 116 s on
+    every attempt, while the adjacent range of 2.2M rows returns in 7 s. The planner picks a
+    scan for some ranges and the job is killed before it finishes. A registered account raises
+    the limits this runs into.
+
+    The password is NEVER taken on the command line: that would put it in shell history. It comes
+    from the GAIA_PASSWORD environment variable if you set one, otherwise from a prompt that does
+    not echo.
+    """
+    password = os.environ.get("GAIA_PASSWORD")
+    if not password:
+        password = getpass.getpass(f"ESA archive password for {username} (not echoed): ")
+
+    body = urllib.parse.urlencode({"username": username, "password": password}).encode()
+    try:
+        with _opener.open(urllib.request.Request(TAP_LOGIN, data=body, method="POST")) as r:
+            if r.status not in (200, 303):
+                raise RuntimeError(f"login returned HTTP {r.status}")
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"ESA archive login failed for '{username}': HTTP {e.code}. "
+                         "Check the username and password, and that the account is activated "
+                         "(registration sends a confirmation mail).") from None
+    finally:
+        del password
+
+    print(f"Logged in to the ESA archive as {username}.")
 
 
 def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
@@ -216,14 +260,14 @@ def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
         "PHASE": "RUN", "QUERY": adql,
     }).encode()
 
-    with urllib.request.urlopen(urllib.request.Request(TAP_ASYNC, data=body, method="POST")) as r:
+    with _opener.open(urllib.request.Request(TAP_ASYNC, data=body, method="POST")) as r:
         job = r.geturl().split("?")[0]
 
     # Progress is printed while polling. Without it a slice that legitimately takes minutes is
     # indistinguishable from a hang, which is exactly how this first looked.
     started = time.time()
     while True:
-        with urllib.request.urlopen(job + "/phase") as r:
+        with _opener.open(job + "/phase") as r:
             phase = r.read().decode().strip()
         elapsed = time.time() - started
         if phase in ("COMPLETED", "ERROR", "ABORTED"):
@@ -237,10 +281,10 @@ def tap_query(adql, timeout_s=3600, quiet=False, want_text=False):
         time.sleep(3)
 
     if phase != "COMPLETED":
-        with urllib.request.urlopen(job + "/error") as r:
+        with _opener.open(job + "/error") as r:
             raise RuntimeError(f"TAP job {phase}: {r.read().decode()[:500]}")
 
-    with urllib.request.urlopen(job + "/results/result") as r:
+    with _opener.open(job + "/results/result") as r:
         text = r.read().decode()
     return text if want_text else list(csv.DictReader(io.StringIO(text)))
 
@@ -345,10 +389,19 @@ def main():
     p.add_argument("--gmax", type=float, required=True, help="faint limit in Gaia G (see the depth table in this file's docstring)")
     p.add_argument("--out", required=True, help="output .bin path")
     p.add_argument("--slices", type=int, default=48, help="source_id slices to split the query into; each is subdivided further if the archive refuses it")
+    p.add_argument("--user", help="ESA archive username. Strongly recommended: anonymous access "
+                                  "hits a job wall that no amount of retrying gets past. The "
+                                  "password is prompted for, or read from GAIA_PASSWORD.")
     p.add_argument("--cache", help="directory for completed slices, so a restart resumes (default: <out>.cache)")
     p.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS"),
                    help="restrict to a cone in degrees, for testing the pipeline end to end")
     args = p.parse_args()
+
+    if args.user:
+        login(args.user)
+    else:
+        print("No --user given, so this runs anonymously. Expect ranges that fail at ~2 minutes "
+              "and cannot be retried past it; see this file's header.")
 
     print(f"Querying Gaia DR3 for G < {args.gmax}")
     stars = []

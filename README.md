@@ -200,18 +200,25 @@ field or an honestly empty one, rather than a heavy download that delivers neith
 ### Building it
 
 ```
-python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat
+python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
 ```
+
+**Register a free ESA archive account first** (<https://cosmos.esa.int/web/gaia-users/register>) and
+pass it with `--user`. This is not optional in practice. Anonymous access is the archive's degraded
+mode, and it hits a wall that retrying cannot get past: measured on Gaia DR3, one source_id range
+whose row count answers in 5 seconds fails its data fetch at 116 s on every single attempt, while
+the range next to it, of almost the same size, returns in 7 s. The query planner picks a scan for
+some ranges and the job is killed before it finishes.
+
+The password is never taken on the command line, which would put it in your shell history: the tool
+prompts for it without echo, or reads `GAIA_PASSWORD` if you prefer to set it yourself.
 
 No packages to install: the ESA archive speaks plain HTTP, so this runs on the Python 3 that
 already ships with macOS and most Linux distributions.
 
-**Expect it to be slow, and expect to retry.** The anonymous archive limits how much one job may
-return and appears to throttle under sustained use: ranges that came back in a second in isolation
-failed after ~112 s when run back to back. The tool counts each range before fetching it and splits
-until it fits, and retries a range the archive refuses anyway, but a full `G < 13` pack is best
-measured in hours and may need restarting. A free ESA archive account raises those limits
-substantially if you plan to build a deep one.
+**It is still not instant.** The tool counts each range before fetching it, splits any that is too
+big, retries a refused one with backoff, and caches every completed range to `<out>.cache` so a run
+that dies resumes instead of starting over. Leave it going and come back to it.
 
 Then copy the result to:
 
