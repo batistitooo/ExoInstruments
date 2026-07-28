@@ -219,9 +219,7 @@ def check_frame(path):
     is_dark = "dark" in kind.lower()
 
     if not (is_bias or is_dark):
-        print("    (light frame: its mean depends on the sky and the target, so only the")
-        print("     header keywords are checked, not the pixel statistics)")
-        return 0
+        return report_light_frame(header, stats, gain, read_noise, bias)
 
     # What the header says the pixels must do. Compared against the ROBUST statistics,
     # because the defects a dark frame exists to record would otherwise swamp both.
@@ -266,6 +264,59 @@ def check_frame(path):
         print(f"    {hot} pixels sit more than 10 sigma above the dark level "
               f"({100.0 * hot / stats['n']:.4f}% of the frame) -- hot pixels and cosmic rays")
         failures += report(hot > 0, "the dark frame actually contains defects to subtract")
+
+    return failures
+
+
+def report_light_frame(header, stats, gain, read_noise, bias):
+    """
+    Is there anything in this frame, and if so can the display possibly show it?
+
+    "I see nothing" has two very different causes and they need separating. Either the
+    exposure genuinely collected no signal, or it collected signal that the display's
+    transfer function renders as black. The pixels settle it: this measures the target
+    against the frame's own background noise, and separately against the converter's full
+    scale, because the display is normalised to the LATTER.
+    """
+    adc_max = (1 << header.get("ADCBITS", 16)) - 1
+    background = stats["median"]
+    noise = max(stats["robust_sigma"], 1e-9)
+
+    # Signal is anything standing clear of the background. 5 sigma is the usual threshold
+    # for calling a detection real.
+    threshold = background + 5.0 * noise
+    signal_pixels = count_above(stats, threshold)
+    peak_over_background = stats["max"] - background
+
+    print(f"    background: {background:.1f} adu, noise {noise:.2f} adu")
+    print(f"    peak:       {stats['max']:.0f} adu, i.e. {peak_over_background:.1f} adu "
+          f"= {peak_over_background / noise:.1f} sigma above background")
+    print(f"    {signal_pixels} pixels stand more than 5 sigma clear of the background "
+          f"({100.0 * signal_pixels / stats['n']:.4f}% of the frame)")
+    print(f"    brightest pixel reaches {100.0 * stats['max'] / adc_max:.3f}% of the "
+          f"converter's full scale ({adc_max} adu)")
+
+    failures = 0
+    detected = peak_over_background > 5.0 * noise
+    failures += report(detected,
+                       "there IS signal in this frame"
+                       if detected else
+                       "NOTHING in this frame stands clear of the noise -- the exposure really did "
+                       "collect nothing, so this is an exposure/target problem, not a display one")
+
+    if detected:
+        fraction = stats["max"] / adc_max
+        # The display normalises to the converter's full scale with no auto-scaling, and the
+        # asinh stretch turns over at 2% of it. Below that a real signal is rendered almost
+        # linearly, which for a faint target means almost black.
+        if fraction < 0.02:
+            print("  note   ...but the peak is below 2% of full scale, which is where the asinh")
+            print("         stretch turns over. The display normalises to the CONVERTER's range,")
+            print("         not to this frame's own content, so a real signal this faint renders")
+            print("         as near-black however good the data is. Raise the exposure, the gain,")
+            print("         or the binning -- or read the FITS in a viewer that auto-scales.")
+        else:
+            print("       and the peak is bright enough for the display stretch to show it.")
 
     return failures
 
