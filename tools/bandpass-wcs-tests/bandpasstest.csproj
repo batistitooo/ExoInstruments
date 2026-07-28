@@ -33,5 +33,6 @@
     <Compile Include="$(Core)/DirectImagingResult.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/GaiaPhotometry.cs" />
   </ItemGroup>
 </Project>

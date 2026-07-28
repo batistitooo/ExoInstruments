@@ -55,6 +55,7 @@ class Program
         TestPupilDiffraction();
         TestSpiderKernels();
         TestFilterCurves();
+        TestGaiaPhotometry();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -861,6 +862,64 @@ class Program
         Check("the detector suppresses the filter's near-infrared red leak",
               leakThroughQe < 0.5 * leakInFilter,
               $"integrated 900-1200 nm leak drops {(1 - leakThroughQe / Math.Max(leakInFilter, 1e-30)) * 100:F1}% once the CCD's QE curve is applied");
+
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ GaiaPhotometry
+    //
+    // Everything downstream of the star catalogue works in Johnson V and B-V; Gaia measures G and
+    // G_BP - G_RP. Any use of Gaia data has to cross that boundary, and assuming G = V would be
+    // wrong by up to a magnitude for a red star.
+
+    static void TestGaiaPhotometry()
+    {
+        Console.WriteLine("Gaia to Johnson-Cousins (GaiaPhotometry)");
+
+        // The Sun is the one star whose values in both systems are independently known:
+        // V = -26.76 and G = -26.90, so G - V = -0.14 at its own colour of BP-RP = 0.82.
+        double solarGMinusV = GaiaPhotometry.GMinusV(0.82);
+        Check("the published polynomial reproduces the Sun's own G - V",
+              Math.Abs(solarGMinusV - (-0.14)) < 0.03,
+              $"{solarGMinusV:F4} against -0.14 measured, inside the relation's own {GaiaPhotometry.GMinusVScatterMag:F4} mag scatter");
+
+        // A red star is where assuming G = V goes badly wrong, which is the whole point of
+        // carrying the transformation at all.
+        double redGMinusV = GaiaPhotometry.GMinusV(3.0);
+        Check("a red star's G and V differ by far more than the relation's scatter",
+              Math.Abs(redGMinusV) > 1.0,
+              $"G - V = {redGMinusV:F3} at BP-RP = 3.0, so assuming G = V would misplace it by {Math.Abs(redGMinusV):F2} mag");
+
+        // Outside the published range the relation is clamped, not extrapolated: a cubic fitted
+        // over -0.5 to 5.0 diverges fast beyond it.
+        Check("the relation clamps outside its published validity range rather than extrapolating",
+              GaiaPhotometry.GMinusV(9.0) == GaiaPhotometry.GMinusV(GaiaPhotometry.MaxBpRp)
+              && GaiaPhotometry.GMinusV(-4.0) == GaiaPhotometry.GMinusV(GaiaPhotometry.MinBpRp),
+              $"held at {GaiaPhotometry.GMinusV(GaiaPhotometry.MaxBpRp):F4} beyond BP-RP = {GaiaPhotometry.MaxBpRp}");
+
+        // V <-> G must invert exactly, since one is defined as the other's offset.
+        double worst = 0.0;
+        for (double bpRp = -0.4; bpRp <= 4.5; bpRp += 0.1)
+            for (double v = 5.0; v <= 18.0; v += 2.0)
+                worst = Math.Max(worst, Math.Abs(GaiaPhotometry.VFromG(GaiaPhotometry.GFromV(v, bpRp), bpRp) - v));
+        Check("V to G and back is exact", worst < 1e-12, $"worst round-trip {worst:E2} mag");
+
+        // B-V is obtained by inverting Gaia's published (BP-RP)(B-V) polynomial numerically,
+        // because Gaia publishes only that direction. The inversion must close on itself.
+        double worstColour = 0.0;
+        for (double bv = -0.3; bv <= 1.9; bv += 0.05)
+        {
+            double back = GaiaPhotometry.BMinusVFromBpRp(GaiaPhotometry.BpRpFromBMinusV(bv));
+            if (!double.IsNaN(back)) worstColour = Math.Max(worstColour, Math.Abs(back - bv));
+        }
+        Check("inverting Gaia's own colour polynomial closes on itself",
+              worstColour < 1e-9, $"worst round-trip {worstColour:E2} mag in B-V over -0.3 to 1.9");
+
+        // And a colour the published relation cannot produce must be refused rather than
+        // silently given a plausible-looking default.
+        Check("a colour outside the published relation returns NaN rather than a default",
+              double.IsNaN(GaiaPhotometry.BMinusVFromBpRp(12.0)),
+              "BP-RP = 12 is outside anything the B-V polynomial spans");
 
         Console.WriteLine();
     }

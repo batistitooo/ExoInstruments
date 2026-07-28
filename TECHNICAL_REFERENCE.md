@@ -464,6 +464,23 @@ Fixed by calibrating every filter (R/G/B/Hα) against the same shared reference,
   - **VLT FORS2** (0px): a real, well-corrected two-mirror Cassegrain system, but no published VLT optical prescription gives a field-dependent astigmatism coefficient to the precision this pipeline's display model would need.
   - **VLT SPHERE** (0px): ZIMPOL's real field of view is only 3.6"×3.6", far too narrow for off-axis astigmatism to grow to any meaningful amplitude regardless of the telescope's own prescription — justified by the field size alone, not just the "no published coefficient" reasoning the other zero entries use.
 
+### 7.015 Gaia to Johnson-Cousins (`Core/GaiaPhotometry.cs`)
+
+Everything downstream of the star catalogue works in **Johnson V and B-V**: the magnitude normalisation (948 photons/cm²/s/Å at V), the colour term, the rendered star field. Gaia measures **G, G_BP and G_RP**. Any use of Gaia data has to cross that boundary, and crossing it by assuming `G = V` would be wrong by **1.54 mag** for a star at BP-RP = 3.
+
+The coefficients are Gaia's own, from the DR3 documentation's "Photometric relationships with other photometric systems" (Table 5.9):
+
+```
+G − V = −0.02704 + 0.01424·x − 0.2156·x² + 0.01426·x³ ,   x = G_BP − G_RP
+```
+
+valid over `−0.5 < x < 5.0` (Table 5.10) with a residual scatter of **0.03017 mag**. Nothing is fitted, adjusted or extrapolated by this project.
+
+- **Outside the validity range the colour is clamped, not extrapolated.** A cubic fitted over −0.5 to 5.0 diverges fast beyond it, and an extrapolated value would be this project inventing photometry Gaia did not publish. Same choice `SpectralCurve` makes outside a measured QE curve's range.
+- **B-V is obtained by inverting Gaia's published `(BP−RP)(B−V)` polynomial numerically**, because Gaia publishes only that direction. Rather than fit a new one, the published polynomial is inverted by bisection, so the only quantity used is still Gaia's. A colour the relation cannot produce returns **NaN**, which callers must treat as "no colour known" rather than substituting a default.
+
+**Harness verification** (6 checks): the polynomial reproduces the Sun's own `G − V = −0.14` (independently known from V = −26.76 and G = −26.90) to within the relation's own scatter, giving −0.1525; a red star's offset is 1.54 mag, which is why the transformation exists; clamping holds beyond the range instead of diverging; V↔G inverts exactly; the colour inversion closes on itself to 2×10⁻¹⁶; and an out-of-range colour returns NaN rather than a plausible default.
+
 ### 7.02 Real measured filter curves (`Core/FilterCurves.cs`)
 
 Every filter in the roster was a **top-hat**: a rectangle of its published FWHM at its published central wavelength, scaled by its published peak transmission. That remains the honest treatment when nothing else exists, and it is still what the amateur LRGB set and the H-alpha positions get. But ESO measured FORS2's filters *in the instrument* and publishes the tables, so for those three there is no reason to keep guessing a shape.
@@ -957,6 +974,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 - Cumming, A., Marcy, G. W. & Butler, R. P. (1999). RV semi-amplitude formalism (with Lovis & Fischer 2010 below).
 - Gillon, M. et al. (2018). SPECULOOS survey description.
 - Gilmozzi, R. & Spyromilio, J. (2007). ELT (39.3m, Cerro Armazones) description.
+- Gaia Collaboration, Gaia DR3 documentation, "Photometric relationships with other photometric systems", Tables 5.9 and 5.10. The `G − V` and `(G_BP − G_RP)(B − V)` polynomials, their validity range and their 0.03017 mag scatter (§7.015).
 - ESO, FORS2 filter transmission curves (www.eso.org/sci/facilities/paranal/instruments/fors/inst/Filters/curves.html). "The transmission curves for many of the FORS interference filters have been measured within the instruments" — the Bessell B/V/R tables the FORS2 bandpass is integrated over (§7.02).
 - Martinez, P. et al. (2011). "Band-Limited Coronagraphs using a halftone-dot process: II." arXiv:1111.6956. Scaled VLT and E-ELT pupil masks: the VLT pupil at Φ=3 mm has "the central obscuration scaled to 0.47 mm ± 0.002 mm (14% linear ratio) and the spider-vane thickness is 15 µm ± 4 µm" — the source of the VLT's 4.1 cm vanes (§7.113). Its E-ELT mask independently reproduces the ELT's published 50 cm vanes to 4 %.
 - Schwartz, N., Sauvage, J.-F., Correia, C., Petit, C., Quiros-Pacheco, F., Fusco, T., Dohlen, K., El Hadi, K., Thatte, N., Clarke, F., Paufique, J. & Vernet, J. (2018). "Sensing and control of segmented mirrors with a pyramid wavefront sensor in the presence of spiders." *AO4ELT5*. The ELT's secondary "is supported by six 50-cm wide spiders" — the vane count and width the direct-imaging spikes are computed from (§7.112).
