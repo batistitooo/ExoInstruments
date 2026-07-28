@@ -26,6 +26,25 @@ namespace ExoInstruments.Core
         /// profile; see RadialPsfProfile.
         /// </summary>
         public const double ObstructionRatio = 11.1 / 39.3;
+
+        /// <summary>
+        /// The ELT's secondary support. **Schwartz et al. 2018** (AO4ELT5, "Sensing and control of
+        /// segmented mirrors with a pyramid wavefront sensor in the presence of spiders") states it
+        /// outright: "The secondary mirror unit of the European Extremely Large Telescope (ELT) is
+        /// supported by six 50-cm wide spiders, providing the necessary stiffness to the structure
+        /// while minimising the obstruction of the beam." ESO's own main-structure page independently
+        /// confirms the count: the M2 crown "is connected to the top ring by means of six beams,
+        /// forming the 'spider'".
+        ///
+        /// The published width is not perfectly settled: METIS phase D simulations quote 54 cm, and
+        /// at least one pupil figure in the literature is drawn with 40 cm. 50 cm is used because it
+        /// is the figure stated in prose by an ESO-co-authored paper rather than read off a diagram,
+        /// and because the spread is small where it matters: spike brightness scales as the vane
+        /// area squared, so 40 to 54 cm spans a factor 1.8 in an effect that is itself ~1e-4 of the
+        /// peak. Quantified in TECHNICAL_REFERENCE section 7.112 rather than hidden.
+        /// </summary>
+        public const int SpiderVaneCount = 6;
+        public const double SpiderVaneWidthMeters = 0.50;
         public const double AssumedBondAlbedo = 0.3;     // assumption, not measurement -- no catalog column
         public const double DeepContrastLimit = 1.0e-8;  // post-processing floor far from the star
         public const double DetectionSnrThreshold = 5.0; // standard imaging detection criterion
@@ -34,8 +53,26 @@ namespace ExoInstruments.Core
         private const double EarthRadiiPerSolarRadius = 109.2;
         private const double PlanckHcOverK = 8995.9;     // h*c/(lambda*kB) at 1.6 um, in Kelvin
 
-        public static double DiffractionLimitArcsec =>
-            1.22 * WavelengthMeters / ApertureMeters * RadiansToArcsec;
+        /// <summary>lambda/D in arcsec: the pattern's natural angular unit, and the scale its rings repeat on.</summary>
+        public static double LambdaOverDArcsec => WavelengthMeters / ApertureMeters * RadiansToArcsec;
+
+        /// <summary>
+        /// The telescope's real resolution limit: the first null of ITS OWN pupil's diffraction
+        /// pattern, found on the exact profile.
+        ///
+        /// This used to return the textbook 1.22*lambda/D. That figure is the first null of an
+        /// UNOBSTRUCTED circular aperture, and the ELT is not one: its 11.1 m secondary obstruction
+        /// pushes the first null inward, to 1.124*lambda/D (9.44 mas in H band against 10.24 mas).
+        /// Quoting the unobstructed number while modelling an obstructed pupil made the simulator
+        /// disagree with its own optics by 8.4%, and the frame it drew showed the disagreement:
+        /// the guide ring marking "the diffraction limit" sat visibly outside the first dark ring
+        /// the pattern actually had.
+        ///
+        /// Computed once. FirstNullRad scans and bisects the exact profile, which is far too much
+        /// work to repeat per pixel, and the pupil never changes at runtime.
+        /// </summary>
+        public static readonly double DiffractionLimitArcsec =
+            RadialPsfProfile.FirstNullRad(ApertureMeters, ObstructionRatio, WavelengthMeters) * RadiansToArcsec;
 
         public static DirectImagingAssessment Assess(StarTarget star, InstrumentSpec instrument)
         {
@@ -108,12 +145,21 @@ namespace ExoInstruments.Core
             return (Math.Exp(xStar) - 1.0) / (Math.Exp(xPlanet) - 1.0);
         }
 
-        /// <summary>5-sigma contrast floor after 1 hour at a given separation. Improves quadratically with separation; returns the base value inside the diffraction limit.</summary>
+        /// <summary>
+        /// 5-sigma contrast floor after 1 hour at a given separation. Improves quadratically with
+        /// separation; returns the base value inside one lambda/D.
+        ///
+        /// Scaled against lambda/D rather than against the first null. The speckle field's own
+        /// grid spacing is lambda/D, which is what sets how many independent speckles fall at a
+        /// given separation; the first null is a property of the core, not of the halo. The two
+        /// were the same quantity here only as long as DiffractionLimitArcsec was a fixed multiple
+        /// of lambda/D, which it no longer is now that it comes from the real obstructed pupil.
+        /// </summary>
         public static double SpeckleFloorAtSeparation(double baseFloor1LambdaD, double separationArcsec)
         {
-            double thetaDiff = DiffractionLimitArcsec;
-            if (separationArcsec <= thetaDiff) return baseFloor1LambdaD;
-            double ratio = thetaDiff / separationArcsec;
+            double lambdaOverD = LambdaOverDArcsec;
+            if (separationArcsec <= lambdaOverD) return baseFloor1LambdaD;
+            double ratio = lambdaOverD / separationArcsec;
             return Math.Max(DeepContrastLimit, baseFloor1LambdaD * ratio * ratio);
         }
 

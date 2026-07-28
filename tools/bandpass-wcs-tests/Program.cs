@@ -52,6 +52,7 @@ class Program
         TestCurve();
         TestWcs();
         TestRadialPsfProfile();
+        TestPupilDiffraction();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
@@ -566,6 +567,130 @@ class Program
               Math.Abs(tabulated / direct - 1.0) < 5e-3 && worstEntry < 5e-3,
               $"table vs direct evaluation over the full 400 px raster: {tabulated / direct - 1.0:+0.0000%;-0.0000%;0.0000%} integrated, "
               + $"worst point {worstEntry:E2} of peak");
+
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ PupilDiffraction
+    //
+    // The imaging display drew its six diffraction spikes from three invented constants: an
+    // amplitude of 4e-4 at 1 lambda/D, an azimuthal Gaussian of sigma 1.3 degrees, and a 1/r^2
+    // falloff. PupilDiffraction replaces all three with the Fourier transform of the real pupil,
+    // vanes included. These checks establish that it reduces to the exact annular pattern when the
+    // vanes are removed (the standard this project holds new models to), that its normalisation is
+    // the pupil's own open area, and that the spikes it produces are where a spider puts them.
+
+    static void TestPupilDiffraction()
+    {
+        Console.WriteLine("Real ELT pupil: rings and spikes from one transform (PupilDiffraction)");
+
+        double D = DirectImagingSimulator.ApertureMeters;
+        double eps = DirectImagingSimulator.ObstructionRatio;
+        double lambda = DirectImagingSimulator.WavelengthMeters;
+        double lod = lambda / D;
+        int vanes = DirectImagingSimulator.SpiderVaneCount;
+        double vaneW = DirectImagingSimulator.SpiderVaneWidthMeters;
+
+        // --- Reducibility: no vanes must give back the published closed form ---------------
+
+        var bare = new PupilDiffraction(D, eps, lambda, 0, 0.0, 0.0);
+        double worstBare = 0.0, worstAt = 0.0;
+        for (double rLod = 0.0; rLod <= 20.0; rLod += 0.01)
+        {
+            double a = bare.Intensity(rLod * lod, 0.0);
+            double b = OpticalPsf.AiryIntensity(rLod * lod, D, eps, lambda);
+            double dev = Math.Abs(a - b);
+            if (dev > worstBare) { worstBare = dev; worstAt = rLod; }
+        }
+        Check("with its vanes removed the pupil transform reproduces the closed-form annular pattern",
+              worstBare < 1e-9,
+              $"worst absolute deviation {worstBare:E2} of peak at {worstAt:F2} lambda/D, over 0 .. 20 lambda/D");
+
+        // Same statement rotated: with no vanes the pattern must have no azimuthal structure.
+        var bareAz = 0.0;
+        for (double rLod = 0.5; rLod <= 10.0; rLod += 0.5)
+        {
+            double ref0 = bare.Intensity(rLod * lod, 0.0);
+            for (double deg = 0; deg < 180; deg += 7.5)
+            {
+                double a = deg * Math.PI / 180.0;
+                double v = bare.Intensity(rLod * lod * Math.Cos(a), rLod * lod * Math.Sin(a));
+                bareAz = Math.Max(bareAz, Math.Abs(v - ref0));
+            }
+        }
+        Check("and it is azimuthally flat without them, as a circular pupil must be",
+              bareAz < 1e-9, $"worst azimuthal spread {bareAz:E2} of peak");
+
+        // --- Normalisation is the pupil's own geometry, not a fitted scale -----------------
+
+        var elt = new PupilDiffraction(D, eps, lambda, vanes, vaneW, 0.0);
+        double R = D / 2.0, Rin = eps * D / 2.0;
+        double expectedObsc = vanes * vaneW * (R - Rin) / (Math.PI * (R * R - Rin * Rin));
+        Check("the vanes remove the area the real spider removes",
+              Math.Abs(elt.VaneObscurationFraction - expectedObsc) < 1e-12 && elt.VaneObscurationFraction < 0.05,
+              $"{elt.VaneObscurationFraction * 100:F3}% of the open pupil, for {vanes} vanes {vaneW} m wide "
+              + $"spanning {R - Rin:F2} m");
+        Check("on-axis intensity is exactly 1 with the vanes in place",
+              Math.Abs(elt.Intensity(0, 0) - 1.0) < 1e-12, $"{elt.Intensity(0, 0):F12}");
+
+        // --- The spikes: where a spider puts them, and how bright the vanes make them -------
+
+        // Six vanes give three spike axes (opposed pairs share one line), 60 degrees apart.
+        // Sample a ring well outside the core and find where the pattern peaks in azimuth.
+        double ringLod = 6.0;
+        double bestOn = 0.0, bestOff = double.MaxValue;
+        double onAngle = 0.0;
+        for (double deg = 0; deg < 180; deg += 0.25)
+        {
+            double a = deg * Math.PI / 180.0;
+            double v = elt.Intensity(ringLod * lod * Math.Cos(a), ringLod * lod * Math.Sin(a));
+            if (v > bestOn) { bestOn = v; onAngle = deg; }
+            if (v < bestOff) bestOff = v;
+        }
+        // A long thin bar transforms to something NARROW along the bar and WIDE across it, so each
+        // spike lies PERPENDICULAR to the vane that makes it. With vane axes at 0, 60 and 120
+        // degrees the spikes must therefore fall at 90, 150 and 30. Getting this backwards is the
+        // easiest way to draw a plausible-looking frame that is rotated 90 degrees from reality,
+        // which is exactly why it is worth asserting.
+        double offAxis = Math.Abs(onAngle % 60.0 - 30.0);
+        Check("the spikes lie perpendicular to the vanes that cast them",
+              offAxis < 1.0,
+              $"brightest azimuth at {onAngle:F2} deg, with vane axes every 60 deg from 0 -- "
+              + $"perpendicular to the {(onAngle + 90.0) % 180.0:F0} deg vane");
+        Check("and they stand well above the ring background they cross",
+              bestOn / bestOff > 20.0,
+              $"{bestOn / bestOff:E1}x contrast between the spike and the faintest azimuth at {ringLod} lambda/D");
+
+        // How wrong the invented constant was, now that the pupil answers instead. Measured along
+        // a spike, well outside the core, against the same pupil with its vanes taken away.
+        double spikeDir = (onAngle) * Math.PI / 180.0;
+        double withVanes = elt.Intensity(ringLod * lod * Math.Cos(spikeDir), ringLod * lod * Math.Sin(spikeDir));
+        double withoutVanes = bare.Intensity(ringLod * lod, 0.0);
+        Console.WriteLine($"         (along a spike at {ringLod} lambda/D: {withVanes:E3} of peak with the real vanes, "
+                          + $"{withoutVanes:E3} without them, so the vanes add {withVanes / withoutVanes:F1}x there;");
+        Console.WriteLine($"          the display's discarded constant asserted 4.0E-004 at 1 lambda/D with a 1/r^2 falloff, "
+                          + $"which is {4.0e-4 / (ringLod * ringLod):E3} at this radius)");
+
+        // --- Pixel averaging still reduces to point sampling --------------------------------
+
+        double worstAvg = 0.0;
+        for (double rLod = 0.0; rLod <= 8.0; rLod += 0.37)
+        {
+            double t = rLod * lod;
+            worstAvg = Math.Max(worstAvg, Math.Abs(
+                elt.PixelAveragedIntensity(t, 0.3 * t, lod / 500.0) - elt.Intensity(t, 0.3 * t)));
+        }
+        Check("pixel averaging over the vaned pupil reduces to point sampling at a fine plate scale",
+              worstAvg < 1e-6, $"worst absolute deviation {worstAvg:E2} of peak at lambda/D / 500");
+
+        // --- The first null, which 9b now makes the simulator quote --------------------------
+
+        Check("the simulator's diffraction limit is now its own pupil's first null",
+              Math.Abs(DirectImagingSimulator.DiffractionLimitArcsec
+                       / DirectImagingSimulator.LambdaOverDArcsec - 1.1242) < 2e-3,
+              $"{DirectImagingSimulator.DiffractionLimitArcsec * 1000:F3} mas "
+              + $"= {DirectImagingSimulator.DiffractionLimitArcsec / DirectImagingSimulator.LambdaOverDArcsec:F4} lambda/D, "
+              + $"against 1.22 lambda/D = {1.22 * DirectImagingSimulator.LambdaOverDArcsec * 1000:F3} mas before");
 
         Console.WriteLine();
     }

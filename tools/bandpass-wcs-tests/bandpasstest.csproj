@@ -31,5 +31,6 @@
     <Compile Include="$(Core)/RadialPsfProfile.cs" />
     <Compile Include="$(Core)/DirectImagingSimulator.cs" />
     <Compile Include="$(Core)/DirectImagingResult.cs" />
+    <Compile Include="$(Core)/PupilDiffraction.cs" />
   </ItemGroup>
 </Project>

@@ -44,14 +44,50 @@ passes through zero and a percentage of it is meaningless.
 POPPY's profile is binned at 0.02 λ/D, and the three values it returns (1.21000, 1.13000, 1.07000)
 land exactly on bin centres. At the resolution of the measurement the two codes agree.
 
+## The vaned pupil (`compare_vanes.py`)
+
+The harder claim, and the one that removed three invented constants from the display: that six
+50 cm vanes across the ELT pupil produce spikes of the right brightness, in the right direction,
+with the right falloff, from geometry alone. `Core/PupilDiffraction` sums closed-form transforms
+(a disc transform for the annulus, a product of sinc functions per vane); POPPY rasterises the same
+pupil and propagates it numerically.
+
+**Direction, established independently.** POPPY's brightest azimuth at 6 λ/D is 150°, one of the
+three axes `PupilDiffraction` predicts (30 / 90 / 150). Both put the spikes *perpendicular* to the
+vanes, which is the direction a long thin obscuration diffracts into and the easiest thing in this
+whole model to get 90° wrong.
+
+**Brightness**, along a spike and between spikes:
+
+| radius | along spike | between spikes |
+|---|---|---|
+| 2 λ/D | 0.16 % | 0.27 % |
+| 4 λ/D | 0.18 % | 0.21 % |
+| 8 λ/D | 0.10 % | 0.04 % |
+| 12 λ/D | 0.02 % | 0.04 % |
+| 16 λ/D | 0.11 % | 0.36 % |
+
+Two radii disagree by more (77 % at 3 λ/D along the spike, 9 % at 6 λ/D between spikes). Both sit
+**on nulls**, where the intensity drops to 1e-5 and 1e-6 of peak: POPPY's finite pupil sampling
+cannot reach the true depth of a zero, so the percentage there measures POPPY's grid, not a
+disagreement about physics.
+
+**Spike-to-background contrast**, the quantity a viewer actually sees, agrees to 0.1 % at 4, 8 and
+12 λ/D.
+
 ## What this does NOT establish
 
 - **Only the diffraction term.** Not the Kolmogorov atmospheric transfer function (POPPY does not
   model it natively), not the pixel averaging of `RadialPsfProfile` (checked separately, against a
   brute-force square-pixel average, in `tools/bandpass-wcs-tests`), and nothing in the detector chain.
-- **No spider vanes** (`n_supports=0`, deliberately). This mod has no pupil-transform spider model;
-  its six spikes are a display term with an assumed amplitude, recorded in §12 entry 9a. Comparing
-  them here would compare POPPY's physics against a drawing.
+- **The vanes are modelled as spanning the open annulus only**, so they neither overlap at the
+  centre nor double-subtract the region the secondary already blocks. A real spider does converge
+  on the secondary, which sits inside the obstruction and is therefore already dark. POPPY draws
+  its supports the same way, so this comparison does not test that choice.
+- **The vane width itself is a literature value, not a measurement made here.** 50 cm is what
+  Schwartz et al. (2018) state in prose; METIS phase D simulations quote 54 cm and at least one
+  published pupil figure is drawn at 40 cm. Spike brightness scales as the vane area squared, so
+  that spread is a factor 1.8 on an effect of order 1e-4 of the peak.
 - Agreement does not prove both are right, only that they do not share an error. Sharing neither
   code nor method is the most a cross-validation can offer.
 
@@ -60,7 +96,8 @@ land exactly on bin centres. At the resolution of the measurement the two codes 
 ```
 dotnet run -p:Core=../../ExoInstruments/Core          # writes exo_*.csv from the shipped Core
 python -m venv env && ./env/bin/pip install poppy matplotlib
-./env/bin/python compare_poppy.py                     # prints the comparison tables
+./env/bin/python compare_poppy.py                     # radially symmetric pupils
+./env/bin/python compare_vanes.py                     # the pupil with its spider
 ./env/bin/python plot_poppy.py                        # writes psf_exo_vs_poppy.png
 ```
 

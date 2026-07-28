@@ -10,6 +10,8 @@ Headless verification of three pieces of `Core/`:
 - **`RadialPsfProfile.cs`** — the exact annular-pupil diffraction pattern as a sampled radial
   profile, which replaced the Gaussian core and invented ring envelope the high-contrast imaging
   display used to synthesise its own PSF from.
+- **`PupilDiffraction.cs`** — the full two-dimensional pattern of a real pupil, vanes included,
+  which replaced the three invented constants that used to draw the display's diffraction spikes.
 
 No Unity, no KSP, no game. Everything under test is pure `Core/` C#.
 
@@ -26,7 +28,7 @@ layer but carries no Unity dependency itself. That is deliberate and worth knowi
 harness compile the **real** `VisualTelescopeCatalog`, so the throughput and filter figures it
 checks are the ones the mod ships rather than a second copy free to drift from them.
 
-## What the 44 checks establish
+## What the 52 checks establish
 
 **The new photometry is a generalisation of the old one, not a replacement.** With a flat source
 spectrum, a grey QE and no atmosphere, the integral reproduces `FWHM x QE` exactly (to 1e-12), and
@@ -88,6 +90,15 @@ as steeply as the real `θ⁻³` envelope. The tabulated profile carries the sam
 direct evaluation to 0.34% over a full 400 px raster, and the peak pixel dilutes monotonically as
 the plate scale coarsens — recovering 0.9989 of the point peak at 0.05 `λ/D` per pixel and holding
 0.077 of it at 4 `λ/D` per pixel, which is detector physics rather than a modelling loss.
+
+**Spikes and rings now come from one pupil.** With its vanes removed, `PupilDiffraction` reproduces
+the published closed-form annular pattern to **7.8×10⁻¹⁶** of peak over the core and twenty rings,
+and is azimuthally flat to 3.3×10⁻¹⁶ — two independent routes to the same physics agreeing to
+machine precision. With them in place, on-axis intensity is exactly 1, the vanes remove the
+3.789 % of the open pupil their real geometry removes, and the spikes land **perpendicular** to the
+vanes that cast them, standing 9.6×10⁶ above the faintest azimuth at 6 λ/D. The simulator's
+diffraction limit is now its own pupil's first null, 9.440 mas, rather than the unobstructed
+Rayleigh criterion's 10.245 mas.
 
 ## Note on the sibling harness
 

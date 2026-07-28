@@ -1,0 +1,214 @@
+using System;
+
+namespace ExoInstruments.Core
+{
+    /// <summary>
+    /// The Fraunhofer diffraction pattern of a REAL telescope pupil: an annular aperture crossed by
+    /// straight secondary-support vanes. Rings and diffraction spikes come out of one calculation,
+    /// because on a real telescope they come from one pupil.
+    ///
+    /// WHY THIS EXISTS. OpticalPsf and RadialPsfProfile handle the radially symmetric part exactly,
+    /// but a spider is not radially symmetric, so no radial profile can carry it. The imaging
+    /// display therefore drew its six spikes with an invented amplitude (4e-4 of peak at 1 lambda/D)
+    /// on an invented azimuthal Gaussian (sigma = 1.3 degrees) and an invented 1/r^2 falloff. Three
+    /// free parameters standing in for something the pupil determines outright.
+    ///
+    /// THE CALCULATION, and why it needs no free parameter. The far-field amplitude is the Fourier
+    /// transform of the pupil's transmission. Transmission is a sum of simple shapes, and the
+    /// transform is linear, so the amplitude is a sum of their transforms in closed form:
+    ///
+    ///   * A disc of radius a transforms to  pi*a^2 * 2*J1(2*pi*a*u) / (2*pi*a*u).
+    ///     The annulus is the outer disc minus the obstruction disc.
+    ///   * A rectangle transforms to a product of two sinc functions. Each vane is a rectangle of
+    ///     width w spanning the open annulus radially, so it carries a phase from sitting off
+    ///     centre; vanes on opposite sides of the pupil carry conjugate phases, and their sum is
+    ///     real. That is why the six-vane sum below reduces to three cosine terms.
+    ///
+    ///       A_vane_pair = 2*w*L * sinc(pi*w*u_perp) * sinc(pi*L*u_par) * cos(2*pi*d*u_par)
+    ///
+    ///     with L the vane's radial length, d the radius of its midpoint, and u resolved along and
+    ///     across the vane.
+    ///
+    /// Intensity is |A_total|^2, normalised by the on-axis value, which is just the pupil's open
+    /// AREA: pi*R^2 - pi*R_in^2 - n*w*L. Every quantity above is a length measured on the real
+    /// telescope. The spikes' amplitude, their angular width and their radial falloff are now all
+    /// consequences of the vane geometry, and none of them can be tuned.
+    ///
+    /// The vanes are modelled as spanning only the OPEN annulus, from the obstruction's edge
+    /// outward, so they neither overlap each other at the centre nor double-subtract the region the
+    /// secondary already blocks. A real spider does converge on the secondary, which sits inside
+    /// the obstruction and is therefore already dark.
+    ///
+    /// REDUCIBILITY. With vaneCount = 0 this must reproduce OpticalPsf.AiryIntensity exactly, since
+    /// both are then the same annular pupil by two different routes (this one via the difference of
+    /// two disc transforms, that one via the published obstructed-aperture form). The headless
+    /// harness checks it.
+    ///
+    /// Pure C# with no Unity dependency, like the rest of Core.
+    /// </summary>
+    public sealed class PupilDiffraction
+    {
+        private const double ArcsecToRad = Math.PI / (180.0 * 3600.0);
+
+        private readonly double _outerRadius;      // R, metres
+        private readonly double _innerRadius;      // eps*R, metres
+        private readonly double _wavelength;       // metres
+        private readonly double _vaneWidth;        // w, metres
+        private readonly double _vaneLength;       // L = R - R_in, metres
+        private readonly double _vaneMidRadius;    // d = (R + R_in)/2, metres
+        private readonly int _vanePairs;           // vaneCount / 2
+        private readonly double[] _vaneCos;        // direction cosines, one per pair
+        private readonly double[] _vaneSin;
+        private readonly double _onAxisAmplitude;  // the pupil's open area
+
+        /// <summary>Aperture diameter (m).</summary>
+        public double ApertureMeters => 2.0 * _outerRadius;
+
+        /// <summary>Wavelength (m).</summary>
+        public double WavelengthMeters => _wavelength;
+
+        /// <summary>lambda/D in radians: the pattern's natural angular unit.</summary>
+        public double LambdaOverDRad => _wavelength / (2.0 * _outerRadius);
+
+        /// <summary>
+        /// Fraction of the pupil's open area the vanes remove. Small, and that is the point: the
+        /// spikes are visible not because the vanes block much light but because what they block is
+        /// a long thin shape, which concentrates its diffracted light into a narrow line.
+        /// </summary>
+        public double VaneObscurationFraction { get; }
+
+        /// <param name="vaneCount">Number of support vanes. Must be even (they come in opposed pairs) or zero.</param>
+        /// <param name="vaneWidthMeters">Vane width. Zero disables the vanes.</param>
+        /// <param name="vaneRotationRad">Orientation of the first vane, so a pupil can be clocked.</param>
+        public PupilDiffraction(
+            double apertureMeters, double obstructionRatio, double wavelengthMeters,
+            int vaneCount, double vaneWidthMeters, double vaneRotationRad)
+        {
+            if (apertureMeters <= 0.0 || wavelengthMeters <= 0.0)
+                throw new ArgumentException("aperture and wavelength must be positive");
+            if (vaneCount < 0 || (vaneCount & 1) != 0)
+                throw new ArgumentException("vaneCount must be zero or even: vanes come in opposed pairs");
+
+            _outerRadius = 0.5 * apertureMeters;
+            _innerRadius = 0.5 * apertureMeters * Math.Max(0.0, Math.Min(0.95, obstructionRatio));
+            _wavelength = wavelengthMeters;
+            _vaneWidth = Math.Max(0.0, vaneWidthMeters);
+            _vaneLength = _outerRadius - _innerRadius;
+            _vaneMidRadius = 0.5 * (_outerRadius + _innerRadius);
+
+            _vanePairs = (vaneWidthMeters > 0.0) ? vaneCount / 2 : 0;
+            _vaneCos = new double[Math.Max(1, _vanePairs)];
+            _vaneSin = new double[Math.Max(1, _vanePairs)];
+            for (int k = 0; k < _vanePairs; k++)
+            {
+                // Pairs are opposed, so n pairs span 180 degrees rather than 360.
+                double phi = vaneRotationRad + Math.PI * k / _vanePairs;
+                _vaneCos[k] = Math.Cos(phi);
+                _vaneSin[k] = Math.Sin(phi);
+            }
+
+            double annulusArea = Math.PI * (_outerRadius * _outerRadius - _innerRadius * _innerRadius);
+            double vaneArea = 2.0 * _vanePairs * _vaneWidth * _vaneLength;
+            _onAxisAmplitude = annulusArea - vaneArea;
+            VaneObscurationFraction = annulusArea > 0.0 ? vaneArea / annulusArea : 0.0;
+
+            if (_onAxisAmplitude <= 0.0)
+                throw new ArgumentException("vanes obscure the entire pupil");
+        }
+
+        /// <summary>
+        /// Normalised intensity (1.0 on axis) at an angular offset, in radians, resolved into two
+        /// axes because the pattern is not radially symmetric once the pupil has vanes.
+        /// </summary>
+        public double Intensity(double thetaXRad, double thetaYRad)
+        {
+            double amp = Amplitude(thetaXRad, thetaYRad) / _onAxisAmplitude;
+            return amp * amp;
+        }
+
+        /// <summary>The far-field amplitude itself, in units of area. Real, by the pupil's central symmetry.</summary>
+        public double Amplitude(double thetaXRad, double thetaYRad)
+        {
+            // Spatial frequency, in cycles per metre of pupil.
+            double ux = thetaXRad / _wavelength;
+            double uy = thetaYRad / _wavelength;
+            double u = Math.Sqrt(ux * ux + uy * uy);
+
+            double amp = DiscTransform(_outerRadius, u) - DiscTransform(_innerRadius, u);
+
+            for (int k = 0; k < _vanePairs; k++)
+            {
+                double uPar = ux * _vaneCos[k] + uy * _vaneSin[k];
+                double uPerp = -ux * _vaneSin[k] + uy * _vaneCos[k];
+                amp -= 2.0 * _vaneWidth * _vaneLength
+                     * Sinc(Math.PI * _vaneWidth * uPerp)
+                     * Sinc(Math.PI * _vaneLength * uPar)
+                     * Math.Cos(2.0 * Math.PI * _vaneMidRadius * uPar);
+            }
+            return amp;
+        }
+
+        /// <summary>
+        /// Mean intensity over a square detector pixel of angular side pixelScaleRad centred at the
+        /// given offset, by midpoint rule in both axes.
+        ///
+        /// Required for the same reason RadialPsfProfile averages: a detector integrates over its
+        /// pixel, and at the coarse plate scales this display reaches, a pixel spans several rings.
+        /// The node count is set by the finest structure the pattern actually contains, which for a
+        /// vaned pupil is the ring period lambda/D and not the much broader spike envelope.
+        /// </summary>
+        public double PixelAveragedIntensity(double thetaXRad, double thetaYRad, double pixelScaleRad)
+        {
+            if (pixelScaleRad <= 0.0) return Intensity(thetaXRad, thetaYRad);
+
+            int n = NodeCount(pixelScaleRad);
+            if (n <= 1) return Intensity(thetaXRad, thetaYRad);
+
+            double step = pixelScaleRad / n;
+            double origin = -0.5 * pixelScaleRad + 0.5 * step;
+            double sum = 0.0;
+            for (int iy = 0; iy < n; iy++)
+            {
+                double dy = origin + iy * step;
+                for (int ix = 0; ix < n; ix++)
+                {
+                    double dx = origin + ix * step;
+                    sum += Intensity(thetaXRad + dx, thetaYRad + dy);
+                }
+            }
+            return sum / ((double)n * n);
+        }
+
+        /// <summary>Midpoint nodes per pixel axis, from how many ring periods the pixel straddles. Capped, since cost grows as its square.</summary>
+        public int NodeCount(double pixelScaleRad)
+        {
+            const int NodesPerRingPeriod = 4;
+            int n = (int)Math.Ceiling(NodesPerRingPeriod * pixelScaleRad / LambdaOverDRad);
+            return Math.Max(1, Math.Min(12, n));
+        }
+
+        /// <summary>Fourier transform of a filled disc of radius a, evaluated at spatial frequency u. Equals the disc's area at u = 0.</summary>
+        private static double DiscTransform(double a, double u)
+        {
+            if (a <= 0.0) return 0.0;
+            double x = 2.0 * Math.PI * a * u;
+            if (x < 1e-9) return Math.PI * a * a;
+            return Math.PI * a * a * (2.0 * OpticalPsf.BesselJ1(x) / x);
+        }
+
+        /// <summary>sin(x)/x, with its removable singularity at zero.</summary>
+        private static double Sinc(double x)
+        {
+            if (Math.Abs(x) < 1e-9) return 1.0;
+            return Math.Sin(x) / x;
+        }
+
+        /// <summary>Convenience: the same pattern addressed in arcsec rather than radians.</summary>
+        public double IntensityArcsec(double thetaXArcsec, double thetaYArcsec)
+            => Intensity(thetaXArcsec * ArcsecToRad, thetaYArcsec * ArcsecToRad);
+
+        /// <summary>Convenience: pixel-averaged intensity addressed in arcsec.</summary>
+        public double PixelAveragedIntensityArcsec(double thetaXArcsec, double thetaYArcsec, double pixelScaleArcsec)
+            => PixelAveragedIntensity(thetaXArcsec * ArcsecToRad, thetaYArcsec * ArcsecToRad, pixelScaleArcsec * ArcsecToRad);
+    }
+}

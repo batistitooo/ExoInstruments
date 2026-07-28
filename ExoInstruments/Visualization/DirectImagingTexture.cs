@@ -11,11 +11,11 @@ namespace ExoInstruments.Visualization
     /// at real separation/contrast. All parameters deterministic per target so refreshes
     /// don't strobe. Star magnitude scales the whole starlight field; temperature false-colors it.
     ///
-    /// The stellar and planetary profiles are the exact annular-pupil Airy pattern of the real
-    /// ELT pupil, sampled through Core's RadialPsfProfile -- the same closed form the rest of the
-    /// project convolves as a kernel (Core/OpticalPsf.cs). This class used to carry its own
-    /// Gaussian core plus an invented ring envelope, which was a second and mutually inconsistent
-    /// answer to a question Core already answered exactly. There is now one diffraction model.
+    /// The stellar and planetary profiles are the diffraction pattern of the real ELT pupil,
+    /// computed by Core/PupilDiffraction from its annular aperture and its six 50 cm support vanes.
+    /// This class used to carry its own Gaussian core, an invented ring envelope and three invented
+    /// spike constants, all standing in for something the pupil determines outright. Rings and
+    /// spikes now come from one calculation with no free parameter.
     /// </summary>
     public static class DirectImagingTexture
     {
@@ -32,17 +32,11 @@ namespace ExoInstruments.Visualization
         // offset + separation stays inside ~0.38 FOV -- planet always in frame.
         private const double MaxPointingOffsetFovFraction = 0.12;
 
-        // Spider spikes: 6 vanes (ELT), Gaussian angular profile, 1/r^2 falloff.
-        //
-        // NOT sourced, and deliberately left that way for now: the vane count is real (the ELT's
-        // M2 sits on six arms), but the amplitude below is a display constant, not a computed one.
-        // Deriving it means the two-dimensional Fourier transform of the real pupil including its
-        // 0.5 m vanes, which is a different piece of machinery from the radially symmetric closed
-        // form the rings come from. Flagged as an assumed value in TECHNICAL_REFERENCE §12 rather
-        // than dressed up as physics.
-        private const int SpikeCount = 6;
-        private const double SpikeAmplitude = 4.0e-4;   // relative to PSF peak at 1 lambda/D
-        private const double SpikeSigmaDeg = 1.3;
+        // Spider spikes used to live here as three invented constants: an amplitude of 4e-4 at
+        // 1 lambda/D, an azimuthal Gaussian of sigma 1.3 degrees, and a 1/r^2 falloff. All three
+        // are gone. The spikes now come out of Core/PupilDiffraction along with the rings, from the
+        // ELT's real six 50 cm vanes, with nothing left to tune. Only the pupil's CLOCKING survives
+        // as a per-target hash, and that is a pointing choice rather than a physical quantity.
 
         // Wind-driven halo: two-lobed cos^2 modulation of the speckle amplitude.
         private const double WindHaloMin = 0.55;
@@ -80,7 +74,9 @@ namespace ExoInstruments.Visualization
         public static PixelResult ComputePixels(StarTarget star, DirectImagingAssessment assessment, double effectiveExposureSeconds, int size)
         {
             double thetaDiff = assessment.DiffractionLimitArcsec;
-            double lambdaOverD = thetaDiff / 1.22;
+            // Taken from the pupil, not back-computed from thetaDiff: the first null is no longer a
+            // fixed multiple of lambda/D now that the obstruction is modelled (see 9b in section 12).
+            double lambdaOverD = DirectImagingSimulator.LambdaOverDArcsec;
 
             bool placePlanet = assessment.HasRequiredData && assessment.SignalPresent;
             double separation = assessment.SeparationArcsec;
@@ -142,22 +138,22 @@ namespace ExoInstruments.Visualization
             double planetX = starX + separation * Math.Cos(paRadians);
             double planetY = starY + separation * Math.Sin(paRadians);
 
-            double spikeBaseRad = Hash01(star.Name + "#pupil") * (Math.PI / SpikeCount * 2.0);
+            // Pupil clocking: where the spider sits in the frame for this target. A pointing
+            // choice, not a physical quantity, so a per-target hash is the right kind of value.
+            double spikeBaseRad = Hash01(star.Name + "#pupil") * (2.0 * Math.PI / DirectImagingSimulator.SpiderVaneCount);
             double windPaRad = Hash01(star.Name + "#wind") * Math.PI;
 
-            // The instrument's real diffraction pattern, tabulated once for this frame's plate
-            // scale. Built out to 1.2x the raster width so that the far corner of the frame is
-            // still tabulated for a star at its maximum pointing offset and for a planet at its
-            // maximum separation, rather than falling back on the profile's held last value.
-            var psf = RadialPsfProfile.Build(
+            // The instrument's real pupil: annular aperture plus the ELT's six 50 cm support vanes.
+            // Rings AND spikes come out of this one object, because on the real telescope they come
+            // from one pupil. There is nothing left to tune -- amplitude, angular width and radial
+            // falloff of the spikes are all consequences of the vane geometry.
+            var pupil = new PupilDiffraction(
                 DirectImagingSimulator.ApertureMeters,
                 DirectImagingSimulator.ObstructionRatio,
                 DirectImagingSimulator.WavelengthMeters,
-                arcsecPerPixel,
-                size * 1.2);
-
-            double spikeSigmaRad = SpikeSigmaDeg * Math.PI / 180.0;
-            double spikeSectorRad = Math.PI / SpikeCount * 2.0; // 60 deg between spikes
+                DirectImagingSimulator.SpiderVaneCount,
+                DirectImagingSimulator.SpiderVaneWidthMeters,
+                spikeBaseRad);
 
             var pixels = new Color[size * size];
             double half = size / 2.0;
@@ -174,26 +170,12 @@ namespace ExoInstruments.Visualization
                     double dys = yArc - starY;
                     double r = Math.Sqrt(dxs * dxs + dys * dys);
 
-                    // Stellar PSF: the exact annular-pupil Airy pattern of the real ELT pupil,
-                    // averaged over the pixel the way a detector integrates it. Core radius, ring
-                    // radii and ring amplitudes are all consequences of D, the obstruction and
-                    // lambda; none of them is a free parameter here any more.
-                    double starIntensity = psf.AtArcsec(r);
+                    // Stellar PSF: the real ELT pupil's own diffraction pattern, rings and spikes
+                    // together, averaged over the pixel the way a detector integrates it. Every
+                    // feature is a consequence of D, the obstruction, the vane geometry and lambda.
+                    double starIntensity = pupil.PixelAveragedIntensityArcsec(dxs, dys, arcsecPerPixel);
 
                     double theta = Math.Atan2(dys, dxs);
-
-                    // Spider spikes: Gaussian in azimuth around each of 6 ELT vane axes, 1/r^2 along them.
-                    if (r > 0.7 * lambdaOverD)
-                    {
-                        double azOffset = (theta - spikeBaseRad) % spikeSectorRad;
-                        if (azOffset < 0) azOffset += spikeSectorRad;
-                        double dAz = Math.Min(azOffset, spikeSectorRad - azOffset);
-                        if (dAz < 4.0 * spikeSigmaRad)
-                        {
-                            double along = lambdaOverD / r;
-                            starIntensity += SpikeAmplitude * Math.Exp(-0.5 * dAz * dAz / (spikeSigmaRad * spikeSigmaRad)) * along * along;
-                        }
-                    }
 
                     // Speckle halo: fades as sqrt(t_eff) — what visually uncovers the planet over a session.
                     // cos^2 modulation = the classic AO wind-butterfly (residuals pile along the wind axis).
@@ -216,8 +198,8 @@ namespace ExoInstruments.Visualization
                         // marginally resolved companion used to read as a featureless blob.
                         double dx = xArc - planetX;
                         double dy = yArc - planetY;
-                        double rp = Math.Sqrt(dx * dx + dy * dy);
-                        planetIntensity = assessment.ContrastRatio * peakScale * psf.AtArcsec(rp);
+                        planetIntensity = assessment.ContrastRatio * peakScale
+                                        * pupil.PixelAveragedIntensityArcsec(dx, dy, arcsecPerPixel);
                     }
 
                     Color starColor = hasStarColor
