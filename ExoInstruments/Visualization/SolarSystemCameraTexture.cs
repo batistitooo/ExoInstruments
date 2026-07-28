@@ -480,6 +480,21 @@ namespace ExoInstruments.Visualization
         private double lastDarkCurrentElectronsPerSecond;
 
         /// <summary>
+        /// The two numbers that say whether the last capture's TARGET made it into the frame, and
+        /// which half of the pipeline to blame if it did not.
+        ///
+        /// LastTargetElectrons is what the physics computed the body should deliver -- aperture,
+        /// exposure, bandpass, distance, phase. LastRenderedLuminanceSum is what Unity actually
+        /// drew of it. The pipeline multiplies the render by their ratio, so a healthy capture has
+        /// both non-zero; electrons without luminance means the physics is fine and the RENDER
+        /// produced nothing, which is the one failure that looks exactly like an under-exposure.
+        /// </summary>
+        public double LastTargetElectrons => lastTargetElectrons;
+        public double LastRenderedLuminanceSum => lastRenderedLuminanceSum;
+        private double lastTargetElectrons;
+        private double lastRenderedLuminanceSum;
+
+        /// <summary>
         /// The 64-bit seed the last capture's noise was drawn from. Written to the FITS RANDSEED
         /// keyword: with it and the rest of the header, the frame is reproducible exactly.
         /// </summary>
@@ -2068,9 +2083,30 @@ namespace ExoInstruments.Visualization
             // Electrons, not fractions of full well. The rendered frame's luminance sum is the
             // denominator, so this factor converts one unit of rendered brightness into the real
             // electron count the physics computed for the scene.
+            //
+            // THE ZERO BRANCH IS A SILENT FAILURE and is recorded rather than swallowed. If the
+            // Unity render came back empty -- a refused render target, a readback that produced
+            // nothing, a scaled-space body that was not drawn -- then this sum is zero, the factor
+            // is zero, and every scene pixel is multiplied to nothing. The frame still comes out
+            // with its sky, its noise and its catalogue stars, because those are deposited by the
+            // physics rather than taken from the render, so the result looks like a working
+            // exposure that simply missed the target. There is no way to tell that apart from a
+            // genuinely too-faint frame by looking at it, which is exactly why it is reported.
+            lastRenderedLuminanceSum = totalRenderedLuminance;
+            lastTargetElectrons = inputs.TotalElectrons;
+
             float calibratedSignalPerUnit = totalRenderedLuminance > 1e-6
                 ? (float)(inputs.TotalElectrons / totalRenderedLuminance)
                 : 0f;
+
+            if (!(totalRenderedLuminance > 1e-6) && inputs.TotalElectrons > 0.0)
+            {
+                Debug.LogError(
+                    $"[ExoInstruments] The scene render came back empty at {TextureWidth}x{TextureHeight} "
+                  + $"(binning {BinningFactor}): summed luminance {totalRenderedLuminance:E3} over {n} pixels, "
+                  + $"while the physics computed {inputs.TotalElectrons:E3} electrons from the target. "
+                  + "The target will be absent from this frame. Try a higher binning factor.");
+            }
 
             // --- 1. Signal plane -------------------------------------------------------
             // The rendered bodies first: the renderer supplies the spatial shading, the physics

@@ -1516,6 +1516,25 @@ namespace ExoInstruments
                     + "Select a higher binning factor.", smallCaptionStyle);
             }
 
+            // The one failure mode that looks like an ordinary under-exposure: the physics computed
+            // a real electron count for the target, and the render drew none of it, so the frame
+            // comes out with its sky, noise and stars but no body. Reported here because no amount
+            // of looking at the picture can distinguish it from a frame that was simply too faint.
+            if (solarSystemCamera.LastTargetElectrons > 0.0 && solarSystemCamera.LastRenderedLuminanceSum <= 1e-6)
+            {
+                GUILayout.Label(
+                    $"Last capture: the physics computed {solarSystemCamera.LastTargetElectrons:E2} electrons from the "
+                    + $"target, but the scene render came back empty ({w}x{h}). The target is ABSENT from that frame -- "
+                    + "this is a rendering failure, not an exposure problem. Try a higher binning factor.",
+                    smallCaptionStyle);
+            }
+            else if (solarSystemCamera.LastRenderedLuminanceSum > 0.0)
+            {
+                GUILayout.Label(
+                    $"Last capture: {solarSystemCamera.LastTargetElectrons:E2} e- from the target, rendered luminance sum "
+                    + $"{solarSystemCamera.LastRenderedLuminanceSum:E2}.", smallCaptionStyle);
+            }
+
             // Off by default: this is for attributing a bad frame, not part of normal use.
             saveDiagnosticFrames = GUILayout.Toggle(saveDiagnosticFrames,
                 " Diagnostics: also save the raw render on Save Photo (attributes a bad frame to the game's rendering vs. this mod's pipeline)");
