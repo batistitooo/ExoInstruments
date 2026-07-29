@@ -153,7 +153,7 @@ namespace ExoInstruments
         // whole catalog, so a background Task would be pure overhead.
         private Texture2D photoForecastTexture;
         private ObservingForecast.ForecastResult photoForecastResult;
-        private CelestialBody photoForecastAppliedBody;
+        private SkyTarget photoForecastAppliedTarget;
         private double photoForecastComputedUt = double.NaN;
         private double photoForecastWarpTargetUt = double.NaN;
 
@@ -209,7 +209,16 @@ namespace ExoInstruments
         private Color[] lastComposedPixels;
         private string stackComposeError;
         private string stackBatchInterruptedMessage;
-        private CelestialBody selectedPhotographyBody;
+        private SkyTarget selectedPhotographyTarget;
+
+        /// <summary>The target's body, or null when the telescope is pointed at a fixed sky position.</summary>
+        private CelestialBody selectedPhotographyBody => selectedPhotographyTarget.Body;
+
+        // Hand-entered coordinates, so the telescope can be pointed at anything with a published
+        // position rather than only at what the chart happens to carry a marker for.
+        private string manualRaText = "";
+        private string manualDecText = "";
+        private string manualTargetError;
         // Mirrors session/rvSession/imagingSession's role for photography: set
         // by "Start Observation" once a body is selected AND the RC20 is the
         // active instrument, cleared by the right-column Stop button. Nothing
@@ -244,7 +253,7 @@ namespace ExoInstruments
             // earlier SpaceCentre visit keeps the telescope (and doors) pointed
             // off-rest even though this fresh GUI instance's own
             // selectedPhotographyBody correctly starts null.
-            ExoObservatoryTelescopeTracker.TrackedBody = selectedPhotographyBody;
+            ApplyTelescopeTracking();
         }
 
         private void OnObservatoryBuildingClicked()
@@ -408,7 +417,7 @@ namespace ExoInstruments
                         stackBatchRemaining--;
                         if (stackBatchRemaining > 0 && CanExposePhotography())
                         {
-                            solarSystemCamera.BeginExposure(selectedPhotographyBody);
+                            solarSystemCamera.BeginExposure(selectedPhotographyTarget);
                         }
                         else if (stackBatchRemaining > 0)
                         {
@@ -620,35 +629,40 @@ namespace ExoInstruments
 
             if (!anyStarSessionActive && !photographySessionActive)
             {
-                // One shared chart for both stars and solar-system bodies --
-                // clicking either sets that kind of target and clears the other
-                // (see HandleSkyChartInteraction / SelectPhotographyBody).
+                // One shared chart. Clicking a body or a star points the telescope at it; a star
+                // additionally stays selected for the detection instruments, which need a
+                // catalogue entry rather than a direction.
                 DrawStarSelection();
+                DrawManualPointingEntry();
 
-                if (selectedPhotographyBody != null)
+                if (selectedStar != null)
                 {
                     GUILayout.Space(14);
-                    DrawPhotographyTargetInfoCard(selectedPhotographyBody);
+                    DrawTargetInfoCard(selectedStar);
+                    DrawPointingSummary();
+                    GUILayout.Space(10);
+                    DrawObservatorySelector();
+                    DrawStartObservationButton();
+                    if (SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography)
+                        DrawPhotographyForecastPanel();
+                    else
+                        DrawForecastPanel();
+                }
+                else if (selectedPhotographyTarget.HasTarget)
+                {
+                    GUILayout.Space(14);
+                    DrawPhotographyTargetInfoCard(selectedPhotographyTarget);
                     GUILayout.Space(10);
                     DrawObservatorySelector();
                     DrawStartObservationButton();
                     DrawPhotographyForecastPanel();
-                }
-                else if (selectedStar != null)
-                {
-                    GUILayout.Space(14);
-                    DrawTargetInfoCard(selectedStar);
-                    GUILayout.Space(10);
-                    DrawObservatorySelector();
-                    DrawStartObservationButton();
-                    DrawForecastPanel();
                 }
             }
             else if (photographySessionActive)
             {
                 GUILayout.Label("Currently pointing at:");
                 GUILayout.Space(6);
-                DrawPhotographyTargetInfoCard(selectedPhotographyBody);
+                DrawPhotographyTargetInfoCard(selectedPhotographyTarget);
                 GUILayout.Space(10);
                 GUILayout.Label("Stop (right panel) to pick a new target.");
             }
@@ -1048,10 +1062,19 @@ namespace ExoInstruments
         }
 
         /// <summary>Same card slot as DrawTargetInfoCard, for a solar-system body target instead of a catalog star: real radius, current alt/az, and the observability line.</summary>
-        void DrawPhotographyTargetInfoCard(CelestialBody body)
+        void DrawPhotographyTargetInfoCard(SkyTarget target)
         {
-            GUILayout.Label(body.bodyName, sectionHeaderStyle);
-            GUILayout.Label($"Radius: {body.Radius / 1000.0:N0} km" + (body.atmosphere ? "   Has an atmosphere" : ""));
+            GUILayout.Label(target.DisplayName, sectionHeaderStyle);
+            if (target.IsBody)
+            {
+                CelestialBody body = target.Body;
+                GUILayout.Label($"Radius: {body.Radius / 1000.0:N0} km" + (body.atmosphere ? "   Has an atmosphere" : ""));
+            }
+            else if (target.IsEquatorial)
+            {
+                GUILayout.Label($"RA {target.RaDeg:F4} deg   Dec {target.DecDeg:F4} deg", smallCaptionStyle);
+                GUILayout.Label(SkyTarget.FormatCoordinates(target.RaDeg, target.DecDeg), smallCaptionStyle);
+            }
             DrawPhotographyObservability();
         }
 
@@ -1387,11 +1410,11 @@ namespace ExoInstruments
         /// </summary>
         bool CanExposePhotography()
         {
-            if (selectedPhotographyBody == null) return false;
+            if (!selectedPhotographyTarget.HasTarget) return false;
             var conditions = ImagingObservingConditions.Evaluate(
                 Planetarium.GetUniversalTime(), null, null, BuildImagingObserverContext());
-            TryComputeBodyAltAz(selectedPhotographyBody, out double bodyAlt, out _);
-            return conditions.IsNight && bodyAlt > 0.0;
+            TryComputeTargetAltAz(selectedPhotographyTarget, out double targetAlt, out _);
+            return conditions.IsNight && targetAlt > 0.0;
         }
 
         /// <summary>
@@ -1402,13 +1425,13 @@ namespace ExoInstruments
         /// </summary>
         void DrawSolarSystemCameraView()
         {
-            if (selectedPhotographyBody == null)
+            if (!selectedPhotographyTarget.HasTarget)
             {
-                GUILayout.Label("Select a body on the sky chart at left to point the telescope.");
+                GUILayout.Label("Pick a body or a star on the sky chart at left, or enter coordinates, to point the telescope.");
                 return;
             }
 
-            GUILayout.Label($"<b>{selectedPhotographyBody.bodyName}</b>", plotTitleStyle);
+            GUILayout.Label($"<b>{selectedPhotographyTarget.DisplayName}</b>", plotTitleStyle);
 
             // Observability strip: always visible.
             DrawPhotographyObservability();
@@ -1620,7 +1643,7 @@ namespace ExoInstruments
 
         void DrawResolvingPowerDiagnostic()
         {
-            if (selectedPhotographyBody == null) return;
+            if (!selectedPhotographyTarget.IsBody) return;
 
             float plateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
             if (plateScale <= 0f) return;
@@ -1815,7 +1838,7 @@ namespace ExoInstruments
             // on, every capture already re-centers automatically.
             GUI.enabled = !solarSystemCamera.Autoguiding;
             if (GUILayout.Button("Update telescope target", GUILayout.Height(22), GUILayout.Width(180)))
-                solarSystemCamera.UpdateAim(selectedPhotographyBody);
+                solarSystemCamera.UpdateAim(selectedPhotographyTarget);
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
@@ -1836,7 +1859,7 @@ namespace ExoInstruments
             {
                 GUI.enabled = canExpose;
                 if (GUILayout.Button($"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Height(28), GUILayout.Width(180)))
-                    solarSystemCamera.BeginExposure(selectedPhotographyBody);
+                    solarSystemCamera.BeginExposure(selectedPhotographyTarget);
                 GUI.enabled = true;
             }
             GUI.enabled = solarSystemCamera.HasCapturedPhoto;
@@ -1979,7 +2002,7 @@ namespace ExoInstruments
             {
                 stackBatchInterruptedMessage = null;
                 stackBatchRemaining = stackBatchSize;
-                solarSystemCamera.BeginExposure(selectedPhotographyBody);
+                solarSystemCamera.BeginExposure(selectedPhotographyTarget);
             }
             GUI.enabled = true;
             if (batchRunning && GUILayout.Button("Cancel series", GUILayout.Height(26), GUILayout.Width(120)))
@@ -2076,7 +2099,7 @@ namespace ExoInstruments
             string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
 
             byte[] pngData = stackedCompositeTexture.EncodeToPNG();
-            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.png"), pngData);
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_LRGB_{stamp}.png"), pngData);
 
             var fitsInfo = new FitsWriter.FitsHeaderInfo
             {
@@ -2090,7 +2113,7 @@ namespace ExoInstruments
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = false, // stacked composite, see FitsHeaderInfo.IsCalibratedAdu
                 FilterName = "LRGB",
-                ObjectName = selectedPhotographyBody.bodyName,
+                ObjectName = selectedPhotographyTarget.DisplayName,
                 UtcTimestamp = DateTime.UtcNow,
                 ImageType = "Light Frame",
             };
@@ -2104,7 +2127,7 @@ namespace ExoInstruments
             // body travelled, silently. Same standard as the omitted EGAIN above -- a processed
             // product does not get keywords that describe a raw one.
             FitsWriter.WriteGrayscale(
-                System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_LRGB_{stamp}.fits"),
+                System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_LRGB_{stamp}.fits"),
                 ToAduScale(lastComposedPixels), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
         }
 
@@ -2219,15 +2242,16 @@ namespace ExoInstruments
         {
             var conditions = ImagingObservingConditions.Evaluate(
                 Planetarium.GetUniversalTime(), null, null, BuildImagingObserverContext());
-            TryComputeBodyAltAz(selectedPhotographyBody, out double alt, out double az);
+            TryComputeTargetAltAz(selectedPhotographyTarget, out double alt, out double az);
+            string name = selectedPhotographyTarget.DisplayName;
 
             string sky = conditions.IsNight
                 ? $"Night (Sun {conditions.SunAltitudeDeg:F0} deg)."
                 : $"Daytime -- dome closed (Sun {conditions.SunAltitudeDeg:F0} deg, reopens below {ImagingObservingConditions.TwilightSunAltitudeDeg:F0} deg).";
-            string bodyLine = alt > 0.0
-                ? $"{selectedPhotographyBody.bodyName} is up: altitude {alt:F0} deg, azimuth {az:F0} deg."
-                : $"{selectedPhotographyBody.bodyName} is below the horizon ({alt:F0} deg) -- warp/wait for it to rise.";
-            GUILayout.Label(sky + "  " + bodyLine, smallCaptionStyle);
+            string targetLine = alt > 0.0
+                ? $"{name} is up: altitude {alt:F0} deg, azimuth {az:F0} deg."
+                : $"{name} is below the horizon ({alt:F0} deg) -- warp/wait for it to rise.";
+            GUILayout.Label(sky + "  " + targetLine, smallCaptionStyle);
         }
 
         /// <summary>Writes the finished captured photo to KSP's screenshot folder as a PNG (quick preview) and a real 16-bit FITS file (the same format a real RC20+camera would actually produce).</summary>
@@ -2240,7 +2264,7 @@ namespace ExoInstruments
             string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
 
             byte[] pngData = frame.EncodeToPNG();
-            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.png"), pngData);
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_{stamp}.png"), pngData);
 
             if (saveDiagnosticFrames)
             {
@@ -2248,7 +2272,7 @@ namespace ExoInstruments
                 if (raw != null)
                 {
                     System.IO.File.WriteAllBytes(
-                        System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}_RAWRENDER.png"),
+                        System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_{stamp}_RAWRENDER.png"),
                         raw.EncodeToPNG());
                 }
             }
@@ -2269,7 +2293,7 @@ namespace ExoInstruments
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = true, // single raw frame straight off the converter
                 FilterName = FilterLabel(solarSystemCamera.Filter),
-                ObjectName = selectedPhotographyBody.bodyName,
+                ObjectName = selectedPhotographyTarget.DisplayName,
                 UtcTimestamp = DateTime.UtcNow,
                 ImageType = "Light Frame",
                 // A raw sub is one pointing at one instant, so it can carry a real WCS -- measured
@@ -2281,7 +2305,7 @@ namespace ExoInstruments
             };
             FillCommonFitsMetadata(ref fitsInfo);
             FitsWriter.WriteGrayscale(
-                System.IO.Path.Combine(dir, $"ExoInstruments_{selectedPhotographyBody.bodyName}_{stamp}.fits"),
+                System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_{stamp}.fits"),
                 solarSystemCamera.GetLastCaptureAdu(), SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
         }
 
@@ -2450,12 +2474,7 @@ namespace ExoInstruments
                 if (skyChartDragDistance < SkyChartDragClickThreshold && hoveredSkyChartStar != null)
                 {
                     selectedStar = hoveredSkyChartStar;
-                    if (selectedPhotographyBody != null)
-                    {
-                        selectedPhotographyBody = null;
-                        UpdateBodySelectionRingAndRerender();
-                        ExoObservatoryTelescopeTracker.TrackedBody = null;
-                    }
+                    SelectPhotographyStar(hoveredSkyChartStar);
                 }
                 e.Use();
             }
@@ -2481,14 +2500,72 @@ namespace ExoInstruments
         /// <summary>Selects a body as the photography target (clearing any star selection), resets any in-progress capture for the old target, and updates the chart's selection ring immediately.</summary>
         void SelectPhotographyBody(CelestialBody body)
         {
-            if (body == selectedPhotographyBody) return;
-            selectedPhotographyBody = body;
-            selectedStar = null;
+            SelectPhotographyTarget(SkyTarget.FromBody(body), clearStarSelection: true);
+        }
+
+        /// <summary>
+        /// Points the telescope. clearStarSelection is false when the target came FROM a star the
+        /// player picked on the chart, so the detection tabs keep showing that star.
+        /// </summary>
+        void SelectPhotographyTarget(SkyTarget target, bool clearStarSelection)
+        {
+            if (target == selectedPhotographyTarget) return;
+            selectedPhotographyTarget = target;
+            if (clearStarSelection) selectedStar = null;
+            manualTargetError = null;
             solarSystemCamera.DiscardCapturedPhoto();
             photographySessionActive = false;
             ClearAstroStack();
             UpdateBodySelectionRingAndRerender();
-            ExoObservatoryTelescopeTracker.TrackedBody = body;
+            ApplyTelescopeTracking();
+        }
+
+        /// <summary>
+        /// Drives the observatory model. The rig aims in altitude and azimuth, so a fixed target is
+        /// handed the same pair the camera aims with rather than a body to look up.
+        /// </summary>
+        void ApplyTelescopeTracking()
+        {
+            ExoObservatoryTelescopeTracker.TrackedBody = selectedPhotographyTarget.Body;
+            if (selectedPhotographyTarget.IsEquatorial
+                && TryComputeTargetAltAz(selectedPhotographyTarget, out double alt, out double az))
+            {
+                ExoObservatoryTelescopeTracker.TrackedAltDeg = alt;
+                ExoObservatoryTelescopeTracker.TrackedAzDeg = az;
+            }
+            else
+            {
+                ExoObservatoryTelescopeTracker.TrackedAltDeg = null;
+                ExoObservatoryTelescopeTracker.TrackedAzDeg = null;
+            }
+        }
+
+        /// <summary>Altitude and azimuth of whatever the telescope is pointed at.</summary>
+        bool TryComputeTargetAltAz(SkyTarget target, out double altDeg, out double azDeg)
+        {
+            altDeg = 0.0; azDeg = 0.0;
+            if (target.IsBody) return TryComputeBodyAltAz(target.Body, out altDeg, out azDeg);
+            if (!target.IsEquatorial) return false;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+            double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                Planetarium.GetUniversalTime(), home.rotationPeriod, home.initialRotation,
+                ObservatorySite.LongitudeDeg);
+            var horizontal = SkyCoordinates.EquatorialToHorizontal(
+                target.RaDeg, target.DecDeg, meridianRaDeg, ObservatorySite.LatitudeDeg);
+            altDeg = horizontal.AltitudeDeg;
+            azDeg = horizontal.AzimuthDeg;
+            return true;
+        }
+
+        /// <summary>Turns a chart star into a pointing target. Requires coordinates, which is what the chart placed it by anyway.</summary>
+        void SelectPhotographyStar(StarTarget star)
+        {
+            if (star == null || !star.RaDeg.HasValue || !star.DecDeg.HasValue) return;
+            SelectPhotographyTarget(
+                SkyTarget.FromEquatorial(star.RaDeg.Value, star.DecDeg.Value, GetDisplayName(star)),
+                clearStarSelection: false);
         }
 
         /// <summary>Drops all stacked subs and the composite preview -- the stack is specific to one target, it must not survive a target switch.</summary>
@@ -2515,12 +2592,14 @@ namespace ExoInstruments
                 if (body == selectedPhotographyBody) { selAlt = alt; selAz = az; break; }
             }
 
+            SkyTarget pointing = selectedPhotographyTarget;
             for (int i = 0; i < cachedSkyChartPoints.Count; i++)
             {
                 var p = cachedSkyChartPoints[i];
-                if (!p.IsBody) continue;
-                bool shouldBeSelected = !double.IsNaN(selAlt)
-                    && Math.Abs(selAlt - p.AltitudeDeg) < 1e-6 && Math.Abs(selAz - p.AzimuthDeg) < 1e-6;
+                bool shouldBeSelected = p.IsBody
+                    ? !double.IsNaN(selAlt)
+                      && Math.Abs(selAlt - p.AltitudeDeg) < 1e-6 && Math.Abs(selAz - p.AzimuthDeg) < 1e-6
+                    : IsPhotographyTarget(p.Target, pointing);
                 if (p.IsSelectedTarget != shouldBeSelected)
                 {
                     p.IsSelectedTarget = shouldBeSelected;
@@ -2528,6 +2607,67 @@ namespace ExoInstruments
                 }
             }
             RenderSkyChartTexture();
+        }
+
+        /// <summary>
+        /// Hand-entered coordinates. Everything worth photographing that is not a planet and not in
+        /// the loaded catalogue -- a nebula, a galaxy, a dark cloud -- is reachable only this way.
+        /// </summary>
+        void DrawManualPointingEntry()
+        {
+            GUILayout.Space(8);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Point at RA/Dec", GUILayout.Width(100));
+            manualRaText = GUILayout.TextField(manualRaText ?? "", GUILayout.Width(110));
+            manualDecText = GUILayout.TextField(manualDecText ?? "", GUILayout.Width(110));
+            if (GUILayout.Button("Go", GUILayout.Width(40)))
+            {
+                if (SkyTarget.TryParse(manualRaText, manualDecText, out double ra, out double dec))
+                {
+                    SelectPhotographyTarget(SkyTarget.FromEquatorial(ra, dec, null), clearStarSelection: true);
+                }
+                else
+                {
+                    manualTargetError = "Could not read those coordinates.";
+                }
+            }
+            GUILayout.EndHorizontal();
+            GUILayout.Label(manualTargetError
+                ?? "Sexagesimal (05 35 17.3 / -05 23 28) or decimal degrees (83.822 / -5.391). RA in hours when sexagesimal.",
+                smallCaptionStyle);
+        }
+
+        /// <summary>One line stating where the telescope is actually pointed, shown under a star's own card.</summary>
+        void DrawPointingSummary()
+        {
+            if (!selectedPhotographyTarget.HasTarget)
+            {
+                GUILayout.Label("Telescope not pointed at anything -- click this star on the chart to point at it.",
+                                smallCaptionStyle);
+                return;
+            }
+            TryComputeTargetAltAz(selectedPhotographyTarget, out double alt, out double az);
+            GUILayout.Label($"Telescope pointed at {selectedPhotographyTarget.DisplayName}"
+                          + $"  (altitude {alt:F0} deg, azimuth {az:F0} deg)", smallCaptionStyle);
+        }
+
+        /// <summary>Target name reduced to something a filesystem accepts.</summary>
+        string TargetFileName()
+        {
+            string name = selectedPhotographyTarget.DisplayName;
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+                sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '+' ? c : '_');
+            return sb.ToString();
+        }
+
+        /// <summary>Whether the telescope is pointed at this catalogue star, matched on coordinates rather than identity so a reloaded catalogue still rings the right marker.</summary>
+        static bool IsPhotographyTarget(StarTarget star, SkyTarget pointing)
+        {
+            if (star == null || !pointing.IsEquatorial) return false;
+            if (!star.RaDeg.HasValue || !star.DecDeg.HasValue) return false;
+            return Math.Abs(star.RaDeg.Value - pointing.RaDeg) < 1e-6
+                && Math.Abs(star.DecDeg.Value - pointing.DecDeg) < 1e-6;
         }
 
         void HandleSkyChartZoom(Rect chartRect, Event e)
@@ -2578,7 +2718,7 @@ namespace ExoInstruments
 
             if (session == null && rvSession == null && imagingSession == null)
             {
-                GUILayout.Label(selectedPhotographyBody != null
+                GUILayout.Label(selectedPhotographyTarget.HasTarget
                     ? "Click \"Start Observation\" on the left when ready."
                     : selectedStar == null
                     ? "Select a target on the left to begin."
@@ -2769,22 +2909,20 @@ namespace ExoInstruments
         /// </summary>
         void DrawStartObservationButton()
         {
-            // A star and a solar-system body are mutually-exclusive target
-            // kinds selected from the same chart (see SelectPhotographyBody /
-            // HandleSkyChartInteraction) -- the mismatch this guards against is
-            // the OTHER axis: the instrument not matching the kind of target
-            // that's currently selected.
+            // The visual instruments point anywhere on the sky, so the only mismatch left is a
+            // detection instrument handed a solar-system body: a transit or radial-velocity run
+            // needs a catalogue star, and a planet is not one.
             bool methodIsPhotography = SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography;
-            if (selectedPhotographyBody != null && !methodIsPhotography)
+            if (selectedPhotographyTarget.IsBody && !methodIsPhotography)
             {
                 GUILayout.Label($"Observation impossible: {SelectedInstrument.DisplayName} can't observe solar-system bodies. " +
                                  "Switch to the amateur astrograph (RC20) in the observatory selector above.", smallCaptionStyle);
                 return;
             }
-            if (selectedStar != null && methodIsPhotography)
+            if (methodIsPhotography && !selectedPhotographyTarget.HasTarget)
             {
-                GUILayout.Label("Observation impossible: the amateur astrograph can't observe catalog stars. " +
-                                 "Select a planet/moon on the sky chart, or switch instrument.", smallCaptionStyle);
+                GUILayout.Label("Observation impossible: nothing is pointed at. " +
+                                 "Click a target on the sky chart, or enter coordinates.", smallCaptionStyle);
                 return;
             }
 
@@ -4302,6 +4440,7 @@ namespace ExoInstruments
                 ut, home.rotationPeriod, home.initialRotation, ObservatorySite.LongitudeDeg);
             var catalogSnapshot = catalog;
             string filterSnapshot = searchFilter;
+            var pointingSnapshot = selectedPhotographyTarget;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
 
             // Solar-system bodies must be sampled on the MAIN thread (they read
@@ -4325,7 +4464,8 @@ namespace ExoInstruments
                         Target = star,
                         AltitudeDeg = horizontal.Value.AltitudeDeg,
                         AzimuthDeg = horizontal.Value.AzimuthDeg,
-                        IsHighlighted = MatchesFilter(star, filterSnapshot)
+                        IsHighlighted = MatchesFilter(star, filterSnapshot),
+                        IsSelectedTarget = IsPhotographyTarget(star, pointingSnapshot)
                     });
                 }
                 points.AddRange(bodyPoints);
@@ -4511,7 +4651,7 @@ namespace ExoInstruments
             GUILayout.Space(10);
             RefreshPhotographyForecastIfStale();
 
-            if (photoForecastTexture == null || photoForecastResult == null || photoForecastAppliedBody != selectedPhotographyBody)
+            if (photoForecastTexture == null || photoForecastResult == null || photoForecastAppliedTarget != selectedPhotographyTarget)
             {
                 GUILayout.Label("Computing observing forecast...", smallCaptionStyle);
                 return;
@@ -4533,7 +4673,7 @@ namespace ExoInstruments
                 double quality = photoForecastResult.Quality01[row * photoForecastResult.Columns + col];
                 double hoursAway = (cellUt - nowUt) / 3600.0;
                 hoverLine = quality <= 0.0
-                    ? $"+{hoursAway:F1} h: unobservable (day, or {selectedPhotographyBody.bodyName} below the horizon)"
+                    ? $"+{hoursAway:F1} h: unobservable (day, or {selectedPhotographyTarget.DisplayName} below the horizon)"
                     : $"+{hoursAway:F1} h: {quality * 100.0:F0}% zenith-equivalent seeing efficiency. Click to warp.";
                 if (e.type == EventType.MouseDown && e.button == 0)
                 {
@@ -4568,16 +4708,16 @@ namespace ExoInstruments
         /// <summary>Recomputes the body forecast (synchronous -- cheap enough) when the target changed or the clock moved a quarter-night since the last compute.</summary>
         void RefreshPhotographyForecastIfStale()
         {
-            if (selectedPhotographyBody == null) return;
+            if (!selectedPhotographyTarget.HasTarget) return;
             double ut = Planetarium.GetUniversalTime();
-            bool stale = photoForecastAppliedBody != selectedPhotographyBody
+            bool stale = photoForecastAppliedTarget != selectedPhotographyTarget
                 || double.IsNaN(photoForecastComputedUt)
                 || Math.Abs(ut - photoForecastComputedUt) > ForecastRefreshUtSeconds;
             if (!stale) return;
 
             photoForecastComputedUt = ut;
-            photoForecastAppliedBody = selectedPhotographyBody;
-            photoForecastResult = ComputeBodyForecast(selectedPhotographyBody, ut, ForecastNights, ForecastColumns);
+            photoForecastAppliedTarget = selectedPhotographyTarget;
+            photoForecastResult = ComputeBodyForecast(selectedPhotographyTarget, ut, ForecastNights, ForecastColumns);
             var pixels = ForecastTexture.ComputePixels(photoForecastResult, ForecastWidth, ForecastHeight);
             photoForecastTexture = ForecastTexture.ApplyToTexture(pixels, ForecastWidth, ForecastHeight, photoForecastTexture);
         }
@@ -4604,11 +4744,12 @@ namespace ExoInstruments
         ///   1       = zénith, ciel dégagé
         /// </summary>
         ObservingForecast.ForecastResult ComputeBodyForecast(
-            CelestialBody body,
+            SkyTarget target,
             double startUt,
             int nights,
             int columnsPerNight)
         {
+            CelestialBody body = target.Body;
             var result = new ObservingForecast.ForecastResult
             {
                 StartUt = startUt,
@@ -4621,7 +4762,7 @@ namespace ExoInstruments
             };
 
             CelestialBody home = FlightGlobals.GetHomeBody();
-            if (home == null || body == null)
+            if (home == null || !target.HasTarget)
             {
                 result.CellSeconds = 21600.0 / columnsPerNight;
                 return result;
@@ -4691,15 +4832,26 @@ namespace ExoInstruments
                 Vector3d observerPositionAtUt =
                     homePositionAtUt + observerUpAtUt * (home.Radius + 100.0);
 
-                Vector3d bodyPositionAtUt = GetBodyPositionAtUt(body, cellUt);
-                Vector3d observerToBody = bodyPositionAtUt - observerPositionAtUt;
-
                 double altitudeDeg = double.NegativeInfinity;
-                if (observerToBody.sqrMagnitude > 0.0)
+                if (target.IsBody)
                 {
-                    altitudeDeg = 90.0 - Vector3d.Angle(
-                        observerUpAtUt,
-                        observerToBody.normalized);
+                    Vector3d bodyPositionAtUt = GetBodyPositionAtUt(body, cellUt);
+                    Vector3d observerToBody = bodyPositionAtUt - observerPositionAtUt;
+                    if (observerToBody.sqrMagnitude > 0.0)
+                    {
+                        altitudeDeg = 90.0 - Vector3d.Angle(
+                            observerUpAtUt,
+                            observerToBody.normalized);
+                    }
+                }
+                else
+                {
+                    // A fixed position needs no orbit propagation: only the sky's own rotation
+                    // moves it, which is what the local meridian already tracks.
+                    double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                        cellUt, home.rotationPeriod, home.initialRotation, ObservatorySite.LongitudeDeg);
+                    altitudeDeg = SkyCoordinates.EquatorialToHorizontal(
+                        target.RaDeg, target.DecDeg, meridianRaDeg, ObservatorySite.LatitudeDeg).AltitudeDeg;
                 }
 
                 // Même définition de nuit que l'interface du RC20.

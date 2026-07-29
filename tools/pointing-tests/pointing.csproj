@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>pointing</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpPointing.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
+    <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+  </ItemGroup>
+</Project>

@@ -784,8 +784,12 @@ namespace ExoInstruments
     /// </summary>
     public class ExoObservatoryTelescopeTracker : MonoBehaviour
     {
-        /// <summary>Set from ExoInstrumentsGUI wherever selectedPhotographyBody changes. Null = idle/parked.</summary>
+        /// <summary>Set from ExoInstrumentsGUI wherever the photography target changes. Null = idle/parked, or a fixed sky position (see TrackedAltDeg).</summary>
         public static CelestialBody TrackedBody;
+
+        /// <summary>Where a fixed equatorial target currently sits, when TrackedBody is null. Refreshed by the GUI; null = nothing to track.</summary>
+        public static double? TrackedAltDeg;
+        public static double? TrackedAzDeg;
 
         // No azimuth/altitude calibration constants: aiming is measured against the
         // tube's own current orientation each frame (see Update), so the rig's rest
@@ -934,9 +938,16 @@ namespace ExoInstruments
         private void Update()
         {
             double altDeg = 0.0, azDeg = 0.0;
-            bool haveTarget = TrackedBody != null
-                && TryComputeAltAz(TrackedBody, out altDeg, out azDeg)
-                && altDeg > 0.0;
+            bool haveTarget;
+            if (TrackedBody != null)
+            {
+                haveTarget = TryComputeAltAz(TrackedBody, out altDeg, out azDeg) && altDeg > 0.0;
+            }
+            else
+            {
+                haveTarget = TrackedAltDeg.HasValue && TrackedAzDeg.HasValue && TrackedAltDeg.Value > 0.0;
+                if (haveTarget) { altDeg = TrackedAltDeg.Value; azDeg = TrackedAzDeg.Value; }
+            }
 
             // Always rebuild from the authored rest pose, then aim from there.
             _dome.position = _domeRestPos; _dome.rotation = _domeRestRot;

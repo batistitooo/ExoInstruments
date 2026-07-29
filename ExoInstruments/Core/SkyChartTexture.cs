@@ -198,7 +198,7 @@ namespace ExoInstruments.Visualization
             float radius = ComputeMarkerRadius(p.Target.ApparentMagnitude, view.Zoom);
             Color color = ComputeStarDisplayColor(p.Target, emphasize);
             DrawFilledCircle(pixels, width, height, px.x, px.y, radius, color);
-            if (emphasize)
+            if (emphasize || p.IsSelectedTarget)
             {
                 DrawHighlightRing(pixels, width, height, px.x, px.y, radius, view.Zoom);
             }

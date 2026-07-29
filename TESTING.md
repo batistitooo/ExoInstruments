@@ -142,7 +142,31 @@ so both need to be looked at rather than assumed.
       to build. Watch the first capture after switching filter or binning (which invalidates the PSF
       cache): the halo path on SPHERE builds the largest kernel in the game.
 
-## 9. Known open item
+## 9. Pointing at anything on the sky
+
+The visual telescopes now aim at a `SkyTarget`: a body, or a fixed right ascension and declination.
+`tools/pointing-tests` validates the trigonometry against IAU SOFA to 5.5 microarcseconds, but the
+world basis it composes with comes from KSP and only the game can exercise it.
+
+- [ ] **9.1** Click a star on the sky chart. It gets a selection ring, the telescope slews, and the
+      right panel shows its name rather than "select a body".
+- [ ] **9.2** Capture on that star. The star must land at the CENTRE of the frame. This is the check
+      that matters: if the world basis has east and west swapped, the field will be full of the
+      wrong stars and still look plausible.
+- [ ] **9.3** Enter M42's coordinates by hand (`05 35 17.3` / `-05 23 28`) and capture. Compare the
+      field against any star atlas at the same scale.
+- [ ] **9.4** Enter the same position in decimal degrees (`83.822` / `-5.391`). Identical frame.
+- [ ] **9.5** The observatory model itself must slew for a fixed target, not just for a body: watch
+      the dome and tube while switching from a planet to a star.
+- [ ] **9.6** Point at something near the celestial pole and something near the horizon, and check
+      the reported altitude and azimuth against the sky chart's own marker.
+- [ ] **9.7** With autoguiding OFF, two captures minutes apart on a fixed target must show the field
+      drifting, and the star trails must run the same way they do on a planet.
+- [ ] **9.8** The observing forecast now covers fixed targets. Its band pattern should be a clean
+      sidereal repeat, unlike a planet's slowly-shifting one.
+- [ ] **9.9** Exported FITS: `OBJECT` carries the target name, and the file name is sanitised.
+
+## 10. Known open item
 
 There is no flat-field model. Pixel response non-uniformity is the dominant
 systematic in ground-based photometry of a bright target, and its absence makes

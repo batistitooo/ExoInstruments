@@ -695,7 +695,7 @@ namespace ExoInstruments.Visualization
         private bool isCapturing;
         private float captureElapsed;
         private float captureDuration;
-        private CelestialBody pendingTarget;
+        private SkyTarget pendingTarget;
 
         // --- Background processing state (the heavy per-pixel physics pipeline runs off the
         // main thread once the exposure's integration time has elapsed -- see GatherFrameInputs
@@ -822,11 +822,11 @@ namespace ExoInstruments.Visualization
         public float[] GetLastCaptureGray()
             => lastCaptureSnapshot != null ? (float[])lastCaptureSnapshot.Clone() : null;
 
-        /// <summary>Starts a timed exposure on targetBody. Nothing renders until the exposure completes.</summary>
-        public void BeginExposure(CelestialBody targetBody)
+        /// <summary>Starts a timed exposure on the target. Nothing renders until the exposure completes.</summary>
+        public void BeginExposure(SkyTarget target)
         {
-            if (!IsAvailable) return;
-            pendingTarget = targetBody;
+            if (!IsAvailable || !target.HasTarget) return;
+            pendingTarget = target;
             isCapturing = true;
             captureElapsed = 0f;
             captureDuration = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
@@ -898,11 +898,11 @@ namespace ExoInstruments.Visualization
             // So the capture waits for residency rather than racing it. Bounded, because a body
             // whose loader never flips its own isLoaded flag must not hang the shutter forever --
             // after the cap the frame is taken regardless, which is exactly the old behaviour.
-            if (!KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(pendingTarget))
+            if (!KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(pendingTarget.Body))
             {
                 if (++textureWaitFrames <= MaxTextureWaitFrames) return;
 
-                Debug.LogWarning($"[ExoInstruments] Scaled-space textures for {pendingTarget?.bodyName} did not "
+                Debug.LogWarning($"[ExoInstruments] Scaled-space textures for {pendingTarget.DisplayName} did not "
                                + $"become resident within {MaxTextureWaitFrames} frames; capturing anyway. "
                                + "The body may render without its colour map.");
             }
@@ -913,15 +913,15 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Renders the target into readbackTexture (main thread), gathers every input the physics pipeline needs, then kicks that pipeline off onto a background Task.</summary>
-        private void RenderExposure(CelestialBody targetBody)
+        private void RenderExposure(SkyTarget target)
         {
-            if (targetBody == null) return;
-            // Without autoguiding, the aim stays locked at the last UpdateAim position —
-            // which is how the body drifts off-center if it moved since then.
-            if (Autoguiding) UpdateAim(targetBody);
-            RenderScene(targetBody);
+            if (!target.HasTarget) return;
+            // Without autoguiding, the aim stays locked at the last UpdateAim position -- which is
+            // how a body drifts off-center if it moved, and how a fixed target drifts as the sky turns.
+            if (Autoguiding) UpdateAim(target);
+            RenderScene(target);
 
-            FrameComputeInputs inputs = GatherFrameInputs(targetBody);
+            FrameComputeInputs inputs = GatherFrameInputs(target);
             isProcessing = true;
             processTask = Task.Run(() => ComputeFramePixels(inputs));
         }
@@ -1045,22 +1045,102 @@ namespace ExoInstruments.Visualization
         private Vector3 lockedCamPos;
         private Quaternion lockedLook;
 
-        /// <summary>Locks the camera aim on targetBody's current position. A capture always renders through the locked aim, so without autoguiding the body can drift off-center between shots.</summary>
-        public void UpdateAim(CelestialBody targetBody)
+        /// <summary>Locks the camera aim on the target's current position. A capture always renders through the locked aim, so without autoguiding the field drifts between shots.</summary>
+        public void UpdateAim(SkyTarget target)
         {
-            if (targetBody == null || targetBody.scaledBody == null) return;
+            if (!target.HasTarget) return;
+
             Camera liveScaledSpace = FindCameraByName(ScaledSpaceCameraName);
             CelestialBody home = FlightGlobals.GetHomeBody();
             Vector3 camPos = liveScaledSpace != null
                 ? liveScaledSpace.transform.position
                 : (home != null && home.scaledBody != null ? home.scaledBody.transform.position : Vector3.zero);
 
-            Vector3 toTarget = targetBody.scaledBody.transform.position - camPos;
-            if (toTarget.sqrMagnitude < 1e-6f) return; // degenerate: observer coincides with the target's scaled position
+            Vector3 direction;
+            if (target.IsBody)
+            {
+                if (target.Body.scaledBody == null) return;
+                Vector3 toTarget = target.Body.scaledBody.transform.position - camPos;
+                if (toTarget.sqrMagnitude < 1e-6f) return; // observer coincides with the target's scaled position
+                direction = toTarget.normalized;
+            }
+            else
+            {
+                if (!TryEquatorialDirection(target.RaDeg, target.DecDeg, Planetarium.GetUniversalTime(),
+                                            out Vector3d skyDirection)) return;
+                direction = (Vector3)skyDirection;
+            }
 
             lockedCamPos = camPos;
-            lockedLook = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
+            lockedLook = Quaternion.LookRotation(direction, Vector3.up);
             hasLockedAim = true;
+        }
+
+        /// <summary>
+        /// Unit direction toward a catalogue position, as a scaled-space vector.
+        ///
+        /// The exact inverse of the chain TryBuildFieldGeometry runs forward: equatorial to
+        /// horizontal by SkyCoordinates, horizontal to a (north, east, up) triple by SkyVector, and
+        /// that triple back onto the observatory's own world basis. Scaled space is a uniform
+        /// scaling of the world about a moving origin, so a DIRECTION is the same vector in both
+        /// and no conversion is needed -- the same fact TryBuildFieldGeometry relies on.
+        /// </summary>
+        private static bool TryEquatorialDirection(double raDeg, double decDeg, double ut, out Vector3d direction)
+        {
+            direction = Vector3d.zero;
+            if (double.IsNaN(raDeg) || double.IsNaN(decDeg)) return false;
+            if (!TryBuildSiteBasis(out Vector3d north, out Vector3d east, out Vector3d up,
+                                   out double latitudeDeg, out double longitudeDeg)) return false;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+
+            double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                ut, home.rotationPeriod, home.initialRotation, longitudeDeg);
+            HorizontalCoordinates horizontal =
+                SkyCoordinates.EquatorialToHorizontal(raDeg, decDeg, meridianRaDeg, latitudeDeg);
+            SkyVector v = SkyVector.FromHorizontal(horizontal.AltitudeDeg, horizontal.AzimuthDeg);
+
+            direction = (north * v.X + east * v.Y + up * v.Z).normalized;
+            return direction.sqrMagnitude > 0.5;
+        }
+
+        /// <summary>
+        /// The observatory's local north/east/up in world coordinates.
+        ///
+        /// Read from KSP's own latitude/longitude convention by asking the home body where a point
+        /// slightly north and slightly east of the site is, rather than from cross products of a
+        /// rotation axis: Unity's left-handed frame makes the sign of such a product easy to get
+        /// backwards and impossible to notice, and this form simply cannot be wrong about east.
+        /// </summary>
+        private static bool TryBuildSiteBasis(out Vector3d north, out Vector3d east, out Vector3d up,
+                                              out double latitudeDeg, out double longitudeDeg)
+        {
+            north = east = up = Vector3d.zero;
+            latitudeDeg = longitudeDeg = 0.0;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+
+            latitudeDeg = ObservatorySite.LatitudeDeg;
+            longitudeDeg = ObservatorySite.LongitudeDeg;
+            double elevation = ObservatorySite.SiteElevationMeters;
+
+            Vector3d observer = ObservatorySite.WorldPosition(home);
+            up = (observer - home.position).normalized;
+            if (up.sqrMagnitude < 0.5) return false;
+
+            // At the pole the northward step would run over the top, so it is taken southward and negated.
+            const double StepDeg = 0.01;
+            bool nearNorthPole = latitudeDeg + StepDeg > 90.0;
+            Vector3d northProbe = home.GetWorldSurfacePosition(
+                nearNorthPole ? latitudeDeg - StepDeg : latitudeDeg + StepDeg, longitudeDeg, elevation) - observer;
+            if (nearNorthPole) northProbe = -northProbe;
+            Vector3d eastProbe = home.GetWorldSurfacePosition(latitudeDeg, longitudeDeg + StepDeg, elevation) - observer;
+
+            north = Orthonormalize(northProbe, up);
+            east = Orthonormalize(eastProbe, up);
+            return north.sqrMagnitude > 0.5 && east.sqrMagnitude > 0.5;
         }
 
         /// <summary>
@@ -1068,11 +1148,11 @@ namespace ExoInstruments.Visualization
         /// exposure completion — no live preview. Works entirely in KSP's scaled-space frame
         /// using the game's own scaledBody transforms, so no coordinate conversion is needed.
         /// </summary>
-        private void RenderScene(CelestialBody targetBody)
+        private void RenderScene(SkyTarget target)
         {
-            if (targetBody == null || !IsAvailable) return;
-            if (targetBody.scaledBody == null) return; // no scaled stand-in -- nothing to frame
-            if (!hasLockedAim) UpdateAim(targetBody); // first-ever shot on this target: always start centered
+            if (!target.HasTarget || !IsAvailable) return;
+            if (target.IsBody && target.Body.scaledBody == null) return; // no scaled stand-in -- nothing to frame
+            if (!hasLockedAim) UpdateAim(target); // first-ever shot on this target: always start centered
 
             CelestialBody home = FlightGlobals.GetHomeBody();
             Vector3 camPos = lockedCamPos;
@@ -1088,7 +1168,7 @@ namespace ExoInstruments.Visualization
             // about. Photographing an unloaded body draws its mesh with no colour map: a black
             // disc with a lit rim. Force the target (and its moons, which share the field)
             // resident first. No-op without Kopernicus.
-            KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(targetBody);
+            KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(target.Body);
 
             // A RenderTexture's contents are volatile: Unity documents them as lost on graphics-
             // device events, fullscreen transitions among them -- which is what alt-tabbing is.
@@ -1370,7 +1450,7 @@ namespace ExoInstruments.Visualization
         /// <summary>Plain-data snapshot of everything ComputeFramePixels needs -- gathered on the main thread (it touches CelestialBody/Unity APIs), then handed to a background Task that touches none of that, mirroring the StartImagingRefresh/PollImagingRenderTask pattern used elsewhere in this mod.</summary>
         private struct FrameComputeInputs
         {
-            public int TargetSeed;
+            public long TargetSeed;
             public double Ut;
             public float ExposureSeconds;
             public float IsoGain;
@@ -1433,7 +1513,7 @@ namespace ExoInstruments.Visualization
         /// phase law -- see PhotonFluxModel) converted into real electrons collected through
         /// the RC20's real aperture/obstruction/QE/filter-bandwidth/exposure/extinction.
         /// </summary>
-        private FrameComputeInputs GatherFrameInputs(CelestialBody targetBody)
+        private FrameComputeInputs GatherFrameInputs(SkyTarget target)
         {
             // Handed to the background pass through a field rather than through the inputs struct,
             // so that pass can drop it as soon as it has read it -- see pendingSrc.
@@ -1445,7 +1525,7 @@ namespace ExoInstruments.Visualization
 
             double ut = Planetarium.GetUniversalTime();
 
-            TryComputeAltitudeDeg(targetBody, out double targetAltDeg);
+            TryComputeAltitudeDeg(target, out double targetAltDeg);
             double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
             // Extinction at the fitted filter's own wavelength: a real site is far more
             // transparent in the red than in the blue, so a single grey coefficient made every
@@ -1453,14 +1533,14 @@ namespace ExoInstruments.Visualization
             float extinction = (float)AtmosphericImagingNoise.ExtinctionTransmissionAt(
                 airmass, FilterCentralWavelengthMeters(Filter), Spec.SiteAltitudeMeters);
 
-            double angularDiameterRad = ComputeAngularDiameterRad(targetBody);
+            double angularDiameterRad = AngularDiameterArcsec(target) * Math.PI / (180.0 * 3600.0);
             double scintSigma = AtmosphericImagingNoise.ScintillationExcessSigma(
                 Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, angularDiameterRad);
 
             // The Sun's real altitude, handed straight to the sky model; twilight brightness is
             // a measured function of solar depression, not a normalised ramp between two limits.
             bool haveSunAlt = TryComputeAltitudeDeg(Planetarium.fetch != null ? Planetarium.fetch.Sun : null, out double sunAltDeg);
-            double moonSkyExcess = ComputeMoonSkyExcess(targetBody);
+            double moonSkyExcess = ComputeMoonSkyExcess(target);
             float coverage = ComputeCloudCoverage();
 
             // The instrument's whole spectral response for this filter and airmass, integrated
@@ -1470,7 +1550,9 @@ namespace ExoInstruments.Visualization
             LastAirmass = airmass;
             LastEffectiveWidthAngstrom = response.EffectiveWidthAngstromFlat;
 
-            double totalElectrons = ComputeCollectedElectrons(targetBody, response, 1.0, exposureSeconds);
+            double totalElectrons = target.IsBody
+                ? ComputeCollectedElectrons(target.Body, response, 1.0, exposureSeconds)
+                : 0.0;
 
             // Seeing is the site's own atmospheric term and nothing else. Cloud cover used to add
             // a blur here, and no longer does, for two independent reasons.
@@ -1496,7 +1578,7 @@ namespace ExoInstruments.Visualization
 
             var inputs = new FrameComputeInputs
             {
-                TargetSeed = targetBody.flightGlobalsIndex,
+                TargetSeed = target.Seed,
                 Ut = ut,
                 ExposureSeconds = exposureSeconds,
                 IsoGain = isoGain,
@@ -1518,7 +1600,7 @@ namespace ExoInstruments.Visualization
                 Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, 0.0);
 
             GatherSkyBackground(ref inputs, targetAltDeg, sunAltDeg, haveSunAlt, coverage);
-            GatherSkyField(ref inputs, targetBody, exposureSeconds, airmass);
+            GatherSkyField(ref inputs, target, exposureSeconds, airmass);
 
             return inputs;
         }
@@ -1610,7 +1692,7 @@ namespace ExoInstruments.Visualization
         /// and the observatory's real orientation; what leaves is plain data the background pass
         /// can work on.
         /// </summary>
-        private void GatherSkyField(ref FrameComputeInputs inputs, CelestialBody targetBody,
+        private void GatherSkyField(ref FrameComputeInputs inputs, SkyTarget target,
                                     float exposureSeconds, double airmass)
         {
             inputs.HaveFieldGeometry = false;
@@ -1671,8 +1753,8 @@ namespace ExoInstruments.Visualization
                                         out inputs.DriftPixelX, out inputs.DriftPixelY);
 
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
-            inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, targetBody, projection, exposureSeconds);
-            inputs.TotalElectrons = ComputeSceneElectrons(inputs, targetBody, projection, exposureSeconds);
+            inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
+            inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds);
         }
 
         /// <summary>
@@ -1689,12 +1771,15 @@ namespace ExoInstruments.Visualization
         /// division is close to right. Bodies too small to resolve are excluded here because
         /// they are drawn separately as point sources, so nothing is counted twice.
         /// </summary>
-        private double ComputeSceneElectrons(FrameComputeInputs inputs, CelestialBody targetBody,
+        private double ComputeSceneElectrons(FrameComputeInputs inputs, SkyTarget target,
                                              GnomonicProjection projection, float exposureSeconds)
         {
             // Extinction is inside inputs.Response, so only the cloud term is handed over here.
             double bodyTransmission = inputs.CloudTransmission;
-            double total = ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds);
+            CelestialBody targetBody = target.Body;
+            double total = target.IsBody
+                ? ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds)
+                : 0.0;
             if (FlightGlobals.Bodies == null) return total;
 
             foreach (CelestialBody body in FlightGlobals.Bodies)
@@ -1756,26 +1841,8 @@ namespace ExoInstruments.Visualization
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null || !hasLockedAim) return false;
 
-            latitudeDeg = ObservatorySite.LatitudeDeg;
-            double longitudeDeg = ObservatorySite.LongitudeDeg;
-            double elevation = ObservatorySite.SiteElevationMeters;
-
-            Vector3d observer = ObservatorySite.WorldPosition(home);
-            Vector3d up = (observer - home.position).normalized;
-            if (up.sqrMagnitude < 0.5) return false;
-
-            // Step in latitude/longitude and see which way the world moves. At the poles the
-            // northward step would run over the top, so it is taken southward and negated.
-            const double StepDeg = 0.01;
-            bool nearNorthPole = latitudeDeg + StepDeg > 90.0;
-            Vector3d northProbe = home.GetWorldSurfacePosition(
-                nearNorthPole ? latitudeDeg - StepDeg : latitudeDeg + StepDeg, longitudeDeg, elevation) - observer;
-            if (nearNorthPole) northProbe = -northProbe;
-            Vector3d eastProbe = home.GetWorldSurfacePosition(latitudeDeg, longitudeDeg + StepDeg, elevation) - observer;
-
-            Vector3d north = Orthonormalize(northProbe, up);
-            Vector3d east = Orthonormalize(eastProbe, up);
-            if (north.sqrMagnitude < 0.5 || east.sqrMagnitude < 0.5) return false;
+            if (!TryBuildSiteBasis(out Vector3d north, out Vector3d east, out Vector3d up,
+                                   out latitudeDeg, out double longitudeDeg)) return false;
 
             // Held for the rest of the gather pass: every body projected into this frame is
             // resolved against the same basis, and it does not change within one capture.
@@ -1904,11 +1971,12 @@ namespace ExoInstruments.Visualization
         /// the electron budget the rendered image is calibrated against (see
         /// ComputeSceneElectrons), so it is never drawn twice.
         /// </summary>
-        private List<PointSource> GatherUnresolvedBodies(FrameComputeInputs inputs, CelestialBody targetBody,
+        private List<PointSource> GatherUnresolvedBodies(FrameComputeInputs inputs, SkyTarget target,
                                                          GnomonicProjection projection, float exposureSeconds)
         {
             var sources = new List<PointSource>();
             if (FlightGlobals.Bodies == null) return sources;
+            CelestialBody targetBody = target.Body;
 
             // ComputeCollectedElectrons applies the ND filter itself and takes extinction from the
             // response, so it is handed the cloud term only; passing the full star chain would
@@ -2591,6 +2659,24 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Altitude of a live body above KSC's horizon. Returns false if the home body or the body itself is unavailable.</summary>
+        /// <summary>Altitude of a target above the observatory horizon: read from geometry for a body, from the equatorial transform for a fixed position.</summary>
+        public static bool TryComputeAltitudeDeg(SkyTarget target, out double altDeg)
+        {
+            altDeg = 0.0;
+            if (target.IsBody) return TryComputeAltitudeDeg(target.Body, out altDeg);
+            if (!target.IsEquatorial) return false;
+
+            if (!TryBuildSiteBasis(out _, out _, out _, out double latitudeDeg, out double longitudeDeg)) return false;
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+
+            double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                Planetarium.GetUniversalTime(), home.rotationPeriod, home.initialRotation, longitudeDeg);
+            altDeg = SkyCoordinates.EquatorialToHorizontal(
+                target.RaDeg, target.DecDeg, meridianRaDeg, latitudeDeg).AltitudeDeg;
+            return true;
+        }
+
         private static bool TryComputeAltitudeDeg(CelestialBody body, out double altDeg)
         {
             altDeg = 0.0;
@@ -2843,16 +2929,30 @@ namespace ExoInstruments.Visualization
         /// imaged body (closer moons pollute the frame far more than distant ones at the same
         /// altitude). A moon being imaged is excluded from its own sky background.
         /// </summary>
-        private static double ComputeMoonSkyExcess(CelestialBody targetBody)
+        private static double ComputeMoonSkyExcess(SkyTarget target)
         {
             CelestialBody home = FlightGlobals.GetHomeBody();
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || home.orbitingBodies == null) return 0.0;
 
+            CelestialBody targetBody = target.Body;
             Vector3d obsPos = ObservatorySite.WorldPosition(home);
-            Vector3d toTarget = targetBody != null ? (targetBody.position - obsPos) : Vector3d.zero;
-            bool haveTarget = toTarget.sqrMagnitude > 1e-6;
-            if (haveTarget) toTarget = toTarget.normalized;
+
+            // The moon-target separation drives the scattering kernel, so a fixed target needs the
+            // aim direction rather than a body position.
+            Vector3d toTarget = Vector3d.zero;
+            bool haveTarget = false;
+            if (target.IsBody)
+            {
+                toTarget = targetBody.position - obsPos;
+                haveTarget = toTarget.sqrMagnitude > 1e-6;
+                if (haveTarget) toTarget = toTarget.normalized;
+            }
+            else if (target.IsEquatorial)
+            {
+                haveTarget = TryEquatorialDirection(target.RaDeg, target.DecDeg,
+                                                    Planetarium.GetUniversalTime(), out toTarget);
+            }
 
             double kernelAtReference = MoonlightPollution.ScatteringKernel(30.0);
             double referenceFlux = MoonReferenceFluxUnits(home);
@@ -2936,6 +3036,10 @@ namespace ExoInstruments.Visualization
         /// <summary>targetBody's apparent diameter in arcsec as seen from KSC right now -- paired with PlateScaleArcsecPerPixel this is what decides how many pixels across the disk actually lands on, i.e. whether any surface detail is resolvable in principle.</summary>
         public static double AngularDiameterArcsec(CelestialBody targetBody)
             => ComputeAngularDiameterRad(targetBody) * (180.0 / Math.PI) * 3600.0;
+
+        /// <summary>Zero for a fixed target: a star is a point source, and that is what the scintillation model needs to be told.</summary>
+        public static double AngularDiameterArcsec(SkyTarget target)
+            => target.IsBody ? AngularDiameterArcsec(target.Body) : 0.0;
 
         private static double ComputeAngularDiameterRad(CelestialBody targetBody)
         {
