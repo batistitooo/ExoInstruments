@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>emission</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpEmission.cs" />
+    <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/SystemBandpass.cs" />
+    <Compile Include="$(Core)/PhotonFluxModel.cs" />
+    <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/SkyBrightnessModel.cs" />
+    <Compile Include="$(Core)/EmissionLines.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericNoise.cs" />
+    <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <Compile Include="$(Core)/PhotometricDetector.cs" />
+    <Compile Include="$(Core)/DetectionResult.cs" />
+    <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/RadialPsfProfile.cs" />
+    <Compile Include="$(Core)/PupilDiffraction.cs" />
+  </ItemGroup>
+</Project>

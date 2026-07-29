@@ -222,6 +222,41 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// The system's dimensionless throughput at ONE wavelength: filter, optical train, detector
+        /// quantum efficiency and atmospheric extinction, sampled rather than integrated.
+        ///
+        /// This is what an emission line needs, and it is a different quantity from the effective
+        /// width every other caller asks for. A line arrives in a fraction of an Angstrom, so there
+        /// is nothing to integrate across; what decides how much of it reaches the detector is the
+        /// response exactly where the line falls. It is also why a 3 nm filter collects the same
+        /// line photons as a 30 nm one while admitting a tenth of the sky, which no effective-width
+        /// model can express.
+        ///
+        /// Zero outside the filter's support, which is the honest answer: a line outside the
+        /// passband does not arrive.
+        /// </summary>
+        public double ThroughputAt(double wavelengthMeters, bool includeExtinction = true)
+        {
+            if (!(wavelengthMeters > 0.0) || greyTransmission <= 0.0) return 0.0;
+
+            if (filterTransmissionCurve != null)
+            {
+                if (wavelengthMeters < filterTransmissionCurve.MinWavelengthMeters
+                 || wavelengthMeters > filterTransmissionCurve.MaxWavelengthMeters) return 0.0;
+            }
+            else
+            {
+                if (widthMeters <= 0.0 || centralWavelengthMeters <= 0.0) return 0.0;
+                double half = 0.5 * widthMeters;
+                if (Math.Abs(wavelengthMeters - centralWavelengthMeters) > half) return 0.0;
+            }
+
+            // The source-shape factor is deliberately absent: Integrand normalises a CONTINUUM at
+            // Johnson V, and a line's flux is given absolutely rather than as a magnitude.
+            return Integrand(wavelengthMeters, 0.0, includeExtinction, 0.0);
+        }
+
+        /// <summary>
         /// Effective width for a star of known INTRINSIC temperature seen through a known
         /// reddening: the Planck shape of the star it really is, times the extinction curve,
         /// normalised at V so its observed magnitude still sets the flux.
