@@ -89,6 +89,10 @@ namespace ExoInstruments.Visualization
             public double DiffractionFwhmArcsec;
             /// <summary>Sky background, V mag/arcsec^2 -- the quantity SkyBrightnessModel computes and publishes in.</summary>
             public double SkyBrightnessVMagPerArcsec2;
+            /// <summary>Total Galactic E(B-V) toward the field, or NaN with no dust map installed. The whole column, so it describes what lies beyond the Galaxy rather than any star in the frame.</summary>
+            public double GalacticReddeningEBv;
+            /// <summary>Which published map that reddening came from, for the header's own record.</summary>
+            public string DustMapSource;
             /// <summary>Filter's central wavelength and FWHM, nanometres, so a colour term can be recomputed downstream.</summary>
             public double FilterCentralWavelengthNm;
             public double FilterBandwidthNm;
@@ -270,6 +274,19 @@ namespace ExoInstruments.Visualization
                 AppendCard(sb, "DIFFLIM", info.DiffractionFwhmArcsec.ToString("F5", CultureInfo.InvariantCulture), "diffraction core FWHM (arcsec)");
             if (IsFinite(info.SkyBrightnessVMagPerArcsec2))
                 AppendCard(sb, "SKYMAG", info.SkyBrightnessVMagPerArcsec2.ToString("F3", CultureInfo.InvariantCulture), "sky background (V mag/arcsec2)");
+            // Sight-line extinction, omitted rather than zero-filled with no dust map installed: a
+            // missing keyword says "not measured", a zero would say "no dust", and only one of
+            // those is true.
+            if (IsFinite(info.GalacticReddeningEBv))
+            {
+                AppendCard(sb, "EBV", info.GalacticReddeningEBv.ToString("F4", CultureInfo.InvariantCulture),
+                           "total Galactic E(B-V) toward the field (mag)");
+                AppendCard(sb, "AV", (info.GalacticReddeningEBv * Core.InterstellarExtinction.MilkyWayRv)
+                               .ToString("F4", CultureInfo.InvariantCulture),
+                           "total Galactic A(V) at R_V = 3.1 (mag)");
+                if (!string.IsNullOrEmpty(info.DustMapSource))
+                    AppendCommentaryCard(sb, "COMMENT", "EBV from " + info.DustMapSource);
+            }
             if (info.FilterCentralWavelengthNm > 0.0)
                 AppendCard(sb, "WAVELNTH", info.FilterCentralWavelengthNm.ToString("F2", CultureInfo.InvariantCulture), "filter central wavelength (nm)");
             if (info.FilterBandwidthNm > 0.0)

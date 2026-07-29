@@ -59,9 +59,27 @@ Three checks are about signs rather than tolerances — Sgr A\* at the origin, a
 at exactly ±90° — because a frame with a flipped longitude sense passes every round-trip test ever
 written and puts the Galactic plane sweeping the wrong way across the sky.
 
+**The packed map format round-trips.** `make_test_map.py` writes a synthetic map whose value is a
+known analytic function of Galactic latitude — `0.02 + 1.98 exp(-|b|/8°)` — and the C# side reads it
+back and queries 3000 random directions. The expectation is recomputed from the *queried position*
+alone, so the map file is never consulted: this checks the pixel lookup, not the file's contents.
+
+| check | result |
+|---|---|
+| median residual against the written pattern | **0.9 mmag** |
+| worst residual, as a fraction of one pixel's own gradient | 0.81 |
+| `A(V)` against `R_V E(B-V)` | 0 |
+
+The worst residual is bounded by the pattern's gradient times one pixel rather than by a flat
+tolerance, because a query returns the value of the pixel it lands in while the expectation is
+evaluated at the exact direction. The pattern is steepest in the Galactic plane and flat at the
+poles, so a flat tolerance would be too tight in one place and meaningless in the other.
+
 ## What this does NOT establish
 
-- **Indexing only.** No map is read here. No `E(B-V)` for any sight line, no dust, no physics.
+- **No real map is read here.** The synthetic pattern checks the format and the lookup; whether
+  SFD98 or Planck GNILC say the right thing about the real sky is their business, not this
+  harness's.
 - **Direction to pixel only.** The inverse (pixel centre to direction) and neighbour queries are not
   implemented, because a map *reader* does not need them.
 - **No interpolation.** Nearest-pixel lookup. Bilinear interpolation over the four neighbours is

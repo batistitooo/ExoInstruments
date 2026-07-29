@@ -1727,6 +1727,12 @@ namespace ExoInstruments.Visualization
             // stars in it, so the header and the image cannot disagree. Referred to the START of
             // the exposure, which is what DATE-OBS timestamps.
             LastWcs = Core.FitsWcs.Build(projection, inputs.StartMeridianRaDeg, latitudeDeg);
+
+            // Sight-line extinction toward the boresight, from the WCS's own reference point so
+            // the header's pointing and its extinction cannot describe different directions.
+            LastFieldReddeningEBv = DustMap != null
+                ? DustMap.ReddeningAt(LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg)
+                : double.NaN;
             LastFrameTrailed = inputs.EndMeridianRaDeg != inputs.StartMeridianRaDeg;
 
             inputs.ApertureAreaCm2 = RealApertureAreaCm2();
@@ -1805,11 +1811,26 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static RenderedStarCatalog StarCatalog { get; set; }
 
+        /// <summary>
+        /// Optional all-sky reddening map, set by the GUI at load time. Null simply means no
+        /// sight-line extinction is reported, and nothing else changes: this is the TOTAL Galactic
+        /// column, so it describes what lies beyond the whole Galaxy and is never applied to a
+        /// catalogue star -- see DustMap.
+        /// </summary>
+        public static DustMap DustMap { get; set; }
+
+        /// <summary>Total Galactic E(B-V) toward the last capture's field centre, or NaN with no map installed.</summary>
+        public double LastFieldReddeningEBv { get; private set; } = double.NaN;
+
         /// <summary>Sky surface brightness (V mag/arcsec^2) behind the last capture: the number a real observer would quote for the conditions. Higher is darker.</summary>
         public double LastSkyBrightnessVMagPerArcsec2 { get; private set; }
 
         /// <summary>Number of catalogue stars actually drawn into the last capture.</summary>
         public int LastStarsDrawn => lastStarsDrawnInternal;
+
+        /// <summary>Quadratures the reddening cache ran for the last capture. Zero when no star in the field carries a reddening estimate.</summary>
+        public int LastReddeningQuadratures => lastReddeningQuadratures;
+        private int lastReddeningQuadratures;
 
         /// <summary>Limiting V magnitude of the last capture: the faintest star that rose above its noise floor.</summary>
         public double LastLimitingVMag { get; private set; }
@@ -2783,6 +2804,11 @@ namespace ExoInstruments.Visualization
                 double exposure = inputs.ExposureSeconds;
                 double transmission = inputs.StarNonAtmosphericTransmission * scintillation;
 
+                // One cache per frame, built here rather than alongside the response: it runs
+                // quadratures, this is the background thread, and a frame is one sight line so its
+                // stars share nearly all of them. See ReddenedResponseCache.
+                var reddening = new ReddenedResponseCache(response);
+
                 drawn = StarFieldRenderer.DepositStars(
                     signal, TextureWidth, TextureHeight,
                     inputs.Stars, inputs.Projection,
@@ -2790,7 +2816,10 @@ namespace ExoInstruments.Visualization
                     inputs.ObserverLatitudeDeg,
                     inputs.SignalCutoffElectrons,
                     star => StellarPhotometry.CollectedElectrons(
-                        star.VMag, star.ColorIndexBV, response, area, exposure, transmission));
+                        star.VMag, star.ColorIndexBV, star.ReddeningEBv,
+                        response, reddening, area, exposure, transmission));
+
+                lastReddeningQuadratures = reddening.Evaluations;
             }
 
             if (inputs.UnresolvedBodies != null)

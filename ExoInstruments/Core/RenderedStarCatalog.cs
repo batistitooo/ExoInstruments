@@ -11,10 +11,22 @@ namespace ExoInstruments.Core
         public double DecDeg;
         /// <summary>Johnson V apparent magnitude.</summary>
         public double VMag;
-        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star.</summary>
+        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star. OBSERVED, so it carries the star's reddening -- see ReddeningEBv.</summary>
         public double ColorIndexBV;
 
+        /// <summary>
+        /// Interstellar reddening toward this star, or NaN when the catalogue has none.
+        ///
+        /// Gaia's own gspphot estimate, not a sight-line average: it comes from fitting an
+        /// atmosphere model to the star's own BP/RP spectrum and parallax, so it applies to this
+        /// star at its own distance. NaN means the fit had no solution, and the photometry then
+        /// behaves exactly as it did before the column existed.
+        /// </summary>
+        public double ReddeningEBv;
+
         public bool HasColor => !double.IsNaN(ColorIndexBV);
+
+        public bool HasReddening => !double.IsNaN(ReddeningEBv);
     }
 
     /// <summary>
@@ -47,9 +59,14 @@ namespace ExoInstruments.Core
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'S', (byte)'T', (byte)'A', (byte)'R', (byte)'1' };
 
         // Must match tools/pack_gaia_catalog.py, which writes the file.
-        private const int FormatVersion = 2;
+        private const int FormatVersion = 3;
+
+        /// <summary>Version 2 files still load; they simply carry no reddening column, and every star reads as "not estimated".</summary>
+        private const int OldestSupportedVersion = 2;
+
         private const double VMagOffset = 2.0;
         private const short BvUnknown = -32768;
+        private const ushort EbvUnknown = 65535;
 
         /// <summary>
         /// Positions are fixed point over a full turn, not float32 degrees. A float32 near
@@ -65,6 +82,7 @@ namespace ExoInstruments.Core
         private int[] decFixed;
         private ushort[] vMagMilli;
         private short[] bvMilli;
+        private ushort[] ebvMilli;
         private uint[] bandStart;
         private int bandCount;
         private double bandWidthDeg;
@@ -92,7 +110,9 @@ namespace ExoInstruments.Core
                 }
 
                 int version = reader.ReadInt32();
-                if (version != FormatVersion) throw new InvalidDataException("unsupported catalogue version " + version);
+                if (version < OldestSupportedVersion || version > FormatVersion)
+                    throw new InvalidDataException("unsupported catalogue version " + version);
+                bool hasReddening = version >= 3;
 
                 int count = reader.ReadInt32();
                 bandCount = reader.ReadInt32();
@@ -107,12 +127,14 @@ namespace ExoInstruments.Core
                 decFixed = new int[count];
                 vMagMilli = new ushort[count];
                 bvMilli = new short[count];
+                ebvMilli = new ushort[count];
                 for (int i = 0; i < count; i++)
                 {
                     raFixed[i] = reader.ReadUInt32();
                     decFixed[i] = reader.ReadInt32();
                     vMagMilli[i] = reader.ReadUInt16();
                     bvMilli[i] = reader.ReadInt16();
+                    ebvMilli[i] = hasReddening ? reader.ReadUInt16() : EbvUnknown;
                 }
             }
         }
@@ -206,6 +228,7 @@ namespace ExoInstruments.Core
                     DecDeg = starDecDeg,
                     VMag = vMagMilli[i] / 1000.0 - VMagOffset,
                     ColorIndexBV = bvMilli[i] == BvUnknown ? double.NaN : bvMilli[i] / 1000.0,
+                    ReddeningEBv = ebvMilli[i] == EbvUnknown ? double.NaN : ebvMilli[i] / 1000.0,
                 });
             }
         }

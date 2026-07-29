@@ -238,6 +238,7 @@ namespace ExoInstruments
         {
             catalog = LoadCatalog();
             LoadRenderedStarCatalog();
+            LoadDustMap();
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
@@ -309,6 +310,34 @@ namespace ExoInstruments
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the rendered star catalog: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Optional all-sky reddening map. Like the star catalogue nothing ships, and with no file
+        /// installed every query returns NaN and the header simply omits the keywords.
+        /// </summary>
+        private void LoadDustMap()
+        {
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/DustMap.dustmap";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.Log("[ExoInstruments] No dust map installed, so frames carry no sight-line "
+                            + "extinction. Build one with tools/pack_dust_map.py and place it at " + path);
+                    return;
+                }
+                var map = new DustMap();
+                map.Load(path);
+                SolarSystemCameraTexture.DustMap = map;
+                Debug.Log($"[ExoInstruments] Dust map: nside {map.Nside} "
+                        + $"({map.ResolutionArcmin:F1} arcmin), {map.Source}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the dust map: {e.Message}");
             }
         }
 
@@ -1691,6 +1720,16 @@ namespace ExoInstruments
                     $"Sky {sky}  |  limiting magnitude V {solarSystemCamera.LastLimitingVMag:F1}"
                     + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
                     smallCaptionStyle);
+
+                double fieldEbv = solarSystemCamera.LastFieldReddeningEBv;
+                if (!double.IsNaN(fieldEbv))
+                {
+                    GUILayout.Label(
+                        $"Galactic extinction toward this field: E(B-V) = {fieldEbv:F3}, "
+                        + $"A(V) = {fieldEbv * InterstellarExtinction.MilkyWayRv:F2} mag "
+                        + "(whole column, so it applies beyond the Galaxy rather than to stars in frame)",
+                        smallCaptionStyle);
+                }
             }
 
             // Saturation is the one failure here that silently destroys real detail rather than
@@ -1962,6 +2001,7 @@ namespace ExoInstruments
             fitsInfo.Airmass = double.NaN;
             fitsInfo.SeeingFwhmArcsec = double.NaN;
             fitsInfo.SkyBrightnessVMagPerArcsec2 = double.NaN;
+            fitsInfo.GalacticReddeningEBv = double.NaN;
 
             string path = System.IO.Path.Combine(dir, $"ExoInstruments_{kind}_{stamp}.fits");
             FitsWriter.WriteGrayscale(path, adu,
@@ -2172,6 +2212,9 @@ namespace ExoInstruments
             info.SeeingFwhmArcsec = solarSystemCamera.LastAtmosphericFwhmArcsec;
             info.DiffractionFwhmArcsec = solarSystemCamera.LastDiffractionFwhmArcsec;
             info.SkyBrightnessVMagPerArcsec2 = solarSystemCamera.LastSkyBrightnessVMagPerArcsec2;
+            info.GalacticReddeningEBv = solarSystemCamera.LastFieldReddeningEBv;
+            info.DustMapSource = SolarSystemCameraTexture.DustMap != null
+                ? SolarSystemCameraTexture.DustMap.Source : null;
 
             info.OpticalThroughput = spec.OpticsTransmission;
             info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;

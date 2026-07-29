@@ -105,10 +105,43 @@ def galactic():
     check("the south Galactic pole maps to b = -90", d["b_deg"][2], -90.0, 1e-6, " deg")
 
 
+def dust_map():
+    """The packed map format and the query, end to end against the pattern that was written."""
+    print("\n6. DustMap: read back the synthetic map and query it")
+    d = np.genfromtxt("exo_mapquery.csv", delimiter=",", names=True)
+    if len(d) == 0:
+        print("  [note] no test_map.dustmap; run make_test_map.py first")
+        return
+
+    # The pattern make_test_map.py wrote, recomputed here from the queried position alone. The
+    # map file is not consulted, so this checks the pixel lookup rather than the file's contents.
+    expected = 0.02 + 1.98 * np.exp(-np.abs(d["b_deg"]) / 8.0)
+    known = np.isfinite(d["ebv"])
+
+    # A query returns the value of the pixel it lands in, while the expectation is evaluated at the
+    # queried direction, so the residual is the pattern's own variation across one pixel. Bounding
+    # it by a flat tolerance would be wrong: the pattern is steepest in the Galactic plane and flat
+    # at the poles. The bound is therefore the gradient itself, times one pixel.
+    dev = np.abs(d["ebv"][known] - expected[known])
+    resol_deg = np.degrees(np.sqrt(4 * np.pi / (12 * 64 * 64)))
+    gradient = (1.98 / 8.0) * np.exp(-np.abs(d["b_deg"][known]) / 8.0)
+    bound = gradient * resol_deg + 1e-4          # plus the write quantisation
+    worst = float((dev / bound).max())
+    check(f"residual within one pixel of the pattern's own gradient, {known.sum()} directions",
+          worst, 0.0, 1.0, " pixel-gradients")
+    check("median residual, i.e. the typical sub-pixel variation",
+          float(np.median(dev)), 0.0, 5e-3, " mag")
+    check("A(V) is exactly R_V E(B-V)",
+          float(np.abs(d["av"][known] / d["ebv"][known] - 3.1).max()), 0.0, 1e-12)
+    notes.append(f"the packed map round-trips: {known.sum()} of {len(d)} directions carry a value, "
+                 f"median residual {np.median(dev) * 1000:.1f} mmag against the written pattern")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     healpix()
     galactic()
+    dust_map()
 
     print("\n" + "-" * 78)
     for n in notes:

@@ -121,7 +121,7 @@ import urllib.request
 # definition of the format Core/RenderedStarCatalog.cs reads. Keep VERSION in step with
 # RenderedStarCatalog.FormatVersion.
 MAGIC = b"EXOSTAR1"
-VERSION = 2
+VERSION = 3
 
 # Positions are stored as fixed-point integers over the full turn rather than as float32
 # degrees. A float32 near RA = 360 deg has an ULP of 2.1e-5 deg = 0.077 arcsec, which is a
@@ -140,6 +140,26 @@ DEC_BAND_COUNT = int(round(180.0 / DEC_BAND_WIDTH_DEG))
 # brightest real star (Sirius, V = -1.46) still lands on a positive value.
 V_MAG_OFFSET = 2.0
 BV_UNKNOWN = -32768  # sentinel: this star has no Gaia colour, so its B-V is unknown
+
+# Interstellar reddening, stored as an unsigned millimagnitude with a sentinel for "not
+# estimated". Version 3 added it, and the reason is that everything else in this file
+# writes OBSERVED photometry: Gaia's G and BP-RP are reddened, and nothing here deredden
+# them. Downstream that left a hot star behind dust indistinguishable from a cool star, and
+# the pipeline modelled it as the cool one. E(B-V) is what separates the two.
+#
+# It is Gaia's own estimate, not a dust map's. gspphot fits an atmosphere model to the
+# star's own BP/RP spectrum and parallax and reports the extinction that fit implies, so it
+# is per-source and needs no distance of ours. Where gspphot has no solution the field is
+# the sentinel, the star is drawn exactly as version 2 drew it, and that is honest rather
+# than filled in from a sight-line average that would be wrong for a foreground star.
+EBV_UNKNOWN = 65535
+EBV_MAX_MAG = 10.0   # anything above this is a fit failure rather than a sight line
+
+# gspphot reports A_0, the monochromatic extinction at 547.7 nm, and E(BP-RP). A_0 is the
+# closer of the two to A(V) and converting it needs only R_V: E(B-V) = A_0 / R_V with the
+# Galactic average 3.1, the same value Core/InterstellarExtinction uses and the one every
+# all-sky map is calibrated to.
+GALACTIC_RV = 3.1
 
 # --- Gaia DR3 Table 5.9, exactly as published ---------------------------------------
 G_MINUS_V = (-0.02704, 0.01424, -0.2156, 0.01426)     # in (G_BP - G_RP)
@@ -177,7 +197,18 @@ def b_minus_v(bp_rp):
     return 0.5 * (lo + hi)
 
 
-def build_star(ra, dec, g, bp_rp):
+def reddening_milli(a0):
+    """gspphot's A_0 as a packed E(B-V), or the sentinel when there is no usable estimate."""
+    if a0 is None:
+        return EBV_UNKNOWN
+    ebv = a0 / GALACTIC_RV
+    if not (0.0 <= ebv <= EBV_MAX_MAG):
+        return EBV_UNKNOWN
+    milli = int(round(ebv * 1000.0))
+    return EBV_UNKNOWN if milli >= EBV_UNKNOWN else milli
+
+
+def build_star(ra, dec, g, bp_rp, a0=None):
     """One packed record, or None when the row carries no usable position/magnitude."""
     if ra is None or dec is None or g is None:
         return None
@@ -206,7 +237,7 @@ def build_star(ra, dec, g, bp_rp):
 
     ra_fixed = int(round((ra % 360.0) * RA_SCALE)) % (2 ** 32)
     dec_fixed = max(-(2 ** 31), min(2 ** 31 - 1, int(round(dec * DEC_SCALE))))
-    return (ra_fixed, dec_fixed, v_milli, bv_milli, dec)
+    return (ra_fixed, dec_fixed, v_milli, bv_milli, reddening_milli(a0), dec)
 
 
 # --- ESA archive access, with no third-party dependency -------------------------------
@@ -402,7 +433,7 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
                        f"AND source_id >= {lo} AND source_id < {hi}")
         count = int(with_retries("count", lambda: tap_query(count_query, quiet=True))[0]["n"])
         if count == 0:
-            open(cached, "w").write("ra,dec,phot_g_mean_mag,bp_rp\n")
+            open(cached, "w").write("ra,dec,phot_g_mean_mag,bp_rp,ag_gspphot\n")
             return
         if count > MAX_ROWS_PER_JOB:
             mid = (lo + hi) // 2
@@ -420,7 +451,7 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
 
 def fetch(gmax, cone, slices, cache_dir):
     """Rows from the ESA archive, in source_id slices small enough for one job each."""
-    columns = "ra, dec, phot_g_mean_mag, bp_rp"
+    columns = "ra, dec, phot_g_mean_mag, bp_rp, ag_gspphot"
     if cone:
         ra, dec, radius = cone
         print(f"  cone {ra} {dec} r={radius} deg, G < {gmax}", flush=True)
@@ -474,7 +505,8 @@ def main():
                 except ValueError:
                     return None
                 return None if f != f else f   # NaN-safe
-            star = build_star(value("ra"), value("dec"), value("phot_g_mean_mag"), value("bp_rp"))
+            star = build_star(value("ra"), value("dec"), value("phot_g_mean_mag"),
+                              value("bp_rp"), value("ag_gspphot"))
             if star:
                 stars.append(star)
         print(f"    {len(stars)} cumulative", flush=True)
@@ -505,12 +537,14 @@ def main():
         f.write(struct.pack("<II", VERSION, len(stars)))
         f.write(struct.pack("<If", DEC_BAND_COUNT, DEC_BAND_WIDTH_DEG))
         f.write(struct.pack(f"<{DEC_BAND_COUNT + 1}I", *band_start))
-        record = struct.Struct("<IiHh")
-        f.write(b"".join(record.pack(s[0], s[1], s[2], s[3]) for s in stars))
+        record = struct.Struct("<IiHhH")
+        f.write(b"".join(record.pack(s[0], s[1], s[2], s[3], s[4]) for s in stars))
 
     size_mb = os.path.getsize(args.out) / (1024 * 1024)
     no_colour = sum(1 for s in stars if s[3] == BV_UNKNOWN)
-    print(f"{len(stars)} stars -> {args.out} ({size_mb:.1f} MB), {no_colour} without a colour index")
+    no_reddening = sum(1 for s in stars if s[4] == EBV_UNKNOWN)
+    print(f"{len(stars)} stars -> {args.out} ({size_mb:.1f} MB), {no_colour} without a colour index, "
+          f"{no_reddening} without a reddening estimate")
     print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat")
     return 0
 

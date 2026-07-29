@@ -15,7 +15,8 @@ static class DumpMapIndex
     {
         DumpHealpix();
         DumpGalactic();
-        Console.WriteLine("written exo_healpix.csv, exo_galactic.csv");
+        DumpMapQueries();
+        Console.WriteLine("written exo_healpix.csv, exo_galactic.csv, exo_mapquery.csv");
     }
 
     static void DumpHealpix()
@@ -55,6 +56,32 @@ static class DumpMapIndex
             nside, theta, phi,
             Healpix.AngleToRing(nside, theta, phi),
             Healpix.AngleToNested(nside, theta, phi)));
+    }
+
+    /// <summary>Reads the synthetic map make_test_map.py wrote and queries it, so the format and the lookup are checked end to end.</summary>
+    static void DumpMapQueries()
+    {
+        var map = new DustMap();
+        if (!File.Exists("test_map.dustmap"))
+        {
+            File.WriteAllText("exo_mapquery.csv", "ra_deg,dec_deg,l_deg,b_deg,ebv,av\n");
+            return;
+        }
+        map.Load("test_map.dustmap");
+
+        var sb = new StringBuilder();
+        sb.AppendLine("ra_deg,dec_deg,l_deg,b_deg,ebv,av");
+        var rng = new Pcg32(0x0D0570EUL, 5UL);
+        for (int i = 0; i < 3000; i++)
+        {
+            double ra = 360.0 * rng.NextDouble();
+            double dec = Math.Asin(2.0 * rng.NextDouble() - 1.0) * 180.0 / Math.PI;
+            GalacticCoordinates.EquatorialToGalactic(ra, dec, out double l, out double b);
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R},{3:R},{4:R},{5:R}",
+                ra, dec, l, b, map.ReddeningAt(ra, dec), map.ExtinctionAtV(ra, dec)));
+        }
+        File.WriteAllText("exo_mapquery.csv", sb.ToString());
+        Console.WriteLine($"  map: nside {map.Nside} ({map.ResolutionArcmin:F1} arcmin), {map.Source}");
     }
 
     static void DumpGalactic()
