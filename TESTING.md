@@ -305,3 +305,22 @@ frame to divide by.
 - [ ] **14.6** **A bright planet must still look right.** Jupiter at a sensible exposure fills the
       converter's range on its own, so the limits should stay wide and the disk should not be blown
       out by the auto scaling.
+
+## 15. The high-resolution patch layer
+
+- [ ] **15.1** **It loads.** `KSP.log` must carry
+      `Emission patches: <n> regions at nside 4096 (0.86 arcmin), SHASSA ... on the Finkbeiner ...`.
+      Without the file every field is drawn at 6' and nothing else changes.
+- [ ] **15.2** **The Horsehead.** Point at `IC 434` (the emission ridge, not `B 33`) with the RC20 or
+      the CDK1000 in `Ha`. The frame must show the ridge with structure and the dark cloud beside it,
+      not a smooth gradient. The readout must say
+      `from the IC 434 Horsehead high-resolution patch at 0.86' sampling`.
+- [ ] **15.3** **M42 at the RedCat.** Same check. The patch covers 1.1 degrees, the RedCat's field is
+      4.4 x 3.0, so the frame does NOT fit inside the patch and must fall back to the all-sky map --
+      the readout should say so. Use the RC20 or CDK1000 to get inside the patch.
+- [ ] **15.4** **A target with no patch** -- IC 1396 at +57 degrees is outside SHASSA -- must report
+      `from the all-sky map at 3.44' sampling (6' beam) -- no patch covers this field`.
+- [ ] **15.5** **No seam.** Frame a patch edge with an instrument whose field is small enough to sit
+      just inside, then just outside. The two frames should differ in detail, never show a step.
+- [ ] **15.6** **Cost.** Time a capture inside a patch against one outside at the same binning. The
+      patch lookup keeps a run cursor, so it should be within a few percent, not multiples.

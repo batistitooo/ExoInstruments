@@ -1950,6 +1950,20 @@ namespace ExoInstruments.Visualization
         public static EmissionMap EmissionMap { get; set; }
 
         /// <summary>
+        /// Optional high-resolution patches of the same line over the sky where a finer survey
+        /// exists, set by the GUI at load time. Null simply means every field is drawn at the
+        /// all-sky map's own 6 arcmin beam -- see EmissionPatchSet for why that is the difference
+        /// between a nebula and a smudge.
+        /// </summary>
+        public static EmissionPatchSet EmissionPatches { get; set; }
+
+        /// <summary>Name of the high-resolution patch the last frame was drawn from, or null when the base map answered.</summary>
+        public string LastEmissionPatchName { get; private set; }
+
+        /// <summary>Resolution the last frame's emission actually came at, arcminutes -- the patch's when one covered the field, the base map's otherwise.</summary>
+        public double LastEmissionResolutionArcmin { get; private set; }
+
+        /// <summary>
         /// Optional galaxy catalogue, set by the GUI at load time. Unlike a star, a galaxy is
         /// resolved by every instrument here, so it is drawn from its own measured shape rather
         /// than by the PSF -- see GalaxyCatalog and GalaxyRenderer.
@@ -2084,6 +2098,8 @@ namespace ExoInstruments.Visualization
             LastEmissionRayleighs = double.NaN;
             LastEmissionPeakElectrons = double.NaN;
             LastEmissionLines = null;
+            LastEmissionPatchName = null;
+            LastEmissionResolutionArcmin = 0.0;
 
             EmissionMap map = EmissionMap;
             if (map == null || !map.IsLoaded || !inputs.HaveFieldGeometry || signal == null) return;
@@ -2124,6 +2140,22 @@ namespace ExoInstruments.Visualization
             // render as flat blocks 54 frame pixels across.
             EmissionMap.AllocateScratch(out long[] pixelScratch, out double[] weightScratch);
 
+            // The high-resolution layer, if one covers this field. Resolved once: a frame cannot
+            // span two patches, and asking per pixel would be a hundred dot products for an answer
+            // that does not change.
+            EmissionPatchSet patchSet = EmissionPatches;
+            EmissionPatchSet.Patch patch = null;
+            var patchCursor = EmissionPatchSet.Cursor.New();
+            if (patchSet != null && patchSet.IsLoaded)
+            {
+                double fieldRadiusDeg = 0.5 * Math.Sqrt((double)w * w + (double)h * h)
+                                      * inputs.PlateScaleArcsec / 3600.0;
+                patch = patchSet.FindCoveringPatch(LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg,
+                                                   fieldRadiusDeg);
+            }
+            LastEmissionPatchName = patch != null ? patch.Name : null;
+            LastEmissionResolutionArcmin = patch != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
+
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
@@ -2131,7 +2163,13 @@ namespace ExoInstruments.Visualization
                     SkyVector direction = inputs.Projection.Deproject(x + 0.5, y + 0.5);
                     rotation.ToGalactic(direction, out double l, out double b);
 
-                    double r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
+                    // The patch carries total surface brightness, apodised into the base map at its
+                    // own edge, so it substitutes rather than adds. Any pixel it cannot answer for
+                    // falls through to the base map.
+                    double r;
+                    if (patch == null || !patchSet.TryRayleighsAtGalactic(
+                            patch, l, b, pixelScratch, weightScratch, ref patchCursor, out r))
+                        r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
                     if (double.IsNaN(r)) continue;
                     counted++;
                     if (!(r > 0.0)) continue;

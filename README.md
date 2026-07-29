@@ -488,6 +488,85 @@ planetary nebulae, supernova remnants and a few hot cores, and weak everywhere b
 the neutral boundary rather than the ionised gas. Deriving either from an Hα map would be inventing
 a sky, so those filter positions stay empty until a survey of their own is installed.
 
+## The resolution limit, and what was done about it
+
+This is the mod's largest known limitation, and it is worth stating precisely because it is a
+property of the available data rather than of the code.
+
+The Finkbeiner composite has a **6 arcmin beam**. Everything that makes a nebula recognisable in a
+photograph is finer than that:
+
+| structure | size | beams across | what a frame shows |
+|---|---|---|---|
+| Horsehead, the head itself | 3′ | **0.5** | nothing |
+| M42 Trapezium / Huygens region | 5′ | **0.8** | nothing |
+| Horsehead, whole silhouette | 8′ | **1.3** | nothing |
+| Filaments in IC 1396A | 2′ | **0.3** | nothing |
+| M42's wings and dark lanes | 10′ | 1.7 | a smudge |
+| Elephant's Trunk IC 1396A | 20′ | 3.3 | a smudge |
+| Rosette pillars | 10′ | 1.7 | a smudge |
+| Rosette ring | 80′ | 13.3 | its outline |
+| M42 as a whole | 85′ | 14.2 | its outline |
+| North America | 120′ | 20.0 | its outline |
+| IC 1396 as a whole | 170′ | 28.3 | its outline |
+
+Only the last four render as shapes, and none of the detail inside them does. A real astrophotograph
+works at 2 arcseconds — **180 times finer** — which is why the pictures look different. No display
+setting, stretch or stacking recovers information the file does not contain.
+
+Two further consequences worth knowing:
+
+* **A dark nebula cannot be rendered at any resolution from an emission map.** What defines the
+  Horsehead is the *absence* of light where dust blocks the emission behind it, and the map holds
+  only what is emitted. `Core/DeepSkyCatalog` marks dark nebulae as such and the sky chart says so.
+* Around the very brightest object in the sky the composite carries a visible **artefact**: a ridge
+  about 10′ wide and 1.5° long through M42, whereas M42 is a roughly round 85′ × 60′ nebula. It is
+  in the published file — reading it with `healpy` directly reproduces it — and is most likely a
+  saturation bleed in the survey images the composite mosaics.
+
+### The patch layer
+
+The one thing that helps is finer data, and it exists over part of the sky. **SHASSA** (Gaustad,
+McCullough, Rosing & Van Buren 2001, PASP 113, 1326) images everything south of **+15° declination**
+at **0.8 arcmin** — 7.5× finer, at which the Horsehead spans 10 elements instead of 1.3.
+
+```
+cd tools
+python3 -m venv env && ./env/bin/pip install numpy scipy astropy healpy requests
+./env/bin/python pack_shassa_patches.py \
+    --composite "<KSP>/GameData/ExoInstruments/PluginData/HalphaMap.emission" \
+    --out HalphaPatches.patchset
+cp HalphaPatches.patchset "<KSP>/GameData/ExoInstruments/PluginData/"
+```
+
+Cutouts come from **NASA SkyView**, which mosaics and reprojects SHASSA on request, so nothing has to
+download the survey's 2.3 GB of fields.
+
+**Why patches and not a finer all-sky map.** Resolution is only worth storing where there is
+something to resolve. All-sky at 0.86′ is 201 million HEALPix cells and **403 MB**, nearly all of it
+diffuse background that 6′ already describes perfectly. A degree or two around each catalogued object
+is about **5 MB for the whole catalogue** — eighty times smaller for the same result on every target
+anyone actually points at. Outside a patch the all-sky map answers, which is the layered arrangement
+every real survey archive uses. The frame reports which layer it came from and at what sampling.
+
+**The calibration is measured, not assumed.** SHASSA's own pixel units are not taken on trust. Each
+cutout is smoothed to the composite's 6′ beam and regressed against the composite over the same area,
+which *measures* the scale between them and prints it. The patch then stores
+
+    composite  +  scale × (cutout − smoothed cutout)
+
+so the absolute calibration stays exactly the composite's and SHASSA contributes only structure finer
+than 6′, which is the only thing it is being used for. Smoothing a patch back to 6′ returns the
+composite. The fine term is apodised to zero across the patch's outer margin, so a patch joins the
+base map continuously instead of leaving a step. Measured residual after matching at 6′: about 20%,
+which is the uncertainty on the *amplitude* of the fine structure and is reported per patch.
+
+**What it does not fix.** SHASSA stops at +15°, so IC 1396 (+57°), North America (+44°), the Heart and
+Soul, the Bubble and the Cave stay at 6′. VTSS covers the northern plane at 1.6′ and is the obvious
+next step. And even at 0.8′ these are survey images: M42's Trapezium spans 6 elements rather than
+0.8, which is a nebula rather than a smudge, but it is not a two-arcsecond astrophotograph and will
+not look like one.
+
 ## Optional: the galaxy catalogue
 
 **Nothing ships.** Galaxies are rendered from their own measured shape, so the catalogue supplies

@@ -1025,6 +1025,80 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 39. **A stacked composite carries no WCS** (§7.7.1), because centroid registration on a moving body aligns the target and not the field, so no single pointing describes the stack.
 40. **The sky background's extinction is still evaluated at the filter's central wavelength**, not integrated across the band as the sources' now is: its four terms are each attenuated differently (airglow inside the atmosphere, zodiacal light outside it, moonlight and twilight already measured through it) and preserving that distinction was judged more important than resolving the residual in wavelength (§7.3).
 
+### 12.1 The nebula-morphology limit, and the layer built for it
+
+**This is the largest known limitation of the imaging path, and it is a property of the available
+data rather than of the code.** It is written out at length because it is the one thing a reader of
+the pretty pictures will notice first.
+
+The all-sky H-alpha map (`Core/EmissionMap.cs`, packed by `tools/pack_halpha_map.py`) is the
+**Finkbeiner (2003, ApJS 146, 407)** WHAM/VTSS/SHASSA composite, whose beam is **6 arcmin**. Its
+HEALPix sampling at nside 1024 is 3.44′, finer than the beam, so the sampling is not the limit — the
+beam is. Every structure that makes a nebula recognisable is finer than it:
+
+| structure | size | beams | rendered |
+|---|---|---|---|
+| Horsehead (B33) head | 3′ | 0.5 | not at all |
+| M42 Trapezium | 5′ | 0.8 | not at all |
+| Horsehead silhouette | 8′ | 1.3 | not at all |
+| IC 1396A filaments | 2′ | 0.3 | not at all |
+| M42 wings, dark lanes | 10′ | 1.7 | a smudge |
+| IC 1396A (the Trunk) | 20′ | 3.3 | a smudge |
+| M42 whole / Rosette ring | 85′ / 80′ | 14 / 13 | outline only |
+| North America / IC 1396 whole | 120′ / 170′ | 20 / 28 | outline only |
+
+A real astrophotograph works at ~2″, **180× finer**. `Core/DeepSkyObject.BeamsAcross` computes the
+figure and the sky chart reports it on hover, so a player is told before spending the exposure.
+
+Two consequences that no resolution would remove:
+
+* **A dark nebula cannot come out of an emission map at all.** What defines the Horsehead is the
+  absence of light where dust blocks emission behind it; the map holds only what is emitted. B33 is a
+  separate `DeepSkyKind.DarkNebula` entry and the chart says the installed data cannot show it. This
+  was a real error before: IC 434, the emission ridge, was labelled as the Horsehead.
+* **The composite carries a visible artefact around M42**, the brightest H-alpha source in the sky: a
+  ridge ~10′ wide and ~1.5° long, where M42 is a roughly round 85′ × 60′ nebula. Reading the file
+  directly with `healpy` reproduces it, so it is in the published data — most plausibly a saturation
+  bleed in the survey images the composite mosaics. Not corrected, because correcting it would mean
+  inventing what is underneath.
+
+**The layer built for it.** `Core/EmissionPatchSet.cs` adds high-resolution patches over the sky where
+a finer survey exists, built by `tools/pack_shassa_patches.py` from **SHASSA** (Gaustad, McCullough,
+Rosing & Van Buren 2001, PASP 113, 1326) — 0.8′ over everything south of +15° declination, at which
+the Horsehead spans 10 elements rather than 1.3.
+
+Design points, each of which was a decision with an alternative:
+
+* **Patches, not a finer all-sky map.** All-sky at nside 4096 (0.86′) is 201 million cells and 403 MB,
+  nearly all diffuse background 6′ already describes. A degree or two per catalogued object is ~5 MB
+  for the whole catalogue. Outside a patch the base map answers.
+* **Run-length by HEALPix ring.** In RING order a disc cuts each ring in one contiguous stretch, so a
+  patch is a few hundred runs rather than a 4-byte pixel index per 2-byte value, which would have
+  cost three times the values themselves.
+* **The covering patch is resolved once per frame**, not per pixel: a frame is arcminutes across and
+  cannot span two patches. Lookup within a patch keeps a run cursor, so consecutive frame pixels along
+  a row cost one comparison rather than a binary search.
+* **A frame straddling a patch edge falls back entirely to the base map** — a visible loss of detail,
+  never a seam.
+* **The calibration is measured, not assumed.** SHASSA's pixel units are not taken on trust: each
+  cutout is smoothed to 6′ and regressed against the composite, which measures the scale and prints
+  it. The patch stores `composite + scale × (cutout − smoothed cutout)`, so the absolute calibration
+  stays the composite's and SHASSA contributes only sub-6′ structure. Smoothing a patch back to 6′
+  returns the composite. Residual after matching: ~20%, which is the uncertainty on the fine
+  structure's *amplitude*, reported per patch.
+* **The fine term is apodised to zero across the patch's outer margin**, so a patch joins the base map
+  continuously.
+
+Validated in `tools/emission-tests`: the shipped reader covers exactly the directions the file does
+over 4000 test positions, and its values agree with an independent read to 5.3×10⁻³ relative — which
+is the Galactic transform's own 3×10⁻⁶ deg accuracy acting on the gradient across a 51″ cell, half
+float precision alone being 4.9×10⁻⁴.
+
+**What remains open.** SHASSA stops at +15°, so IC 1396, North America, the Heart, the Soul, the
+Bubble and the Cave stay at 6′; **VTSS** at 1.6′ over the northern plane is the obvious next layer and
+is not built. And even at 0.8′ these are survey images: the result is a nebula rather than a smudge,
+but it is not a two-arcsecond astrophotograph and does not claim to be.
+
 ## 13. Bibliography (papers/formulas actually cited in-source)
 
 - Ballesteros, F. J. (2012). "New insights into black bodies." *EPL* 97, 34008. — B-V→Teff relation.

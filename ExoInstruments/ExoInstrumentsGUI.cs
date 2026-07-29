@@ -241,6 +241,7 @@ namespace ExoInstruments
             LoadRenderedStarCatalog();
             LoadDustMap();
             LoadEmissionMap();
+            LoadEmissionPatches();
             LoadGalaxyCatalog();
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
@@ -366,6 +367,31 @@ namespace ExoInstruments
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the emission map: {e.Message}");
+            }
+        }
+
+        private void LoadEmissionPatches()
+        {
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/HalphaPatches.patchset";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.Log("[ExoInstruments] No high-resolution emission patches installed, so every "
+                            + "field is drawn at the all-sky map's 6 arcmin beam. Build them with "
+                            + "tools/pack_shassa_patches.py and place the result at " + path);
+                    return;
+                }
+                var set = new EmissionPatchSet();
+                set.Load(path);
+                SolarSystemCameraTexture.EmissionPatches = set;
+                Debug.Log($"[ExoInstruments] Emission patches: {set.PatchCount} regions at nside {set.Nside} "
+                        + $"({set.ResolutionArcmin:F2} arcmin), {set.Source}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the emission patches: {e.Message}");
             }
         }
 
@@ -1836,6 +1862,19 @@ namespace ExoInstruments
                         + (double.IsNaN(solarSystemCamera.LastEmissionTemperatureK) ? ""
                             : $", forbidden-line ratios at T_e = {solarSystemCamera.LastEmissionTemperatureK:F0} K"),
                         smallCaptionStyle);
+
+                    // Which layer answered, and at what beam. This is the number that decides
+                    // whether the frame can show structure at all, so it is on the frame.
+                    double beam = solarSystemCamera.LastEmissionResolutionArcmin;
+                    if (beam > 0.0)
+                    {
+                        GUILayout.Label(
+                            solarSystemCamera.LastEmissionPatchName != null
+                                ? $"   from the {solarSystemCamera.LastEmissionPatchName} high-resolution patch "
+                                  + $"at {beam:F2}' sampling"
+                                : $"   from the all-sky map at {beam:F2}' sampling (6' beam) -- no patch covers this field",
+                            smallCaptionStyle);
+                    }
                     if (!double.IsNaN(peak) && well > 0.0)
                     {
                         // The number that answers "why can I not see it": a nebula this bright is a

@@ -69,8 +69,7 @@ namespace ExoInstruments.Core
 
                 long count = Healpix.PixelCount(n);
                 if (count > int.MaxValue) throw new InvalidDataException("map too large to hold");
-                var values = new ushort[count];
-                for (long i = 0; i < count; i++) values[i] = reader.ReadUInt16();
+                ushort[] values = ReadHalfFloats(reader, (int)count);
 
                 pixels = values;
                 nside = n;
@@ -79,6 +78,42 @@ namespace ExoInstruments.Core
                 LineName = lineName;
                 Source = source;
             }
+        }
+
+        /// <summary>
+        /// Reads count little-endian half floats in bulk.
+        ///
+        /// A BinaryReader.ReadUInt16 per value is one virtual call and one bounds check each, and at
+        /// nside 1024 that is 12.6 million of them; at nside 4096 it would be 201 million, which is
+        /// the difference between a load the player does not notice and one that stalls the scene
+        /// change. Reading into a byte buffer and reinterpreting is the same bytes in the same order.
+        ///
+        /// Byte order is asserted rather than assumed: the format is little-endian, and every
+        /// platform KSP runs on is too, so a big-endian host would silently read a scrambled sky.
+        /// </summary>
+        internal static ushort[] ReadHalfFloats(BinaryReader reader, int count)
+        {
+            if (!BitConverter.IsLittleEndian)
+                throw new InvalidDataException("packed maps are little-endian and this platform is not");
+
+            var values = new ushort[count];
+            const int chunkValues = 1 << 16;
+            var buffer = new byte[chunkValues * 2];
+            int read = 0;
+            while (read < count)
+            {
+                int want = Math.Min(chunkValues, count - read);
+                int got = 0;
+                while (got < want * 2)
+                {
+                    int n = reader.Read(buffer, got, want * 2 - got);
+                    if (n <= 0) throw new EndOfStreamException("packed map ended early");
+                    got += n;
+                }
+                Buffer.BlockCopy(buffer, 0, values, read * 2, want * 2);
+                read += want;
+            }
+            return values;
         }
 
         private static string ReadString(BinaryReader reader, int limit)

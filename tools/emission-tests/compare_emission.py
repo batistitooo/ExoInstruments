@@ -226,6 +226,78 @@ def line_ratios():
                  f"with [S II]/[N II] flat to {spread*100:.0f}% across the range")
 
 
+def patch_set():
+    """The high-resolution patch format, read back independently.
+
+    The format is new and every part of it fails silently: a run-length table off by one returns a
+    neighbouring cell, a frame mix-up returns a disc of sky from somewhere else, and a half-float
+    read at the wrong offset returns numbers that are still plausible surface brightnesses. So the
+    same file is read here from scratch and compared value by value against what the shipped Core
+    reader returned, including which directions it considers covered.
+    """
+    import os
+    import struct
+
+    import healpy as hp
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    print("\n7. The high-resolution patch format, against an independent read")
+    if not os.path.exists("exo_patchset.csv"):
+        print("  [note] no patch set built; run tools/pack_shassa_patches.py first, skipped")
+        return
+
+    path = os.environ.get("EXO_PATCHSET", "/tmp/test.patchset")
+    if not os.path.exists(path):
+        print(f"  [note] {path} is gone, skipped")
+        return
+
+    with open(path, "rb") as f:
+        assert f.read(8) == b"EXOPTCH1", "not a patch set"
+        _, nside = struct.unpack("<ii", f.read(8))
+        f.read(1)
+        struct.unpack("<d", f.read(8))
+        for _ in range(2):
+            n, = struct.unpack("<i", f.read(4))
+            f.read(n)
+        struct.unpack("<i", f.read(4))
+        nl, = struct.unpack("<i", f.read(4))
+        f.read(nl)
+        ra, dec, radius = struct.unpack("<ddf", f.read(20))
+        nruns, = struct.unpack("<i", f.read(4))
+        runs = [struct.unpack("<ii", f.read(8)) for _ in range(nruns)]
+        total = sum(c for _, c in runs)
+        vals = np.frombuffer(f.read(2 * total), dtype="<f2").astype(np.float64)
+
+    full = np.full(hp.nside2npix(nside), np.nan)
+    off = 0
+    for start, count in runs:
+        full[start:start + count] = vals[off:off + count]
+        off += count
+
+    d = np.genfromtxt("exo_patchset.csv", delimiter=",", names=True)
+    gal = SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg).galactic
+    ref = hp.get_interp_val(full, gal.l.deg, gal.b.deg, nest=False, lonlat=True)
+    covered = d["covered"] > 0.5
+    finite = np.isfinite(ref)
+
+    check("the reader covers exactly the directions the file does",
+          float(np.count_nonzero(covered != finite)), 0.0, 0.0)
+
+    both = covered & finite
+    if both.sum() == 0:
+        failures.append("patch set: nothing comparable")
+        return
+    rel = np.abs(d["rayleighs"][both] - ref[both]) / np.maximum(1e-9, np.abs(ref[both]))
+    # The residual is the Galactic transform's own 3e-6 deg accuracy acting on the gradient across a
+    # 51 arcsec cell, not the format: half-float precision alone is 4.9e-4.
+    check(f"values over {int(both.sum())} directions, relative", float(rel.max()), 0.0, 1e-2)
+    print(f"  [note] {nruns} run-length rows carry {total} cells over a {radius:.2f} deg radius; "
+          f"values {ref[both].min():.0f} to {ref[both].max():.0f} R")
+    notes.append(f"the patch format round-trips to {rel.max():.1e} relative over "
+                 f"{int(both.sum())} directions, with coverage agreeing exactly")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     rayleigh()
@@ -234,6 +306,7 @@ def main():
     narrowband()
     rotation()
     line_ratios()
+    patch_set()
 
     print("\n" + "-" * 78)
     for n in notes:

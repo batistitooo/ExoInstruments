@@ -20,6 +20,7 @@
     <Compile Include="$(Core)/EmissionLines.cs" />
     <Compile Include="$(Core)/NebularLineRatios.cs" />
     <Compile Include="$(Core)/EmissionMap.cs" />
+    <Compile Include="$(Core)/EmissionPatchSet.cs" />
     <Compile Include="$(Core)/DeepSkyCatalog.cs" />
     <Compile Include="$(Core)/Healpix.cs" />
     <Compile Include="$(Core)/Float16.cs" />

@@ -18,6 +18,7 @@ static class DumpEmission
         DumpNarrowband();
         DumpRealTargets();
         DumpLineRatios();
+        DumpPatchSet();
         DumpRotation();
         Console.WriteLine("written exo_lines.csv, exo_rayleigh.csv, exo_narrowband.csv, exo_rotation.csv");
     }
@@ -200,6 +201,55 @@ static class DumpEmission
                             + $" peak {best,8:F0} R  {bestOffset * 60.0,5:F1}' away  (x{ratio:F2})");
         }
         Console.WriteLine($"  worst offset to a local maximum: {worst * 60.0:F1}' ({worstName})");
+    }
+
+    /// <summary>
+    /// Reads a packed patch set through the real Core reader and dumps what it returns, so the
+    /// Python side can compare against the same file read independently.
+    ///
+    /// The format is new and every part of it fails silently: a run-length table off by one returns
+    /// a neighbouring cell's value, a frame mix-up returns a disc of sky from somewhere else, and a
+    /// half-float read at the wrong offset returns numbers that are still plausible surface
+    /// brightnesses. Only a value-by-value comparison catches those.
+    /// </summary>
+    static void DumpPatchSet()
+    {
+        string path = Environment.GetEnvironmentVariable("EXO_PATCHSET") ?? "/tmp/test.patchset";
+        if (!File.Exists(path)) { Console.WriteLine($"  (no patch set at {path}; skipped)"); return; }
+
+        var set = new EmissionPatchSet();
+        set.Load(path);
+        Console.WriteLine($"\n  patch set: {set.PatchCount} patches at nside {set.Nside} "
+                        + $"({set.ResolutionArcmin:F3} arcmin), {set.LineName}");
+        foreach (string n in set.PatchNames) Console.WriteLine($"    {n}");
+
+        // A grid over the first patch, sampled through the real interpolation, plus a ring of points
+        // outside it which must come back uncovered rather than wrong.
+        var sb = new StringBuilder();
+        sb.AppendLine("ra_deg,dec_deg,covered,rayleighs");
+        EmissionMap.AllocateScratch(out long[] px, out double[] wt);
+        var cursor = EmissionPatchSet.Cursor.New();
+
+        var rng = new Pcg32(0x9A7C4EUL, 3UL);
+        for (int i = 0; i < 4000; i++)
+        {
+            // Deliberately spread out to 1.4x the patch radius, so both sides of the edge are tested.
+            double t = 2.0 * Math.PI * rng.NextDouble();
+            double rad = 1.4 * Math.Sqrt(rng.NextDouble());
+            double dec = -2.45 + rad * Math.Sin(t);
+            double ra = 85.25 + rad * Math.Cos(t) / Math.Cos(dec * Math.PI / 180.0);
+
+            var patch = set.FindCoveringPatch(ra, dec, 0.0);
+            GalacticCoordinates.EquatorialToGalactic(ra, dec, out double l, out double b);
+            bool covered = patch != null
+                && set.TryRayleighsAtGalactic(patch, l, b, px, wt, ref cursor, out double v);
+            double value = 0.0;
+            if (covered) set.TryRayleighsAtGalactic(patch, l, b, px, wt, ref cursor, out value);
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2},{3:R}",
+                ra, dec, covered ? 1 : 0, value));
+        }
+        File.WriteAllText("exo_patchset.csv", sb.ToString());
+        Console.WriteLine("  written exo_patchset.csv");
     }
 
     /// <summary>
