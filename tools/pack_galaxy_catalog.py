@@ -46,13 +46,16 @@ HYPERLEDA_URL = "http://atlas.obs-hp.fr/hyperleda/fG.cgi"
 # Only galaxies (objtype G), with the four quantities the render cannot do without. A row missing
 # any of them is dropped rather than filled in: a galaxy with no measured size has no shape, and
 # inventing one is exactly what this file exists not to do.
-REQUIRED = ("al2000", "de2000", "bt", "logd25", "logr25", "pa")
+REQUIRED = ("al2000", "de2000", "bt", "logd25", "logr25")
 
 
 def fetch_hyperleda(bmax):
     import requests
+    # Deliberately NOT filtering on pa: a round isophote has no measurable position angle and
+    # HyperLEDA leaves it blank, so requiring one here silently drops the roundest galaxies --
+    # M87 among them. The row filter below handles a missing angle properly.
     sql = (f"objtype='G' and bt is not null and bt<={bmax:g} "
-           "and logd25 is not null and logr25 is not null and pa is not null")
+           "and logd25 is not null and logr25 is not null")
     params = {
         "n": "meandata",
         "c": "o",
@@ -67,20 +70,26 @@ def fetch_hyperleda(bmax):
     print(f"querying HyperLEDA for bt <= {bmax} ...")
     r = requests.get(HYPERLEDA_URL, params=params, timeout=600)
     r.raise_for_status()
-    text = r.text
-    # The CGI wraps its table in HTML; the payload starts at the header line.
-    start = text.find("objname")
-    if start < 0:
+    return r.text
+
+
+def strip_comments(text):
+    """HyperLEDA prefixes its table with a commented query description and separator rules.
+
+    Every one of those lines starts with '#', including a per-column description block that
+    repeats the column NAMES -- so locating the header by searching for a column name finds the
+    description instead, and taking everything after it yields three rows of nonsense. Dropping
+    the comment lines first is both simpler and unambiguous.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    if not lines:
         raise SystemExit("HyperLEDA returned no table -- check the query, or use --input with a "
                          "CSV exported from http://atlas.obs-hp.fr/hyperleda/")
-    body = text[start:]
-    end = body.find("<")
-    if end > 0:
-        body = body[:end]
-    return body
+    return "\n".join(lines)
 
 
 def parse_rows(text):
+    text = strip_comments(text)
     sniff = "|" if "|" in text.splitlines()[0] else ","
     reader = csv.DictReader(io.StringIO(text), delimiter=sniff)
     reader.fieldnames = [f.strip() for f in reader.fieldnames]
@@ -105,7 +114,8 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--input", help="CSV exported from HyperLEDA; omit to query the archive")
     p.add_argument("--bmax", type=float, default=15.0,
-                   help="faintest total B magnitude to keep (default 15, about 130k galaxies)")
+                   help="faintest total B magnitude to keep (15 gives 15732 galaxies in 0.9 MB, "
+                        "13 gives 1454 in 82 KB)")
     p.add_argument("--out", default="GalaxyCatalog.galcat")
     p.add_argument("--source", default="HyperLEDA (Makarov et al. 2014, A&A 570, A13)")
     args = p.parse_args()
@@ -130,7 +140,16 @@ def main():
         dec = vals["de2000"]
         d25 = 10.0 ** vals["logd25"] / 10.0   # 0.1 arcmin units -> arcmin
         axis = 10.0 ** (-vals["logr25"])      # logr25 = log10(major/minor)
-        pa = vals["pa"] % 180.0
+        # A round isophote has no measurable position angle, and HyperLEDA leaves it blank rather
+        # than inventing one. Zero is then not a guess but the only meaningful value; for an
+        # elongated galaxy a missing angle IS a gap, and the row is dropped.
+        pa_raw = number(row, "pa")
+        if math.isnan(pa_raw):
+            if 10.0 ** (-vals["logr25"]) < 0.9:
+                dropped += 1
+                continue
+            pa_raw = 0.0
+        pa = pa_raw % 180.0
         t = number(row, "t")
         vt = number(row, "vt")
         bv = bt - vt if not math.isnan(vt) else float("nan")
@@ -144,8 +163,9 @@ def main():
     out.sort(key=lambda g: g[2])
     print(f"{len(out)} kept, {dropped} dropped for a missing or impossible value")
 
-    # A few named galaxies, printed so a units error cannot pass silently: M31 must come out at
-    # about 3.2 degrees across and B_T 4.4, M87 at 8 arcmin and 9.6.
+    # A few named galaxies, printed so a units error cannot pass silently. Measured values from a
+    # real run: M31 at B_T 4.29, D25 177.8' (2.96 deg), b/a 0.392, PA 35; M87 at 9.65, 7.11', 0.938.
+    # Getting logd25 wrong by its factor of ten would show here immediately.
     for name in ("NGC0224", "NGC0598", "NGC4486", "NGC5194", "NGC1068"):
         for g in out:
             if g[0].replace(" ", "").upper() == name:

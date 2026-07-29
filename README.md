@@ -184,19 +184,73 @@ All of them are built by a script in `tools/` and copied to
 | `GaiaStarCatalog.starcat` | 88 MB at G ≤ 13 | Gaia DR3, via the ESA archive | The star field in every photograph | [below](#the-star-field-is-user-supplied-build-it-from-gaia-dr3) |
 | `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout | [below](#optional-the-interstellar-dust-map) |
 | `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband | [below](#optional-the-h-alpha-emission-map) |
-| `GalaxyCatalog.galcat` | ~10 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape | [below](#optional-the-galaxy-catalogue) |
+| `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape | [below](#optional-the-galaxy-catalogue) |
 
 Each script prints named sanity checks as it runs — M31 must come out 3.2° across at B_T 4.4, Sgr A*
 must land at Galactic (0, 0) — so a units error or a wrong file fails loudly instead of producing a
 plausible sky. If a script says nothing looks familiar, stop and check the input.
 
-One shared environment does for all four:
+### All four, in order
 
-```
+Set `KSP` to your install and run these from the repository root. The sections further down explain
+what each one is and why; this is the whole install.
+
+```bash
+KSP="$HOME/Library/Application Support/Steam/steamapps/common/Kerbal Space Program"
 cd tools
 python3 -m venv env
-./env/bin/pip install numpy scipy astropy healpy requests dustmaps astroquery
+./env/bin/pip install numpy scipy astropy healpy requests dustmaps
 ```
+
+**1. The star field.** Needs a free ESA archive account
+(<https://cosmos.esa.int/web/gaia-users/register>); the password is prompted for, never taken on the
+command line. No packages needed — the archive speaks plain HTTP. Hours, but it resumes if
+interrupted. Try the one-minute cone first:
+
+```bash
+python3 pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
+python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
+cp GaiaStarCatalog.starcat "$KSP/GameData/ExoInstruments/PluginData/"
+```
+
+**2. The dust map.** Fetches SFD98 (~150 MB) on first run.
+
+```bash
+./env/bin/python pack_dust_map.py --out DustMap.dustmap
+cp DustMap.dustmap "$KSP/GameData/ExoInstruments/PluginData/"
+```
+
+**3. The Hα map.** The 49 MB source file is downloaded by hand on purpose: the archive's URLs move,
+and a wrong file silently producing a plausible sky is worse than an error. **Take the nside 1024
+file, not the 512** — see the section below for why.
+
+```bash
+curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits
+./env/bin/python pack_halpha_map.py --input Halpha_fwhm06_1024.fits --out HalphaMap.emission
+cp HalphaMap.emission "$KSP/GameData/ExoInstruments/PluginData/"
+```
+
+**4. The galaxies.** Queries HyperLEDA directly and takes about a minute. `--bmax 13` gives 1454
+galaxies in 82 KB and is plenty for the RedCat; `--bmax 15` gives 15 732 in 0.9 MB. It prints M31,
+M33, M87, M51 and M77 with their parameters as it finishes — M31 must come out at **B_T 4.29, D25
+177.8′, b/a 0.392, PA 35°**, and if it does not, stop rather than install the result.
+
+```bash
+./env/bin/python pack_galaxy_catalog.py --bmax 13.0 --out GalaxyCatalog.galcat
+cp GalaxyCatalog.galcat "$KSP/GameData/ExoInstruments/PluginData/"
+```
+
+Then start KSP and check the log. Every file that loaded says so, with its own provenance:
+
+```
+[ExoInstruments] Rendered star field: 7369627 Gaia DR3 stars loaded.
+[ExoInstruments] Dust map: nside 1024 (3.4 arcmin), SFD98 ... x0.86 ...
+[ExoInstruments] Emission map: H-alpha at nside 1024 (3.4 arcmin), Finkbeiner ...
+[ExoInstruments] Galaxy catalogue: 4812 galaxies, HyperLEDA (Makarov et al. 2014, A&A 570, A13)
+```
+
+A file that is missing says that instead, and names the script that builds it. Nothing fails
+silently, and nothing is required.
 
 ## The star field is user-supplied: build it from Gaia DR3
 
@@ -449,8 +503,8 @@ cp GalaxyCatalog.galcat "<KSP>/GameData/ExoInstruments/PluginData/"
 
 The packer queries **HyperLEDA** (Makarov et al. 2014, A&A 570, A13) directly. If the archive is
 unreachable, export the same columns by hand from <http://atlas.obs-hp.fr/hyperleda/> and pass
-`--input leda.csv`. `--bmax 15` keeps of order 130 000 galaxies; `--bmax 12` keeps a few thousand and
-is plenty for the RedCat.
+`--input leda.csv`. `--bmax 15` keeps 15 732 galaxies in 0.9 MB; `--bmax 13` keeps 1454 in 82 KB and is
+plenty for the RedCat.
 
 HyperLEDA is the homogenised compilation that folds in RC3 (de Vaucouleurs et al. 1991), the
 classical source for exactly these parameters, plus everything measured since.
@@ -470,6 +524,9 @@ shows, rather than the isophote, which it does not.
 Photometry goes down the same path as a catalogue star, with the Galactic foreground extinction
 applied in full — a galaxy sits behind the whole column, which is the one case the dust map's total
 reddening applies to without qualification.
+
+The packer prints five named galaxies as it finishes, so a units error cannot pass silently: M31
+must come out at B_T 4.29 and D25 177.8′ (2.96°), M87 at 7.11′ and b/a 0.938.
 
 Galaxies are drawn as crosses on the sky chart down to B = 11, sized to their own extent; the camera
 has no such cut and draws whatever clears the frame's noise floor. `tools/galaxy-tests` validates the
