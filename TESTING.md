@@ -284,3 +284,20 @@ frame to divide by.
 - [ ] **13.8** **The faint gas is redder in [N II].** Compare the reported temperature between a
       bright H II region core and a faint high-latitude field: it must rise as the H-alpha
       brightness falls, which is what makes [N II]/H-alpha rise with it.
+
+## 14. Where black and white are
+
+- [ ] **14.1** **The Elephant's Trunk again.** RedCat, `Ha`, 4x4, 40 s, log. It used to be uniform
+      grey fog because the subject occupied 0.4 of 255 display levels. With the new
+      `Auto black/white points` toggle on -- it is on by default -- the same frame should show the
+      nebula's gradient across the full display range.
+- [ ] **14.2** The readout under the stretch buttons reports the limits, e.g.
+      `showing 0.106% to 0.249% of full scale, i.e. a 697x stretch`.
+- [ ] **14.3** **Turn it off** and the old behaviour must come back exactly, which is the check that
+      it is a viewer control and nothing upstream changed.
+- [ ] **14.4** **A saturated star must not flatten the frame.** Photograph a bright star field. With
+      auto scaling on, the sky and faint stars stay visible: the white point is set by the sky's own
+      noise, not by the brightest pixel.
+- [ ] **14.5** **A bright planet must still look right.** Jupiter at a sensible exposure fills the
+      converter's range on its own, so the limits should stay wide and the disk should not be blown
+      out by the auto scaling.

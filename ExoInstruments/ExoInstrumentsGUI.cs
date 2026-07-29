@@ -1680,8 +1680,25 @@ namespace ExoInstruments
                     solarSystemCamera.UploadDisplayTextures();
                 }
             }
+            bool autoScale = SolarSystemCameraTexture.AutoScaleDisplay;
+            if (GUILayout.Toggle(autoScale, " Auto black/white points (zscale, as DS9 and IRAF do it)") != autoScale)
+            {
+                SolarSystemCameraTexture.AutoScaleDisplay = !autoScale;
+                solarSystemCamera.UploadDisplayTextures();
+            }
             GUILayout.EndHorizontal();
             GUILayout.Label(StretchDescription(SolarSystemCameraTexture.Stretch), smallCaptionStyle);
+
+            if (SolarSystemCameraTexture.AutoScaleDisplay && solarSystemCamera.HasCapturedPhoto)
+            {
+                double black = solarSystemCamera.LastDisplayBlackPoint;
+                double white = solarSystemCamera.LastDisplayWhitePoint;
+                double wellFraction = white - black;
+                GUILayout.Label(
+                    $"   showing {black * 100.0:F3}% to {white * 100.0:F3}% of full scale"
+                    + (wellFraction > 0.0 ? $", i.e. a {1.0 / wellFraction:F0}x stretch of the range the frame occupies" : ""),
+                    smallCaptionStyle);
+            }
         }
 
         static string StretchLabel(DisplayStretch mode)

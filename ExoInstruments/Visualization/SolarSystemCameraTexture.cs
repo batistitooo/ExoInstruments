@@ -511,6 +511,21 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static DisplayStretch Stretch { get; set; } = DisplayStretch.Asinh;
 
+        /// <summary>
+        /// Whether the display picks its own black and white points from the frame (zscale) rather
+        /// than mapping the converter's whole range. On by default, because off is only right for
+        /// a frame whose subject fills that range -- a bright planet -- and wrong for everything
+        /// faint, where it buries the subject in the bottom few percent of the display.
+        ///
+        /// A VIEWER control, like Stretch: the FITS export and the stacker always get the linear
+        /// frame regardless.
+        /// </summary>
+        public static bool AutoScaleDisplay { get; set; } = true;
+
+        /// <summary>Where the last displayed frame's black and white points landed, as fractions of full scale. Diagnostics.</summary>
+        public double LastDisplayBlackPoint { get; private set; }
+        public double LastDisplayWhitePoint { get; private set; } = 1.0;
+
         /// <summary>DS9's own default scaling constant for its log transfer function.</summary>
         private const double LogStretchA = 1000.0;
 
@@ -1037,9 +1052,23 @@ namespace ExoInstruments.Visualization
             // linear full-precision frame it is built from stays untouched in lastCaptureSnapshot
             // for the FITS export and the stacker.
             if (displayScratch == null || displayScratch.Length != n * 3) displayScratch = new byte[n * 3];
+
+            // Black and white points BEFORE the curve. A transfer function decides how the range
+            // between them is distributed; it cannot decide where they are, and on a frame whose
+            // subject spans twenty counts of a sixteen-thousand-count converter that is the larger
+            // question. See ZScale.
+            double black = 0.0, white = 1.0;
+            bool scaled = AutoScaleDisplay
+                       && ZScale.TryLimits(lastCaptureSnapshot, out black, out white)
+                       && white > black;
+            LastDisplayBlackPoint = scaled ? black : 0.0;
+            LastDisplayWhitePoint = scaled ? white : 1.0;
+            float invRange = scaled ? (float)(1.0 / (white - black)) : 1f;
+            float offset = scaled ? (float)black : 0f;
+
             for (int i = 0; i < n; i++)
             {
-                float v = ApplyDisplayStretch(lastCaptureSnapshot[i]);
+                float v = ApplyDisplayStretch((lastCaptureSnapshot[i] - offset) * invRange);
                 byte b = (byte)(Mathf.Clamp01(v) * 255f + 0.5f);
                 int o = i * 3;
                 displayScratch[o] = b;
