@@ -222,7 +222,34 @@ game and an installed map.
       structure: 6 arcmin is 1300 pixels behind the RC20's Barlow. That is the data's limit and it
       must not be mistaken for a rendering bug.
 
-## 12. Known open item
+## 12. The PSF's edge, and the nebula markers
+
+- [ ] **12.1** **The square is gone.** On SPHERE/ZIMPOL, point at a bright star and expose until it
+      saturates. There must be no square, no rectangle and no ring around it: the halo now runs to
+      the edge of the frame and fades. The measurements it replaces are in
+      `tools/psf-truncation/README.md` -- the old kernel stopped where the profile was still 3.1e-2
+      of its peak, which is what drew the edge.
+- [ ] **12.2** Same test on the RC20 and the CDK1000 at 1x1, on a bright star. The old 48 px kernel
+      stopped at 1.8e-2 and 6.3e-3 of peak respectively, so a saturated star showed a 97 px square.
+      It should now be a smooth falloff.
+- [ ] **12.3** **Cost.** The first capture after changing instrument, filter, binning or seeing
+      rebuilds the halo spectrum, which measured 463 ms on ZIMPOL. Later captures with the same
+      settings must not pay it again -- time two captures in a row.
+- [ ] **12.4** **The nebulae are on the chart.** Crosses, sized to the object's own extent and
+      tinted red for line emitters and blue for reflection nebulae. Hovering names the object and
+      says what it is and how big; clicking points the telescope at it. Check IC 1396 (2.8 deg) is a
+      far larger cross than NGC 7635 (15').
+- [ ] **12.5** **The blocks are gone.** Photograph the Rosette or M42 on the RedCat in `Ha` with a
+      log stretch. The nebula must be a smooth gradient, not a mosaic of flat squares 54 pixels
+      across. What remains is the 6 arcmin beam of the survey itself, which is real.
+- [ ] **12.6** **What "nothing appeared" was.** The observing panel now reports the brightest pixel
+      of the diffuse emission in electrons and as a fraction of full well. On the RedCat, M42 in
+      `Ha` at 30 s is about 67 e-, i.e. 0.1% of the well and 17 ADU of 16383 -- correct, and
+      invisible in a linear stretch. Check the readout matches roughly what the frame shows, and
+      that the RC20 reports far less for the same object (a 55x finer plate scale collects 3000x
+      less light per pixel from an extended source).
+
+## 12b. Known open item
 
 There is no flat-field model. Pixel response non-uniformity is the dominant
 systematic in ground-based photometry of a bright target, and its absence makes
