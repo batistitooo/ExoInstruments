@@ -46,5 +46,34 @@ def main():
     return 0
 
 
+def write_emission():
+    """The same pattern as an emission map, so the emission header is exercised too.
+
+    Values in rayleighs over five decades, which is the range the real H-alpha composite spans and
+    the reason both maps store half floats rather than a scaled integer.
+    """
+    npix = hp.nside2npix(NSIDE)
+    lon, lat = hp.pix2ang(NSIDE, np.arange(npix), nest=False, lonlat=True)
+    values = 0.5 + 8000.0 * np.exp(-np.abs(lat) / 4.0)
+
+    packed = values.astype(np.float16)
+    packed[0] = np.nan
+
+    name = b"H-alpha"
+    source = b"synthetic test pattern, 0.5 + 8000 exp(-|b|/4 deg) rayleighs"
+    with open("test_map.emission", "wb") as f:
+        f.write(b"EXOEMIS1")
+        f.write(struct.pack("<ii", VERSION, NSIDE))
+        f.write(struct.pack("<B", 0))
+        f.write(struct.pack("<d", 6562.80e-10))
+        f.write(struct.pack("<i", len(name)))
+        f.write(name)
+        f.write(struct.pack("<i", len(source)))
+        f.write(source)
+        f.write(packed.astype("<f2").tobytes())
+    print(f"wrote test_map.emission: {npix} pixels, 0.5 to {values.max():.0f} R")
+
+
 if __name__ == "__main__":
+    write_emission()
     sys.exit(main())

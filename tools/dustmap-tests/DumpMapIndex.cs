@@ -121,7 +121,28 @@ static class DumpMapIndex
                 ra, dec, l, b, map.ReddeningAt(ra, dec), map.ExtinctionAtV(ra, dec)));
         }
         File.WriteAllText("exo_mapquery.csv", sb.ToString());
-        Console.WriteLine($"  map: nside {map.Nside} ({map.ResolutionArcmin:F1} arcmin), {map.Source}");
+        Console.WriteLine($"  dust map: nside {map.Nside} ({map.ResolutionArcmin:F1} arcmin), {map.Source}");
+
+        // The emission format shares the dust one's layout but adds the line it belongs to, so it
+        // gets its own read: a header field nothing checks is a header field nothing catches.
+        if (!File.Exists("test_map.emission")) return;
+        var emission = new EmissionMap();
+        emission.Load("test_map.emission");
+
+        var eb = new StringBuilder();
+        eb.AppendLine("ra_deg,dec_deg,l_deg,b_deg,rayleighs");
+        var erng = new Pcg32(0xE1155104UL, 9UL);
+        for (int i = 0; i < 3000; i++)
+        {
+            double ra = 360.0 * erng.NextDouble();
+            double dec = Math.Asin(2.0 * erng.NextDouble() - 1.0) * 180.0 / Math.PI;
+            GalacticCoordinates.EquatorialToGalactic(ra, dec, out double l, out double b);
+            eb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R},{3:R},{4:R}",
+                ra, dec, l, b, emission.RayleighsAt(ra, dec)));
+        }
+        File.WriteAllText("exo_emissionquery.csv", eb.ToString());
+        Console.WriteLine($"  emission map: {emission.LineName} at "
+                        + $"{emission.LineWavelengthMeters * 1e9:F2} nm, nside {emission.Nside}");
     }
 
     static void DumpGalactic()

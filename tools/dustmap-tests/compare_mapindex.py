@@ -222,12 +222,35 @@ def real_map():
                  f"{rel.max():.1e} relative over {known.sum()} sight lines, with no pixel lost")
 
 
+def emission_map():
+    """The emission format, which shares the dust layout but adds the line it belongs to."""
+    import os
+    print("\n7b. EmissionMap: the same round trip, plus the line header")
+    if not os.path.exists("exo_emissionquery.csv"):
+        print("  [note] no test_map.emission; run make_test_map.py first")
+        return
+    d = np.genfromtxt("exo_emissionquery.csv", delimiter=",", names=True)
+    expected = 0.5 + 8000.0 * np.exp(-np.abs(d["b_deg"]) / 4.0)
+    known = np.isfinite(d["rayleighs"])
+
+    resol_deg = np.degrees(np.sqrt(4 * np.pi / (12 * 64 * 64)))
+    gradient = (8000.0 / 4.0) * np.exp(-np.abs(d["b_deg"][known]) / 4.0)
+    dev = np.abs(d["rayleighs"][known] - expected[known])
+    # Half float is relative, so the floor is 4.9e-4 of the value rather than a fixed step.
+    bound = gradient * resol_deg + 4.9e-4 * expected[known]
+    check(f"residual within one pixel of the pattern's gradient, {known.sum()} directions",
+          float((dev / bound).max()), 0.0, 1.0, " pixel-gradients")
+    notes.append(f"the emission format round-trips over five decades, 0.5 to 8000 R, "
+                 f"with no clipping at either end")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     healpix()
     galactic()
     float16()
     dust_map()
+    emission_map()
     real_map()
 
     print("\n" + "-" * 78)

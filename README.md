@@ -341,17 +341,24 @@ the archive's URLs move and a wrong file silently producing a plausible sky is w
 <https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html>
 
 ```
-curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/halpha/lambda_halpha_fwhm06_0512.fits
+curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits
 cd tools
 python3 -m venv env && ./env/bin/pip install healpy numpy
-./env/bin/python pack_halpha_map.py --input ../lambda_halpha_fwhm06_0512.fits --out HalphaMap.emission
+./env/bin/python pack_halpha_map.py --input ../Halpha_fwhm06_1024.fits --out HalphaMap.emission
 cp HalphaMap.emission "<KSP>/GameData/ExoInstruments/PluginData/"
 ```
 
-That file is 12 MB, HEALPix nside 512, and is the **Finkbeiner (2003, ApJS 146, 407)** composite of
+That file is 49 MB, HEALPix nside 1024, and is the **Finkbeiner (2003, ApJS 146, 407)** composite of
 WHAM, VTSS and SHASSA, already published in rayleighs — the unit the photometry converts from, so
-nothing is reinterpreted on the way in. The packer keeps its native resolution by default: going
-finer would store interpolation rather than data.
+nothing is reinterpreted on the way in. Packed it becomes 24 MB, reproducing the source to 0.0488%,
+which is exactly half-float precision and therefore the whole cost of storing it.
+
+**Take the nside 1024 file, not the nside 512 one the same page offers.** They are the same product:
+degrade the 1024 to 512 and it matches the native 512 file to 0.8% in the median. But the map's beam
+is 6′ FWHM and nside 512 gives **6.87′ pixels, coarser than the beam itself** — undersampled by a
+factor 2.3 against Nyquist. The two disagree by 7.3% at the 90th percentile and the 512 loses 130 R
+off the brightest peak in the sky. nside 1024's 3.44′ pixels sample a 6′ beam properly. The packer
+keeps whatever nside the input has: going finer would store interpolation rather than data.
 
 **6 arcmin is the data's limit**, not the renderer's. That is 94 pixels across on the RedCat and
 1300 on the RC20 behind its Barlow, so the map shows real structure in a wide field and a smooth

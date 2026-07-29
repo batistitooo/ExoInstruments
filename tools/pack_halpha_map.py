@@ -5,21 +5,27 @@ WHICH MAP. Finkbeiner (2003, ApJS 146, 407) assembles WHAM, VTSS and SHASSA into
 composite in rayleighs, smoothed to 6 arcmin. It is the all-sky H-alpha map, and rayleighs are the
 unit Core/EmissionLines converts from, so nothing is reinterpreted on the way in.
 
-It is distributed by NASA's LAMBDA archive as a HEALPix FITS file. Point --input at a downloaded
-copy; the script does not fetch it, because the archive's URLs move and a wrong file silently
-producing a plausible sky is worse than an error.
+It is distributed by NASA's LAMBDA archive as a HEALPix FITS file, in rayleighs (TUNIT1 = R). Point
+--input at a downloaded copy; the script does not fetch it, because the archive's URLs move and a
+wrong file silently producing a plausible sky is worse than an error.
 
-    https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html
+    https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits
 
-The composite is distributed at HEALPix nside 512 with a 6 arcmin beam, and by default this keeps
-it there: regridding a map is never free of doubt, and going finer than nside 512 would store
-interpolation rather than data. 6 arcmin is 94 pixels across on the RedCat and 1300 on the RC20
-behind its Barlow, so the map renders real structure in a wide field and a smooth glow at high
-magnification. That is the data's limit and no all-sky H-alpha map does better.
+TAKE THE NSIDE 1024 FILE, not the nside 512 one the same page offers. They are the same product --
+the 1024 degraded to 512 matches the native 512 file to 0.8% in the median -- but the map's beam is
+6 arcmin FWHM and nside 512 gives 6.87 arcmin pixels, coarser than the beam itself. That
+undersamples the map by a factor of 2.3 against Nyquist and smears real structure: the two disagree
+by 7.3% at the 90th percentile, and the 512 loses 130 R off the brightest peak in the sky. nside
+1024's 3.44 arcmin pixels sample a 6 arcmin beam properly.
+
+By default the input's own nside is kept: regridding is never free of doubt, and going finer than
+the file stores interpolation rather than data. The 6 arcmin beam is 94 pixels across on the RedCat
+and 1300 on the RC20 behind its Barlow, so the map renders real structure in a wide field and a
+smooth glow at high magnification. That is the data's limit and no all-sky H-alpha map does better.
 
 Run:
     python -m venv env && ./env/bin/pip install healpy numpy
-    ./env/bin/python pack_halpha_map.py --input lambda_halpha_fwhm06_0512.fits --out HalphaMap.emission
+    ./env/bin/python pack_halpha_map.py --input Halpha_fwhm06_1024.fits --out HalphaMap.emission
 """
 
 import argparse
@@ -52,10 +58,10 @@ def main():
     import numpy as np
     import healpy as hp
 
-    if args.nside <= 0 or args.nside & (args.nside - 1):
-        raise SystemExit("nside must be a power of two")
-
-    raw = hp.read_map(args.input, dtype=np.float64)
+    # nest=False is explicit rather than left to the default: both LAMBDA files are stored NESTED,
+    # the packed format declares RING, and a silent ordering flip would scramble the sky into
+    # something that still looks like a sky.
+    raw = hp.read_map(args.input, dtype=np.float64, nest=False)
     native = hp.npix2nside(len(raw))
     print(f"read {args.input}: nside {native} ({hp.nside2resol(native, arcmin=True):.1f} arcmin)")
 
