@@ -192,6 +192,7 @@ namespace ExoInstruments.Visualization
         // nebulae are tinted apart -- one shows in a narrowband filter and the other cannot.
         private static readonly Color EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
         private static readonly Color ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
+        private static readonly Color GalaxyMarkerColor = new Color(0.95f, 0.86f, 0.55f, 1f);
 
         /// <summary>
         /// Cross sized to the object's own apparent extent, so the chart says how much sky it
@@ -208,8 +209,9 @@ namespace ExoInstruments.Visualization
             double pxPerDeg = ComputeRMax(width, height) / 90.0 * view.Zoom;
             float arm = (float)Math.Max(4.0, Math.Min(40.0, p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5));
 
-            Color color = p.DeepSky.Kind == DeepSkyKind.ReflectionNebula
-                ? ReflectionMarkerColor : EmissionMarkerColor;
+            Color color = p.DeepSky.Kind == DeepSkyKind.ReflectionNebula ? ReflectionMarkerColor
+                        : p.DeepSky.Kind == DeepSkyKind.Galaxy ? GalaxyMarkerColor
+                        : EmissionMarkerColor;
 
             // A gap at the centre, so the cross frames the object instead of covering it.
             float gap = Math.Max(1.5f, arm * 0.35f);

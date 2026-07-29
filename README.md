@@ -169,6 +169,35 @@ A capture is monochrome — one value per pixel — but the pipeline currently s
 
 **2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
+## Data files: what to install
+
+**Nothing but the plugin ships.** Every sky survey this mod reads is someone else's published data,
+often hundreds of megabytes, and vendoring it would be both a licensing question and a download
+nobody asked for. Each one is optional and independent: with none of them installed the instruments
+work and photograph the solar system, and each file you add turns on one more thing.
+
+All of them are built by a script in `tools/` and copied to
+`<KSP>/GameData/ExoInstruments/PluginData/`.
+
+| File | Size | Source | What it turns on | Section |
+|---|---|---|---|---|
+| `GaiaStarCatalog.starcat` | 88 MB at G ≤ 13 | Gaia DR3, via the ESA archive | The star field in every photograph | [below](#the-star-field-is-user-supplied-build-it-from-gaia-dr3) |
+| `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout | [below](#optional-the-interstellar-dust-map) |
+| `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband | [below](#optional-the-h-alpha-emission-map) |
+| `GalaxyCatalog.galcat` | ~10 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape | [below](#optional-the-galaxy-catalogue) |
+
+Each script prints named sanity checks as it runs — M31 must come out 3.2° across at B_T 4.4, Sgr A*
+must land at Galactic (0, 0) — so a units error or a wrong file fails loudly instead of producing a
+plausible sky. If a script says nothing looks familiar, stop and check the input.
+
+One shared environment does for all four:
+
+```
+cd tools
+python3 -m venv env
+./env/bin/pip install numpy scipy astropy healpy requests dustmaps astroquery
+```
+
 ## The star field is user-supplied: build it from Gaia DR3
 
 **No star catalogue ships with the mod.** Without one, the sky behind a photographed body is empty.
@@ -364,12 +393,88 @@ keeps whatever nside the input has: going finer would store interpolation rather
 1300 on the RC20 behind its Barlow, so the map shows real structure in a wide field and a smooth
 glow at high magnification. No published all-sky Hα map does better.
 
-It is deposited **only** when the active filter's passband actually contains Hα, so a Luminance
-frame costs nothing and an `OIII` or `SII` frame gets nothing from it. That gating is the same
-`ThroughputAt` call that supplies the coefficient, so the two cannot disagree.
+It is deposited **only** when the active filter admits at least one line, so a frame that cannot see
+gas costs nothing. That gating is the same `ThroughputAt` call that supplies the coefficient, so the
+two cannot disagree.
 
-Hα only: [S II], [N II] and [O III] have no all-sky survey to read, and exist as filter positions
-and as photometry with nothing behind them yet.
+### What the other lines do
+
+The map measures Hα, but a filter rarely admits Hα alone — a 7 nm filter centred on it also passes
+[N II] 6548 and 6584, twenty angstroms away. Those, and the [S II] doublet, are **derived from the
+physics that sets them** rather than from a ratio picked to look right.
+
+Hα is a *recombination* line: its emissivity is fixed by how many protons recombine and falls only
+slowly with temperature. [N II] and [S II] are *collisionally excited* — an electron has to be
+knocked about 2 eV up — so they carry `exp(−E/kT)` and rise steeply with it. The ratio between them
+is therefore a **thermometer**, and that is exactly how it is used observationally: Madsen, Reynolds
+& Haffner (2006, ApJ 652, 401) measure the warm ionised medium's temperature by inverting these
+expressions. The emissivity ratios are Haffner, Reynolds & Tufte (1999, ApJ 523, 223) eq. 1–2, with
+gas-phase N/H = 7.5 × 10⁻⁵ and S/H = 1.86 × 10⁻⁵.
+
+Nitrogen needs no ionisation correction — charge exchange with hydrogen locks N⁺/N to H⁺/H — which
+is why [N II]/Hα is the cleaner thermometer. Sulphur has no such lock, so S⁺/S stays explicit; it is
+obtained the way the papers obtain it, from the observed [S II]/[N II], which is nearly independent
+of temperature because the two lines sit within 2% of the same excitation energy.
+
+The one modelled step is the temperature itself, interpolated logarithmically between two measured
+anchors: **6500 K at 1000 R** (a classical H II region, which cools efficiently) and **10 000 K at
+1 R** (faint high-latitude gas). That reproduces the WIM's most robust observed property — bright
+nebulae are Hα-dominated, faint diffuse gas is [N II]-rich — and the frame reports the temperature
+it used, because it is the one number here that is a model rather than a measurement.
+
+`tools/emission-tests` checks the result against the published values at both ends: [N II]/Hα comes
+out **0.26 at 6000 K** (H II regions are measured at 0.15–0.35) and **0.73 at 8000 K** (the WIM at
+0.3–0.9), with [S II]/[N II] flat to 9% across 6000–10 000 K while [N II]/Hα moves 432% — the
+signature of a temperature gradient rather than an abundance one.
+
+**[O III] 5007, [O II] 3727 and [O I] 6300 are deliberately not synthesised.** [O III] needs O⁺⁺,
+which needs photons above 35 eV; the diffuse gas is lit by Lyman continuum that leaked out of H II
+regions and is far too soft to make much of it, so [O III] does **not** track Hα — it is strong in
+planetary nebulae, supernova remnants and a few hot cores, and weak everywhere between. [O I] traces
+the neutral boundary rather than the ionised gas. Deriving either from an Hα map would be inventing
+a sky, so those filter positions stay empty until a survey of their own is installed.
+
+## Optional: the galaxy catalogue
+
+**Nothing ships.** Galaxies are rendered from their own measured shape, so the catalogue supplies
+four quantities per object: total B magnitude, the diameter of the 25 B-mag/arcsec² isophote (D25),
+the axis ratio of that isophote, and its position angle.
+
+```
+cd tools
+python3 -m venv env && ./env/bin/pip install numpy requests
+./env/bin/python pack_galaxy_catalog.py --bmax 15.0 --out GalaxyCatalog.galcat
+cp GalaxyCatalog.galcat "<KSP>/GameData/ExoInstruments/PluginData/"
+```
+
+The packer queries **HyperLEDA** (Makarov et al. 2014, A&A 570, A13) directly. If the archive is
+unreachable, export the same columns by hand from <http://atlas.obs-hp.fr/hyperleda/> and pass
+`--input leda.csv`. `--bmax 15` keeps of order 130 000 galaxies; `--bmax 12` keeps a few thousand and
+is plenty for the RedCat.
+
+HyperLEDA is the homogenised compilation that folds in RC3 (de Vaucouleurs et al. 1991), the
+classical source for exactly these parameters, plus everything measured since.
+
+**Why D25 and not a half-light radius.** D25 is what the wide-field catalogues actually measure for
+tens of thousands of galaxies; fitted half-light radii exist for far fewer. The conversion costs
+nothing in rigour: a total magnitude and an isophotal diameter **over-determine** a two-parameter
+profile, so the half-light radius follows from the two together with no free constant. The profile
+shape comes from the morphological type — de Vaucouleurs (1948) R^(1/4) for spheroids, Freeman
+(1970) exponential for disks, which are Sérsic n = 4 and n = 1 — and where a catalogue carries a
+fitted index the packer stores it and flags it as measured.
+
+Where the two are inconsistent (a galaxy too faint in total to reach 25 mag/arcsec² anywhere at its
+quoted size) there is no solution, and the renderer keeps the **size**, which is what the frame
+shows, rather than the isophote, which it does not.
+
+Photometry goes down the same path as a catalogue star, with the Galactic foreground extinction
+applied in full — a galaxy sits behind the whole column, which is the one case the dust map's total
+reddening applies to without qualification.
+
+Galaxies are drawn as crosses on the sky chart down to B = 11, sized to their own extent; the camera
+has no such cut and draws whatever clears the frame's noise floor. `tools/galaxy-tests` validates the
+profile against SciPy and astropy: b_n to 4 × 10⁻¹⁵, the surface brightness against astropy's
+`Sersic2D` to 1.2 × 10⁻¹³, the deposited flux to 4.5 × 10⁻⁴ over 81 shapes.
 
 ## Future Roadmap
 

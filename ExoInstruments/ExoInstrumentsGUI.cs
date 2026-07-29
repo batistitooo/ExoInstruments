@@ -241,6 +241,7 @@ namespace ExoInstruments
             LoadRenderedStarCatalog();
             LoadDustMap();
             LoadEmissionMap();
+            LoadGalaxyCatalog();
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
@@ -365,6 +366,29 @@ namespace ExoInstruments
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the emission map: {e.Message}");
+            }
+        }
+
+        private void LoadGalaxyCatalog()
+        {
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/GalaxyCatalog.galcat";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.Log("[ExoInstruments] No galaxy catalogue installed, so photographs show no "
+                            + "galaxies. Build one with tools/pack_galaxy_catalog.py and place it at " + path);
+                    return;
+                }
+                var catalog = new GalaxyCatalog();
+                catalog.Load(path);
+                SolarSystemCameraTexture.GalaxyCatalog = catalog;
+                Debug.Log($"[ExoInstruments] Galaxy catalogue: {catalog.Count} galaxies, {catalog.Source}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the galaxy catalogue: {e.Message}");
             }
         }
 
@@ -1789,8 +1813,12 @@ namespace ExoInstruments
                     double peak = solarSystemCamera.LastEmissionPeakElectrons;
                     double well = SolarSystemCameraTexture.FullWellElectrons;
                     GUILayout.Label(
-                        $"Diffuse line emission in this filter: {emission:F1} R mean over the field "
-                        + $"({SolarSystemCameraTexture.EmissionMap.LineName})", smallCaptionStyle);
+                        $"Diffuse line emission in this filter: {emission:F1} R mean over the field"
+                        + (solarSystemCamera.LastEmissionLines != null
+                            ? $" from {solarSystemCamera.LastEmissionLines}" : "")
+                        + (double.IsNaN(solarSystemCamera.LastEmissionTemperatureK) ? ""
+                            : $", forbidden-line ratios at T_e = {solarSystemCamera.LastEmissionTemperatureK:F0} K"),
+                        smallCaptionStyle);
                     if (!double.IsNaN(peak) && well > 0.0)
                     {
                         // The number that answers "why can I not see it": a nebula this bright is a
@@ -1802,6 +1830,19 @@ namespace ExoInstruments
                             + (peak < 0.01 * well ? " -- below what a linear stretch can show; use log/asinh and stack" : ""),
                             smallCaptionStyle);
                     }
+                }
+
+                if (solarSystemCamera.LastGalaxiesDrawn > 0)
+                {
+                    double well = SolarSystemCameraTexture.FullWellElectrons;
+                    GUILayout.Label(
+                        $"Galaxies in frame: {solarSystemCamera.LastGalaxiesDrawn} drawn, "
+                        + $"{solarSystemCamera.LastGalaxyElectrons:E2} e- between them"
+                        + (solarSystemCamera.LastGalaxiesWithModelledColour > 0
+                            ? $" ({solarSystemCamera.LastGalaxiesWithModelledColour} with no catalogued colour, "
+                              + "band conversion from the mean colour of their type)"
+                            : ""),
+                        smallCaptionStyle);
                 }
 
                 double fieldEbv = solarSystemCamera.LastFieldReddeningEBv;
@@ -4672,6 +4713,7 @@ namespace ExoInstruments
                 case DeepSkyKind.HiiRegion: kind = "H II region"; break;
                 case DeepSkyKind.SupernovaRemnant: kind = "supernova remnant"; break;
                 case DeepSkyKind.PlanetaryNebula: kind = "planetary nebula"; break;
+                case DeepSkyKind.Galaxy: kind = "galaxy"; break;
                 default: kind = "reflection nebula"; break;
             }
             string size = obj.MajorArcmin >= 60.0
@@ -4709,8 +4751,46 @@ namespace ExoInstruments
                                     && Math.Abs(pointing.DecDeg - obj.DecDeg) < 1e-6,
                 });
             }
+
+            // The galaxies come from the packed catalogue rather than a hand-written list, so the
+            // chart is cut by brightness: at B = 15 there are of order a hundred thousand of them
+            // and the chart would be a wall of markers. 11 is roughly the reach of the RedCat on an
+            // extended source in a single sub, and leaves a few hundred on the whole sky.
+            GalaxyCatalog catalog = SolarSystemCameraTexture.GalaxyCatalog;
+            if (catalog != null && catalog.IsLoaded)
+            {
+                foreach (Galaxy g in catalog.Search(0.0, 0.0, 180.0, ChartGalaxyMagnitudeLimit))
+                {
+                    var h = SkyCoordinates.EquatorialToHorizontal(
+                        g.RaDeg, g.DecDeg, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
+                    if (!h.IsAboveHorizon(0.0)) continue;
+
+                    points.Add(new SkyChartPoint
+                    {
+                        IsDeepSky = true,
+                        DeepSky = new DeepSkyObject
+                        {
+                            Id = g.Name,
+                            CommonName = null,
+                            RaDeg = g.RaDeg,
+                            DecDeg = g.DecDeg,
+                            MajorArcmin = g.D25Arcmin,
+                            MinorArcmin = g.D25Arcmin * g.AxisRatio,
+                            Kind = DeepSkyKind.Galaxy,
+                        },
+                        AltitudeDeg = h.AltitudeDeg,
+                        AzimuthDeg = h.AzimuthDeg,
+                        IsSelectedTarget = pointing.IsEquatorial
+                                        && Math.Abs(pointing.RaDeg - g.RaDeg) < 1e-6
+                                        && Math.Abs(pointing.DecDeg - g.DecDeg) < 1e-6,
+                    });
+                }
+            }
             return points;
         }
+
+        /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut -- it draws whatever clears the frame's own noise floor.</summary>
+        private const double ChartGalaxyMagnitudeLimit = 11.0;
 
         /// <summary>Applies a completed background chart render (see StartSkyChartRefresh) -- the only part of the pipeline that's allowed to touch the Texture2D.</summary>
         void PollSkyChartRenderTask()

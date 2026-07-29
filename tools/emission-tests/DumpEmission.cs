@@ -17,6 +17,7 @@ static class DumpEmission
         DumpRayleigh();
         DumpNarrowband();
         DumpRealTargets();
+        DumpLineRatios();
         DumpRotation();
         Console.WriteLine("written exo_lines.csv, exo_rayleigh.csv, exo_narrowband.csv, exo_rotation.csv");
     }
@@ -85,6 +86,52 @@ static class DumpEmission
                                 + $" -> {e30,10:F1} e- in 30 s = {100.0 * e30 / spec.FullWellElectrons,7:F3}% of full well"
                                 + $" = {e30 / spec.ElectronsPerAduAtUnityGain,8:F1} ADU of {(1 << spec.AdcBits) - 1}");
             }
+        }
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// The forbidden-line ratios against the values they are measured at, which is the only check
+    /// that matters here: the emissivity expressions carry coefficients and abundances, and a wrong
+    /// one still produces a smooth, plausible ratio map.
+    ///
+    /// The anchors are published. Classical H II regions: [N II] 6584/H-alpha near 0.25 at the
+    /// 6000-7000 K they are measured at. The warm ionised medium near the midplane: 0.3-0.6 at
+    /// about 8000 K, rising toward unity at high |z| where it approaches 10^4 K (Haffner, Reynolds
+    /// &amp; Tufte 1999; Madsen, Reynolds &amp; Haffner 2006). [S II]/[N II] near 0.3-0.5 and far
+    /// flatter than either ratio to H-alpha, which is the observational statement that what varies
+    /// is temperature and not abundance.
+    /// </summary>
+    static void DumpLineRatios()
+    {
+        var rb = new StringBuilder();
+        rb.AppendLine("temperature_k,nii6584_over_ha,sii6716_over_ha");
+        for (int i = 0; i <= 80; i++)
+        {
+            double tk = 6000.0 + i * 50.0;
+            rb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R}",
+                tk, NebularLineRatios.Nii6584OverHalpha(tk), NebularLineRatios.Sii6716OverHalpha(tk)));
+        }
+        File.WriteAllText("exo_lineratios.csv", rb.ToString());
+
+        Console.WriteLine("\nForbidden-line ratios against the temperatures they are measured at:");
+        Console.WriteLine("     T_e      I_Ha      [NII]6584/Ha   [SII]6716/Ha   [SII]/[NII]");
+        double[] temps = { 6000, 6500, 7000, 8000, 9000, 10000 };
+        foreach (double t in temps)
+        {
+            double nii = NebularLineRatios.Nii6584OverHalpha(t);
+            double sii = NebularLineRatios.Sii6716OverHalpha(t);
+            Console.WriteLine($"   {t,6:F0} K              {nii,10:F3}     {sii,10:F3}     {sii / nii,10:F3}");
+        }
+
+        Console.WriteLine("\n   and as a function of the H-alpha brightness the map supplies:");
+        double[] intensities = { 5000, 1000, 300, 100, 30, 10, 3, 1, 0.3 };
+        foreach (double i in intensities)
+        {
+            double t = NebularLineRatios.ElectronTemperatureK(i);
+            double nii = NebularLineRatios.Nii6584OverHalpha(t);
+            double sii = NebularLineRatios.Sii6716OverHalpha(t);
+            Console.WriteLine($"   {t,6:F0} K  {i,8:F1} R  {nii,10:F3}     {sii,10:F3}     {sii / nii,10:F3}");
         }
         Console.WriteLine();
     }

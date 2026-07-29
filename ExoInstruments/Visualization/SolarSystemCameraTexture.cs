@@ -1507,6 +1507,10 @@ namespace ExoInstruments.Visualization
             public GnomonicProjection Projection;
             /// <summary>Catalogue stars whose light reaches the sensor this exposure, already cone-searched on the main thread.</summary>
             public List<RenderedStar> Stars;
+            /// <summary>Galaxies whose own extent reaches the sensor, already cone-searched on the main thread.</summary>
+            public List<Galaxy> Galaxies;
+            /// <summary>Total Galactic E(B-V) toward the boresight. A galaxy sits behind the whole column, so this is the reddening that applies to it in full.</summary>
+            public double FieldReddeningEBv;
             /// <summary>Solar-system bodies in the field too small for the renderer to resolve, already projected and converted to signal.</summary>
             public List<PointSource> UnresolvedBodies;
             public bool HaveFieldGeometry;
@@ -1794,7 +1798,9 @@ namespace ExoInstruments.Visualization
 
             MeasurePointingError(target, projection, meridianRaDeg, latitudeDeg);
 
+            inputs.FieldReddeningEBv = LastFieldReddeningEBv;
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
+            inputs.Galaxies = SearchGalaxyCatalog(inputs, latitudeDeg);
             inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
             inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds);
         }
@@ -1913,11 +1919,30 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static EmissionMap EmissionMap { get; set; }
 
+        /// <summary>
+        /// Optional galaxy catalogue, set by the GUI at load time. Unlike a star, a galaxy is
+        /// resolved by every instrument here, so it is drawn from its own measured shape rather
+        /// than by the PSF -- see GalaxyCatalog and GalaxyRenderer.
+        /// </summary>
+        public static GalaxyCatalog GalaxyCatalog { get; set; }
+
+        /// <summary>Galaxies drawn into the last frame, and the electrons they contributed. Diagnostics, read after a capture.</summary>
+        public int LastGalaxiesDrawn { get; private set; }
+        public double LastGalaxyElectrons { get; private set; }
+        /// <summary>How many of those had no catalogued colour, so their band conversion used the mean colour of their morphological type instead of a measured one.</summary>
+        public int LastGalaxiesWithModelledColour { get; private set; }
+
         /// <summary>Mean line surface brightness the last capture collected, rayleighs, or NaN when no map contributed.</summary>
         public double LastEmissionRayleighs { get; private set; } = double.NaN;
 
         /// <summary>Electrons the brightest pixel of that diffuse emission collected this exposure. Against the full well it says whether a linear stretch could ever show it, which for a nebula is usually no.</summary>
         public double LastEmissionPeakElectrons { get; private set; } = double.NaN;
+
+        /// <summary>Which lines the last frame's filter actually admitted, e.g. "[N II] 6548, H-alpha, [N II] 6584" for a 7 nm H-alpha filter. Null when none did.</summary>
+        public string LastEmissionLines { get; private set; }
+
+        /// <summary>Mean electron temperature the forbidden-line ratios were taken at, kelvin. The one modelled quantity between the H-alpha map and the other lines, so it is reported rather than buried.</summary>
+        public double LastEmissionTemperatureK { get; private set; } = double.NaN;
 
         /// <summary>Total Galactic E(B-V) toward the last capture's field centre, or NaN with no map installed.</summary>
         public double LastFieldReddeningEBv { get; private set; } = double.NaN;
@@ -2006,16 +2031,19 @@ namespace ExoInstruments.Visualization
         /// Fills the frame from an all-sky emission-line map.
         ///
         /// This is the one source that is drawn FROM the sky rather than placed ON it, so every
-        /// pixel has to ask what lies behind it. Three things keep that affordable without
-        /// approximating anything:
+        /// pixel has to ask what lies behind it. Two things keep that affordable without
+        /// approximating anything: it does nothing unless a map is loaded AND the active filter
+        /// admits at least one line, so a frame that cannot see gas costs zero; and the
+        /// (north, east, up) to Galactic chain is one rotation for the whole frame, built once
+        /// (HorizontalToGalactic) rather than six trigonometric calls per pixel.
         ///
-        ///   * it does nothing at all unless a map is loaded AND the active filter's passband
-        ///     contains the map's line, so a broadband frame costs zero;
-        ///   * the (north, east, up) to Galactic chain is one rotation for the whole frame, built
-        ///     once (HorizontalToGalactic) rather than six trigonometric calls per pixel;
-        ///   * consecutive pixels along a row land in the same map cell almost always -- at 6
-        ///     arcmin a cell spans at least 94 pixels on the widest instrument here -- so the value
-        ///     lookup is skipped while the cell index is unchanged.
+        /// EVERY LINE THE FILTER ADMITS, not just the mapped one. The map measures H-alpha, but a
+        /// 7 nm filter centred on it also passes [N II] 6548 and 6584, and an [S II] filter passes
+        /// a doublet the map says nothing about directly. Those are derived from the H-alpha
+        /// brightness by the physics that sets them -- see NebularLineRatios, where the ratio is a
+        /// thermometer rather than a coefficient. Each admitted line gets its own throughput at its
+        /// own wavelength, which is the whole point of narrowband: a 3 nm filter separates H-alpha
+        /// from [N II] 6584 and a 7 nm one does not.
         ///
         /// Deposited into the SIGNAL plane, before the optics, because that is where sky light
         /// enters. At this resolution the convolution barely changes it, which is a property of the
@@ -2024,28 +2052,42 @@ namespace ExoInstruments.Visualization
         private void DepositEmissionField(float[] signal, FrameComputeInputs inputs)
         {
             LastEmissionRayleighs = double.NaN;
+            LastEmissionPeakElectrons = double.NaN;
+            LastEmissionLines = null;
 
             EmissionMap map = EmissionMap;
             if (map == null || !map.IsLoaded || !inputs.HaveFieldGeometry || signal == null) return;
             if (inputs.Response == null) return;
 
-            // Does this filter admit the line at all? ThroughputAt is zero outside the passband,
-            // which answers the question and supplies the coefficient in one call.
-            double throughput = inputs.Response.ThroughputAt(map.LineWavelengthMeters);
-            if (!(throughput > 0.0)) return;
+            // Which lines this filter admits, and what each is worth per rayleigh. ThroughputAt is
+            // zero outside the passband, so the admission test and the coefficient are one call.
+            var lines = new List<EmissionLines.Line>();
+            var coefficients = new List<double>();
+            double exposureTransmission = inputs.ExposureSeconds
+                                        * Math.Max(0.0, inputs.StarNonAtmosphericTransmission);
+            foreach (EmissionLines.Line line in NebularLineRatios.DerivableLines)
+            {
+                double throughput = inputs.Response.ThroughputAt(line.WavelengthMeters);
+                if (!(throughput > 0.0)) continue;
+                double perRayleigh = EmissionLines.ElectronsPerPixelPerSecond(
+                    1.0, inputs.PlateScaleArcsec, inputs.ApertureAreaCm2, throughput) * exposureTransmission;
+                if (!(perRayleigh > 0.0)) continue;
+                lines.Add(line);
+                coefficients.Add(perRayleigh);
+            }
+            if (lines.Count == 0) return;
 
             var rotation = HorizontalToGalactic.Build(inputs.EndMeridianRaDeg, inputs.ObserverLatitudeDeg);
             if (!rotation.IsValid) return;
 
-            double perRayleighPerSecond = EmissionLines.ElectronsPerPixelPerSecond(
-                1.0, inputs.PlateScaleArcsec, inputs.ApertureAreaCm2, throughput);
-            double coefficient = perRayleighPerSecond * inputs.ExposureSeconds
-                               * Math.Max(0.0, inputs.StarNonAtmosphericTransmission);
-            if (!(coefficient > 0.0)) return;
+            var names = new string[lines.Count];
+            for (int i = 0; i < lines.Count; i++) names[i] = lines[i].Name;
+            LastEmissionLines = string.Join(", ", names);
 
             int w = TextureWidth, h = TextureHeight;
             double sum = 0.0, brightest = 0.0;
             long counted = 0;
+            double temperatureSum = 0.0;
 
             // The map is read per pixel and interpolated. There used to be a one-entry cell cache
             // here, which is what a nearest-pixel lookup allows and is exactly what made a nebula
@@ -2061,15 +2103,219 @@ namespace ExoInstruments.Visualization
 
                     double r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
                     if (double.IsNaN(r)) continue;
-                    sum += r;
                     counted++;
-                    if (r > brightest) brightest = r;
-                    if (r > 0.0) signal[y * w + x] += (float)(r * coefficient);
+                    if (!(r > 0.0)) continue;
+
+                    // One temperature per pixel, from that pixel's own H-alpha brightness, and
+                    // every admitted line's ratio taken at it. That is what makes a bright H II
+                    // region come out H-alpha dominated and the faint diffuse gas [N II] rich,
+                    // which is the WIM's most robust measured property rather than a stylistic
+                    // choice.
+                    double tempK = NebularLineRatios.ElectronTemperatureK(r);
+                    temperatureSum += tempK;
+
+                    double pixelRayleighs = 0.0, pixelElectrons = 0.0;
+                    for (int i = 0; i < lines.Count; i++)
+                    {
+                        double ratio = NebularLineRatios.RatioToHalpha(lines[i], r);
+                        if (double.IsNaN(ratio) || !(ratio > 0.0)) continue;
+                        double lineR = r * ratio;
+                        pixelRayleighs += lineR;
+                        pixelElectrons += lineR * coefficients[i];
+                    }
+
+                    sum += pixelRayleighs;
+                    if (pixelElectrons > brightest) brightest = pixelElectrons;
+                    if (pixelElectrons > 0.0) signal[y * w + x] += (float)pixelElectrons;
                 }
             }
 
             LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
-            LastEmissionPeakElectrons = counted > 0 ? brightest * coefficient : double.NaN;
+            LastEmissionPeakElectrons = counted > 0 ? brightest : double.NaN;
+            LastEmissionTemperatureK = counted > 0 ? temperatureSum / counted : double.NaN;
+        }
+
+        /// <summary>
+        /// Galaxies whose light lands on the sensor. The cone is the frame's own half-diagonal
+        /// about the WCS reference point, widened inside GalaxyCatalog.Search by the catalogue's
+        /// largest object so that a galaxy centred just off the edge still puts its disk in frame.
+        ///
+        /// No magnitude cut here: for an extended source the question is not total brightness but
+        /// SURFACE brightness, and a nearby dwarf can be brighter in total than a distant spiral
+        /// while being invisible per pixel. DepositGalaxies applies the real test, which is whether
+        /// the profile's own centre clears the frame's noise floor.
+        /// </summary>
+        private List<Galaxy> SearchGalaxyCatalog(FrameComputeInputs inputs, double latitudeDeg)
+        {
+            GalaxyCatalog catalog = GalaxyCatalog;
+            if (catalog == null || !catalog.IsLoaded || !inputs.HaveFieldGeometry) return null;
+
+            double halfDiagonalDeg = 0.5 * Math.Sqrt(
+                (TextureWidth * inputs.PlateScaleArcsec) * (TextureWidth * inputs.PlateScaleArcsec)
+              + (TextureHeight * inputs.PlateScaleArcsec) * (TextureHeight * inputs.PlateScaleArcsec)) / 3600.0;
+
+            return catalog.Search(LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg,
+                                  halfDiagonalDeg, double.PositiveInfinity);
+        }
+
+        /// <summary>
+        /// Draws the galaxies, in electrons, from their catalogued photometry and shape.
+        ///
+        /// PHOTOMETRY goes down the same path as a catalogue star: an apparent magnitude and a
+        /// colour, through the instrument's integrated response, with the Galactic foreground
+        /// extinction applied. For a galaxy the extinction is the WHOLE column -- it sits behind
+        /// all of it -- which is the one case DustMap's total reddening applies to without
+        /// qualification, and it is why LastFieldReddeningEBv exists.
+        ///
+        /// The colour is used the way a star's is, to set a blackbody standing in for the source's
+        /// spectrum inside the bandpass integral. For a star that is close to the truth; for a
+        /// galaxy it is a composite stellar population being represented by its own colour
+        /// temperature. What it affects is only the conversion from the catalogued V to this
+        /// instrument's band, not the flux, and there is no all-sky catalogue of galaxy spectra to
+        /// do better from. Entries with no catalogued colour are counted and reported rather than
+        /// silently filled.
+        ///
+        /// SHAPE comes from the catalogue: D25, the axis ratio and the position angle. The major
+        /// axis is turned into a PIXEL direction by projecting two sky positions through the very
+        /// projection that places the stars, so field rotation and the projection's own distortion
+        /// are already in it rather than being corrected for afterwards.
+        /// </summary>
+        private void DepositGalaxies(float[] signal, FrameComputeInputs inputs, double scintillation)
+        {
+            LastGalaxiesDrawn = 0;
+            LastGalaxyElectrons = 0.0;
+            LastGalaxiesWithModelledColour = 0;
+
+            List<Galaxy> galaxies = inputs.Galaxies;
+            if (galaxies == null || galaxies.Count == 0 || inputs.Response == null) return;
+            if (!inputs.HaveFieldGeometry || signal == null) return;
+
+            var reddening = new ReddenedResponseCache(inputs.Response);
+            double eBv = inputs.FieldReddeningEBv;
+            double plateScale = inputs.PlateScaleArcsec;
+            if (!(plateScale > 0.0)) return;
+
+            // One electron in the exposure is the floor: a surface brightness below that cannot be
+            // recorded at all, so it is where the profile stops. Same criterion as the PSF's.
+            double floorElectrons = Math.Max(1.0, inputs.SignalCutoffElectrons);
+
+            foreach (Galaxy g in galaxies)
+            {
+                double colour = g.ColourBv;
+                bool modelledColour = double.IsNaN(colour);
+                if (modelledColour) colour = MeanColourForType(g.MorphologicalType);
+                double vMag = g.TotalBMag - colour;
+
+                double electrons = StellarPhotometry.CollectedElectrons(
+                    vMag, colour, eBv, inputs.Response, reddening,
+                    inputs.ApertureAreaCm2, inputs.ExposureSeconds,
+                    inputs.StarNonAtmosphericTransmission * Math.Max(0.0, scintillation));
+                if (!(electrons > 0.0)) continue;
+
+                if (!TryProjectGalaxy(g, inputs, out double cx, out double cy,
+                                      out double majorX, out double majorY))
+                    continue;
+
+                double semiMajorPx = g.SemiMajorArcsec / plateScale;
+                double n = g.SersicIndex > 0.0
+                    ? g.SersicIndex
+                    : Core.GalaxyCatalog.SersicIndexForType(g.MorphologicalType);
+
+                // R_e from the two measured quantities together, with no free constant.
+                //
+                // Where they are inconsistent -- a galaxy whose total magnitude is too faint to
+                // reach 25 mag/arcsec^2 anywhere at its catalogued size -- the isophote cannot be
+                // honoured by any R_e, and the fallback keeps the SIZE, which is what the frame
+                // shows, by reading D25/2 as the radius enclosing FallbackEnclosedAtD25 of the
+                // light instead. tools/galaxy-tests reports what fraction the solved cases put
+                // there, which is where that number comes from.
+                double reArcsec = SersicProfile.EffectiveRadiusFromIsophote(
+                    g.TotalBMag, g.SemiMajorArcsec, D25SurfaceBrightness, n);
+                double rePx = double.IsNaN(reArcsec)
+                    ? semiMajorPx / Math.Max(1e-6,
+                        SersicProfile.RadiusForEnclosedFraction(FallbackEnclosedAtD25, n))
+                    : reArcsec / plateScale;
+                if (!(rePx > 0.0)) continue;
+
+                double radii = GalaxyRenderer.TruncationRadiiForFloor(
+                    electrons, rePx, g.AxisRatio, n, floorElectrons, MaxGalaxyTruncationRadii);
+                if (!(radii > 0.0)) continue;
+
+                double deposited = GalaxyRenderer.Deposit(
+                    signal, TextureWidth, TextureHeight, cx, cy, majorX, majorY,
+                    rePx, g.AxisRatio, n, electrons, radii);
+                if (deposited <= 0.0) continue;
+
+                LastGalaxiesDrawn++;
+                LastGalaxyElectrons += deposited;
+                if (modelledColour) LastGalaxiesWithModelledColour++;
+            }
+        }
+
+        /// <summary>Surface brightness the catalogued D25 isophote is defined at, B magnitudes per square arcsecond (de Vaucouleurs et al. 1991, RC3).</summary>
+        private const double D25SurfaceBrightness = 25.0;
+
+        /// <summary>Ceiling on how far out a galaxy is drawn, in effective radii. A Sersic n = 4 profile has no edge; this bounds the box when a bright one would otherwise ask for the whole sensor several times over.</summary>
+        private const double MaxGalaxyTruncationRadii = 12.0;
+
+        /// <summary>Fraction of a galaxy's light the D25 isophote is taken to enclose when the catalogued magnitude and size admit no exact solution. See the use site.</summary>
+        private const double FallbackEnclosedAtD25 = 0.9;
+
+        /// <summary>
+        /// Mean B-V of a morphological type, for the catalogue entries with no measured colour.
+        /// Roberts &amp; Haynes (1994, ARA&amp;A 32, 115) Table 2: the integrated colours of galaxies
+        /// redden monotonically from irregulars to ellipticals as the young stellar population
+        /// thins out. Only used where the catalogue has no V magnitude, and counted when it is.
+        /// </summary>
+        private static double MeanColourForType(double t)
+        {
+            if (double.IsNaN(t)) return 0.7;
+            if (t <= -4.0) return 0.96;   // E
+            if (t <= -1.0) return 0.93;   // E-S0
+            if (t <= 0.5) return 0.91;    // S0
+            if (t <= 2.5) return 0.79;    // Sa-Sab
+            if (t <= 4.5) return 0.68;    // Sb-Sbc
+            if (t <= 6.5) return 0.55;    // Sc-Scd
+            if (t <= 8.5) return 0.44;    // Sd-Sdm
+            return 0.39;                  // Im and later
+        }
+
+        /// <summary>
+        /// Galaxy centre and major-axis direction, both in pixels.
+        ///
+        /// The direction is obtained by projecting a second point one arcminute along the major
+        /// axis rather than by rotating the catalogued position angle into the frame: the
+        /// projection already contains the field rotation of an alt-azimuth mount, the parity of
+        /// the sensor's axes and the gnomonic distortion, and re-deriving any of those by hand is
+        /// how a position angle ends up mirrored.
+        /// </summary>
+        private bool TryProjectGalaxy(Galaxy g, FrameComputeInputs inputs,
+                                      out double cx, out double cy,
+                                      out double majorX, out double majorY)
+        {
+            cx = cy = majorX = majorY = 0.0;
+
+            HorizontalCoordinates altAz = SkyCoordinates.EquatorialToHorizontal(
+                g.RaDeg, g.DecDeg, inputs.EndMeridianRaDeg, inputs.ObserverLatitudeDeg);
+            if (!inputs.Projection.TryProject(
+                    SkyVector.FromHorizontal(altAz.AltitudeDeg, altAz.AzimuthDeg), out cx, out cy))
+                return false;
+
+            const double stepDeg = 1.0 / 60.0;
+            double pa = g.PositionAngleDeg * Math.PI / 180.0;
+            double cosDec = Math.Cos(g.DecDeg * Math.PI / 180.0);
+            double ra2 = g.RaDeg + (Math.Abs(cosDec) > 1e-6 ? stepDeg * Math.Sin(pa) / cosDec : 0.0);
+            double dec2 = g.DecDeg + stepDeg * Math.Cos(pa);
+
+            HorizontalCoordinates tip = SkyCoordinates.EquatorialToHorizontal(
+                ra2, dec2, inputs.EndMeridianRaDeg, inputs.ObserverLatitudeDeg);
+            if (!inputs.Projection.TryProject(
+                    SkyVector.FromHorizontal(tip.AltitudeDeg, tip.AzimuthDeg), out double tx, out double ty))
+                return false;
+
+            majorX = tx - cx;
+            majorY = ty - cy;
+            return majorX * majorX + majorY * majorY > 0.0;
         }
 
         /// <summary>
@@ -2518,6 +2764,12 @@ namespace ExoInstruments.Visualization
             // rendered channel already in place and the render itself already let go.
             float sceneScale = calibratedSignalPerUnit * scintJitter * cloudTransmission;
             for (int i = 0; i < n; i++) signal[i] *= sceneScale;
+
+            // Galaxies go in with the rendered scene rather than with the star field, because like
+            // the scene they are RESOLVED: they are drawn from their own measured profile, they
+            // take the extended-source scintillation instead of the point-source one, and the
+            // smear below trails them as a shape rather than as a streak from a point.
+            if (inputs.HaveFieldGeometry) DepositGalaxies(signal, inputs, scintJitter);
 
             // The rendered scene is a snapshot at one instant; an unguided mount lets the sky
             // slide across the sensor during the exposure, so the whole scene draws a streak
@@ -3023,9 +3275,13 @@ namespace ExoInstruments.Visualization
                         response, reddening, area, exposure, transmission));
 
                 lastReddeningQuadratures = reddening.Evaluations;
-
-                DepositEmissionField(signal, inputs);
             }
+
+            // Outside the block above on purpose. The diffuse gas does not depend on whether any
+            // catalogue star happened to fall in the field, and while it was nested there a frame
+            // with no star in it -- a narrow field, a short exposure, a gap in the catalogue --
+            // rendered no nebula at all.
+            DepositEmissionField(signal, inputs);
 
             if (inputs.UnresolvedBodies != null)
             {

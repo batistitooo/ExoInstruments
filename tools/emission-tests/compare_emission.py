@@ -173,6 +173,59 @@ def rotation():
                  f"{max(float(db.max()), float(dl[off_pole].max())):.1e} deg")
 
 
+def line_ratios():
+    """The forbidden-line ratios against the values they are measured at.
+
+    The emissivity expressions carry a coefficient, an abundance and an ionisation fraction, and a
+    wrong one still produces a smooth, plausible ratio map. What pins them is that the published
+    observations bracket the answer at both ends of the temperature range.
+    """
+    print("\n6. Forbidden-line ratios, against Haffner et al. (1999) and Madsen et al. (2006)")
+    d = np.genfromtxt("exo_lineratios.csv", delimiter=",", names=True)
+    t = d["temperature_k"]
+
+    def at(temp):
+        return d[np.argmin(np.abs(t - temp))]
+
+    # Classical H II regions: cool, dense, and H-alpha dominated.
+    hii = at(6000.0)
+    ok = 0.15 <= hii["nii6584_over_ha"] <= 0.35
+    print(f"  [{'ok  ' if ok else 'FAIL'}] [N II]/Ha at 6000 K = {hii['nii6584_over_ha']:.3f}, "
+          f"published for classical H II regions 0.15-0.35")
+    if not ok:
+        failures.append("[N II]/Ha in H II regions")
+
+    # The warm ionised medium near the midplane.
+    wim = at(8000.0)
+    ok = 0.3 <= wim["nii6584_over_ha"] <= 0.9
+    print(f"  [{'ok  ' if ok else 'FAIL'}] [N II]/Ha at 8000 K = {wim['nii6584_over_ha']:.3f}, "
+          f"published for the WIM near the midplane 0.3-0.9")
+    if not ok:
+        failures.append("[N II]/Ha in the WIM")
+
+    # [S II]/[N II] is the abundance-and-ionisation diagnostic, and is nearly flat in temperature
+    # because the two lines sit within 2% of the same excitation energy. Both facts are testable.
+    ratio = d["sii6716_over_ha"] / d["nii6584_over_ha"]
+    ok = 0.30 <= ratio.mean() <= 0.55
+    print(f"  [{'ok  ' if ok else 'FAIL'}] [S II]/[N II] = {ratio.min():.3f} to {ratio.max():.3f} "
+          f"over 6000-10000 K, published 0.30-0.55")
+    if not ok:
+        failures.append("[S II]/[N II]")
+
+    spread = ratio.max() / ratio.min() - 1.0
+    nii_spread = d["nii6584_over_ha"].max() / d["nii6584_over_ha"].min() - 1.0
+    ok = spread < 0.15 and nii_spread > 2.0
+    print(f"  [{'ok  ' if ok else 'FAIL'}] over that range [S II]/[N II] moves {spread*100:.0f}% "
+          f"while [N II]/Ha moves {nii_spread*100:.0f}% -- the observed signature of a temperature "
+          f"gradient rather than an abundance one")
+    if not ok:
+        failures.append("[S II]/[N II] flatness")
+
+    notes.append(f"[N II]/Ha comes out {hii['nii6584_over_ha']:.2f} at the 6000 K of a classical "
+                 f"H II region and {wim['nii6584_over_ha']:.2f} at the 8000 K of the diffuse gas, "
+                 f"with [S II]/[N II] flat to {spread*100:.0f}% across the range")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     rayleigh()
@@ -180,6 +233,7 @@ def main():
     lines()
     narrowband()
     rotation()
+    line_ratios()
 
     print("\n" + "-" * 78)
     for n in notes:

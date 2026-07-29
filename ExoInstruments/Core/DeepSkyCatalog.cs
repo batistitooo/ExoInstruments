@@ -13,6 +13,8 @@ namespace ExoInstruments.Core
         PlanetaryNebula,
         /// <summary>Reflection nebula: dust scattering a nearby star's continuum, with no emission lines of its own.</summary>
         ReflectionNebula,
+        /// <summary>A galaxy, placed on the chart from the packed GalaxyCatalog rather than from the list below.</summary>
+        Galaxy,
     }
 
     /// <summary>One catalogued nebula: what it is called, where it is, and how big.</summary>

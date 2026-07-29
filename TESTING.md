@@ -258,3 +258,29 @@ no manufacturer or observatory publishes a non-uniformity figure for the specifi
 detectors in this roster. Consequence for testing: the calibration chain is
 incomplete, so bias and dark can be produced and subtracted but there is no flat
 frame to divide by.
+
+## 13. Galaxies and the forbidden lines
+
+- [ ] **13.1** **The catalogue loads.** `KSP.log` must carry
+      `Galaxy catalogue: <n> galaxies, HyperLEDA (Makarov et al. 2014, A&A 570, A13)`. Without it,
+      photographs simply have no galaxies and everything else is unchanged.
+- [ ] **13.2** **They are on the chart**, as yellow crosses down to B = 11, sized to their own
+      extent. Hovering names the object and says "galaxy" plus its size.
+- [ ] **13.3** **M31 at the RedCat.** Click it on the chart, `Luminance`, a few minutes total. It is
+      3.2 degrees across against a 4.4 x 3.0 degree field, so it should nearly fill the frame, be
+      clearly elongated at the catalogued position angle, and have a bright nucleus. Check the
+      readout line `Galaxies in frame: <n> drawn`.
+- [ ] **13.4** **The same galaxy at the CDK1000.** The field is 11' x 7.5', so M31's disk covers it
+      entirely and the frame should be a smooth gradient with no edge -- the search deliberately
+      includes galaxies whose centre lies outside the field.
+- [ ] **13.5** **An elliptical against a spiral**, e.g. M87 against M101. The elliptical's light must
+      be far more concentrated (Sersic n = 4 against n = 1) at a similar total magnitude.
+- [ ] **13.6** **[N II] comes with H-alpha.** Photograph M42 or the Rosette in `Ha` on the RedCat.
+      The readout must now say which lines the filter admitted -- for a 7 nm filter that is
+      `[N II] 6548, H-alpha, [N II] 6584` -- and report the temperature the ratios were taken at.
+- [ ] **13.7** **The [S II] position works.** The same target in `SII` should show the nebula at
+      roughly a third of its H-alpha brightness, and nothing at all in `OIII`, `OII` or `OI`, which
+      are not derived from an H-alpha map on purpose.
+- [ ] **13.8** **The faint gas is redder in [N II].** Compare the reported temperature between a
+      bright H II region core and a faint high-latitude field: it must rise as the H-alpha
+      brightness falls, which is what makes [N II]/H-alpha rise with it.
