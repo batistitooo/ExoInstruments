@@ -298,6 +298,10 @@ frame to divide by.
 - [ ] **14.4** **A saturated star must not flatten the frame.** Photograph a bright star field. With
       auto scaling on, the sky and faint stars stay visible: the white point is set by the sky's own
       noise, not by the brightest pixel.
-- [ ] **14.5** **A bright planet must still look right.** Jupiter at a sensible exposure fills the
+- [ ] **14.5** **A bright extended subject must not clip.** M42 on the RedCat in `Ha`. The nebula
+      must show a gradient with a bright core, not a flat white polygon with straight edges: pure
+      zscale put its white point at 329 R against a 5116 R peak and blew out an eighth of the frame.
+      The limits readout should now show a white point near the peak.
+- [ ] **14.6** **A bright planet must still look right.** Jupiter at a sensible exposure fills the
       converter's range on its own, so the limits should stay wide and the disk should not be blown
       out by the auto scaling.

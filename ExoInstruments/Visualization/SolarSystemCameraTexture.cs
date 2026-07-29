@@ -1059,7 +1059,8 @@ namespace ExoInstruments.Visualization
             // question. See ZScale.
             double black = 0.0, white = 1.0;
             bool scaled = AutoScaleDisplay
-                       && ZScale.TryLimits(lastCaptureSnapshot, out black, out white)
+                       && ZScale.TryExtendedSourceLimits(lastCaptureSnapshot, TextureWidth, TextureHeight,
+                                                         out black, out white)
                        && white > black;
             LastDisplayBlackPoint = scaled ? black : 0.0;
             LastDisplayWhitePoint = scaled ? white : 1.0;

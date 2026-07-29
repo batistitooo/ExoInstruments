@@ -17,19 +17,21 @@ static class DumpZScale
     static void Main()
     {
         var meta = new StringBuilder();
-        meta.AppendLine("name,black,white");
+        meta.AppendLine("name,black,white,ext_black,ext_white");
 
         foreach (var (name, frame) in Frames())
         {
-            bool ok = ZScale.TryLimits(frame, out double black, out double white);
-            meta.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R},{2:R}", name, black, white));
+            ZScale.TryLimits(frame, out double black, out double white);
+            bool ok = ZScale.TryExtendedSourceLimits(frame, 400, 300, out double eBlack, out double eWhite);
+            meta.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R},{2:R},{3:R},{4:R}",
+                name, black, white, eBlack, eWhite));
 
             using (var w = new BinaryWriter(File.Create("frame_" + name + ".bin")))
             {
                 w.Write(frame.Length);
                 foreach (float v in frame) w.Write(v);
             }
-            Console.WriteLine($"  {name,-18} black {black:E4}  white {white:E4}  ok={ok}");
+            Console.WriteLine($"  {name,-18} zscale [{black:E3}, {white:E3}]  extended [{eBlack:E3}, {eWhite:E3}]  ok={ok}");
         }
         File.WriteAllText("exo_zscale.csv", meta.ToString());
         Console.WriteLine("written exo_zscale.csv and the frames beside it");
@@ -53,6 +55,19 @@ static class DumpZScale
             double v = 0.002 + 1e-4 * rng.NextGaussian();
             // A handful of saturated stars, the thing a max-based scaling would be destroyed by.
             if ((x * 7919 + y * 104729) % 4001 == 0) v = 1.0;
+            return v;
+        }));
+
+        yield return ("bright_nebula", Build(w, h, (x, y, rng) =>
+        {
+            // What 40 s on M42 produces: emission spanning a factor of 150, covering an eighth of
+            // the frame, with saturated stars on top of it. The case pure zscale clips to a
+            // featureless white polygon.
+            double sky = 0.0006;
+            double dx = (x - w * 0.45) / (w * 0.18), dy = (y - h * 0.5) / (h * 0.16);
+            double neb = 0.025 * Math.Exp(-(dx * dx + dy * dy));
+            double v = sky + neb + 4e-5 * rng.NextGaussian();
+            if ((x * 7919 + y * 104729) % 6007 == 0) v = 1.0;
             return v;
         }));
 

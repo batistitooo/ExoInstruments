@@ -141,6 +141,78 @@ namespace ExoInstruments.Core
             return true;
         }
 
+        /// <summary>
+        /// Black and white points for a frame whose subject is EXTENDED, which is the case zscale
+        /// alone gets wrong.
+        ///
+        /// zscale finds the sky beautifully and sets the white point from the sky's own noise, on
+        /// the assumption that sources are a small minority of pixels. A nebula filling a third of
+        /// the frame breaks that assumption outright: on a 40 s exposure of M42 the emission spans
+        /// 34 to 5116 rayleighs while zscale's limits stop at 329, so an eighth of the frame clips
+        /// to flat white and the nebula becomes a featureless polygon -- the shape of an iso-contour
+        /// rather than of a nebula.
+        ///
+        /// The two halves of the question have different answers, so they are answered separately.
+        /// The BLACK point still comes from zscale, because finding the sky is exactly what it is
+        /// good at. The WHITE point comes from a high percentile of a BLOCK-AVERAGED copy of the
+        /// frame: averaging over a block dilutes anything that covers a few pixels by the block's
+        /// area while leaving anything extended untouched, so the white point ends up set by the
+        /// brightest extended structure and not by a star. That is the right answer on physical
+        /// grounds -- a stretch exists to show structure, and a point source has none -- and it is
+        /// also what every real astrophotograph does, clipping its stars to white.
+        /// </summary>
+        public static bool TryExtendedSourceLimits(float[] image, int width, int height,
+                                                   out double blackPoint, out double whitePoint)
+        {
+            blackPoint = 0.0;
+            whitePoint = 1.0;
+            if (image == null || image.Length == 0 || width <= 0 || height <= 0) return false;
+            if (image.Length != width * height) return false;
+
+            if (!TryLimits(image, out double zBlack, out double zWhite)) return false;
+            blackPoint = zBlack;
+            whitePoint = zWhite;
+
+            // Block MEDIAN, not mean. A mean still carries a saturated star, merely divided by the
+            // block's area, and on a star field that is enough to set the white point 7 times too
+            // high and compress the sky again. A median over 64 pixels is untouched by anything
+            // covering fewer than 32 of them, so a star vanishes completely while a nebula, which
+            // fills the block, is unchanged. The block size is the compromise: large enough that
+            // the seeing disk is a small part of it at every plate scale in this roster, small
+            // enough to preserve the finest extended structure worth stretching for.
+            const int block = 8;
+            int bw = Math.Max(1, width / block), bh = Math.Max(1, height / block);
+            var averaged = new double[bw * bh];
+            var cell = new double[block * block];
+            for (int by = 0; by < bh; by++)
+            {
+                for (int bx = 0; bx < bw; bx++)
+                {
+                    int count = 0;
+                    for (int y = by * block; y < Math.Min(height, (by + 1) * block); y++)
+                        for (int x = bx * block; x < Math.Min(width, (bx + 1) * block); x++)
+                            cell[count++] = image[y * width + x];
+                    if (count == 0) { averaged[by * bw + bx] = 0.0; continue; }
+                    Array.Sort(cell, 0, count);
+                    averaged[by * bw + bx] = count % 2 == 1
+                        ? cell[count / 2]
+                        : 0.5 * (cell[count / 2 - 1] + cell[count / 2]);
+                }
+            }
+
+            Array.Sort(averaged);
+            int index = (int)(ExtendedWhitePercentile * (averaged.Length - 1));
+            double extendedWhite = averaged[Math.Max(0, Math.Min(averaged.Length - 1, index))];
+
+            // Never darker than zscale's own white point: on a frame with no extended source at all
+            // the block average is just the sky, and taking it would leave nothing above black.
+            if (extendedWhite > whitePoint) whitePoint = extendedWhite;
+            return whitePoint > blackPoint;
+        }
+
+        /// <summary>Percentile of the block-averaged frame that becomes white. 99.5% lets the very brightest extended structure clip, which is what a real exposure of a nebula core does.</summary>
+        private const double ExtendedWhitePercentile = 0.995;
+
         /// <summary>Ordinary least squares of value against sample rank, over the samples not yet rejected.</summary>
         private static bool FitLine(double[] samples, bool[] bad, out double slope, out double intercept)
         {

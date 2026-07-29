@@ -50,6 +50,21 @@ def main():
         print(f"  [{'ok  ' if ok else 'FAIL'}] {name:<15} ours [{row['black']:.6g}, {row['white']:.6g}]  "
               f"astropy [{ref_lo:.6g}, {ref_hi:.6g}]  ->  {dev*100:.2f}% of the span")
 
+    print("\n1b. The extended-source limits, which is what the display actually uses")
+    for row in rows:
+        name = str(row["name"])
+        frame = load(name)
+        above = float((frame > row["ext_white"]).mean())
+        clipped_by_zscale = float((frame > row["white"]).mean())
+        flag = ""
+        if name in ("bright_nebula", "bright_planet"):
+            ok = above < 0.02
+            if not ok:
+                failures.append(name + " extended white point")
+            flag = "  [ok  ]" if ok else "  [FAIL]"
+        print(f"{flag or '        '} {name:<15} pure zscale clips {clipped_by_zscale*100:5.1f}% of the "
+              f"frame to white; the extended-source limits clip {above*100:5.1f}%")
+
     print("\n2. What it buys on the faint frame")
     frame = load("faint_nebula")
     row = rows[[str(r["name"]) for r in rows].index("faint_nebula")]
