@@ -75,9 +75,38 @@ tolerance, because a query returns the value of the pixel it lands in while the 
 evaluated at the exact direction. The pattern is steepest in the Galactic plane and flat at the
 poles, so a flat tolerance would be too tight in one place and meaningless in the other.
 
+**A real map, against `dustmaps` on the real sky.** When `tools/pack_dust_map.py` has built one,
+the harness reads it and queries 4000 random sight lines:
+
+| check | result |
+|---|---|
+| reddening at the pixel centre, relative | **4.8×10⁻⁴** |
+| directions with no value | **0** |
+
+4.8×10⁻⁴ is the half float's own precision, so nothing else stands between the packer, the format,
+the HEALPix lookup and the Galactic transform. The comparison is made at the **pixel centre**
+because that is what the packer stored; querying `dustmaps` at an arbitrary direction interpolates
+its native Lambert grid instead, which measures the resampling rather than the format. That
+resampling is reported separately: median **0.90 %**, worst 25 %, concentrated in the plane where
+SFD's gradient is steepest and below its own 6.1′ beam.
+
+**The half-float decode is exact** over all 65536 encodings, including subnormals, both infinities
+and every NaN.
+
+### One bug this found
+
+The first version of the format stored fixed-point counts of 10⁻⁴ magnitudes, saturating at 6.5535.
+SFD98 reaches **135.25 magnitudes** in the inner plane, so that version silently marked 48 615
+pixels "no value" — every one at |b| below a degree, which is to say exactly the dust worth having.
+A query toward the Galactic centre returned NaN.
+
+No fixed-point scale spans 0.00037 to 135 magnitudes in 16 bits: any scale fine enough for the poles
+saturates in the plane, and any scale coarse enough for the plane quantises the poles to nothing.
+A half float's precision is *relative*, 4.9×10⁻⁴ of the value everywhere, in the same two bytes.
+
 ## What this does NOT establish
 
-- **No real map is read here.** The synthetic pattern checks the format and the lookup; whether
+- **The synthetic pattern checks the format; the real map checks the chain.** The synthetic pattern checks the format and the lookup; whether
   SFD98 or Planck GNILC say the right thing about the real sky is their business, not this
   harness's.
 - **Direction to pixel only.** The inverse (pixel centre to direction) and neighbour queries are not

@@ -26,13 +26,12 @@ import struct
 import sys
 
 MAGIC = b"EXOEMIS1"
-VERSION = 1
+VERSION = 2
 
-# Rayleighs per stored unit. 0.01 R resolves far below the survey's own noise and reaches 655 R,
-# past the brightest diffuse emission in the plane; the brightest H II region cores saturate it and
-# are clipped rather than wrapped.
-SCALE_R_PER_UNIT = 0.01
-UNKNOWN = 0xFFFF
+# Rayleighs as an IEEE 754 half float, matching the dust map and for the same reason: diffuse
+# H-alpha runs from under a rayleigh at the poles to thousands in an H II region core, and a
+# fixed-point scale fine enough for one saturates on the other. A half float's precision is
+# relative, 4.9e-4 of the value everywhere.
 
 # H-alpha, air wavelength, matching Core/EmissionLines.HAlpha.
 LINE_NAME = "H-alpha"
@@ -64,11 +63,9 @@ def main():
         raw = hp.ud_grade(raw, args.nside, order_in="RING", order_out="RING")
         print(f"regridded to nside {args.nside} ({hp.nside2resol(args.nside, arcmin=True):.1f} arcmin)")
 
-    counts = np.rint(raw / SCALE_R_PER_UNIT)
-    bad = ~np.isfinite(raw) | (counts < 0)
-    saturated = int((counts >= UNKNOWN).sum())
-    counts = np.clip(counts, 0, UNKNOWN - 1).astype(np.uint16)
-    counts[bad] = UNKNOWN
+    # A negative surface brightness is a subtraction artefact, not a measurement.
+    values = np.where(np.isfinite(raw) & (raw >= 0.0), raw, np.nan)
+    packed = values.astype(np.float16)
 
     name = LINE_NAME.encode("utf-8")
     source = args.source.encode("utf-8")
@@ -76,18 +73,20 @@ def main():
         f.write(MAGIC)
         f.write(struct.pack("<ii", VERSION, args.nside))
         f.write(struct.pack("<B", 0))                   # 0 = RING
-        f.write(struct.pack("<f", SCALE_R_PER_UNIT))
         f.write(struct.pack("<d", LINE_WAVELENGTH_M))
         f.write(struct.pack("<i", len(name)))
         f.write(name)
         f.write(struct.pack("<i", len(source)))
         f.write(source)
-        f.write(counts.astype("<u2").tobytes())
+        f.write(packed.astype("<f2").tobytes())
 
     import os
     size_mb = os.path.getsize(args.out) / (1024 * 1024)
-    print(f"{len(counts)} pixels -> {args.out} ({size_mb:.1f} MB), "
-          f"{int(bad.sum())} without a value, {saturated} clipped at {(UNKNOWN - 1) * SCALE_R_PER_UNIT:.0f} R")
+    finite = np.isfinite(packed.astype(float))
+    v = packed.astype(float)[finite]
+    print(f"{len(packed)} pixels -> {args.out} ({size_mb:.1f} MB), "
+          f"{int((~finite).sum())} without a value")
+    print(f"surface brightness range: {v.min():.3f} to {v.max():.1f} R, median {float(np.median(v)):.3f}")
     print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/")
     return 0
 

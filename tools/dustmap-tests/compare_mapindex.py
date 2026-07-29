@@ -105,9 +105,28 @@ def galactic():
     check("the south Galactic pole maps to b = -90", d["b_deg"][2], -90.0, 1e-6, " deg")
 
 
+def float16():
+    """Every half-float encoding, against numpy's own float16."""
+    print("\n6. IEEE 754 binary16 decode, against numpy, over all 65536 encodings")
+    d = np.genfromtxt("exo_float16.csv", delimiter=",", names=True)
+    bits = d["bits"].astype(np.uint16)
+    ref = bits.view(np.float16).astype(np.float64)
+    got = d["value"]
+
+    finite = np.isfinite(ref)
+    check(f"finite values ({finite.sum()} of {len(ref)})",
+          float(np.abs(got[finite] - ref[finite]).max()), 0.0, 0.0)
+    check("NaN encodings decode to NaN",
+          float(np.count_nonzero(np.isnan(got[np.isnan(ref)]) != True)), 0.0, 0.0)
+    check("infinite encodings decode to infinity",
+          float(np.count_nonzero(got[np.isinf(ref)] != ref[np.isinf(ref)])), 0.0, 0.0)
+    notes.append("the half-float decode is exact over all 65536 encodings, including subnormals, "
+                 "NaN and both infinities")
+
+
 def dust_map():
     """The packed map format and the query, end to end against the pattern that was written."""
-    print("\n6. DustMap: read back the synthetic map and query it")
+    print("\n7. DustMap: read back the synthetic map and query it")
     d = np.genfromtxt("exo_mapquery.csv", delimiter=",", names=True)
     if len(d) == 0:
         print("  [note] no test_map.dustmap; run make_test_map.py first")
@@ -137,11 +156,79 @@ def dust_map():
                  f"median residual {np.median(dev) * 1000:.1f} mmag against the written pattern")
 
 
+def real_map():
+    """The whole chain against dustmaps, on the real sky, if a real map has been built."""
+    import os
+    if not os.path.exists("exo_realmap.csv"):
+        print("\n8. Real map: none built next door, skipped")
+        print("   Build one with tools/pack_dust_map.py to run this.")
+        return
+
+    print("\n8. A real packed map, against dustmaps on the real sky")
+    d = np.genfromtxt("exo_realmap.csv", delimiter=",", names=True)
+
+    import glob
+    import astropy.units as u
+    import healpy as hp
+    from dustmaps.config import config
+    from dustmaps.sfd import SFDQuery
+    try:
+        query = SFDQuery()
+    except Exception:                                       # noqa: BLE001
+        # tools/pack_dust_map.py fetched SFD into its own environment; point at that copy rather
+        # than downloading 128 MB a second time.
+        found = glob.glob("../*/lib/*/site-packages/dustmaps/data/sfd/SFD_dust_4096_ngp.fits")
+        if not found:
+            print("  [note] SFD data not found in any sibling environment, skipped")
+            return
+        config["data_dir"] = os.path.dirname(os.path.dirname(found[0]))
+        query = SFDQuery()
+    ref = np.asarray(query(SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg,
+                                    frame="icrs")), dtype=float) * 0.86
+
+    # THE COMPARISON HAS TO BE AT THE PIXEL CENTRE. The packer stored SFD sampled at each
+    # HEALPix pixel's own centre; dustmaps queried at an arbitrary direction interpolates its
+    # native Lambert grid there instead. Comparing those two measures the resampling, not the
+    # format, and in the plane where SFD reaches tens of magnitudes across a few arcminutes that
+    # difference reaches 25%. Asking the reference for the same pixel centre isolates what this
+    # check is for.
+    coords = SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg, frame="icrs").galactic
+    pix = hp.ang2pix(1024, coords.l.deg, coords.b.deg, nest=False, lonlat=True)
+    cl, cb = hp.pix2ang(1024, pix, nest=False, lonlat=True)
+    ref = np.asarray(query(SkyCoord(l=cl * u.deg, b=cb * u.deg, frame="galactic")),
+                     dtype=float) * 0.86
+
+    known = np.isfinite(d["ebv"]) & np.isfinite(ref) & (ref > 0)
+    rel = np.abs(d["ebv"][known] / ref[known] - 1.0)
+
+    # Half-float precision is 4.9e-4 relative, and nothing else stands between the two.
+    check(f"reddening at the pixel centre, {known.sum()} real sight lines, relative",
+          float(rel.max()), 0.0, 5e-4)
+    check("nothing lost: every direction carries a value",
+          float(np.count_nonzero(~np.isfinite(d["ebv"]))), 0.0, 0.0)
+
+    # And the resampling, reported rather than asserted: it is the price of a HEALPix grid and it
+    # is concentrated exactly where the dust is steepest.
+    interp = np.asarray(query(SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg,
+                                       frame="icrs")), dtype=float) * 0.86
+    ok = np.isfinite(interp) & (interp > 0) & known
+    resample = np.abs(d["ebv"][ok] / interp[ok] - 1.0)
+    v = d["ebv"][known]
+    print(f"  [note] range over the sample: {v.min():.5f} to {v.max():.2f} mag, "
+          f"median {np.median(v):.5f}")
+    print(f"  [note] resampling onto HEALPix at 3.4 arcmin: median {np.median(resample) * 100:.2f}%, "
+          f"worst {resample.max() * 100:.0f}% (in the plane, where SFD is steepest)")
+    notes.append(f"the real packed map reproduces dustmaps at the pixel centre to "
+                 f"{rel.max():.1e} relative over {known.sum()} sight lines, with no pixel lost")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     healpix()
     galactic()
+    float16()
     dust_map()
+    real_map()
 
     print("\n" + "-" * 78)
     for n in notes:

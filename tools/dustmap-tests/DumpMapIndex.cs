@@ -16,7 +16,9 @@ static class DumpMapIndex
         DumpHealpix();
         DumpGalactic();
         DumpMapQueries();
-        Console.WriteLine("written exo_healpix.csv, exo_galactic.csv, exo_mapquery.csv");
+        DumpFloat16();
+        DumpRealMapQueries();
+        Console.WriteLine("written exo_healpix.csv, exo_galactic.csv, exo_mapquery.csv, exo_float16.csv");
     }
 
     static void DumpHealpix()
@@ -56,6 +58,44 @@ static class DumpMapIndex
             nside, theta, phi,
             Healpix.AngleToRing(nside, theta, phi),
             Healpix.AngleToNested(nside, theta, phi)));
+    }
+
+    /// <summary>
+    /// Queries a REAL packed map, if one has been built next door, so the whole chain -- packer,
+    /// format, HEALPix, Galactic transform -- can be compared against dustmaps on the real sky
+    /// rather than against a pattern this project wrote itself.
+    /// </summary>
+    static void DumpRealMapQueries()
+    {
+        const string path = "../DustMap.dustmap";
+        if (!File.Exists(path)) { File.Delete("exo_realmap.csv"); return; }
+
+        var map = new DustMap();
+        map.Load(path);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("ra_deg,dec_deg,ebv");
+        var rng = new Pcg32(0x5F1DEEDUL, 17UL);
+        for (int i = 0; i < 4000; i++)
+        {
+            double ra = 360.0 * rng.NextDouble();
+            double dec = Math.Asin(2.0 * rng.NextDouble() - 1.0) * 180.0 / Math.PI;
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R}",
+                ra, dec, map.ReddeningAt(ra, dec)));
+        }
+        File.WriteAllText("exo_realmap.csv", sb.ToString());
+        Console.WriteLine($"  real map: nside {map.Nside} ({map.ResolutionArcmin:F1} arcmin), {map.Source}");
+    }
+
+    /// <summary>Every one of the 65536 half-float encodings, decoded, for numpy to check.</summary>
+    static void DumpFloat16()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("bits,value");
+        for (int i = 0; i <= ushort.MaxValue; i++)
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R}",
+                i, Float16.ToDouble((ushort)i)));
+        File.WriteAllText("exo_float16.csv", sb.ToString());
     }
 
     /// <summary>Reads the synthetic map make_test_map.py wrote and queries it, so the format and the lookup are checked end to end.</summary>

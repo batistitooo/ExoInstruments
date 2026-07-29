@@ -13,9 +13,7 @@ import numpy as np
 import healpy as hp
 
 MAGIC = b"EXODUST1"
-VERSION = 1
-SCALE = 1.0e-4
-UNKNOWN = 0xFFFF
+VERSION = 2
 NSIDE = 64
 
 
@@ -29,10 +27,9 @@ def main():
     lon, lat = hp.pix2ang(NSIDE, np.arange(npix), nest=False, lonlat=True)
     values = pattern(lat)
 
-    counts = np.rint(values / SCALE).astype(np.int64)
-    counts = np.clip(counts, 0, UNKNOWN - 1).astype(np.uint16)
-    # One pixel deliberately marked unknown, so the sentinel path is exercised too.
-    counts[0] = UNKNOWN
+    counts = values.astype(np.float16)
+    # One pixel deliberately NaN, so the no-measurement path is exercised too.
+    counts[0] = np.nan
 
     source = "synthetic test pattern, exp(-|b|/8 deg)"
     encoded = source.encode("utf-8")
@@ -40,10 +37,9 @@ def main():
         f.write(MAGIC)
         f.write(struct.pack("<ii", VERSION, NSIDE))
         f.write(struct.pack("<B", 0))
-        f.write(struct.pack("<f", SCALE))
         f.write(struct.pack("<i", len(encoded)))
         f.write(encoded)
-        f.write(counts.astype("<u2").tobytes())
+        f.write(counts.astype("<f2").tobytes())
 
     print(f"wrote test_map.dustmap: nside {NSIDE}, {npix} pixels, "
           f"{hp.nside2resol(NSIDE, arcmin=True):.1f} arcmin")

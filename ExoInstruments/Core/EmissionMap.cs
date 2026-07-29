@@ -11,9 +11,11 @@ namespace ExoInstruments.Core
     /// Finkbeiner (2003, ApJS 146, 407) assembles them into one composite in rayleighs, which is
     /// the unit EmissionLines converts from.
     ///
-    /// SAME PACKED FORMAT AS DustMap, deliberately: HEALPix in Galactic coordinates, one unsigned
-    /// 16-bit value per pixel, a scale factor and a provenance string. The only difference is what
-    /// the numbers mean and which line they belong to, and both are in the header.
+    /// SAME PACKED FORMAT AS DustMap, deliberately: HEALPix in Galactic coordinates, one IEEE 754
+    /// half float per pixel and a provenance string. The only difference is what the numbers mean
+    /// and which line they belong to, and both are in the header. Half rather than a scaled
+    /// integer for the same reason as the dust map: diffuse H-alpha runs from under a rayleigh at
+    /// the poles to thousands in an H II region core, and no fixed-point scale covers both.
     ///
     /// RESOLUTION IS A REAL LIMIT HERE, more than it is for dust. The composite is smoothed to 6
     /// arcmin, which is 94 pixels across on the RedCat and 1300 on the RC20 with its Barlow -- so
@@ -25,13 +27,11 @@ namespace ExoInstruments.Core
     public sealed class EmissionMap
     {
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'E', (byte)'M', (byte)'I', (byte)'S', (byte)'1' };
-        private const int FormatVersion = 1;
-        private const ushort Unknown = ushort.MaxValue;
+        private const int FormatVersion = 2;
 
-        private ushort[] pixels;
+        private ushort[] pixels;   // IEEE 754 binary16, see Float16
         private int nside;
         private bool nested;
-        private double scaleRayleighPerUnit;
 
         public bool IsLoaded => pixels != null;
         public int Nside => nside;
@@ -60,8 +60,6 @@ namespace ExoInstruments.Core
                 int n = reader.ReadInt32();
                 if (!Healpix.IsValidNside(n)) throw new InvalidDataException("bad nside " + n);
                 bool isNested = reader.ReadByte() != 0;
-                double scale = reader.ReadSingle();
-                if (!(scale > 0.0)) throw new InvalidDataException("bad scale");
 
                 double wavelength = reader.ReadDouble();
                 if (!(wavelength > 0.0)) throw new InvalidDataException("bad line wavelength");
@@ -77,7 +75,6 @@ namespace ExoInstruments.Core
                 pixels = values;
                 nside = n;
                 nested = isNested;
-                scaleRayleighPerUnit = scale;
                 LineWavelengthMeters = wavelength;
                 LineName = lineName;
                 Source = source;
@@ -99,8 +96,7 @@ namespace ExoInstruments.Core
                 ? Healpix.SphericalDegreesToNested(nside, lDeg, bDeg)
                 : Healpix.SphericalDegreesToRing(nside, lDeg, bDeg);
             if (pixel < 0 || pixel >= pixels.Length) return double.NaN;
-            ushort raw = pixels[pixel];
-            return raw == Unknown ? double.NaN : raw * scaleRayleighPerUnit;
+            return Float16.ToDouble(pixels[pixel]);
         }
 
         /// <summary>The same for an equatorial direction.</summary>
@@ -127,8 +123,7 @@ namespace ExoInstruments.Core
         public double RayleighsInCell(long cell)
         {
             if (pixels == null || cell < 0 || cell >= pixels.Length) return double.NaN;
-            ushort raw = pixels[cell];
-            return raw == Unknown ? double.NaN : raw * scaleRayleighPerUnit;
+            return Float16.ToDouble(pixels[cell]);
         }
     }
 }

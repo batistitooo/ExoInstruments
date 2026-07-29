@@ -16,9 +16,10 @@ namespace ExoInstruments.Core
     /// Its other job is simply to be reported. Extinction toward the field is a number a real
     /// observer records with a frame, and the FITS header carries it.
     ///
-    /// FORMAT. HEALPix, Galactic coordinates, one unsigned 16-bit value per pixel scaled to
-    /// magnitudes. At the map's own 6.1 arcmin resolution the whole sky is nside 1024 and 24 MB,
-    /// so it loads whole and needs no block index. tools/pack_dust_map.py writes it.
+    /// FORMAT. HEALPix, Galactic coordinates, one IEEE 754 half float per pixel. Half rather than
+    /// a scaled integer because SFD98 spans 0.00037 to 135 magnitudes and no fixed-point scale
+    /// covers both ends -- see Float16. At the map's own 6.1 arcmin resolution the whole sky is
+    /// nside 1024 and 24 MB, so it loads whole and needs no block index. tools/pack_dust_map.py writes it.
     ///
     /// NOTHING SHIPS, for the same reason the star catalogue ships nothing: the map is a published
     /// dataset with its own licence and its own download. With no file installed every query
@@ -29,15 +30,11 @@ namespace ExoInstruments.Core
     public sealed class DustMap
     {
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'D', (byte)'U', (byte)'S', (byte)'T', (byte)'1' };
-        private const int FormatVersion = 1;
+        private const int FormatVersion = 2;
 
-        /// <summary>Sentinel for a pixel the source map has no value for.</summary>
-        private const ushort Unknown = ushort.MaxValue;
-
-        private ushort[] pixels;
+        private ushort[] pixels;   // IEEE 754 binary16, see Float16
         private int nside;
         private bool nested;
-        private double scaleMagPerUnit;
 
         public bool IsLoaded => pixels != null;
         public int Nside => nside;
@@ -62,8 +59,6 @@ namespace ExoInstruments.Core
                 int n = reader.ReadInt32();
                 if (!Healpix.IsValidNside(n)) throw new InvalidDataException("bad nside " + n);
                 bool isNested = reader.ReadByte() != 0;
-                double scale = reader.ReadSingle();
-                if (!(scale > 0.0)) throw new InvalidDataException("bad scale");
 
                 int sourceLength = reader.ReadInt32();
                 if (sourceLength < 0 || sourceLength > 4096) throw new InvalidDataException("bad provenance length");
@@ -77,7 +72,6 @@ namespace ExoInstruments.Core
                 pixels = values;
                 nside = n;
                 nested = isNested;
-                scaleMagPerUnit = scale;
                 Source = source;
             }
         }
@@ -99,8 +93,8 @@ namespace ExoInstruments.Core
                 : Healpix.SphericalDegreesToRing(nside, l, b);
             if (pixel < 0 || pixel >= pixels.Length) return double.NaN;
 
-            ushort raw = pixels[pixel];
-            return raw == Unknown ? double.NaN : raw * scaleMagPerUnit;
+            // NaN in the file means the source map had no measurement there, and stays NaN.
+            return Float16.ToDouble(pixels[pixel]);
         }
 
         /// <summary>Total extinction at V toward a position, magnitudes: A(V) = R_V E(B-V).</summary>

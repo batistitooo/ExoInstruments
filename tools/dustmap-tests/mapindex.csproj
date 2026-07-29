@@ -11,6 +11,7 @@
     <Compile Include="DumpMapIndex.cs" />
     <Compile Include="$(Core)/Healpix.cs" />
     <Compile Include="$(Core)/DustMap.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
     <Compile Include="$(Core)/GalacticCoordinates.cs" />

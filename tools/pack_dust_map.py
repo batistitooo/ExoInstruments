@@ -27,12 +27,16 @@ import struct
 import sys
 
 MAGIC = b"EXODUST1"
-VERSION = 1
+VERSION = 2
 
-# E(B-V) as an unsigned 16-bit count of this many magnitudes. 1e-4 mag resolves far below any
-# map's own uncertainty and still reaches 6.55 mag, past the most obscured sight line in the plane.
-SCALE_MAG_PER_UNIT = 1.0e-4
-UNKNOWN = 0xFFFF
+# E(B-V) as an IEEE 754 half float, which is what Core/Float16.cs reads.
+#
+# Version 1 stored a fixed-point count of 1e-4 magnitudes, which saturated at 6.5535. SFD98 reaches
+# 135.25 magnitudes in the inner plane, so that version silently marked 48615 pixels "no value" --
+# every one of them at |b| below a degree, i.e. exactly the dust worth having. No fixed-point scale
+# spans 0.00037 to 135 magnitudes in 16 bits; a half float's precision is relative, 4.9e-4 of the
+# value everywhere, which is 3e-5 mag at the median sight line and 0.07 at the worst.
+SATURATION_LIMIT = 65504.0    # largest finite binary16
 
 
 def build(map_name, nside, quiet=False):
@@ -74,7 +78,7 @@ def build(map_name, nside, quiet=False):
         print(f"{map_name}: nside {nside}, {npix} pixels, "
               f"{hp.nside2resol(nside, arcmin=True):.2f} arcmin", flush=True)
 
-    packed = np.empty(npix, dtype=np.uint16)
+    packed = np.empty(npix, dtype=np.float16)
 
     # In chunks: the whole sky at nside 1024 is 12.6 M coordinates, and building one SkyCoord of
     # that size is a large transient allocation for no gain.
@@ -86,11 +90,10 @@ def build(map_name, nside, quiet=False):
         coords = SkyCoord(l=lon * u.deg, b=lat * u.deg, frame="galactic")
 
         values = np.asarray(query(coords), dtype=float) * recalibration
-        counts = np.rint(values / SCALE_MAG_PER_UNIT)
-        bad = ~np.isfinite(values) | (counts < 0) | (counts >= UNKNOWN)
-        counts = np.clip(counts, 0, UNKNOWN - 1).astype(np.uint16)
-        counts[bad] = UNKNOWN
-        packed[start:stop] = counts
+        # A negative reddening is a fit artefact rather than a measurement, and is recorded as
+        # "no value" rather than clipped to zero, which would claim a transparent sight line.
+        values = np.where(np.isfinite(values) & (values >= 0.0), values, np.nan)
+        packed[start:stop] = values.astype(np.float16)
 
         if not quiet:
             print(f"  {stop}/{npix}", flush=True)
@@ -110,6 +113,8 @@ def main():
     if args.nside <= 0 or args.nside & (args.nside - 1):
         raise SystemExit("nside must be a power of two")
 
+    import numpy as np
+
     packed, source = build(args.map, args.nside, args.quiet)
     encoded = source.encode("utf-8")
 
@@ -117,15 +122,19 @@ def main():
         f.write(MAGIC)
         f.write(struct.pack("<ii", VERSION, args.nside))
         f.write(struct.pack("<B", 0))                       # 0 = RING
-        f.write(struct.pack("<f", SCALE_MAG_PER_UNIT))
         f.write(struct.pack("<i", len(encoded)))
         f.write(encoded)
-        f.write(packed.astype("<u2").tobytes())
+        f.write(packed.astype("<f2").tobytes())
 
     import os
     size_mb = os.path.getsize(args.out) / (1024 * 1024)
-    unknown = int((packed == UNKNOWN).sum())
-    print(f"{len(packed)} pixels -> {args.out} ({size_mb:.1f} MB), {unknown} without a value")
+    finite = np.isfinite(packed.astype(float))
+    unknown = int((~finite).sum())
+    v = packed.astype(float)[finite]
+    over = int((v > SATURATION_LIMIT).sum())
+    print(f"{len(packed)} pixels -> {args.out} ({size_mb:.1f} MB), {unknown} without a value, "
+          f"{over} beyond the format's range")
+    print(f"E(B-V) range: {v.min():.5f} to {v.max():.2f} mag, median {float(np.median(v)):.5f}")
     print(f"source: {source}")
     print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/")
     return 0

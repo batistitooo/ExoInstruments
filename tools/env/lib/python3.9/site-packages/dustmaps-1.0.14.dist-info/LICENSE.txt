@@ -1,0 +1,14 @@
+Copyright (c) 2024, Gregory M. Green
+
+This project is dual-licensed under the following licenses:
+
+1. The GNU General Public License, Version 2.0 (GPL-2.0)
+   - Full text available in the file `LICENSE.GPL-2.0`.
+   - More information: https://opensource.org/licenses/GPL-2.0
+
+2. The 2-Clause BSD License (Simplified BSD License)
+   - Full text available in the file `LICENSE.BSD-2-Clause`.
+   - More information: https://opensource.org/licenses/BSD-2-Clause
+
+You may choose to use this software under the terms of either license.
+If you redistribute or modify this software, ensure your usage complies with the chosen license's terms.
