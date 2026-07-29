@@ -1,0 +1,6 @@
+frames/
+noise_samples_*.csv
+truth.csv
+meta.csv
+ccd_equation_prediction.csv
+env/

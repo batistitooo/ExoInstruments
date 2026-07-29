@@ -113,7 +113,36 @@ applies.
 - [ ] **6.4** Check Alt+F12 for `[ExoInstruments] The graphics device refused a
       ... render target`.
 
-## 7. Known open item
+## 7. The OD 3.8 filter stop
+
+`tools/nd-filter-audit` found the ND ladder's largest gap, a hundredfold step from ND1000 to the
+solar film, and added `Nd6300` (Baader AstroSolar PHOTO Film, OD 3.8) to fill it. That directory's
+README has the numbers; these are the in-game checks it implies.
+
+- [ ] **7.1** A fifth toggle, `OD3.8`, appears between `ND1000` and `Solar`. Selecting it takes and
+      holds, and the row still fits at the default window width.
+- [ ] **7.2** On a bright target, `OD3.8` is visibly dimmer than `ND1000` and visibly brighter than
+      `Solar`. If it looks identical to either, the transmission is not reaching the source.
+- [ ] **7.3** `MAGZERO` in an exported header shifts by 3.8 mag between no filter and `OD3.8`, since
+      the zero point carries the ND transmission.
+- [ ] **7.4** The case the stop exists for: RC20, 4x4, high gain, on a bright planet at the default
+      0.5 s. `ND1000` should over-expose and `Solar` should read near zero; `OD3.8` should land
+      between them.
+
+## 8. PSF changes from the GalSim cross-validation
+
+`tools/galsim-crossvalidation` fixed two numerical defects in `OpticalPsf`. Both change the kernel,
+so both need to be looked at rather than assumed.
+
+- [ ] **8.1** The delivered seeing is now 0.45% wider (the Fried constant is measured from the
+      profile instead of quoted as 0.98). Too small to see; what must be checked is that captures
+      still look normal and no exception appears in Alt+F12 on the first exposure after load, since
+      the constant is now computed in a static initialiser.
+- [ ] **8.2** The atmospheric quadrature now follows rho, so a kernel at a large radius costs more
+      to build. Watch the first capture after switching filter or binning (which invalidates the PSF
+      cache): the halo path on SPHERE builds the largest kernel in the game.
+
+## 9. Known open item
 
 There is no flat-field model. Pixel response non-uniformity is the dominant
 systematic in ground-based photometry of a bright target, and its absence makes

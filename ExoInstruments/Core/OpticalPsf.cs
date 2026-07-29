@@ -154,14 +154,51 @@ namespace ExoInstruments.Core
         // ---------------------------------------------------------------- Atmosphere
 
         /// <summary>
-        /// Fried parameter r0 (metres) corresponding to a seeing FWHM, via the standard
-        /// long-exposure relation FWHM = 0.98 * lambda / r0.
+        /// The constant k in the long-exposure seeing relation FWHM = k * lambda / r0, MEASURED
+        /// from the profile this file evaluates rather than quoted.
+        ///
+        /// This used to be the literature's round 0.98 (Roddier 1981), and that was an internal
+        /// inconsistency rather than a sourcing choice: the exact Kolmogorov profile below has a
+        /// half-power point at rho = 3.0648, so its own FWHM is 0.97554 lambda/r0, and inverting
+        /// with 0.98 therefore delivered a PSF 0.45% NARROWER than the seeing figure the caller
+        /// asked for. A telescope told to deliver Paranal's 0.72 arcsec produced 0.7167.
+        ///
+        /// Deriving the constant from the profile removes the discrepancy by construction, and it
+        /// is not a private convention: GalSim, which tabulates the same transform by a different
+        /// method, reports 0.9758634. The two agree to 0.03%, which is this bisection's own
+        /// resolution. Same discipline as AiryFwhmArcsec, which bisects the real Airy profile
+        /// instead of quoting the 1.028 lambda/D rule of thumb that only holds unobstructed.
+        /// </summary>
+        public static readonly double SeeingFwhmOverLambdaR0 = MeasureSeeingFwhmConstant();
+
+        private static double MeasureSeeingFwhmConstant()
+        {
+            // In reduced form rho = 2*pi*r0*theta/lambda, so r0 = 1 and lambda = 2*pi make
+            // rho = theta and let the profile be probed in its own only variable.
+            const double r0 = 1.0, lambda = 2.0 * Math.PI;
+            double peak = AtmosphericIntensity(0.0, r0, lambda);
+
+            double lo = 0.0, hi = 6.0; // the half-power point is near rho = 3
+            for (int i = 0; i < 60; i++)
+            {
+                double mid = 0.5 * (lo + hi);
+                if (AtmosphericIntensity(mid, r0, lambda) > 0.5 * peak) lo = mid; else hi = mid;
+            }
+            // FWHM = 2 * rho_half in reduced units, and theta = rho * lambda / (2*pi*r0), so
+            // FWHM_theta = (rho_half / pi) * lambda / r0.
+            return 0.5 * (lo + hi) / Math.PI;
+        }
+
+        /// <summary>
+        /// Fried parameter r0 (metres) corresponding to a seeing FWHM, via the long-exposure
+        /// relation FWHM = k * lambda / r0 with k measured from the profile itself -- see
+        /// SeeingFwhmOverLambdaR0 for why the constant is measured rather than quoted.
         /// </summary>
         public static double FriedParameterMeters(double seeingFwhmArcsec, double wavelengthMeters)
         {
             double fwhmRad = seeingFwhmArcsec * ArcsecToRad;
             if (fwhmRad <= 0.0) return double.PositiveInfinity;
-            return 0.98 * wavelengthMeters / fwhmRad;
+            return SeeingFwhmOverLambdaR0 * wavelengthMeters / fwhmRad;
         }
 
         /// <summary>
@@ -172,8 +209,22 @@ namespace ExoInstruments.Core
         ///     PSF(r) proportional to  Integral[ exp(-3.44 u^(5/3)) * J0(rho*u) * u , {u,0,inf} ],
         /// after substituting u = lambda*f/r0, which leaves rho = 2*pi*r0*theta/lambda as the
         /// only argument. The integrand is killed by its own exponential -- at u = 4,
-        /// exp(-3.44*u^(5/3)) is below 1e-15 -- so the upper limit is finite in practice, and
-        /// Simpson's rule over that range converges to well past the precision this kernel needs.
+        /// exp(-3.44*u^(5/3)) is below 1e-15 -- so the upper limit is finite in practice.
+        ///
+        /// THE STEP COUNT HAS TO FOLLOW RHO, and a fixed one is where this used to be wrong. The
+        /// integrand oscillates with J0(rho*u), whose period in u is 2*pi/rho, so the number of
+        /// oscillations across the range grows linearly with rho -- which is to say, with how far
+        /// into the wings the profile is being asked about. At a fixed 512 steps the quadrature was
+        /// accurate to 0.3% out to 5 lambda/r0 and then failed progressively: it returned 4.5% high
+        /// at 8 lambda/r0, 46% high at 12, and a factor of 10.2 high at 20, turning the true
+        /// theta^(-11/3) Kolmogorov wing into an apparent theta^(-2.2). That is not a small error in
+        /// a faint place: the seeing halo is what aperture photometry integrates over, and a wing
+        /// an order of magnitude too bright puts light in the sky annulus that is not there.
+        ///
+        /// SamplesPerOscillation below fixes the resolution PER PERIOD instead, which is the
+        /// quantity Simpson's error actually depends on. Verified against a high-order adaptive
+        /// quadrature of the same integral: the fitted wing index over 6-18 lambda/r0 becomes
+        /// -3.70, against -3.7097 exact and -3.667 for the asymptotic power law.
         /// </summary>
         public static double AtmosphericIntensity(double thetaRad, double friedParameterMeters, double wavelengthMeters)
         {
@@ -183,7 +234,14 @@ namespace ExoInstruments.Core
             double rho = 2.0 * Math.PI * friedParameterMeters * Math.Abs(thetaRad) / wavelengthMeters;
 
             const double uMax = 4.0;
-            const int steps = 512; // even, for Simpson
+
+            // Oscillations of J0(rho*u) across [0, uMax], and enough Simpson points on each.
+            double oscillations = rho * uMax / (2.0 * Math.PI);
+            int steps = (int)Math.Ceiling(SamplesPerOscillation * oscillations);
+            if (steps < MinQuadratureSteps) steps = MinQuadratureSteps;
+            if (steps > MaxQuadratureSteps) steps = MaxQuadratureSteps;
+            if ((steps & 1) != 0) steps++;  // Simpson needs an even count
+
             double h = uMax / steps;
             double sum = 0.0;
             for (int i = 0; i <= steps; i++)
@@ -195,6 +253,23 @@ namespace ExoInstruments.Core
             }
             return sum * h / 3.0;
         }
+
+        /// <summary>
+        /// Simpson points per oscillation of J0 in the atmospheric quadrature. 24 is where the
+        /// wing index converges: 6 (which a fixed 512 steps amounts to at rho = 126) gives -2.18,
+        /// 24 gives -3.70, and quadrupling it again to 96 moves the profile by under 1e-4 anywhere.
+        /// </summary>
+        private const int SamplesPerOscillation = 24;
+
+        /// <summary>Floor on the step count, so the smooth core is integrated as finely as it always was.</summary>
+        private const int MinQuadratureSteps = 512;
+
+        /// <summary>
+        /// Ceiling, reached at about 27 lambda/r0. Beyond that the profile is 1e-5 of its peak and
+        /// far outside any kernel this file builds, so the bound costs nothing real; it exists so
+        /// that a caller asking about an absurd radius cannot make one sample unbounded.
+        /// </summary>
+        private const int MaxQuadratureSteps = 4096;
 
         // ---------------------------------------------------------------- Kernel assembly
 

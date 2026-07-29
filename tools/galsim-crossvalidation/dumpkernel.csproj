@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>dumpkernel</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpKernel.cs" />
+    <!-- CameraFilter, restated so the REAL VisualTelescopeCatalog compiles here. Same reason as
+         tools/bandpass-wcs-tests/Stub.cs: the instrument parameters this harness feeds to GalSim
+         must be the ones the mod ships, not a second copy free to drift from them. -->
+    <Compile Include="Stub.cs" />
+    <!-- The real shipped Core. -->
+    <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/PupilDiffraction.cs" />
+    <Compile Include="$(Core)/RadialPsfProfile.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+  </ItemGroup>
+</Project>

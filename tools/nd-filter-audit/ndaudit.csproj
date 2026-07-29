@@ -3,13 +3,13 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>disable</Nullable>
-    <AssemblyName>bandpasstest</AssemblyName>
+    <AssemblyName>ndaudit</AssemblyName>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <LangVersion>latest</LangVersion>
     <NoWarn>CS0168;CS0219</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs" />
+    <Compile Include="NdFilterAudit.cs" />
     <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/SpectralCurve.cs" />
     <Compile Include="$(Core)/SystemBandpass.cs" />
@@ -19,25 +19,16 @@
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
     <Compile Include="$(Core)/AtmosphericNoise.cs" />
-    <Compile Include="$(Core)/FitsWcs.cs" />
-    <Compile Include="$(Core)/GnomonicProjection.cs" />
-    <Compile Include="$(Core)/SkyCoordinates.cs" />
-    <Compile Include="$(Core)/StarTarget.cs" />
     <Compile Include="$(Core)/InstrumentSpec.cs" />
-    <!-- InstrumentSpec gained a PhotometricDetector field with the CCD-equation work; without this
-         the harness stopped building, which is how it was found. -->
     <Compile Include="$(Core)/PhotometricDetector.cs" />
     <Compile Include="$(Core)/DetectionResult.cs" />
     <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
     <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
     <Compile Include="$(Core)/RadialPsfProfile.cs" />
-    <Compile Include="$(Core)/DirectImagingSimulator.cs" />
-    <Compile Include="$(Core)/DirectImagingResult.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
-    <Compile Include="$(Core)/FilterCurves.cs" />
-    <Compile Include="$(Core)/GaiaPhotometry.cs" />
-    <Compile Include="$(Core)/RenderedStarCatalog.cs" />
-    <Compile Include="$(Core)/StarFieldRenderer.cs" />
   </ItemGroup>
 </Project>

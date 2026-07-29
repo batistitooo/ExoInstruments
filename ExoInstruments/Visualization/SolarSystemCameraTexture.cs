@@ -47,6 +47,18 @@ namespace ExoInstruments.Visualization
     /// ND stops (OD 0.9/1.8/3.0, transmission = 10^-OD); Nd100000 matches the real optical density
     /// of a Baader AstroSolar safety film / Thousand Oaks solar filter (OD ~5.0), the real
     /// accessory class used for direct imaging of the brightest object in the sky.
+    ///
+    /// WHY THERE IS A STOP BETWEEN ND1000 AND THE SOLAR FILM. Those two are a hundredfold apart,
+    /// which is the largest gap on the ladder by a factor of eight, and tools/nd-filter-audit
+    /// measures a real configuration that falls straight into it: an RC20 at 4x4 binning and high
+    /// gain, on Jupiter at the camera's default half-second exposure, over-exposes through ND1000
+    /// and reads 0.2% of full scale through the solar film. Nothing in between existed to reach for.
+    ///
+    /// Nd6300 is not an interpolation invented to fill that gap. It is Baader's AstroSolar PHOTO
+    /// Film, optical density 3.8 (transmission 1.6e-4): the same optically-treated carrier as the
+    /// OD 5.0 safety film with the coating density reduced in a controlled fashion, sold expressly
+    /// for digital imaging at high magnification and short exposure, and expressly NOT for visual
+    /// use at any magnification. It is the one real product occupying this part of the ladder.
     /// </summary>
     public enum NdFilterStop
     {
@@ -54,6 +66,8 @@ namespace ExoInstruments.Visualization
         Nd8,
         Nd64,
         Nd1000,
+        /// <summary>Baader AstroSolar PHOTO Film, OD 3.8. Photographic only -- never safe for visual use.</summary>
+        Nd6300,
         Nd100000
     }
 
@@ -667,6 +681,7 @@ namespace ExoInstruments.Visualization
                 case NdFilterStop.Nd8: return Math.Pow(10.0, -0.9);
                 case NdFilterStop.Nd64: return Math.Pow(10.0, -1.8);
                 case NdFilterStop.Nd1000: return Math.Pow(10.0, -3.0);
+                case NdFilterStop.Nd6300: return Math.Pow(10.0, -3.8);
                 case NdFilterStop.Nd100000: return Math.Pow(10.0, -5.0);
                 default: return 1.0;
             }
@@ -3114,82 +3129,14 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Knuth's algorithm: exact Poisson sample, fine for the small lambda cosmic rays use.</summary>
-        private static double SamplePoisson(System.Random rng, double lambda)
-        {
-            if (!(lambda > 0.0)) return 0.0;
-
-            // Knuth's product method: exact, and the cheapest thing available while the mean is
-            // small. It is O(lambda) and needs exp(-lambda), so it is confined to the range
-            // where both are harmless -- at a mean of 150,000 electrons it would run 150,000
-            // iterations per pixel against an exp() that has already underflowed to zero, and
-            // never terminate.
-            if (lambda < PtrsThreshold)
-            {
-                double l = Math.Exp(-lambda);
-                int k = 0;
-                double p = 1.0;
-                do
-                {
-                    k++;
-                    p *= rng.NextDouble();
-                } while (p > l);
-                return k - 1;
-            }
-
-            // Above that, the transformed rejection method PTRS (Hormann 1993, "The transformed
-            // rejection method for generating Poisson random variables", Insurance: Mathematics
-            // and Economics 12, 39). This is a genuine Poisson generator, not a normal
-            // approximation: it is a rejection sampler whose accepted values are exactly Poisson
-            // distributed, at constant cost independent of the mean. It is the same algorithm
-            // NumPy uses above its own threshold, and therefore the one behind GalSim's and
-            // Pyxel's shot noise.
-            double smu = Math.Sqrt(lambda);
-            double b = 0.931 + 2.53 * smu;
-            double a = -0.059 + 0.02483 * b;
-            double invAlpha = 1.1239 + 1.1328 / (b - 3.4);
-            double vr = 0.9277 - 3.6224 / (b - 2.0);
-
-            while (true)
-            {
-                double u = rng.NextDouble() - 0.5;
-                double v = rng.NextDouble();
-                double us = 0.5 - Math.Abs(u);
-
-                double k = Math.Floor((2.0 * a / us + b) * u + lambda + 0.43);
-                if (us >= 0.07 && v <= vr) return k;
-                if (k < 0.0 || (us < 0.013 && v > us)) continue;
-
-                if (Math.Log(v * invAlpha / (a / (us * us) + b))
-                    <= k * Math.Log(lambda) - lambda - LogGamma(k + 1.0))
-                    return k;
-            }
-        }
-
-        /// <summary>Mean above which SamplePoisson switches from Knuth's method to PTRS. Hormann's own paper recommends 10; NumPy uses the same value.</summary>
-        private const double PtrsThreshold = 10.0;
-
         /// <summary>
-        /// log(Gamma(x)) for x &gt; 0, by the Lanczos approximation (Lanczos 1964, "A precision
-        /// approximation of the gamma function", SIAM J. Numer. Anal. B 1, 86) with the g=7,
-        /// n=9 coefficient set. Accurate to about 15 significant digits over the range PTRS
-        /// needs, which is the factorial term of the Poisson mass function.
+        /// A Poisson deviate, delegated to Core.NoiseSampler so that the implementation lives
+        /// where a headless harness can reach it (see tools/photometry-roundtrip, which checks it
+        /// against SciPy). Kept as a wrapper rather than replaced at every call site so that the
+        /// detector chain still reads as one narrative.
         /// </summary>
-        private static double LogGamma(double x)
-        {
-            double sum = LanczosCoefficients[0];
-            for (int i = 1; i < LanczosCoefficients.Length; i++) sum += LanczosCoefficients[i] / (x + i - 1.0);
-
-            double t = x + 6.5; // x + g - 0.5, with g = 7
-            return 0.5 * Math.Log(2.0 * Math.PI) + (x - 0.5) * Math.Log(t) - t + Math.Log(sum);
-        }
-
-        private static readonly double[] LanczosCoefficients =
-        {
-            0.99999999999980993, 676.5203681218851, -1259.1392167224028,
-            771.32342877765313, -176.61502916214059, 12.507343278686905,
-            -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
-        };
+        private static double SamplePoisson(System.Random rng, double lambda)
+            => NoiseSampler.Poisson(rng, lambda);
 
         /// <summary>
         /// Third-order astigmatism: transverse blur scaling with the square of the normalized
@@ -3284,13 +3231,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>Box-Muller Gaussian sample with the given sigma (mean 0).</summary>
         private static float NextGaussian(System.Random rng, float sigma)
-        {
-            if (sigma <= 0f) return 0f;
-            double u1 = 1.0 - rng.NextDouble();
-            double u2 = rng.NextDouble();
-            double z = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
-            return (float)(z * sigma);
-        }
+            => (float)NoiseSampler.Gaussian(rng, sigma);
 
         private static double Clamp01(double v) => v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
 

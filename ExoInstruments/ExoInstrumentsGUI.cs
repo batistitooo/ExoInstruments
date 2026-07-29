@@ -2184,6 +2184,7 @@ namespace ExoInstruments
                 case NdFilterStop.Nd8: return "ND8";
                 case NdFilterStop.Nd64: return "ND64";
                 case NdFilterStop.Nd1000: return "ND1000";
+                case NdFilterStop.Nd6300: return "OD3.8";
                 case NdFilterStop.Nd100000: return "Solar";
                 default: return "None";
             }
