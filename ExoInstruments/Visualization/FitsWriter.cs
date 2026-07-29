@@ -91,6 +91,11 @@ namespace ExoInstruments.Visualization
             public double SkyBrightnessVMagPerArcsec2;
             /// <summary>Total Galactic E(B-V) toward the field, or NaN with no dust map installed. The whole column, so it describes what lies beyond the Galaxy rather than any star in the frame.</summary>
             public double GalacticReddeningEBv;
+            /// <summary>Mean diffuse line surface brightness the filter collected, rayleighs, or NaN when no emission map contributed.</summary>
+            public double LineSurfaceBrightnessRayleighs;
+            /// <summary>Which line that was, and where the map came from.</summary>
+            public string EmissionLineName;
+            public string EmissionMapSource;
             /// <summary>Which published map that reddening came from, for the header's own record.</summary>
             public string DustMapSource;
             /// <summary>Filter's central wavelength and FWHM, nanometres, so a colour term can be recomputed downstream.</summary>
@@ -286,6 +291,17 @@ namespace ExoInstruments.Visualization
                            "total Galactic A(V) at R_V = 3.1 (mag)");
                 if (!string.IsNullOrEmpty(info.DustMapSource))
                     AppendCommentaryCard(sb, "COMMENT", "EBV from " + info.DustMapSource);
+            }
+            // What diffuse line emission this filter collected, so a narrowband frame says which
+            // line it is a frame OF rather than leaving that to the file name.
+            if (IsFinite(info.LineSurfaceBrightnessRayleighs))
+            {
+                AppendCard(sb, "LINEBRIT", info.LineSurfaceBrightnessRayleighs.ToString("F2", CultureInfo.InvariantCulture),
+                           "mean diffuse line surface brightness (rayleighs)");
+                if (!string.IsNullOrEmpty(info.EmissionLineName))
+                    AppendStringCard(sb, "LINE", info.EmissionLineName, "emission line imaged");
+                if (!string.IsNullOrEmpty(info.EmissionMapSource))
+                    AppendCommentaryCard(sb, "COMMENT", "LINEBRIT from " + info.EmissionMapSource);
             }
             if (info.FilterCentralWavelengthNm > 0.0)
                 AppendCard(sb, "WAVELNTH", info.FilterCentralWavelengthNm.ToString("F2", CultureInfo.InvariantCulture), "filter central wavelength (nm)");

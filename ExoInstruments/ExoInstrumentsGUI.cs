@@ -2036,6 +2036,7 @@ namespace ExoInstruments
             fitsInfo.SeeingFwhmArcsec = double.NaN;
             fitsInfo.SkyBrightnessVMagPerArcsec2 = double.NaN;
             fitsInfo.GalacticReddeningEBv = double.NaN;
+            fitsInfo.LineSurfaceBrightnessRayleighs = double.NaN;
 
             string path = System.IO.Path.Combine(dir, $"ExoInstruments_{kind}_{stamp}.fits");
             FitsWriter.WriteGrayscale(path, adu,
@@ -2249,6 +2250,11 @@ namespace ExoInstruments
             info.GalacticReddeningEBv = solarSystemCamera.LastFieldReddeningEBv;
             info.DustMapSource = SolarSystemCameraTexture.DustMap != null
                 ? SolarSystemCameraTexture.DustMap.Source : null;
+            info.LineSurfaceBrightnessRayleighs = solarSystemCamera.LastEmissionRayleighs;
+            info.EmissionLineName = SolarSystemCameraTexture.EmissionMap != null
+                ? SolarSystemCameraTexture.EmissionMap.LineName : null;
+            info.EmissionMapSource = SolarSystemCameraTexture.EmissionMap != null
+                ? SolarSystemCameraTexture.EmissionMap.Source : null;
 
             info.OpticalThroughput = spec.OpticsTransmission;
             info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;

@@ -192,7 +192,31 @@ headlessly. These are the parts only the game exercises.
       is far darker than in Luminance.
 - [ ] **10.8** LRGB stacking still composes with the new positions present in the enum.
 
-## 11. Known open item
+## 11. Diffuse line emission
+
+`tools/emission-tests` covers the photometry and the per-pixel rotation headlessly. These need the
+game and an installed map.
+
+- [ ] **11.1** With no emission map installed, nothing changes anywhere. The deposit returns before
+      touching a pixel.
+- [ ] **11.2** Build one with `tools/pack_halpha_map.py` from the Finkbeiner composite and install
+      it. Alt+F12 should report the line, the nside and the provenance at load.
+- [ ] **11.3** Point the RedCat at a bright Galactic H II region and capture in `Ha`. The gas must
+      appear. Capture the same field in `Luminance`: the gas should be far weaker against the sky,
+      which is the whole point of the narrowband filter.
+- [ ] **11.4** Capture in `OIII` and `SII`. Those filters do not contain H-alpha, so the map must
+      contribute NOTHING -- the deposit is gated on the filter's own passband.
+- [ ] **11.5** The observing panel reports the mean surface brightness in rayleighs, and an exported
+      FITS carries `LINEBRIT` and `LINE`.
+- [ ] **11.6** **Cost.** This is the only per-pixel source in the pipeline. Time a capture in `Ha`
+      at 4x4 and at 1x1 with the map installed, and compare against `Luminance` at the same binning,
+      which does not run it at all. If 1x1 is unacceptable, that is a real finding and belongs in
+      the README rather than being hidden by sampling the map more coarsely.
+- [ ] **11.7** At high magnification the map should look like a smooth gradient rather than
+      structure: 6 arcmin is 1300 pixels behind the RC20's Barlow. That is the data's limit and it
+      must not be mistaken for a rendering bug.
+
+## 12. Known open item
 
 There is no flat-field model. Pixel response non-uniformity is the dominant
 systematic in ground-based photometry of a bright target, and its absence makes
