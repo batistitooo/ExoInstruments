@@ -18,6 +18,10 @@
     <Compile Include="$(Core)/StellarColor.cs" />
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/EmissionLines.cs" />
+    <Compile Include="$(Core)/EmissionMap.cs" />
+    <Compile Include="$(Core)/DeepSkyCatalog.cs" />
+    <Compile Include="$(Core)/Healpix.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
     <Compile Include="$(Core)/HorizontalToGalactic.cs" />
     <Compile Include="$(Core)/GnomonicProjection.cs" />
     <Compile Include="$(Core)/GalacticCoordinates.cs" />

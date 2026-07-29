@@ -13,12 +13,54 @@ static class DumpMapIndex
 {
     static void Main()
     {
+        DumpInterpolation();
         DumpHealpix();
         DumpGalactic();
         DumpMapQueries();
         DumpFloat16();
         DumpRealMapQueries();
         Console.WriteLine("written exo_healpix.csv, exo_galactic.csv, exo_mapquery.csv, exo_float16.csv");
+    }
+
+    /// <summary>
+    /// The four surrounding pixels and their weights, which is how a beam-smoothed map has to be
+    /// sampled. Compared against healpy's get_interp_weights, the reference implementation of the
+    /// same scheme -- pixel identity as well as weight, since a plausible weight on the wrong
+    /// pixel is the failure mode that still produces a sky.
+    /// </summary>
+    static void DumpInterpolation()
+    {
+        int[] nsides = { 1, 2, 4, 16, 64, 256, 1024 };
+        var rng = new Pcg32(0x117E12AUL, 11UL);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("nside,theta_rad,phi_rad,p0,p1,p2,p3,w0,w1,w2,w3");
+        var pix = new long[4];
+        var wgt = new double[4];
+
+        foreach (int nside in nsides)
+        {
+            // The poles and the cap/band transition first: the scheme is piecewise across them and
+            // the interpolation folds in extra pixels at both ends.
+            double[] specialZ = { 1.0, 0.999999, 2.0 / 3.0 + 1e-12, 2.0 / 3.0 - 1e-12, 0.0, -2.0 / 3.0, -0.999999, -1.0 };
+            double[] specialPhi = { 0.0, 1e-12, Math.PI / 2.0, Math.PI, 3.0 * Math.PI / 2.0, 2.0 * Math.PI - 1e-12 };
+            foreach (double z in specialZ)
+            foreach (double phi in specialPhi)
+                InterpRow(sb, nside, Math.Acos(Math.Max(-1.0, Math.Min(1.0, z))), phi, pix, wgt);
+
+            for (int i = 0; i < 3000; i++)
+                InterpRow(sb, nside, Math.Acos(2.0 * rng.NextDouble() - 1.0),
+                          2.0 * Math.PI * rng.NextDouble(), pix, wgt);
+        }
+        File.WriteAllText("exo_interp.csv", sb.ToString());
+    }
+
+    static void InterpRow(StringBuilder sb, int nside, double theta, double phi, long[] pix, double[] wgt)
+    {
+        Healpix.InterpolationWeights(nside, theta, phi, pix, wgt);
+        sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+            "{0},{1:R},{2:R},{3},{4},{5},{6},{7:R},{8:R},{9:R},{10:R}",
+            nside, theta, phi, pix[0], pix[1], pix[2], pix[3], wgt[0], wgt[1], wgt[2], wgt[3]));
     }
 
     static void DumpHealpix()

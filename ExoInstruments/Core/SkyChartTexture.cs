@@ -28,6 +28,12 @@ namespace ExoInstruments.Visualization
         public Color BodyColor;
         /// <summary>True only for the body currently selected as the photography target -- the sole condition that draws its ring, so bodies don't look "search-highlighted" by default.</summary>
         public bool IsSelectedTarget;
+
+        // --- Deep-sky points ----------------------------------------------
+        // A nebula is not a point source and has no magnitude to size a disc
+        // by, so it gets a cross scaled to its own apparent extent instead.
+        public bool IsDeepSky;
+        public DeepSkyObject DeepSky;
     }
 
     /// <summary>
@@ -126,9 +132,11 @@ namespace ExoInstruments.Visualization
                 // stars, then solar-system bodies on top so their bigger discs
                 // are never buried under the star field.
                 foreach (var p in points)
-                    if (!p.IsBody && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, false);
+                    if (!p.IsBody && !p.IsDeepSky && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, false);
                 foreach (var p in points)
-                    if (!p.IsBody && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, true);
+                    if (!p.IsBody && !p.IsDeepSky && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, true);
+                foreach (var p in points)
+                    if (p.IsDeepSky) PlotDeepSky(pixels, width, height, p, view);
                 foreach (var p in points)
                     if (p.IsBody) PlotStar(pixels, width, height, p, view, false);
             }
@@ -177,6 +185,79 @@ namespace ExoInstruments.Visualization
                 }
             }
             return best;
+        }
+
+        // Deep-sky markers: a cross rather than a disc, because a nebula is not a point source and
+        // a disc among the star discs would read as another star. Line emitters and reflection
+        // nebulae are tinted apart -- one shows in a narrowband filter and the other cannot.
+        private static readonly Color EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
+        private static readonly Color ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
+
+        /// <summary>
+        /// Cross sized to the object's own apparent extent, so the chart says how much sky it
+        /// covers as well as where it is -- the difference between the 2 degree North America and
+        /// the 25 arcsec Cat's Eye is the difference between a wide-field target and one that needs
+        /// the CDK. Floored so the small ones stay clickable, capped so the big ones stay a marker.
+        /// </summary>
+        private static void PlotDeepSky(Color[] pixels, int width, int height, SkyChartPoint p, SkyChartView view)
+        {
+            Vector2 px = ProjectToPixel(p.AltitudeDeg, p.AzimuthDeg, width, height, view);
+
+            // The dome projection puts the horizon at rMax and the zenith at the centre, so one
+            // degree of sky is rMax/90 raw pixels; zoom scales that.
+            double pxPerDeg = ComputeRMax(width, height) / 90.0 * view.Zoom;
+            float arm = (float)Math.Max(4.0, Math.Min(40.0, p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5));
+
+            Color color = p.DeepSky.Kind == DeepSkyKind.ReflectionNebula
+                ? ReflectionMarkerColor : EmissionMarkerColor;
+
+            // A gap at the centre, so the cross frames the object instead of covering it.
+            float gap = Math.Max(1.5f, arm * 0.35f);
+            for (float d = gap; d <= arm; d += 0.5f)
+            {
+                SetPixel(pixels, width, height, px.x + d, px.y, color);
+                SetPixel(pixels, width, height, px.x - d, px.y, color);
+                SetPixel(pixels, width, height, px.x, px.y + d, color);
+                SetPixel(pixels, width, height, px.x, px.y - d, color);
+            }
+
+            if (p.IsSelectedTarget)
+                DrawHighlightRing(pixels, width, height, px.x, px.y, arm, view.Zoom);
+        }
+
+        private static void SetPixel(Color[] pixels, int width, int height, float x, float y, Color color)
+        {
+            int ix = (int)Math.Round(x), iy = (int)Math.Round(y);
+            if (ix < 0 || ix >= width || iy < 0 || iy >= height) return;
+            pixels[iy * width + ix] = color;
+        }
+
+        /// <summary>Nearest deep-sky marker within its own arm length, so a big nebula is as easy to click as it is to see.</summary>
+        public static bool HitTestDeepSky(List<SkyChartPoint> points, int width, int height,
+                                          SkyChartView view, int clickX, int clickY, out DeepSkyObject hit)
+        {
+            hit = default(DeepSkyObject);
+            if (points == null) return false;
+            bool found = false;
+            double bestDistSq = double.MaxValue;
+            double pxPerDeg = ComputeRMax(width, height) / 90.0 * view.Zoom;
+
+            foreach (var p in points)
+            {
+                if (!p.IsDeepSky) continue;
+                Vector2 px = ProjectToPixel(p.AltitudeDeg, p.AzimuthDeg, width, height, view);
+                double arm = Math.Max(4.0, Math.Min(40.0, p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5));
+                double tolerance = Math.Max(ComputeHitRadius(view.Zoom), arm);
+                double dx = px.x - clickX, dy = px.y - clickY;
+                double distSq = dx * dx + dy * dy;
+                if (distSq <= tolerance * tolerance && distSq < bestDistSq)
+                {
+                    bestDistSq = distSq;
+                    hit = p.DeepSky;
+                    found = true;
+                }
+            }
+            return found;
         }
 
         private static void PlotStar(Color[] pixels, int width, int height, SkyChartPoint p, SkyChartView view, bool emphasize)

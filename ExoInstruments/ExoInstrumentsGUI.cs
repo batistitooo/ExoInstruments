@@ -125,6 +125,7 @@ namespace ExoInstruments
         private const float SkyChartZoomSensitivity = 0.08f;
         private const float SkyChartDragClickThreshold = 5f; // pixels of movement before a click becomes a drag
         private StarTarget hoveredSkyChartStar;
+        private DeepSkyObject? hoveredDeepSky;
 
         // Observing-quality forecast heatmap for the selected (target, instrument)
         // pairing: rows = nights ahead, columns = time of night. Recomputed on a
@@ -1773,9 +1774,22 @@ namespace ExoInstruments
                 double emission = solarSystemCamera.LastEmissionRayleighs;
                 if (!double.IsNaN(emission))
                 {
+                    double peak = solarSystemCamera.LastEmissionPeakElectrons;
+                    double well = SolarSystemCameraTexture.FullWellElectrons;
                     GUILayout.Label(
                         $"Diffuse line emission in this filter: {emission:F1} R mean over the field "
                         + $"({SolarSystemCameraTexture.EmissionMap.LineName})", smallCaptionStyle);
+                    if (!double.IsNaN(peak) && well > 0.0)
+                    {
+                        // The number that answers "why can I not see it": a nebula this bright is a
+                        // fraction of a percent of full well in one sub, which no linear stretch can
+                        // show. Stacking and a log or asinh stretch is not a display trick, it is
+                        // the technique the exposure requires.
+                        GUILayout.Label(
+                            $"   brightest pixel of it: {peak:F1} e- = {100.0 * peak / well:F3}% of full well"
+                            + (peak < 0.01 * well ? " -- below what a linear stretch can show; use log/asinh and stack" : ""),
+                            smallCaptionStyle);
+                    }
                 }
 
                 double fieldEbv = solarSystemCamera.LastFieldReddeningEBv;
@@ -2449,7 +2463,9 @@ namespace ExoInstruments
 
             GUILayout.Label(hoveredSkyChartStar != null
                 ? $"Hovering: {GetDisplayName(hoveredSkyChartStar)}"
-                : "Hovering: (none)");
+                : hoveredDeepSky.HasValue
+                    ? $"Hovering: {hoveredDeepSky.Value.DisplayName}, {DescribeDeepSky(hoveredDeepSky.Value)}"
+                    : "Hovering: (none)");
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Scroll to zoom, drag to pan. Zenith at center, horizon/rings at 0/20/40/60 deg.");
@@ -2526,6 +2542,7 @@ namespace ExoInstruments
             if (!chartRect.Contains(mouse))
             {
                 hoveredSkyChartStar = null;
+                hoveredDeepSky = null;
                 return;
             }
 
@@ -2533,6 +2550,9 @@ namespace ExoInstruments
             int localY = (int)(chartRect.height - (mouse.y - chartRect.y));
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
             hoveredSkyChartStar = SkyChartTexture.HitTest(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, localX, localY);
+            hoveredDeepSky = SkyChartTexture.HitTestDeepSky(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight,
+                                                            view, localX, localY, out DeepSkyObject nebula)
+                ? (DeepSkyObject?)nebula : null;
         }
 
         void HandleSkyChartInteraction(Rect chartRect)
@@ -2589,9 +2609,16 @@ namespace ExoInstruments
                         selectedStar = hoveredSkyChartStar;
                         SelectPhotographyStar(hoveredSkyChartStar);
                     }
+                    else if (hoveredDeepSky.HasValue)
+                    {
+                        SelectPhotographyTarget(
+                            SkyTarget.FromEquatorial(hoveredDeepSky.Value.RaDeg, hoveredDeepSky.Value.DecDeg,
+                                                     hoveredDeepSky.Value.DisplayName),
+                            clearStarSelection: true);
+                    }
                     else
                     {
-                        // Empty sky. A nebula or a dark cloud has no marker on this chart, so
+                        // Empty sky. A dark cloud or an uncatalogued patch has no marker, so
                         // clicking where it is has to work or those targets are unreachable
                         // without typing coordinates.
                         PointAtChartPosition(chartRect, e.mousePosition);
@@ -4618,9 +4645,59 @@ namespace ExoInstruments
                     });
                 }
                 points.AddRange(bodyPoints);
+                points.AddRange(BuildDeepSkyPoints(localMeridianRaDeg, pointingSnapshot));
                 var pixels = SkyChartTexture.ComputePixels(points, SkyChartWidth, SkyChartHeight, view, !string.IsNullOrEmpty(filterSnapshot));
                 return (points, pixels);
             });
+        }
+
+        /// <summary>What the object is and how much sky it covers -- the two things that decide which instrument can frame it.</summary>
+        static string DescribeDeepSky(DeepSkyObject obj)
+        {
+            string kind;
+            switch (obj.Kind)
+            {
+                case DeepSkyKind.HiiRegion: kind = "H II region"; break;
+                case DeepSkyKind.SupernovaRemnant: kind = "supernova remnant"; break;
+                case DeepSkyKind.PlanetaryNebula: kind = "planetary nebula"; break;
+                default: kind = "reflection nebula"; break;
+            }
+            string size = obj.MajorArcmin >= 60.0
+                ? $"{obj.MajorArcmin / 60.0:F1} x {obj.MinorArcmin / 60.0:F1} deg"
+                : obj.MajorArcmin >= 1.0
+                    ? $"{obj.MajorArcmin:F0} x {obj.MinorArcmin:F0} arcmin"
+                    : $"{obj.MajorArcmin * 60.0:F0} x {obj.MinorArcmin * 60.0:F0} arcsec";
+            return kind + ", " + size;
+        }
+
+        /// <summary>
+        /// The bright nebulae, placed on the chart the same way a star is. Pure computation on
+        /// plain data, so it runs on the chart's background task.
+        ///
+        /// Not gated by the search filter: these are never "highlighted", which is what keeps them
+        /// out of the star hit test. They have their own, HitTestDeepSky.
+        /// </summary>
+        static List<SkyChartPoint> BuildDeepSkyPoints(double localMeridianRaDeg, SkyTarget pointing)
+        {
+            var points = new List<SkyChartPoint>();
+            foreach (var obj in DeepSkyCatalog.All)
+            {
+                var horizontal = SkyCoordinates.EquatorialToHorizontal(
+                    obj.RaDeg, obj.DecDeg, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
+                if (!horizontal.IsAboveHorizon(0.0)) continue;
+
+                points.Add(new SkyChartPoint
+                {
+                    IsDeepSky = true,
+                    DeepSky = obj,
+                    AltitudeDeg = horizontal.AltitudeDeg,
+                    AzimuthDeg = horizontal.AzimuthDeg,
+                    IsSelectedTarget = pointing.IsEquatorial
+                                    && Math.Abs(pointing.RaDeg - obj.RaDeg) < 1e-6
+                                    && Math.Abs(pointing.DecDeg - obj.DecDeg) < 1e-6,
+                });
+            }
+            return points;
         }
 
         /// <summary>Applies a completed background chart render (see StartSkyChartRefresh) -- the only part of the pipeline that's allowed to touch the Texture2D.</summary>

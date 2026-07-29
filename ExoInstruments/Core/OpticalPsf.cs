@@ -51,11 +51,31 @@ namespace ExoInstruments.Core
         /// codes included); the kernel is renormalised to unit sum afterwards so truncation
         /// costs no flux, only the very faintest far wings. This is the one approximation in
         /// this file, and it is a computational bound rather than a physical assumption.
+        ///
+        /// Raised from 48 to 128 because 48 was not a faint place to stop. At the RC20's 0.0688
+        /// arcsec pixels it fell 1.32 seeing-FWHM out, where the Kolmogorov profile is still
+        /// 1.8e-2 of its peak, and the renormalisation that follows conserves the flux but not
+        /// that step -- so a bright star showed a square edge at 1.8% of its own core brightness.
+        /// 128 reaches 3.5 FWHM and 4.3e-4 there, 42 times fainter, for about 1.5x the transform
+        /// work (a wider kernel needs a larger tile, but proportionally fewer of them). The
+        /// residuals per instrument are measured in tools/psf-truncation.
+        ///
+        /// A wide, heavy-tailed component cannot be handled by raising this further -- see
+        /// FourierConvolution.RadialKernelSpectrum, which carries one across the whole frame.
         /// </summary>
-        private const int MaxKernelRadiusPx = 48;
+        private const int MaxKernelRadiusPx = 128;
 
         /// <summary>Kernel half-width is this many times the relevant FWHM before the ceiling above applies -- far enough out to carry the first several Airy rings.</summary>
         private const double KernelRadiusInFwhm = 3.0;
+
+        /// <summary>
+        /// Fraction of its own peak the atmospheric profile must have fallen to at the kernel's
+        /// edge. 1e-4 is where the step stops being the brightest thing at that radius: the
+        /// Kolmogorov wing itself falls as theta^(-11/3), so one more pixel outward costs only a
+        /// few percent, and a discontinuity of 1e-4 of a star's peak sits under the read noise for
+        /// anything short of a naked-eye star.
+        /// </summary>
+        private const double AtmosphericTailFraction = 1e-4;
 
         // ---------------------------------------------------------------- Bessel functions
 
@@ -190,6 +210,32 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// Kernel half-width the atmospheric term needs, in units of its own FWHM, to fall to
+        /// AtmosphericTailFraction of its peak -- measured from the profile rather than assumed,
+        /// in the same reduced variable and by the same bisection as SeeingFwhmOverLambdaR0. The
+        /// profile has one shape, so this is a constant of it and not of any instrument.
+        ///
+        /// Declared after SeeingFwhmOverLambdaR0 because it divides by it, and static field
+        /// initialisers run in declaration order.
+        /// </summary>
+        public static readonly double AtmosphericTailRadiusInFwhm = MeasureTailRadius();
+
+        private static double MeasureTailRadius()
+        {
+            const double r0 = 1.0, lambda = 2.0 * Math.PI;   // makes rho = theta
+            double peak = AtmosphericIntensity(0.0, r0, lambda);
+            double lo = 0.0, hi = 400.0;
+            for (int i = 0; i < 60; i++)
+            {
+                double mid = 0.5 * (lo + hi);
+                if (AtmosphericIntensity(mid, r0, lambda) > AtmosphericTailFraction * peak) lo = mid; else hi = mid;
+            }
+            // rho -> theta is the same scaling the FWHM constant carries, so dividing by it in the
+            // same units leaves a pure ratio.
+            return 0.5 * (lo + hi) / Math.PI / SeeingFwhmOverLambdaR0;
+        }
+
+        /// <summary>
         /// Fried parameter r0 (metres) corresponding to a seeing FWHM, via the long-exposure
         /// relation FWHM = k * lambda / r0 with k measured from the profile itself -- see
         /// SeeingFwhmOverLambdaR0 for why the constant is measured rather than quoted.
@@ -199,6 +245,67 @@ namespace ExoInstruments.Core
             double fwhmRad = seeingFwhmArcsec * ArcsecToRad;
             if (fwhmRad <= 0.0) return double.PositiveInfinity;
             return SeeingFwhmOverLambdaR0 * wavelengthMeters / fwhmRad;
+        }
+
+        /// <summary>
+        /// Factor turning AtmosphericIntensity's output into the fraction of a source's TOTAL flux
+        /// landing in one pixel -- the normalisation, in closed form, with nothing summed.
+        ///
+        /// AtmosphericIntensity evaluates PSF(rho) = Int_0^inf T(u) J0(rho u) u du, which is the
+        /// order-zero Hankel transform of Fried's OTF. That transform is self-reciprocal, so
+        /// Int_0^inf PSF(rho) rho drho = T(0) = 1 exactly, and the integral over the plane is
+        /// therefore 2*pi. A pixel spans drho = 2*pi*r0*p/lambda on a side for plate scale p, so
+        /// its share is PSF * drho^2 / (2*pi).
+        ///
+        /// Why it matters that this is analytic: the alternative is to divide a finite kernel by
+        /// its own sum, which quietly hands the flux that fell outside the kernel back to the
+        /// pixels inside it. For a compact PSF that is a rounding error. For a seeing halo whose
+        /// wings genuinely run off the edge of the sensor, it is an invention -- that light left,
+        /// and a detector never saw it.
+        /// </summary>
+        public static double AtmosphericPerPixelScale(double friedParameterMeters, double wavelengthMeters, double plateScaleArcsecPerPixel)
+        {
+            if (friedParameterMeters <= 0.0 || wavelengthMeters <= 0.0 || plateScaleArcsecPerPixel <= 0.0) return 0.0;
+            double dRho = 2.0 * Math.PI * friedParameterMeters * (plateScaleArcsecPerPixel * ArcsecToRad) / wavelengthMeters;
+            return dRho * dRho / (2.0 * Math.PI);
+        }
+
+        /// <summary>
+        /// The long-exposure atmospheric profile tabulated against pixel radius, for callers that
+        /// must evaluate it millions of times across a frame. Each entry costs a Bessel quadrature;
+        /// the profile depends on radius alone and is smooth on the scale of a quarter pixel, so
+        /// tabulating once and interpolating is the same discipline SampleRadial already uses.
+        ///
+        /// Values are already scaled by AtmosphericPerPixelScale, i.e. they are fractions of the
+        /// source's total flux and sum to 1 over the whole plane.
+        /// </summary>
+        public sealed class AtmosphericProfileTable
+        {
+            private const int SamplesPerPixel = 4;
+            private readonly double[] _lut;
+
+            public AtmosphericProfileTable(double maxRadiusPx, double plateScaleArcsecPerPixel,
+                                           double friedParameterMeters, double wavelengthMeters)
+            {
+                double scale = AtmosphericPerPixelScale(friedParameterMeters, wavelengthMeters, plateScaleArcsecPerPixel);
+                int count = (int)Math.Ceiling(Math.Max(1.0, maxRadiusPx) * SamplesPerPixel) + 2;
+                _lut = new double[count];
+                for (int i = 0; i < count; i++)
+                {
+                    double rPx = (double)i / SamplesPerPixel;
+                    _lut[i] = scale * Math.Max(0.0, AtmosphericIntensity(
+                        rPx * plateScaleArcsecPerPixel * ArcsecToRad, friedParameterMeters, wavelengthMeters));
+                }
+            }
+
+            public double AtPixelRadius(double radiusPx)
+            {
+                double pos = radiusPx * SamplesPerPixel;
+                int i = (int)pos;
+                if (i >= _lut.Length - 1) return _lut[_lut.Length - 1];
+                double f = pos - i;
+                return _lut[i] * (1.0 - f) + _lut[i + 1] * f;
+            }
         }
 
         /// <summary>
@@ -350,7 +457,12 @@ namespace ExoInstruments.Core
             double atmFwhm = Math.Max(0.0, atmosphericFwhmArcsec);
             if (atmFwhm > 0.0)
             {
-                int atmR = RadiusFor(atmFwhm, plateScaleArcsecPerPixel);
+                // Sized by where the profile has actually got faint, not by a multiple of its FWHM:
+                // a Kolmogorov wing at 3 FWHM is still 1e-3 of the peak, where an Airy wing at the
+                // same multiple of its own core is 1e-6. The two components need different rules
+                // because they have different tails.
+                int atmR = Math.Max(1, Math.Min(MaxKernelRadiusPx,
+                    (int)Math.Ceiling(AtmosphericTailRadiusInFwhm * atmFwhm / plateScaleArcsecPerPixel)));
                 double r0 = FriedParameterMeters(atmFwhm, wavelengthMeters);
                 double[] atm = SampleRadial(atmR, plateScaleArcsecPerPixel,
                     theta => AtmosphericIntensity(theta, r0, wavelengthMeters));
@@ -384,6 +496,11 @@ namespace ExoInstruments.Core
         /// The wide, uncorrected seeing halo of an adaptive-optics PSF: the pure long-exposure
         /// Kolmogorov profile at the site's own median seeing, normalised to unit sum.
         ///
+        /// FALLBACK PATH. A halo this wide cannot be truncated anywhere a kernel can afford to
+        /// stop -- see FourierConvolution.RadialKernelSpectrum, which the caller in
+        /// SolarSystemCameraTexture.ApplyPsf uses instead, reaching this only on a frame too large
+        /// to pad for one.
+        ///
         /// This deliberately does NOT convolve in the diffraction pattern the way BuildKernel
         /// does. At the scales involved the omission is quantified and negligible: an 8.2m
         /// aperture's 18 mas core broadens a 650 mas halo to sqrt(650^2 + 18^2) = 650.2 mas,
@@ -401,7 +518,7 @@ namespace ExoInstruments.Core
             radiusPx = 0;
             if (plateScaleArcsecPerPixel <= 0.0 || seeingFwhmArcsec <= 0.0 || wavelengthMeters <= 0.0) return null;
 
-            int r = (int)Math.Ceiling(1.5 * seeingFwhmArcsec / plateScaleArcsecPerPixel);
+            int r = (int)Math.Ceiling(AtmosphericTailRadiusInFwhm * seeingFwhmArcsec / plateScaleArcsecPerPixel);
             r = Math.Max(1, Math.Min(Math.Max(1, maxRadiusPx), r));
 
             double r0 = FriedParameterMeters(seeingFwhmArcsec, wavelengthMeters);
@@ -596,12 +713,34 @@ namespace ExoInstruments.Core
             return outK;
         }
 
-        /// <summary>Scales a kernel to unit sum, so convolution conserves total flux despite the finite support.</summary>
+        /// <summary>
+        /// Clips a kernel to a CIRCULAR support and scales it to unit sum.
+        ///
+        /// Circular because the array is square and a real PSF is not. Sampled into its corners, a
+        /// square kernel of half-width R carries the profile out to R at the mid-edges and to
+        /// R*sqrt(2) at the corners, so where it ends depends on azimuth -- and where a kernel ends
+        /// is where the surface brightness steps to zero. That step is what draws a square around a
+        /// bright star. Clipping to the inscribed circle does not remove the step, it makes it
+        /// isotropic, which is the shape the physics has; the amplitude is the business of the
+        /// radius, chosen in AtmosphericRadiusFor.
+        ///
+        /// Unit sum, so convolution conserves total flux despite the finite support.
+        /// </summary>
         private static float[] Normalise(double[] kernel, int radius)
         {
             int size = 2 * radius + 1;
+            double limit = (double)radius * radius;
             double sum = 0.0;
-            for (int i = 0; i < kernel.Length; i++) sum += kernel[i];
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                int row = (dy + radius) * size;
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    if ((double)dx * dx + (double)dy * dy > limit) kernel[row + dx + radius] = 0.0;
+                    else sum += kernel[row + dx + radius];
+                }
+            }
+
             var result = new float[size * size];
             if (sum <= 0.0) { result[radius * size + radius] = 1f; return result; }
             for (int i = 0; i < kernel.Length; i++) result[i] = (float)(kernel[i] / sum);

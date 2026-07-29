@@ -105,6 +105,184 @@ namespace ExoInstruments.Core
         public static long SphericalDegreesToNested(int nside, double longitudeDeg, double latitudeDeg)
             => AngleToNested(nside, (90.0 - latitudeDeg) * Math.PI / 180.0, longitudeDeg * Math.PI / 180.0);
 
+        // ------------------------------------------------------------------ Interpolation
+
+        /// <summary>
+        /// The four pixels surrounding a direction and their bilinear weights, in RING numbering.
+        /// Weights sum to 1.
+        ///
+        /// WHY A MAP MUST BE READ THIS WAY AND NOT PIXEL BY PIXEL. Every all-sky map this project
+        /// reads has been smoothed to a beam: the Finkbeiner H-alpha composite to 6 arcmin, SFD98
+        /// to 6.1. The field it tabulates therefore has no structure below that scale -- it is
+        /// band-limited, and the pixel values are samples of a function already known to be smooth
+        /// between them. Returning the containing pixel's value instead makes the map piecewise
+        /// constant, which introduces discontinuities at cell edges that the data does not have.
+        /// On a wide-field frame those edges are visible directly: a 3.4 arcmin cell is 54 pixels
+        /// across on the RedCat, so a nebula renders as a mosaic of flat blocks rather than the
+        /// smooth glow the survey actually measured. Interpolating is the reconstruction the
+        /// sampling implies, not an embellishment of it.
+        ///
+        /// This is the scheme's own standard interpolation (Gorski et al. 2005; the
+        /// get_interpol/get_interp_val of the reference HEALPix library and of healpy): bilinear
+        /// in ring index and in azimuth within each ring, with the poles handled by folding in the
+        /// four pixels of the top or bottom ring. tools/dustmap-tests checks it against healpy.
+        /// </summary>
+        public static void InterpolationWeights(int nside, double theta, double phi, long[] pixels, double[] weights)
+        {
+            CheckNside(nside);
+            if (pixels == null || pixels.Length < 4 || weights == null || weights.Length < 4)
+                throw new ArgumentException("pixels and weights must each hold at least four entries");
+
+            theta = Clamp(theta, 0.0, Math.PI);
+            phi = Mod(phi, 2.0 * Math.PI);
+            double z = Math.Cos(theta);
+
+            long ir1 = RingAbove(nside, z);
+            long ir2 = ir1 + 1;
+            double theta1 = 0.0, theta2 = 0.0;
+
+            if (ir1 > 0)
+            {
+                RingInfo(nside, ir1, out long start, out long ringPix, out theta1, out bool shifted);
+                FillRing(phi, start, ringPix, shifted, pixels, weights, 0);
+            }
+            if (ir2 < 4L * nside)
+            {
+                RingInfo(nside, ir2, out long start, out long ringPix, out theta2, out bool shifted);
+                FillRing(phi, start, ringPix, shifted, pixels, weights, 2);
+            }
+
+            if (ir1 == 0)
+            {
+                // Above the topmost ring: the four pixels of that ring surround the pole, so the
+                // two "upper" slots become its other two pixels and the weight is shared evenly.
+                double w = theta / theta2;
+                weights[2] *= w; weights[3] *= w;
+                double fac = (1.0 - w) * 0.25;
+                pixels[0] = (pixels[2] + 2L) & 3L;
+                pixels[1] = (pixels[3] + 2L) & 3L;
+                weights[0] = fac; weights[1] = fac;
+                weights[2] += fac; weights[3] += fac;
+            }
+            else if (ir2 == 4L * nside)
+            {
+                double w = (theta - theta1) / (Math.PI - theta1);
+                weights[0] *= 1.0 - w; weights[1] *= 1.0 - w;
+                double fac = w * 0.25;
+                long npix = PixelCount(nside);
+                pixels[2] = ((pixels[0] + 2L) & 3L) + npix - 4L;
+                pixels[3] = ((pixels[1] + 2L) & 3L) + npix - 4L;
+                weights[0] += fac; weights[1] += fac;
+                weights[2] = fac; weights[3] = fac;
+            }
+            else
+            {
+                double w = (theta - theta1) / (theta2 - theta1);
+                weights[0] *= 1.0 - w; weights[1] *= 1.0 - w;
+                weights[2] *= w; weights[3] *= w;
+            }
+        }
+
+        /// <summary>The same for degrees in the map's own frame, matching SphericalDegreesToRing.</summary>
+        public static void InterpolationWeightsDegrees(int nside, double longitudeDeg, double latitudeDeg,
+                                                       long[] pixels, double[] weights)
+            => InterpolationWeights(nside, (90.0 - latitudeDeg) * Math.PI / 180.0,
+                                    longitudeDeg * Math.PI / 180.0, pixels, weights);
+
+        /// <summary>Converts one RING index on a known ring into NESTED, by way of the pixel centre -- which lies strictly inside the pixel, so the containing-pixel lookup returns the pixel itself.</summary>
+        public static long RingToNested(int nside, long ringPixel)
+        {
+            CheckNside(nside);
+            RingCentre(nside, ringPixel, out double theta, out double phi);
+            return AngleToNested(nside, theta, phi);
+        }
+
+        private static void FillRing(double phi, long start, long ringPix, bool shifted,
+                                     long[] pixels, double[] weights, int slot)
+        {
+            double dPhi = 2.0 * Math.PI / ringPix;
+            double t = phi / dPhi - (shifted ? 0.5 : 0.0);
+            long i1 = t < 0.0 ? (long)t - 1L : (long)t;
+            double w = (phi - (i1 + (shifted ? 0.5 : 0.0)) * dPhi) / dPhi;
+            long i2 = i1 + 1L;
+            if (i1 < 0L) i1 += ringPix;
+            if (i2 >= ringPix) i2 -= ringPix;
+            pixels[slot] = start + i1;
+            pixels[slot + 1] = start + i2;
+            weights[slot] = 1.0 - w;
+            weights[slot + 1] = w;
+        }
+
+        /// <summary>Index of the ring immediately above (smaller theta than) the given z, 0 meaning "above the topmost ring".</summary>
+        private static long RingAbove(int nside, double z)
+        {
+            double az = Math.Abs(z);
+            if (az <= 2.0 / 3.0) return (long)(nside * (2.0 - 1.5 * z));
+            long ring = (long)(nside * Math.Sqrt(3.0 * (1.0 - az)));
+            return z > 0.0 ? ring : 4L * nside - ring - 1L;
+        }
+
+        /// <summary>First pixel, pixel count, colatitude and half-pixel offset of a ring, numbered 1 at the north pole to 4*nside-1 at the south.</summary>
+        private static void RingInfo(int nside, long ring, out long startPix, out long ringPix,
+                                     out double theta, out bool shifted)
+        {
+            long npix = PixelCount(nside);
+            double fact2 = 4.0 / npix;
+            long north = ring > 2L * nside ? 4L * nside - ring : ring;
+
+            if (north < nside)
+            {
+                double tmp = north * north * fact2;
+                theta = Math.Atan2(Math.Sqrt(tmp * (2.0 - tmp)), 1.0 - tmp);
+                ringPix = 4L * north;
+                shifted = true;
+                startPix = 2L * north * (north - 1L);
+            }
+            else
+            {
+                theta = Math.Acos(Clamp((2L * nside - north) * (2.0 * nside * fact2), -1.0, 1.0));
+                ringPix = 4L * nside;
+                shifted = ((north - nside) & 1L) == 0L;
+                startPix = 2L * nside * (nside - 1L) + (north - nside) * ringPix;
+            }
+
+            if (north != ring)
+            {
+                theta = Math.PI - theta;
+                startPix = npix - startPix - ringPix;
+            }
+        }
+
+        /// <summary>Centre of a RING pixel, in the map's own frame.</summary>
+        private static void RingCentre(int nside, long pixel, out double theta, out double phi)
+        {
+            long npix = PixelCount(nside);
+            long ncap = 2L * nside * (nside - 1L);
+            long ring, indexInRing;
+
+            if (pixel < ncap)
+            {
+                ring = (long)(0.5 * (1.0 + Math.Sqrt(1.0 + 2.0 * pixel)));
+                indexInRing = pixel - 2L * ring * (ring - 1L);
+            }
+            else if (pixel < npix - ncap)
+            {
+                long ip = pixel - ncap;
+                ring = ip / (4L * nside) + nside;
+                indexInRing = ip % (4L * nside);
+            }
+            else
+            {
+                long ip = npix - pixel - 1L;
+                long southRing = (long)(0.5 * (1.0 + Math.Sqrt(1.0 + 2.0 * ip)));
+                ring = 4L * nside - southRing;
+                indexInRing = 4L * southRing - 1L - (ip - 2L * southRing * (southRing - 1L));
+            }
+
+            RingInfo(nside, ring, out long start, out long ringPix, out theta, out bool shifted);
+            phi = (indexInRing + (shifted ? 0.5 : 0.0)) * (2.0 * Math.PI / ringPix);
+        }
+
         // ------------------------------------------------------------------ RING
 
         private static long ZPhiToRing(int nside, double z, double phi)

@@ -80,22 +80,38 @@ namespace ExoInstruments.Core
         /// Total Galactic E(B-V) toward an equatorial position, magnitudes. NaN when no map is
         /// loaded or the map has no value there.
         ///
-        /// Nearest pixel. The published maps are smoothed to their own beam, so interpolating
-        /// between pixels would invent structure below the resolution the data has.
+        /// Bilinearly interpolated between the four surrounding pixels, which is what a map
+        /// smoothed to a beam (SFD98's is 6.1 arcmin) is a sampling of -- see
+        /// Healpix.InterpolationWeights. Taking the containing pixel instead would make the
+        /// reddening jump discontinuously between two stars a few arcmin apart, structure the
+        /// survey does not contain.
         /// </summary>
         public double ReddeningAt(double raDeg, double decDeg)
         {
             if (pixels == null) return double.NaN;
 
             GalacticCoordinates.EquatorialToGalactic(raDeg, decDeg, out double l, out double b);
-            long pixel = nested
-                ? Healpix.SphericalDegreesToNested(nside, l, b)
-                : Healpix.SphericalDegreesToRing(nside, l, b);
-            if (pixel < 0 || pixel >= pixels.Length) return double.NaN;
+            Healpix.InterpolationWeightsDegrees(nside, l, b, scratchPixels, scratchWeights);
 
-            // NaN in the file means the source map had no measurement there, and stays NaN.
-            return Float16.ToDouble(pixels[pixel]);
+            // NaN in the file means the source map had no measurement there. Such a pixel is
+            // dropped and the rest reweighted rather than counted as zero reddening, which would
+            // darken the rim of every gap.
+            double sum = 0.0, weight = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                long p = scratchPixels[i];
+                if (p < 0 || p >= pixels.Length) continue;
+                if (nested) p = Healpix.RingToNested(nside, p);
+                double v = Float16.ToDouble(pixels[p]);
+                if (double.IsNaN(v)) continue;
+                sum += scratchWeights[i] * v;
+                weight += scratchWeights[i];
+            }
+            return weight > 0.0 ? sum / weight : double.NaN;
         }
+
+        private readonly long[] scratchPixels = new long[4];
+        private readonly double[] scratchWeights = new double[4];
 
         /// <summary>Total extinction at V toward a position, magnitudes: A(V) = R_V E(B-V).</summary>
         public double ExtinctionAtV(double raDeg, double decDeg, double rv = InterstellarExtinction.MilkyWayRv)

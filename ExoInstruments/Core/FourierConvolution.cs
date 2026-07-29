@@ -110,6 +110,118 @@ namespace ExoInstruments.Core
             Array.Copy(accum, image, image.Length);
         }
 
+        /// <summary>
+        /// A wide radially symmetric PSF, prepared once as the spectrum of a kernel that spans the
+        /// WHOLE frame, so a convolution with it costs one transform pair and truncates nothing.
+        ///
+        /// WHY THIS EXISTS ALONGSIDE Convolve. A tiled kernel has to stop somewhere, and where it
+        /// stops the profile drops to zero in one pixel. Renormalising afterwards conserves the
+        /// flux but not the surface brightness, so around a bright source the boundary is a visible
+        /// edge in the shape of the kernel's support. For a compact PSF that edge sits where the
+        /// profile is already 1e-6 of its peak and nothing shows. Fried's long-exposure atmospheric
+        /// PSF is the opposite case: its wings fall only as theta^(-11/3), so at any radius a tile
+        /// can afford the profile is still percent-level, and the edge is plainly visible.
+        ///
+        /// WHY IT IS EXACT AND NOT MERELY BIGGER. The grid is padded to at least 2N-1 on each axis
+        /// and the kernel is laid out over lags -N/2 to N/2-1 with negative lags wrapped to the top
+        /// of the array, which is the standard ordering that makes a circular convolution agree
+        /// with a linear one. Two pixels of an N-wide frame are never more than N-1 apart, so every
+        /// lag that can occur inside the frame is present in the kernel at its true value and no
+        /// wrap-around can reach the frame. The profile IS truncated -- at a lag no pair of sensor
+        /// pixels can realise. Light at larger offsets left the sensor, which is the same thing the
+        /// zero-padding in Convolve above already assumes.
+        ///
+        /// Sampling the transfer function straight onto the grid instead would be cheaper by one
+        /// transform, and is wrong for the same reason in reverse: it yields the ALIASED kernel,
+        /// sum over m of PSF(lag + mN), which re-injects wing flux that should have left the sensor
+        /// on the far side. Measured on ZIMPOL's halo that reaches 3.5e-2 of the profile at 500 px.
+        ///
+        /// The kernel is used exactly as supplied and never renormalised, so the caller's profile
+        /// must already be in fractions of the source's total flux (see
+        /// OpticalPsf.AtmosphericPerPixelScale). Flux beyond the frame is then genuinely lost,
+        /// which is what a finite sensor does.
+        /// </summary>
+        public sealed class RadialKernelSpectrum
+        {
+            private readonly float[] _re;
+            private readonly float[] _im;
+
+            /// <summary>Padded grid dimensions.</summary>
+            public int Nx { get; }
+            public int Ny { get; }
+
+            /// <summary>Fraction of the source's flux the grid holds; the remainder falls at lags no two sensor pixels can span.</summary>
+            public double EnclosedFraction { get; }
+
+            private RadialKernelSpectrum(float[] re, float[] im, int nx, int ny, double enclosed)
+            {
+                _re = re; _im = im; Nx = nx; Ny = ny; EnclosedFraction = enclosed;
+            }
+
+            /// <summary>Prepares the spectrum, or returns null when the padded grid would exceed maxTransformCells so a caller can fall back and say so.</summary>
+            public static RadialKernelSpectrum Build(int width, int height,
+                                                     Func<double, double> profileAtPixelRadius,
+                                                     long maxTransformCells)
+            {
+                if (profileAtPixelRadius == null || width <= 0 || height <= 0) return null;
+                int nx = NextPowerOfTwoAtLeast(2 * width - 1);
+                int ny = NextPowerOfTwoAtLeast(2 * height - 1);
+                if (nx <= 0 || ny <= 0 || (long)nx * ny > maxTransformCells) return null;
+
+                var re = new float[nx * ny];
+                var im = new float[nx * ny];
+
+                double sum = 0.0;
+                for (int dy = -ny / 2; dy < ny / 2; dy++)
+                {
+                    int row = ((dy + ny) % ny) * nx;
+                    double dy2 = (double)dy * dy;
+                    for (int dx = -nx / 2; dx < nx / 2; dx++)
+                    {
+                        double v = profileAtPixelRadius(Math.Sqrt(dx * (double)dx + dy2));
+                        re[row + (dx + nx) % nx] = (float)v;
+                        sum += v;
+                    }
+                }
+
+                Transform2D(re, im, nx, ny, false);
+                return new RadialKernelSpectrum(re, im, nx, ny, sum);
+            }
+
+            /// <summary>Convolves the frame in place. width and height must match what Build was given.</summary>
+            public void Apply(float[] image, int width, int height)
+            {
+                if (image == null || image.Length != width * height) return;
+                if (NextPowerOfTwoAtLeast(2 * width - 1) != Nx || NextPowerOfTwoAtLeast(2 * height - 1) != Ny) return;
+
+                var re = new float[Nx * Ny];
+                var im = new float[Nx * Ny];
+                for (int y = 0; y < height; y++) Array.Copy(image, y * width, re, y * Nx, width);
+
+                Transform2D(re, im, Nx, Ny, false);
+                for (int i = 0; i < re.Length; i++)
+                {
+                    float ar = re[i], ai = im[i], br = _re[i], bi = _im[i];
+                    re[i] = ar * br - ai * bi;
+                    im[i] = ar * bi + ai * br;
+                }
+                Transform2D(re, im, Nx, Ny, true);
+
+                for (int y = 0; y < height; y++) Array.Copy(re, y * Nx, image, y * width, width);
+            }
+        }
+
+        private static int NextPowerOfTwoAtLeast(int value)
+        {
+            int n = 1;
+            while (n < value)
+            {
+                n <<= 1;
+                if (n <= 0) return 0;   // overflowed
+            }
+            return n;
+        }
+
         /// <summary>Transform size for a given kernel width: a power of two large enough that each tile carries a useful span of real pixels, within the bounds above.</summary>
         private static int TransformSizeFor(int kernelWidth)
         {
@@ -123,25 +235,29 @@ namespace ExoInstruments.Core
 
         /// <summary>Separable 2D transform: every row, then every column. n must be a power of two.</summary>
         private static void Transform2D(float[] re, float[] im, int n, bool inverse)
-        {
-            var rowRe = new float[n];
-            var rowIm = new float[n];
+            => Transform2D(re, im, n, n, inverse);
 
-            for (int y = 0; y < n; y++)
+        /// <summary>The rectangular form. nx and ny must each be a power of two.</summary>
+        private static void Transform2D(float[] re, float[] im, int nx, int ny, bool inverse)
+        {
+            var rowRe = new float[Math.Max(nx, ny)];
+            var rowIm = new float[Math.Max(nx, ny)];
+
+            for (int y = 0; y < ny; y++)
             {
-                int row = y * n;
-                Array.Copy(re, row, rowRe, 0, n);
-                Array.Copy(im, row, rowIm, 0, n);
-                Transform1D(rowRe, rowIm, n, inverse);
-                Array.Copy(rowRe, 0, re, row, n);
-                Array.Copy(rowIm, 0, im, row, n);
+                int row = y * nx;
+                Array.Copy(re, row, rowRe, 0, nx);
+                Array.Copy(im, row, rowIm, 0, nx);
+                Transform1D(rowRe, rowIm, nx, inverse);
+                Array.Copy(rowRe, 0, re, row, nx);
+                Array.Copy(rowIm, 0, im, row, nx);
             }
 
-            for (int x = 0; x < n; x++)
+            for (int x = 0; x < nx; x++)
             {
-                for (int y = 0; y < n; y++) { rowRe[y] = re[y * n + x]; rowIm[y] = im[y * n + x]; }
-                Transform1D(rowRe, rowIm, n, inverse);
-                for (int y = 0; y < n; y++) { re[y * n + x] = rowRe[y]; im[y * n + x] = rowIm[y]; }
+                for (int y = 0; y < ny; y++) { rowRe[y] = re[y * nx + x]; rowIm[y] = im[y * nx + x]; }
+                Transform1D(rowRe, rowIm, ny, inverse);
+                for (int y = 0; y < ny; y++) { re[y * nx + x] = rowRe[y]; im[y * nx + x] = rowIm[y]; }
             }
         }
 

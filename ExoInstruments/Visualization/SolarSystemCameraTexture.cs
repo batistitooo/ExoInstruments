@@ -523,14 +523,26 @@ namespace ExoInstruments.Visualization
         private const double AsinhSoftening = 0.02;
 
         /// <summary>
-        /// Radius ceiling for the seeing-halo kernel. Larger than the core's because the halo is
-        /// genuinely that wide (Paranal's 0.65" is 361 px across at ZIMPOL's unbinned scale), but
-        /// still bounded: the transform size, and so the cost of every capture, grows with it.
-        /// Truncating a halo's far wings and renormalising leaves its FWHM untouched -- only the
-        /// faint outermost flux is redistributed, and at these radii that flux is already a flat
-        /// pedestal across the whole field.
+        /// Radius ceiling for the seeing-halo kernel, which is now only the FALLBACK path -- see
+        /// ApplyPsf, which applies the halo as a transfer function and truncates nothing.
+        ///
+        /// The kernel form could not be made correct by raising this number. At Paranal's 0.72"
+        /// seeing and ZIMPOL's binned 3.6 mas pixels, a 256 px radius stops 1.28 FWHM out, where
+        /// the profile is still 3.1e-2 of its peak; renormalising conserves the flux but leaves
+        /// that 3.1e-2 dropping to zero across one pixel, which is a hard edge in the shape of the
+        /// kernel's support. Pushing the step below the read noise of a tenth-magnitude star needs
+        /// about 10 FWHM, i.e. a 3985 px kernel across a 1024 px frame. The measurements are in
+        /// tools/psf-truncation.
         /// </summary>
         private const int MaxHaloKernelRadiusPx = 256;
+
+        /// <summary>
+        /// Cells a padded frequency-domain pass may allocate. 2048x2048 complex singles is 33 MB
+        /// of transient working set, which covers every frame small enough for the halo to span --
+        /// ZIMPOL binned 2x2 is 1024x1024 and pads to exactly this. Beyond it the kernel fallback
+        /// takes over rather than the allocation growing unbounded.
+        /// </summary>
+        private const long MaxOtfTransformCells = 2048L * 2048L;
 
         // Built PSF, cached on everything it depends on (see EnsurePsfKernels).
         private VisualTelescopeSpec psfCacheSpec;
@@ -543,6 +555,12 @@ namespace ExoInstruments.Visualization
         private float psfCacheCoreWeight = 1f;
         private float[] psfCacheHalo;
         private int psfCacheHaloRadius;
+        private double psfCacheHaloR0;
+        private double psfCacheHaloWavelength;
+        /// <summary>Full-frame halo spectrum, cached with the kernels: it costs a transform to prepare and a stacking batch would otherwise pay for it once per sub.</summary>
+        private FourierConvolution.RadialKernelSpectrum haloSpectrum;
+        private int haloSpectrumWidth;
+        private int haloSpectrumHeight;
         private double psfCacheDiffractionFwhm;
         private float[] rawScratch;
         /// <summary>The frame's signal plane, in fractions of full well: rendered bodies plus every point source, before any noise exists.</summary>
@@ -818,6 +836,12 @@ namespace ExoInstruments.Visualization
 
         /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
         public double LastDiffractionFwhmArcsec { get; private set; }
+
+        /// <summary>True when the last capture's adaptive-optics halo used a kernel spanning the whole frame, so nothing detectable was truncated, rather than the bounded fallback. See ApplyPsf.</summary>
+        public bool LastHaloSpannedFrame { get; private set; }
+
+        /// <summary>Fraction of a source's halo flux that kernel held; the rest falls at offsets larger than the sensor and never reached a pixel. Zero when no halo applies.</summary>
+        public double LastHaloEnclosedFraction { get; private set; }
 
         /// <summary>
         /// Last capture at full float precision, straight from the physics pipeline -- NOT
@@ -1892,6 +1916,9 @@ namespace ExoInstruments.Visualization
         /// <summary>Mean line surface brightness the last capture collected, rayleighs, or NaN when no map contributed.</summary>
         public double LastEmissionRayleighs { get; private set; } = double.NaN;
 
+        /// <summary>Electrons the brightest pixel of that diffuse emission collected this exposure. Against the full well it says whether a linear stretch could ever show it, which for a nebula is usually no.</summary>
+        public double LastEmissionPeakElectrons { get; private set; } = double.NaN;
+
         /// <summary>Total Galactic E(B-V) toward the last capture's field centre, or NaN with no map installed.</summary>
         public double LastFieldReddeningEBv { get; private set; } = double.NaN;
 
@@ -2017,10 +2044,13 @@ namespace ExoInstruments.Visualization
             if (!(coefficient > 0.0)) return;
 
             int w = TextureWidth, h = TextureHeight;
-            long lastCell = -1;
-            double lastValue = 0.0;
-            double sum = 0.0;
+            double sum = 0.0, brightest = 0.0;
             long counted = 0;
+
+            // The map is read per pixel and interpolated. There used to be a one-entry cell cache
+            // here, which is what a nearest-pixel lookup allows and is exactly what made a nebula
+            // render as flat blocks 54 frame pixels across.
+            EmissionMap.AllocateScratch(out long[] pixelScratch, out double[] weightScratch);
 
             for (int y = 0; y < h; y++)
             {
@@ -2029,20 +2059,17 @@ namespace ExoInstruments.Visualization
                     SkyVector direction = inputs.Projection.Deproject(x + 0.5, y + 0.5);
                     rotation.ToGalactic(direction, out double l, out double b);
 
-                    long cell = map.CellAtGalactic(l, b);
-                    if (cell != lastCell)
-                    {
-                        lastCell = cell;
-                        double r = map.RayleighsInCell(cell);
-                        lastValue = double.IsNaN(r) ? 0.0 : r;
-                        if (!double.IsNaN(r)) { sum += r; counted++; }
-                    }
-
-                    if (lastValue > 0.0) signal[y * w + x] += (float)(lastValue * coefficient);
+                    double r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
+                    if (double.IsNaN(r)) continue;
+                    sum += r;
+                    counted++;
+                    if (r > brightest) brightest = r;
+                    if (r > 0.0) signal[y * w + x] += (float)(r * coefficient);
                 }
             }
 
             LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
+            LastEmissionPeakElectrons = counted > 0 ? brightest * coefficient : double.NaN;
         }
 
         /// <summary>
@@ -2272,7 +2299,9 @@ namespace ExoInstruments.Visualization
                          && psfCacheFilter == inputs.Filter
                          && psfCachePlateScale == inputs.PlateScaleArcsec
                          && psfCacheAtmosphericFwhm == atmosphericFwhm
-                         && psfCacheDefocusRadius == inputs.DefocusDiscRadiusPx;
+                         && psfCacheDefocusRadius == inputs.DefocusDiscRadiusPx
+                         && haloSpectrumWidth == TextureWidth
+                         && haloSpectrumHeight == TextureHeight;
 
             if (!reusable)
             {
@@ -2285,13 +2314,32 @@ namespace ExoInstruments.Visualization
                 // system's Strehl ratio, plus the wide halo of everything it failed to correct.
                 psfCacheHalo = null;
                 psfCacheHaloRadius = 0;
+                psfCacheHaloR0 = 0.0;
+                psfCacheHaloWavelength = wavelength;
                 psfCacheCoreWeight = 1f;
+                haloSpectrum = null;
+                haloSpectrumWidth = TextureWidth;
+                haloSpectrumHeight = TextureHeight;
                 if (hasAo && Spec.AdaptiveOpticsStrehlRatio > 0.0 && Spec.AdaptiveOpticsHaloSeeingFwhmArcsec > 0.0)
                 {
                     psfCacheCoreWeight = Mathf.Clamp01((float)Spec.AdaptiveOpticsStrehlRatio);
-                    psfCacheHalo = OpticalPsf.BuildSeeingHaloKernel(
-                        inputs.PlateScaleArcsec, Spec.AdaptiveOpticsHaloSeeingFwhmArcsec,
-                        wavelength, MaxHaloKernelRadiusPx, out psfCacheHaloRadius);
+                    psfCacheHaloR0 = OpticalPsf.FriedParameterMeters(
+                        Spec.AdaptiveOpticsHaloSeeingFwhmArcsec, wavelength);
+
+                    // The frame-wide kernel first. Its radius is the longest diagonal two sensor
+                    // pixels can span, so nothing detectable is left out of the table.
+                    double maxLagPx = Math.Sqrt((double)TextureWidth * TextureWidth
+                                              + (double)TextureHeight * TextureHeight);
+                    var table = new OpticalPsf.AtmosphericProfileTable(
+                        maxLagPx, inputs.PlateScaleArcsec, psfCacheHaloR0, wavelength);
+                    haloSpectrum = FourierConvolution.RadialKernelSpectrum.Build(
+                        TextureWidth, TextureHeight, table.AtPixelRadius, MaxOtfTransformCells);
+
+                    // Bounded fallback, for a frame too large to pad for the above.
+                    if (haloSpectrum == null)
+                        psfCacheHalo = OpticalPsf.BuildSeeingHaloKernel(
+                            inputs.PlateScaleArcsec, Spec.AdaptiveOpticsHaloSeeingFwhmArcsec,
+                            wavelength, MaxHaloKernelRadiusPx, out psfCacheHaloRadius);
                 }
 
                 psfCacheSpec = Spec;
@@ -2311,6 +2359,8 @@ namespace ExoInstruments.Visualization
             haloRadius = psfCacheHaloRadius;
 
             // Diagnostics, read on the main thread after the task completes.
+            LastHaloSpannedFrame = haloSpectrum != null;
+            LastHaloEnclosedFraction = haloSpectrum != null ? haloSpectrum.EnclosedFraction : 0.0;
             LastAppliedBlurRadiusPx = psfCacheCoreRadius;
             LastAtmosphericFwhmArcsec = atmosphericFwhm;
             LastDiffractionFwhmArcsec = psfCacheDiffractionFwhm;
@@ -3082,7 +3132,8 @@ namespace ExoInstruments.Visualization
             if (kernel == null || radius < 1) return;
 
             int n = plane.Length;
-            bool hasHalo = haloKernel != null && haloRadius >= 1 && coreWeight < 0.999f;
+            bool hasHalo = coreWeight < 0.999f
+                        && (haloSpectrum != null || (haloKernel != null && haloRadius >= 1));
 
             // Convolution is linear, so a PSF that is the sum of two components can be applied as
             // the weighted sum of two convolutions -- exactly equivalent to convolving once with
@@ -3093,7 +3144,17 @@ namespace ExoInstruments.Visualization
             {
                 haloPlane = EnsurePassScratch(n);
                 Array.Copy(plane, haloPlane, n);
-                FourierConvolution.Convolve(haloPlane, TextureWidth, TextureHeight, haloKernel, haloRadius);
+
+                // The halo goes in as a kernel spanning the whole frame, which is the only support
+                // at which it can stop without leaving a step: its theta^(-11/3) wings are still
+                // percent-level at any radius a tile can afford. Cut instead at a lag no two
+                // sensor pixels can span, it truncates nothing that could have been detected --
+                // and the square that used to appear around bright stars on SPHERE was exactly
+                // that step. See MaxHaloKernelRadiusPx for the measurements.
+                if (haloSpectrum == null)
+                    FourierConvolution.Convolve(haloPlane, TextureWidth, TextureHeight, haloKernel, haloRadius);
+                else
+                    haloSpectrum.Apply(haloPlane, TextureWidth, TextureHeight);
             }
 
             FourierConvolution.Convolve(plane, TextureWidth, TextureHeight, kernel, radius);

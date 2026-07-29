@@ -67,6 +67,50 @@ def healpix():
               hp.nside2resol(nside) * 180.0 / np.pi, 1e-12, " deg")
 
 
+def interpolation():
+    """The four-pixel bilinear read, against healpy's get_interp_weights.
+
+    A beam-smoothed map has to be interpolated rather than sampled pixel by pixel, and getting it
+    subtly wrong is invisible: the sky still looks like a sky. So both halves are checked -- which
+    four pixels, and with what weight -- against the reference implementation of the same scheme.
+    """
+    print("\n1b. Bilinear interpolation weights, against healpy")
+    d = np.genfromtxt("exo_interp.csv", delimiter=",", names=True)
+
+    worst_w = 0.0
+    total_pix_bad = 0
+    for nside in np.unique(d["nside"]).astype(int):
+        sub = d[d["nside"] == nside]
+        pix_ref, wgt_ref = hp.get_interp_weights(nside, sub["theta_rad"], sub["phi_rad"], nest=False)
+        pix_ours = np.vstack([sub[f"p{i}"] for i in range(4)]).astype(np.int64)
+        wgt_ours = np.vstack([sub[f"w{i}"] for i in range(4)])
+
+        # Order is not part of the contract, so both sides are sorted by pixel before comparing.
+        # A weight has to travel with its own pixel, so the same permutation is applied to both.
+        order_ref = np.argsort(pix_ref, axis=0)
+        order_ours = np.argsort(pix_ours, axis=0)
+        pr = np.take_along_axis(pix_ref, order_ref, axis=0)
+        po = np.take_along_axis(pix_ours, order_ours, axis=0)
+        wr = np.take_along_axis(np.asarray(wgt_ref), order_ref, axis=0)
+        wo = np.take_along_axis(wgt_ours, order_ours, axis=0)
+
+        pix_bad = int(np.count_nonzero(pr != po))
+        w_dev = float(np.abs(wr - wo).max())
+        total_pix_bad += pix_bad
+        worst_w = max(worst_w, w_dev)
+
+        sum_dev = float(np.abs(wgt_ours.sum(axis=0) - 1.0).max())
+        ok = pix_bad == 0 and w_dev < 1e-12 and sum_dev < 1e-12
+        if not ok:
+            failures.append(f"interpolation nside {nside}")
+        print(f"  [{'ok  ' if ok else 'FAIL'}] nside {nside:5d} ({len(sub)} directions): "
+              f"{pix_bad} wrong pixels, weights to {w_dev:.2e}, sum to 1 within {sum_dev:.2e}")
+
+    if total_pix_bad == 0:
+        notes.append(f"interpolation matches healpy's get_interp_weights exactly over {len(d)} "
+                     f"directions -- same four pixels, weights to {worst_w:.1e}")
+
+
 def galactic():
     print("\n3. Galactic coordinates, against astropy")
     d = np.genfromtxt("exo_galactic.csv", delimiter=",", names=True)
@@ -186,23 +230,27 @@ def real_map():
     ref = np.asarray(query(SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg,
                                     frame="icrs")), dtype=float) * 0.86
 
-    # THE COMPARISON HAS TO BE AT THE PIXEL CENTRE. The packer stored SFD sampled at each
-    # HEALPix pixel's own centre; dustmaps queried at an arbitrary direction interpolates its
-    # native Lambert grid there instead. Comparing those two measures the resampling, not the
-    # format, and in the plane where SFD reaches tens of magnitudes across a few arcminutes that
-    # difference reaches 25%. Asking the reference for the same pixel centre isolates what this
-    # check is for.
+    # THE REFERENCE HAS TO BE REBUILT THE SAME WAY THE MAP WAS. The packer stored SFD sampled at
+    # each HEALPix pixel's own centre as a half float; the reader interpolates bilinearly between
+    # four of those. So the reference is that same operation done independently in Python: healpy
+    # picks the four pixels and weights, dustmaps supplies each pixel centre's value, and the two
+    # are combined. Comparing against dustmaps queried directly at the sight line instead would
+    # measure the resampling onto HEALPix, which is a real effect but not what this check is for --
+    # it is reported separately below.
     coords = SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg, frame="icrs").galactic
-    pix = hp.ang2pix(1024, coords.l.deg, coords.b.deg, nest=False, lonlat=True)
-    cl, cb = hp.pix2ang(1024, pix, nest=False, lonlat=True)
-    ref = np.asarray(query(SkyCoord(l=cl * u.deg, b=cb * u.deg, frame="galactic")),
-                     dtype=float) * 0.86
+    pix, wgt = hp.get_interp_weights(1024, coords.l.deg, coords.b.deg, nest=False, lonlat=True)
+    cl, cb = hp.pix2ang(1024, pix.ravel(), nest=False, lonlat=True)
+    vals = np.asarray(query(SkyCoord(l=cl * u.deg, b=cb * u.deg, frame="galactic")),
+                      dtype=float) * 0.86
+    # Through float16 and back, because that is the precision the file carries.
+    vals = vals.astype(np.float16).astype(float).reshape(pix.shape)
+    ref = (np.asarray(wgt) * vals).sum(axis=0)
 
     known = np.isfinite(d["ebv"]) & np.isfinite(ref) & (ref > 0)
     rel = np.abs(d["ebv"][known] / ref[known] - 1.0)
 
     # Half-float precision is 4.9e-4 relative, and nothing else stands between the two.
-    check(f"reddening at the pixel centre, {known.sum()} real sight lines, relative",
+    check(f"interpolated reddening, {known.sum()} real sight lines, relative",
           float(rel.max()), 0.0, 5e-4)
     check("nothing lost: every direction carries a value",
           float(np.count_nonzero(~np.isfinite(d["ebv"]))), 0.0, 0.0)
@@ -216,9 +264,10 @@ def real_map():
     v = d["ebv"][known]
     print(f"  [note] range over the sample: {v.min():.5f} to {v.max():.2f} mag, "
           f"median {np.median(v):.5f}")
-    print(f"  [note] resampling onto HEALPix at 3.4 arcmin: median {np.median(resample) * 100:.2f}%, "
-          f"worst {resample.max() * 100:.0f}% (in the plane, where SFD is steepest)")
-    notes.append(f"the real packed map reproduces dustmaps at the pixel centre to "
+    print(f"  [note] resampling onto HEALPix at 3.4 arcmin, then interpolating back: "
+          f"median {np.median(resample) * 100:.2f}%, worst {resample.max() * 100:.0f}% "
+          f"(in the plane, where SFD is steepest)")
+    notes.append(f"the real packed map reproduces an independently built bilinear read of SFD to "
                  f"{rel.max():.1e} relative over {known.sum()} sight lines, with no pixel lost")
 
 
@@ -247,6 +296,7 @@ def emission_map():
 def main():
     print(__doc__.split("Run:")[0].strip())
     healpix()
+    interpolation()
     galactic()
     float16()
     dust_map()

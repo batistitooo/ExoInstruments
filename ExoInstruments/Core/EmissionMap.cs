@@ -88,15 +88,48 @@ namespace ExoInstruments.Core
             return System.Text.Encoding.UTF8.GetString(reader.ReadBytes(length));
         }
 
-        /// <summary>Line surface brightness toward a Galactic direction, rayleighs. NaN where the map has no value.</summary>
+        /// <summary>
+        /// Line surface brightness toward a Galactic direction, rayleighs, bilinearly interpolated
+        /// between the four surrounding pixels -- see Healpix.InterpolationWeights for why a
+        /// beam-smoothed map has to be read that way. NaN where the map has no value.
+        ///
+        /// Not thread-safe: a per-call scratch pair would allocate once per frame pixel. Callers
+        /// filling a frame use RayleighsAtGalactic(l, b, scratch) with their own buffers.
+        /// </summary>
         public double RayleighsAtGalactic(double lDeg, double bDeg)
+            => RayleighsAtGalactic(lDeg, bDeg, sharedPixels, sharedWeights);
+
+        private readonly long[] sharedPixels = new long[4];
+        private readonly double[] sharedWeights = new double[4];
+
+        /// <summary>Scratch buffers a caller can allocate once and reuse across a whole frame.</summary>
+        public static void AllocateScratch(out long[] pixelScratch, out double[] weightScratch)
+        {
+            pixelScratch = new long[4];
+            weightScratch = new double[4];
+        }
+
+        /// <summary>As above, using caller-supplied scratch so a frame-filling loop allocates nothing.</summary>
+        public double RayleighsAtGalactic(double lDeg, double bDeg, long[] pixelScratch, double[] weightScratch)
         {
             if (pixels == null) return double.NaN;
-            long pixel = nested
-                ? Healpix.SphericalDegreesToNested(nside, lDeg, bDeg)
-                : Healpix.SphericalDegreesToRing(nside, lDeg, bDeg);
-            if (pixel < 0 || pixel >= pixels.Length) return double.NaN;
-            return Float16.ToDouble(pixels[pixel]);
+            Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
+
+            // A pixel with no value must not be treated as zero: that would eat into its
+            // neighbours' contribution and darken the edge of every gap. Renormalising over the
+            // ones that do have a value is the same answer the survey's own coverage supports.
+            double sum = 0.0, weight = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                long p = pixelScratch[i];
+                if (p < 0 || p >= pixels.Length) continue;
+                if (nested) p = Healpix.RingToNested(nside, p);
+                double v = Float16.ToDouble(pixels[p]);
+                if (double.IsNaN(v)) continue;
+                sum += weightScratch[i] * v;
+                weight += weightScratch[i];
+            }
+            return weight > 0.0 ? sum / weight : double.NaN;
         }
 
         /// <summary>The same for an equatorial direction.</summary>
@@ -104,26 +137,6 @@ namespace ExoInstruments.Core
         {
             GalacticCoordinates.EquatorialToGalactic(raDeg, decDeg, out double l, out double b);
             return RayleighsAtGalactic(l, b);
-        }
-
-        /// <summary>
-        /// The HEALPix cell a direction falls in, so a caller filling a whole frame can skip the
-        /// value lookup while consecutive pixels stay in one cell. At 6 arcmin a cell spans at
-        /// least 94 frame pixels, so that is nearly always.
-        /// </summary>
-        public long CellAtGalactic(double lDeg, double bDeg)
-        {
-            if (pixels == null) return -1;
-            return nested
-                ? Healpix.SphericalDegreesToNested(nside, lDeg, bDeg)
-                : Healpix.SphericalDegreesToRing(nside, lDeg, bDeg);
-        }
-
-        /// <summary>Value of a cell obtained from CellAtGalactic. NaN for an unknown cell.</summary>
-        public double RayleighsInCell(long cell)
-        {
-            if (pixels == null || cell < 0 || cell >= pixels.Length) return double.NaN;
-            return Float16.ToDouble(pixels[cell]);
         }
     }
 }
