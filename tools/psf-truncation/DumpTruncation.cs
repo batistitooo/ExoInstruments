@@ -54,6 +54,9 @@ static class DumpTruncation
         Console.WriteLine("=== The frame-wide kernel, against the profile it must reproduce ===\n");
         OtfReport();
 
+        Console.WriteLine("=== Overlap-add tiling, against a direct convolution ===\n");
+        TilingReport();
+
         DumpHaloProfile();
     }
 
@@ -197,6 +200,93 @@ static class DumpTruncation
                         + $"{(r >= 128 ? "  <-- at the ceiling" : "")}");
         Console.WriteLine($"  step at the circular boundary: {edge / peak:E3} of peak"
                         + $"   (corner {corner / peak:E3}, zero because the support is now circular)");
+    }
+
+    /// <summary>
+    /// FourierConvolution.Convolve against a literal O(K^2) convolution of the same image and
+    /// kernel.
+    ///
+    /// Overlap-add is an exact restructuring of linear convolution, so the two must agree to
+    /// float round-off. What makes it worth testing separately is the failure mode: every existing
+    /// check in this project measures KERNELS, and a tiling bug leaves the kernel perfect while
+    /// laying a grid of seams over the frame at the tile pitch. On a smooth, faint, hard-stretched
+    /// subject -- a nebula -- that grid is the only thing with edges in the picture.
+    ///
+    /// The tile pitch is n - k + 1, which for the small kernels a short focal length produces is
+    /// around 60 pixels whatever the binning, so the seams would be four times coarser on screen at
+    /// 4x4 than at 1x1 for the same displayed size.
+    /// </summary>
+    static void TilingReport()
+    {
+        foreach (int kernelRadius in new[] { 1, 2, 4, 7, 16, 48, 128 })
+        {
+            const int w = 400, h = 260;
+
+            // A smooth gradient plus one bright point: the gradient is what a nebula looks like to
+            // the convolution, and the point is what shows a misplaced tail.
+            var image = new float[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    image[y * w + x] = 1000f + 400f * (float)Math.Sin(x * 0.013) * (float)Math.Cos(y * 0.017);
+            image[(h / 2) * w + w / 3] += 50000f;
+
+            int k = 2 * kernelRadius + 1;
+            var kernel = new float[k * k];
+            double sum = 0.0;
+            for (int dy = -kernelRadius; dy <= kernelRadius; dy++)
+                for (int dx = -kernelRadius; dx <= kernelRadius; dx++)
+                {
+                    double r2 = (double)dx * dx + (double)dy * dy;
+                    double v = Math.Exp(-r2 / (2.0 * Math.Max(1.0, kernelRadius * kernelRadius / 4.0)));
+                    kernel[(dy + kernelRadius) * k + dx + kernelRadius] = (float)v;
+                    sum += v;
+                }
+            for (int i = 0; i < kernel.Length; i++) kernel[i] /= (float)sum;
+
+            var direct = DirectConvolve(image, w, h, kernel, kernelRadius);
+            var viaFft = (float[])image.Clone();
+            FourierConvolution.Convolve(viaFft, w, h, kernel, kernelRadius);
+
+            double worstAbs = 0.0, worstRel = 0.0;
+            int worstX = 0, worstY = 0;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    double d = Math.Abs(viaFft[y * w + x] - direct[y * w + x]);
+                    double rel = d / Math.Max(1e-6, Math.Abs(direct[y * w + x]));
+                    if (rel > worstRel) { worstRel = rel; worstX = x; worstY = y; }
+                    if (d > worstAbs) worstAbs = d;
+                }
+
+            Console.WriteLine($"  kernel radius {kernelRadius,3} px: worst {worstAbs:E2} absolute, "
+                            + $"{worstRel:E2} relative at ({worstX},{worstY})"
+                            + $"{(worstRel > 1e-4 ? "   <-- SEAMS" : "")}");
+        }
+        Console.WriteLine();
+    }
+
+    static float[] DirectConvolve(float[] image, int w, int h, float[] kernel, int radius)
+    {
+        int k = 2 * radius + 1;
+        var outImage = new float[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                double acc = 0.0;
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    int sy = y - dy;
+                    if (sy < 0 || sy >= h) continue;
+                    for (int dx = -radius; dx <= radius; dx++)
+                    {
+                        int sx = x - dx;
+                        if (sx < 0 || sx >= w) continue;
+                        acc += image[sy * w + sx] * kernel[(dy + radius) * k + dx + radius];
+                    }
+                }
+                outImage[y * w + x] = (float)acc;
+            }
+        return outImage;
     }
 
     /// <summary>The long-exposure Kolmogorov profile, tabulated once in reduced units and integrated on a geometric grid.</summary>

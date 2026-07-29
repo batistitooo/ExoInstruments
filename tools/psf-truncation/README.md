@@ -55,3 +55,25 @@ profile actually gets faint (1e-4 of peak, which the profile itself says is 9.87
 a multiple of its FWHM, and the support clipped to a circle so where the kernel ends no longer
 depends on azimuth. The transform cost rises about 1.5x -- a wider kernel needs a larger tile, but
 proportionally fewer of them.
+
+## Overlap-add tiling
+
+Added while chasing a report of visible squares on a nebula. Every other check in this project
+measures *kernels*, and a tiling bug is the one that leaves the kernel perfect while laying a grid
+of seams over the frame at the tile pitch -- which on a smooth, faint, hard-stretched subject is the
+only thing in the picture with edges. The tile pitch is `n - k + 1`, about 58 px on the RedCat at
+4x4 and 108 px at 1x1, so seams would be roughly twice as coarse on screen at 4x4 for the same
+displayed size, which is what the report described.
+
+`FourierConvolution.Convolve` is compared against a literal O(K^2) convolution of the same image and
+kernel, on a smooth gradient plus one bright point:
+
+| kernel radius | worst absolute | worst relative |
+|---|---|---|
+| 1 px | 1.3e-2 | 2.3e-6 |
+| 4 px | 2.9e-3 | 2.3e-6 |
+| 16 px | 2.3e-3 | 3.4e-6 |
+| 48 px | 5.3e-3 | 6.3e-6 |
+| 128 px | 5.5e-3 | 5.6e-6 |
+
+Float round-off, no seams. The tiling is not the cause.

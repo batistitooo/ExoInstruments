@@ -1699,12 +1699,19 @@ namespace ExoInstruments
 
         void DrawResolvingPowerDiagnostic()
         {
-            if (!selectedPhotographyTarget.IsBody) return;
+            if (!selectedPhotographyTarget.HasTarget) return;
 
             float plateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
             if (plateScale <= 0f) return;
 
-            double diskArcsec = SolarSystemCameraTexture.AngularDiameterArcsec(selectedPhotographyBody);
+            // A star or a nebula has no resolvable disk, so the disk terms below drop out -- but
+            // everything else here (pointing, PSF, sky, extinction, line emission) is exactly what
+            // those targets are photographed for. This used to return early unless the target was a
+            // solar-system body, which hid every one of those readouts on the only targets they
+            // were written for.
+            bool hasDisk = selectedPhotographyTarget.IsBody;
+            double diskArcsec = hasDisk
+                ? SolarSystemCameraTexture.AngularDiameterArcsec(selectedPhotographyBody) : 0.0;
             double diskPx = diskArcsec / plateScale;
             float blurPx = solarSystemCamera.LastAppliedBlurRadiusPx;
 
@@ -1712,9 +1719,13 @@ namespace ExoInstruments
                 ? $"{plateScale * 1000f:F1} mas/px"
                 : $"{plateScale:F3}\"/px";
 
-            GUILayout.Label($"Plate scale {scale}  |  disk {diskArcsec:F2}\" = {diskPx:F0} px", smallCaptionStyle);
+            GUILayout.Label(hasDisk
+                ? $"Plate scale {scale}  |  disk {diskArcsec:F2}\" = {diskPx:F0} px"
+                : $"Plate scale {scale}  |  field {SolarSystemCameraTexture.TextureWidth * plateScale / 60.0:F1}' x "
+                  + $"{SolarSystemCameraTexture.TextureHeight * plateScale / 60.0:F1}'",
+                smallCaptionStyle);
 
-            if (solarSystemCamera.HasCapturedPhoto && diskPx > 0.0)
+            if (solarSystemCamera.HasCapturedPhoto)
             {
                 // What actually limits the frame, split into the two terms that compete for it:
                 // the telescope's own diffraction (which no observing condition can beat) and
@@ -1725,7 +1736,8 @@ namespace ExoInstruments
 
                 GUILayout.Label(
                     $"PSF: diffraction {Arcsec(diff)} + atmosphere {Arcsec(atm)} = {Arcsec(delivered)} delivered "
-                    + $"({delivered / plateScale:F1} px, {delivered / Math.Max(1e-9, diskArcsec) * 100.0:F1}% of disk)"
+                    + $"({delivered / plateScale:F1} px"
+                    + (diskPx > 0.0 ? $", {delivered / Math.Max(1e-9, diskArcsec) * 100.0:F1}% of disk)" : ")")
                     + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
                     smallCaptionStyle);
 
