@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
@@ -317,6 +318,33 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Aligns (if requested) and averages all subs for one filter, then subtracts the sky background. Null if the filter has no subs.</summary>
+        /// <summary>
+        /// Stacks every filter that has subs and hands the set to ColourComposite, which is where the
+        /// colour is decided. Replaces ComposeLRGB's channel-per-primary assignment -- see
+        /// ColourComposite for why that was wrong and what it does instead.
+        /// </summary>
+        public Color[] Compose(ColourCompositeMode mode, bool align, bool lucky,
+                               VisualTelescopeSpec spec, out string report)
+        {
+            report = null;
+            if (!HasAnySubs)
+            {
+                report = "No subs captured yet -- capture at least one series first.";
+                return null;
+            }
+
+            var channels = new Dictionary<CameraFilter, float[]>();
+            foreach (CameraFilter f in Enum.GetValues(typeof(CameraFilter)))
+            {
+                float[] stacked = StackFilter(f, align, lucky);
+                if (stacked != null) channels[f] = stacked;
+            }
+
+            return ColourComposite.Compose(mode, SolarSystemCameraTexture.TextureWidth,
+                                           SolarSystemCameraTexture.TextureHeight,
+                                           channels, spec, out report);
+        }
+
         private float[] StackFilter(CameraFilter filter, bool align, bool lucky)
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> allSubs) || allSubs.Count == 0) return null;

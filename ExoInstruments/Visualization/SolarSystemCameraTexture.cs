@@ -100,7 +100,7 @@ namespace ExoInstruments.Visualization
         // driven quantity below from whichever VisualTelescopeSpec is now active. See
         // SetActiveTelescope for the switch itself, and builtSpec/EnsureSceneBuilt for how the
         // render targets and scratch buffers get rebuilt at the new instrument's resolution.
-        private static VisualTelescopeSpec Spec = VisualTelescopeCatalog.Rc20;
+        internal static VisualTelescopeSpec Spec = VisualTelescopeCatalog.Rc20;
 
         /// <summary>The visual telescope this pipeline is currently simulating.</summary>
         public static VisualTelescopeSpec ActiveTelescope => Spec;
@@ -3687,6 +3687,9 @@ namespace ExoInstruments.Visualization
         /// transmission chains (a body's chain omits the star field's cloud term, and vice versa),
         /// and folding it in here would make it impossible to keep those apart.
         /// </summary>
+        internal static SystemResponse SystemResponseForColour(CameraFilter filter)
+            => BuildSystemResponse(filter, 1.0);
+
         private static SystemResponse BuildSystemResponse(CameraFilter filter, double airmass)
         {
             SpectralCurve filterCurve = FilterTransmissionCurve(filter);

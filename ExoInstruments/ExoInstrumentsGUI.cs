@@ -205,7 +205,8 @@ namespace ExoInstruments
         private bool stackAlignSubs = true;
         private bool stackLuckyImaging = false;
         private bool saveDiagnosticFrames = false;
-        private float haBlendStrength = 0.5f;
+        private ColourCompositeMode compositeMode = ColourCompositeMode.TrueColour;
+        private string compositeReport;
         private Texture2D stackedCompositeTexture;
         private Color[] lastComposedPixels;
         private string stackComposeError;
@@ -2253,15 +2254,31 @@ namespace ExoInstruments
             stackLuckyImaging = GUILayout.Toggle(stackLuckyImaging, " Lucky imaging (keep sharpest 30%)", GUILayout.Width(240));
             GUILayout.EndHorizontal();
 
+            // Replaces the old "Ha blend strength" slider, which was an artist's knob with no
+            // physical meaning: it added an arbitrary fraction of the H-alpha frame to the red
+            // channel. Colour now comes from the instrument's own fitted transform (true colour) or
+            // from a named palette convention -- see Visualization/ColourComposite.
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Ha blend strength ({haBlendStrength:F2})", GUILayout.Width(150));
-            haBlendStrength = GUILayout.HorizontalSlider(haBlendStrength, 0f, 1f);
+            GUILayout.Label("Composite:", GUILayout.Width(80));
+            foreach (ColourCompositeMode m in new[] { ColourCompositeMode.TrueColour,
+                                                     ColourCompositeMode.NarrowbandHoo,
+                                                     ColourCompositeMode.NarrowbandSho })
+            {
+                bool selected = compositeMode == m;
+                if (GUILayout.Toggle(selected, " " + CompositeLabel(m), GUILayout.Width(126)) && !selected)
+                {
+                    compositeMode = m;
+                    if (stackedCompositeTexture != null) ComposeAstroStack();
+                }
+            }
             GUILayout.EndHorizontal();
+            if (!string.IsNullOrEmpty(compositeReport))
+                GUILayout.Label(compositeReport, smallCaptionStyle);
 
             GUILayout.Space(4);
             GUILayout.BeginHorizontal();
             GUI.enabled = astroStack.HasAnySubs;
-            if (GUILayout.Button("Compose LRGB", GUILayout.Height(26), GUILayout.Width(150)))
+            if (GUILayout.Button("Compose colour", GUILayout.Height(26), GUILayout.Width(150)))
                 ComposeAstroStack();
             GUI.enabled = stackedCompositeTexture != null;
             if (GUILayout.Button("Save composite", GUILayout.Height(26), GUILayout.Width(150)))
@@ -2290,10 +2307,22 @@ namespace ExoInstruments
             GUILayout.EndVertical();
         }
 
-        /// <summary>Runs AstroImageStack.ComposeLRGB and refreshes (or builds) stackedCompositeTexture from the result.</summary>
+        static string CompositeLabel(ColourCompositeMode m)
+        {
+            switch (m)
+            {
+                case ColourCompositeMode.NarrowbandHoo: return "HOO";
+                case ColourCompositeMode.NarrowbandSho: return "SHO (Hubble)";
+                default: return "True colour";
+            }
+        }
+
+        /// <summary>Runs the colour composite and refreshes (or builds) stackedCompositeTexture from the result.</summary>
         void ComposeAstroStack()
         {
-            Color[] pixels = astroStack.ComposeLRGB(stackAlignSubs, stackLuckyImaging, haBlendStrength, out stackComposeError);
+            Color[] pixels = astroStack.Compose(compositeMode, stackAlignSubs, stackLuckyImaging,
+                                                SolarSystemCameraTexture.Spec, out stackComposeError);
+            compositeReport = stackComposeError;
             if (pixels == null) return;
 
             // Keep the full-precision composite for FITS export -- stackedCompositeTexture

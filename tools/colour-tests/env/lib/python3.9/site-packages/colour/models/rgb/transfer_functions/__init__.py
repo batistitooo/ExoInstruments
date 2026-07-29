@@ -1,0 +1,1280 @@
+from functools import partial
+
+from colour.hints import (
+    Any,
+    ArrayLike,
+    NDArrayFloat,
+    NDArrayInt,
+    LiteralLogEncoding,
+    LiteralLogDecoding,
+    LiteralOETF,
+    LiteralOETFInverse,
+    LiteralEOTF,
+    LiteralEOTFInverse,
+    LiteralCCTFEncoding,
+    LiteralCCTFDecoding,
+    LiteralOOTF,
+    LiteralOOTFInverse,
+    Union,
+)
+from colour.utilities import (
+    CanonicalMapping,
+    filter_kwargs,
+    usage_warning,
+    validate_method,
+)
+
+from .common import CV_range, legal_to_full, full_to_legal
+from .gamma import gamma_function
+from .aces import (
+    log_encoding_ACESproxy,
+    log_decoding_ACESproxy,
+    log_encoding_ACEScc,
+    log_decoding_ACEScc,
+    log_encoding_ACEScct,
+    log_decoding_ACEScct,
+)
+from .apple_log_profile import (
+    log_encoding_AppleLogProfile,
+    log_decoding_AppleLogProfile,
+)
+from .arib_std_b67 import oetf_ARIBSTDB67, oetf_inverse_ARIBSTDB67
+from .arri import (
+    log_encoding_ARRILogC3,
+    log_decoding_ARRILogC3,
+    log_encoding_ARRILogC4,
+    log_decoding_ARRILogC4,
+)
+from .blackmagic_design import (
+    oetf_BlackmagicFilmGeneration5,
+    oetf_inverse_BlackmagicFilmGeneration5,
+)
+from .canon import (
+    CANON_LOG_ENCODING_METHODS,
+    log_encoding_CanonLog,
+    CANON_LOG_DECODING_METHODS,
+    log_decoding_CanonLog,
+    CANON_LOG_2_ENCODING_METHODS,
+    log_encoding_CanonLog2,
+    CANON_LOG_2_DECODING_METHODS,
+    log_decoding_CanonLog2,
+    CANON_LOG_3_ENCODING_METHODS,
+    log_encoding_CanonLog3,
+    CANON_LOG_3_DECODING_METHODS,
+    log_decoding_CanonLog3,
+)
+from .cineon import log_encoding_Cineon, log_decoding_Cineon
+from .davinci_intermediate import (
+    oetf_DaVinciIntermediate,
+    oetf_inverse_DaVinciIntermediate,
+)
+from .dcdm import eotf_inverse_DCDM, eotf_DCDM
+from .dicom_gsdf import eotf_inverse_DICOMGSDF, eotf_DICOMGSDF
+from .dji_d_log import log_encoding_DJIDLog, log_decoding_DJIDLog
+from .exponent import exponent_function_basic, exponent_function_monitor_curve
+from .filmic_pro import log_encoding_FilmicPro6, log_decoding_FilmicPro6
+from .filmlight_t_log import (
+    log_encoding_FilmLightTLog,
+    log_decoding_FilmLightTLog,
+)
+from .gopro import log_encoding_Protune, log_decoding_Protune
+from .itur_bt_601 import oetf_BT601, oetf_inverse_BT601
+from .itur_bt_709 import oetf_BT709, oetf_inverse_BT709
+from .itur_bt_1361 import oetf_BT1361, oetf_inverse_BT1361
+from .itur_bt_1886 import eotf_inverse_BT1886, eotf_BT1886
+from .itur_bt_2020 import oetf_BT2020, oetf_inverse_BT2020
+from .st_2084 import eotf_inverse_ST2084, eotf_ST2084
+from .itur_bt_2100 import (
+    oetf_BT2100_PQ,
+    oetf_inverse_BT2100_PQ,
+    eotf_BT2100_PQ,
+    eotf_inverse_BT2100_PQ,
+    ootf_BT2100_PQ,
+    ootf_inverse_BT2100_PQ,
+    oetf_BT2100_HLG,
+    oetf_inverse_BT2100_HLG,
+    BT2100_HLG_EOTF_METHODS,
+    eotf_BT2100_HLG,
+    BT2100_HLG_EOTF_INVERSE_METHODS,
+    eotf_inverse_BT2100_HLG,
+    BT2100_HLG_OOTF_METHODS,
+    ootf_BT2100_HLG,
+    BT2100_HLG_OOTF_INVERSE_METHODS,
+    ootf_inverse_BT2100_HLG,
+)
+from .leica_l_log import log_encoding_LLog, log_decoding_LLog
+from .linear import linear_function
+from .log import (
+    logarithmic_function_basic,
+    logarithmic_function_quasilog,
+    logarithmic_function_camera,
+    log_encoding_Log2,
+    log_decoding_Log2,
+)
+from .panalog import log_encoding_Panalog, log_decoding_Panalog
+from .panasonic_v_log import log_encoding_VLog, log_decoding_VLog
+from .fujifilm_f_log import (
+    log_encoding_FLog,
+    log_decoding_FLog,
+    log_decoding_FLog2,
+    log_encoding_FLog2,
+)
+from .nikon_n_log import log_encoding_NLog, log_decoding_NLog
+from .pivoted_log import log_encoding_PivotedLog, log_decoding_PivotedLog
+from .red import (
+    log_encoding_REDLog,
+    log_decoding_REDLog,
+    log_encoding_REDLogFilm,
+    log_decoding_REDLogFilm,
+    LOG3G10_ENCODING_METHODS,
+    LOG3G10_DECODING_METHODS,
+    log_encoding_Log3G10,
+    log_decoding_Log3G10,
+    log_encoding_Log3G12,
+    log_decoding_Log3G12,
+)
+from .rimm_romm_rgb import (
+    cctf_encoding_ROMMRGB,
+    cctf_decoding_ROMMRGB,
+    cctf_encoding_ProPhotoRGB,
+    cctf_decoding_ProPhotoRGB,
+    cctf_encoding_RIMMRGB,
+    cctf_decoding_RIMMRGB,
+    log_encoding_ERIMMRGB,
+    log_decoding_ERIMMRGB,
+)
+from .smpte_240m import oetf_SMPTE240M, eotf_SMPTE240M
+from .sony import (
+    log_encoding_SLog,
+    log_decoding_SLog,
+    log_encoding_SLog2,
+    log_decoding_SLog2,
+    log_encoding_SLog3,
+    log_decoding_SLog3,
+)
+from .srgb import eotf_inverse_sRGB, eotf_sRGB
+from .viper_log import log_encoding_ViperLog, log_decoding_ViperLog
+from .itut_h_273 import (
+    oetf_H273_Log,
+    oetf_inverse_H273_Log,
+    oetf_H273_LogSqrt,
+    oetf_inverse_H273_LogSqrt,
+    oetf_H273_IEC61966_2,
+    oetf_inverse_H273_IEC61966_2,
+    eotf_inverse_H273_ST428_1,
+    eotf_H273_ST428_1,
+)
+
+__all__ = [
+    "CV_range",
+    "legal_to_full",
+    "full_to_legal",
+]
+__all__ += [
+    "gamma_function",
+]
+__all__ += [
+    "log_encoding_ACESproxy",
+    "log_decoding_ACESproxy",
+    "log_encoding_ACEScc",
+    "log_decoding_ACEScc",
+    "log_encoding_ACEScct",
+    "log_decoding_ACEScct",
+]
+__all__ += ["log_encoding_AppleLogProfile", "log_decoding_AppleLogProfile"]
+__all__ += [
+    "oetf_ARIBSTDB67",
+    "oetf_inverse_ARIBSTDB67",
+]
+__all__ += [
+    "log_encoding_ARRILogC3",
+    "log_decoding_ARRILogC3",
+    "log_encoding_ARRILogC4",
+    "log_decoding_ARRILogC4",
+]
+__all__ += [
+    "oetf_BlackmagicFilmGeneration5",
+    "oetf_inverse_BlackmagicFilmGeneration5",
+]
+__all__ += [
+    "CANON_LOG_ENCODING_METHODS",
+    "log_encoding_CanonLog",
+    "CANON_LOG_DECODING_METHODS",
+    "log_decoding_CanonLog",
+    "CANON_LOG_2_ENCODING_METHODS",
+    "log_encoding_CanonLog2",
+    "CANON_LOG_2_DECODING_METHODS",
+    "log_decoding_CanonLog2",
+    "CANON_LOG_3_ENCODING_METHODS",
+    "log_encoding_CanonLog3",
+    "CANON_LOG_3_DECODING_METHODS",
+    "log_decoding_CanonLog3",
+]
+__all__ += [
+    "log_encoding_Cineon",
+    "log_decoding_Cineon",
+]
+__all__ += [
+    "oetf_DaVinciIntermediate",
+    "oetf_inverse_DaVinciIntermediate",
+]
+__all__ += [
+    "eotf_inverse_DCDM",
+    "eotf_DCDM",
+]
+__all__ += [
+    "eotf_inverse_DICOMGSDF",
+    "eotf_DICOMGSDF",
+]
+__all__ += [
+    "log_encoding_DJIDLog",
+    "log_decoding_DJIDLog",
+]
+__all__ += [
+    "exponent_function_basic",
+    "exponent_function_monitor_curve",
+]
+__all__ += [
+    "log_encoding_FilmicPro6",
+    "log_decoding_FilmicPro6",
+]
+__all__ += [
+    "log_encoding_FilmLightTLog",
+    "log_decoding_FilmLightTLog",
+]
+__all__ += [
+    "log_encoding_Protune",
+    "log_decoding_Protune",
+]
+__all__ += [
+    "oetf_BT601",
+    "oetf_inverse_BT601",
+]
+__all__ += [
+    "oetf_BT709",
+    "oetf_inverse_BT709",
+]
+__all__ += [
+    "oetf_BT1361",
+    "oetf_inverse_BT1361",
+]
+__all__ += [
+    "eotf_inverse_BT1886",
+    "eotf_BT1886",
+]
+__all__ += [
+    "oetf_BT2020",
+    "oetf_inverse_BT2020",
+]
+__all__ += [
+    "eotf_inverse_ST2084",
+    "eotf_ST2084",
+]
+__all__ += [
+    "oetf_BT2100_PQ",
+    "oetf_inverse_BT2100_PQ",
+    "eotf_BT2100_PQ",
+    "eotf_inverse_BT2100_PQ",
+    "ootf_BT2100_PQ",
+    "ootf_inverse_BT2100_PQ",
+    "oetf_BT2100_HLG",
+    "oetf_inverse_BT2100_HLG",
+    "BT2100_HLG_EOTF_METHODS",
+    "eotf_BT2100_HLG",
+    "BT2100_HLG_EOTF_INVERSE_METHODS",
+    "eotf_inverse_BT2100_HLG",
+    "BT2100_HLG_OOTF_METHODS",
+    "ootf_BT2100_HLG",
+    "BT2100_HLG_OOTF_INVERSE_METHODS",
+    "ootf_inverse_BT2100_HLG",
+]
+__all__ += [
+    "log_encoding_LLog",
+    "log_decoding_LLog",
+]
+__all__ += [
+    "linear_function",
+]
+__all__ += [
+    "logarithmic_function_basic",
+    "logarithmic_function_quasilog",
+    "logarithmic_function_camera",
+    "log_encoding_Log2",
+    "log_decoding_Log2",
+]
+__all__ += [
+    "log_encoding_Panalog",
+    "log_decoding_Panalog",
+]
+__all__ += [
+    "log_encoding_VLog",
+    "log_decoding_VLog",
+]
+__all__ += [
+    "log_encoding_FLog",
+    "log_decoding_FLog",
+    "log_encoding_FLog2",
+    "log_decoding_FLog2",
+]
+__all__ += [
+    "log_encoding_NLog",
+    "log_decoding_NLog",
+]
+__all__ += [
+    "log_encoding_PivotedLog",
+    "log_decoding_PivotedLog",
+]
+__all__ += [
+    "log_encoding_REDLog",
+    "log_decoding_REDLog",
+    "log_encoding_REDLogFilm",
+    "log_decoding_REDLogFilm",
+    "LOG3G10_ENCODING_METHODS",
+    "LOG3G10_DECODING_METHODS",
+    "log_encoding_Log3G10",
+    "log_decoding_Log3G10",
+    "log_encoding_Log3G12",
+    "log_decoding_Log3G12",
+]
+__all__ += [
+    "cctf_encoding_ROMMRGB",
+    "cctf_decoding_ROMMRGB",
+    "cctf_encoding_ProPhotoRGB",
+    "cctf_decoding_ProPhotoRGB",
+    "cctf_encoding_RIMMRGB",
+    "cctf_decoding_RIMMRGB",
+    "log_encoding_ERIMMRGB",
+    "log_decoding_ERIMMRGB",
+]
+__all__ += [
+    "oetf_SMPTE240M",
+    "eotf_SMPTE240M",
+]
+__all__ += [
+    "log_encoding_SLog",
+    "log_decoding_SLog",
+    "log_encoding_SLog2",
+    "log_decoding_SLog2",
+    "log_encoding_SLog3",
+    "log_decoding_SLog3",
+]
+__all__ += [
+    "eotf_inverse_sRGB",
+    "eotf_sRGB",
+]
+__all__ += [
+    "log_encoding_ViperLog",
+    "log_decoding_ViperLog",
+]
+__all__ += [
+    "oetf_H273_Log",
+    "oetf_inverse_H273_Log",
+    "oetf_H273_LogSqrt",
+    "oetf_inverse_H273_LogSqrt",
+    "oetf_H273_IEC61966_2",
+    "oetf_inverse_H273_IEC61966_2",
+    "eotf_inverse_H273_ST428_1",
+    "eotf_H273_ST428_1",
+]
+
+LOG_ENCODINGS: CanonicalMapping = CanonicalMapping(
+    {
+        "ACEScc": log_encoding_ACEScc,
+        "ACEScct": log_encoding_ACEScct,
+        "ACESproxy": log_encoding_ACESproxy,
+        "Apple Log Profile": log_encoding_AppleLogProfile,
+        "ARRI LogC3": log_encoding_ARRILogC3,
+        "ARRI LogC4": log_encoding_ARRILogC4,
+        "Canon Log 2": log_encoding_CanonLog2,
+        "Canon Log 3": log_encoding_CanonLog3,
+        "Canon Log": log_encoding_CanonLog,
+        "Cineon": log_encoding_Cineon,
+        "D-Log": log_encoding_DJIDLog,
+        "ERIMM RGB": log_encoding_ERIMMRGB,
+        "F-Log": log_encoding_FLog,
+        "F-Log2": log_encoding_FLog2,
+        "Filmic Pro 6": log_encoding_FilmicPro6,
+        "L-Log": log_encoding_LLog,
+        "Log2": log_encoding_Log2,
+        "Log3G10": log_encoding_Log3G10,
+        "Log3G12": log_encoding_Log3G12,
+        "N-Log": log_encoding_NLog,
+        "PLog": log_encoding_PivotedLog,
+        "Panalog": log_encoding_Panalog,
+        "Protune": log_encoding_Protune,
+        "REDLog": log_encoding_REDLog,
+        "REDLogFilm": log_encoding_REDLogFilm,
+        "S-Log": log_encoding_SLog,
+        "S-Log2": log_encoding_SLog2,
+        "S-Log3": log_encoding_SLog3,
+        "T-Log": log_encoding_FilmLightTLog,
+        "V-Log": log_encoding_VLog,
+        "ViperLog": log_encoding_ViperLog,
+    }
+)
+LOG_ENCODINGS.__doc__ = """
+Supported *log* encoding functions.
+"""
+
+
+def log_encoding(
+    value: ArrayLike,
+    function: Union[LiteralLogEncoding, str] = "Cineon",
+    **kwargs: Any
+) -> Union[NDArrayFloat, NDArrayInt]:
+    """
+    Encode *scene-referred* exposure values to :math:`R'G'B'` video component
+    signal value using given *log* encoding function.
+
+    Parameters
+    ----------
+    value
+        *Scene-referred* exposure values.
+    function
+        *Log* encoding function.
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.log_encoding_ACEScc`,
+        :func:`colour.models.log_encoding_ACEScct`,
+        :func:`colour.models.log_encoding_ACESproxy`,
+        :func:`colour.models.log_encoding_AppleLogProfile`,
+        :func:`colour.models.log_encoding_ARRILogC3`,
+        :func:`colour.models.log_encoding_ARRILogC4`,
+        :func:`colour.models.log_encoding_CanonLog2`,
+        :func:`colour.models.log_encoding_CanonLog3`,
+        :func:`colour.models.log_encoding_CanonLog`,
+        :func:`colour.models.log_encoding_Cineon`,
+        :func:`colour.models.log_encoding_DJIDLog`,
+        :func:`colour.models.log_encoding_ERIMMRGB`,
+        :func:`colour.models.log_encoding_FLog`,
+        :func:`colour.models.log_encoding_FLog2`,
+        :func:`colour.models.log_encoding_FilmicPro6`,
+        :func:`colour.models.log_encoding_LLog`,
+        :func:`colour.models.log_encoding_Log2`,
+        :func:`colour.models.log_encoding_Log3G10`,
+        :func:`colour.models.log_encoding_Log3G12`,
+        :func:`colour.models.log_encoding_NLog`,
+        :func:`colour.models.log_encoding_PivotedLog`,
+        :func:`colour.models.log_encoding_Panalog`,
+        :func:`colour.models.log_encoding_Protune`,
+        :func:`colour.models.log_encoding_REDLog`,
+        :func:`colour.models.log_encoding_REDLogFilm`,
+        :func:`colour.models.log_encoding_SLog`,
+        :func:`colour.models.log_encoding_SLog2`,
+        :func:`colour.models.log_encoding_SLog3`,
+        :func:`colour.models.log_encoding_FilmLightTLog`,
+        :func:`colour.models.log_encoding_VLog`,
+        :func:`colour.models.log_encoding_ViperLog`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        *Log* values.
+
+    Examples
+    --------
+    >>> log_encoding(0.18)  # doctest: +ELLIPSIS
+    0.4573196...
+    >>> log_encoding(0.18, function="ACEScc")  # doctest: +ELLIPSIS
+    0.4135884...
+    >>> log_encoding(0.18, function="PLog", log_reference=400)
+    ... # doctest: +ELLIPSIS
+    0.3910068...
+    >>> log_encoding(0.18, function="S-Log")  # doctest: +ELLIPSIS
+    0.3849708...
+    """
+
+    function = validate_method(
+        function,
+        tuple(LOG_ENCODINGS),
+        '"{0}" "log" encoding function is invalid, it must be one of {1}!',
+    )
+
+    callable_ = LOG_ENCODINGS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+LOG_DECODINGS: CanonicalMapping = CanonicalMapping(
+    {
+        "ACEScc": log_decoding_ACEScc,
+        "ACEScct": log_decoding_ACEScct,
+        "ACESproxy": log_decoding_ACESproxy,
+        "Apple Log Profile": log_decoding_AppleLogProfile,
+        "ARRI LogC3": log_decoding_ARRILogC3,
+        "ARRI LogC4": log_decoding_ARRILogC4,
+        "Canon Log 2": log_decoding_CanonLog2,
+        "Canon Log 3": log_decoding_CanonLog3,
+        "Canon Log": log_decoding_CanonLog,
+        "Cineon": log_decoding_Cineon,
+        "D-Log": log_decoding_DJIDLog,
+        "ERIMM RGB": log_decoding_ERIMMRGB,
+        "F-Log": log_decoding_FLog,
+        "F-Log2": log_decoding_FLog2,
+        "Filmic Pro 6": log_decoding_FilmicPro6,
+        "L-Log": log_decoding_LLog,
+        "Log2": log_decoding_Log2,
+        "Log3G10": log_decoding_Log3G10,
+        "Log3G12": log_decoding_Log3G12,
+        "N-Log": log_decoding_NLog,
+        "PLog": log_decoding_PivotedLog,
+        "Panalog": log_decoding_Panalog,
+        "Protune": log_decoding_Protune,
+        "REDLog": log_decoding_REDLog,
+        "REDLogFilm": log_decoding_REDLogFilm,
+        "S-Log": log_decoding_SLog,
+        "S-Log2": log_decoding_SLog2,
+        "S-Log3": log_decoding_SLog3,
+        "T-Log": log_decoding_FilmLightTLog,
+        "V-Log": log_decoding_VLog,
+        "ViperLog": log_decoding_ViperLog,
+    }
+)
+LOG_DECODINGS.__doc__ = """
+Supported *log* decoding functions.
+"""
+
+
+def log_decoding(
+    value: Union[ArrayLike, ArrayLike],
+    function: Union[LiteralLogDecoding, str] = "Cineon",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Decode :math:`R'G'B'` video component signal value to *scene-referred*
+    exposure values using given *log* decoding function.
+
+    Parameters
+    ----------
+    value
+        *Log* values.
+    function
+        *Log* decoding function.
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.log_decoding_ACEScc`,
+        :func:`colour.models.log_decoding_ACEScct`,
+        :func:`colour.models.log_decoding_ACESproxy`,
+        :func:`colour.models.log_decoding_AppleLogProfile`,
+        :func:`colour.models.log_decoding_ARRILogC3`,
+        :func:`colour.models.log_decoding_ARRILogC4`,
+        :func:`colour.models.log_decoding_CanonLog2`,
+        :func:`colour.models.log_decoding_CanonLog3`,
+        :func:`colour.models.log_decoding_CanonLog`,
+        :func:`colour.models.log_decoding_Cineon`,
+        :func:`colour.models.log_decoding_DJIDLog`,
+        :func:`colour.models.log_decoding_ERIMMRGB`,
+        :func:`colour.models.log_decoding_FLog`,
+        :func:`colour.models.log_decoding_FLog2`,
+        :func:`colour.models.log_decoding_FilmicPro6`,
+        :func:`colour.models.log_decoding_LLog`,
+        :func:`colour.models.log_decoding_Log2`,
+        :func:`colour.models.log_decoding_Log3G10`,
+        :func:`colour.models.log_decoding_Log3G12`,
+        :func:`colour.models.log_decoding_NLog`,
+        :func:`colour.models.log_decoding_PivotedLog`,
+        :func:`colour.models.log_decoding_Panalog`,
+        :func:`colour.models.log_decoding_Protune`,
+        :func:`colour.models.log_decoding_REDLog`,
+        :func:`colour.models.log_decoding_REDLogFilm`,
+        :func:`colour.models.log_decoding_SLog`,
+        :func:`colour.models.log_decoding_SLog2`,
+        :func:`colour.models.log_decoding_SLog3`,
+        :func:`colour.models.log_decoding_FilmLightTLog`,
+        :func:`colour.models.log_decoding_VLog`,
+        :func:`colour.models.log_decoding_ViperLog`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        *Scene-referred* exposure values.
+
+    Examples
+    --------
+    >>> log_decoding(0.457319613085418)  # doctest: +ELLIPSIS
+    0.1...
+    >>> log_decoding(0.413588402492442, function="ACEScc")
+    ... # doctest: +ELLIPSIS
+    0.1...
+    >>> log_decoding(0.391006842619746, function="PLog", log_reference=400)
+    ... # doctest: +ELLIPSIS
+    0.1...
+    >>> log_decoding(0.376512722254600, function="S-Log")
+    ... # doctest: +ELLIPSIS
+    0.1...
+    """
+
+    function = validate_method(
+        function,
+        tuple(LOG_DECODINGS),
+        '"{0}" "log" decoding function is invalid, it must be one of {1}!',
+    )
+
+    callable_ = LOG_DECODINGS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+__all__ += [
+    "LOG_ENCODINGS",
+    "LOG_DECODINGS",
+]
+__all__ += [
+    "log_encoding",
+    "log_decoding",
+]
+
+OETFS: CanonicalMapping = CanonicalMapping(
+    {
+        "ARIB STD-B67": oetf_ARIBSTDB67,
+        "Blackmagic Film Generation 5": oetf_BlackmagicFilmGeneration5,
+        "DaVinci Intermediate": oetf_DaVinciIntermediate,
+        "ITU-R BT.2020": oetf_BT2020,
+        "ITU-R BT.2100 HLG": oetf_BT2100_HLG,
+        "ITU-R BT.2100 PQ": oetf_BT2100_PQ,
+        "ITU-R BT.601": oetf_BT601,
+        "ITU-R BT.709": oetf_BT709,
+        "ITU-T H.273 Log": oetf_H273_Log,
+        "ITU-T H.273 Log Sqrt": oetf_H273_LogSqrt,
+        "ITU-T H.273 IEC 61966-2": oetf_H273_IEC61966_2,
+        "SMPTE 240M": oetf_SMPTE240M,
+    }
+)
+OETFS.__doc__ = """
+Supported opto-electrical transfer functions (OETFs / OECFs).
+"""
+
+
+def oetf(
+    value: ArrayLike,
+    function: Union[LiteralOETF, str] = "ITU-R BT.709",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Encode estimated tristimulus values in a scene to :math:`R'G'B'` video
+    component signal value using given opto-electronic transfer function
+    (OETF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Opto-electronic transfer function (OETF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.oetf_ARIBSTDB67`,
+        :func:`colour.models.oetf_BlackmagicFilmGeneration5`,
+        :func:`colour.models.oetf_DaVinciIntermediate`,
+        :func:`colour.models.oetf_BT2020`,
+        :func:`colour.models.oetf_BT2100_HLG`,
+        :func:`colour.models.oetf_BT2100_PQ`,
+        :func:`colour.models.oetf_BT601`,
+        :func:`colour.models.oetf_BT709`,
+        :func:`colour.models.oetf_SMPTE240M`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        :math:`R'G'B'` video component signal value.
+
+    Examples
+    --------
+    >>> oetf(0.18)  # doctest: +ELLIPSIS
+    0.4090077...
+    >>> oetf(0.18, function="ITU-R BT.601")  # doctest: +ELLIPSIS
+    0.4090077...
+    """
+
+    function = validate_method(
+        function,
+        tuple(OETFS),
+        '"{0}" "OETF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = OETFS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+OETF_INVERSES: CanonicalMapping = CanonicalMapping(
+    {
+        "ARIB STD-B67": oetf_inverse_ARIBSTDB67,
+        "Blackmagic Film Generation 5": oetf_inverse_BlackmagicFilmGeneration5,
+        "DaVinci Intermediate": oetf_inverse_DaVinciIntermediate,
+        "ITU-R BT.2020": oetf_inverse_BT2020,
+        "ITU-R BT.2100 HLG": oetf_inverse_BT2100_HLG,
+        "ITU-R BT.2100 PQ": oetf_inverse_BT2100_PQ,
+        "ITU-R BT.601": oetf_inverse_BT601,
+        "ITU-R BT.709": oetf_inverse_BT709,
+        "ITU-T H.273 Log": oetf_inverse_H273_Log,
+        "ITU-T H.273 Log Sqrt": oetf_inverse_H273_LogSqrt,
+        "ITU-T H.273 IEC 61966-2": oetf_inverse_H273_IEC61966_2,
+    }
+)
+OETF_INVERSES.__doc__ = """
+Supported inverse opto-electrical transfer functions (OETFs / OECFs).
+"""
+
+
+def oetf_inverse(
+    value: ArrayLike,
+    function: Union[LiteralOETFInverse, str] = "ITU-R BT.709",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Decode :math:`R'G'B'` video component signal value to tristimulus values
+    at the display using given inverse opto-electronic transfer function
+    (OETF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Inverse opto-electronic transfer function (OETF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.oetf_inverse_ARIBSTDB67`,
+        :func:`colour.models.oetf_inverse_BlackmagicFilmGeneration5`,
+        :func:`colour.models.oetf_inverse_DaVinciIntermediate`,
+        :func:`colour.models.oetf_inverse_BT2020`,
+        :func:`colour.models.oetf_inverse_BT2100_HLG`,
+        :func:`colour.models.oetf_inverse_BT2100_PQ`,
+        :func:`colour.models.oetf_inverse_BT601`,
+        :func:`colour.models.oetf_inverse_BT709`},
+        See the documentation of the previously listed definitions.
+
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Tristimulus values at the display.
+
+    Examples
+    --------
+    >>> oetf_inverse(0.409007728864150)  # doctest: +ELLIPSIS
+    0.1...
+    >>> oetf_inverse(  # doctest: +ELLIPSIS
+    ...     0.409007728864150, function="ITU-R BT.601"
+    ... )
+    0.1...
+    """
+
+    function = validate_method(
+        function,
+        tuple(OETF_INVERSES),
+        '"{0}" inverse "OETF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = OETF_INVERSES[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+EOTFS: CanonicalMapping = CanonicalMapping(
+    {
+        "DCDM": eotf_DCDM,
+        "DICOM GSDF": eotf_DICOMGSDF,
+        "ITU-R BT.1886": eotf_BT1886,
+        "ITU-R BT.2100 HLG": eotf_BT2100_HLG,
+        "ITU-R BT.2100 PQ": eotf_BT2100_PQ,
+        "ITU-T H.273 ST.428-1": eotf_H273_ST428_1,
+        "SMPTE 240M": eotf_SMPTE240M,
+        "ST 2084": eotf_ST2084,
+        "sRGB": eotf_sRGB,
+    }
+)
+EOTFS.__doc__ = """
+Supported electro-optical transfer functions (EOTFs / EOCFs).
+"""
+
+
+def eotf(
+    value: Union[ArrayLike, ArrayLike],
+    function: Union[LiteralEOTF, str] = "ITU-R BT.1886",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Decode :math:`R'G'B'` video component signal value to tristimulus values
+    at the display using given electro-optical transfer function (EOTF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Electro-optical transfer function (EOTF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.eotf_DCDM`,
+        :func:`colour.models.eotf_DICOMGSDF`,
+        :func:`colour.models.eotf_BT1886`,
+        :func:`colour.models.eotf_BT2100_HLG`,
+        :func:`colour.models.eotf_BT2100_PQ`,
+        :func:`colour.models.eotf_SMPTE240M`,
+        :func:`colour.models.eotf_ST2084`,
+        :func:`colour.models.eotf_sRGB`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Tristimulus values at the display.
+
+    Examples
+    --------
+    >>> eotf(0.461356129500442)  # doctest: +ELLIPSIS
+    0.1...
+    >>> eotf(0.182011532850008, function="ST 2084", L_p=1000)
+    ... # doctest: +ELLIPSIS
+    0.1...
+    """
+
+    function = validate_method(
+        function,
+        tuple(EOTFS),
+        '"{0}" "EOTF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = EOTFS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+EOTF_INVERSES: CanonicalMapping = CanonicalMapping(
+    {
+        "DCDM": eotf_inverse_DCDM,
+        "DICOM GSDF": eotf_inverse_DICOMGSDF,
+        "ITU-R BT.1886": eotf_inverse_BT1886,
+        "ITU-R BT.2100 HLG": eotf_inverse_BT2100_HLG,
+        "ITU-R BT.2100 PQ": eotf_inverse_BT2100_PQ,
+        "ITU-T H.273 ST.428-1": eotf_inverse_H273_ST428_1,
+        "ST 2084": eotf_inverse_ST2084,
+        "sRGB": eotf_inverse_sRGB,
+    }
+)
+EOTF_INVERSES.__doc__ = """
+Supported inverse electro-optical transfer functions (EOTFs / EOCFs).
+"""
+
+
+def eotf_inverse(
+    value: ArrayLike,
+    function: Union[LiteralEOTFInverse, str] = "ITU-R BT.1886",
+    **kwargs
+) -> Union[NDArrayFloat, NDArrayInt]:
+    """
+    Encode estimated tristimulus values in a scene to :math:`R'G'B'` video
+    component signal value using given inverse electro-optical transfer
+    function (EOTF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Inverse electro-optical transfer function (EOTF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.eotf_inverse_DCDM`,
+        :func:`colour.models.eotf_inverse_DICOMGSDF`,
+        :func:`colour.models.eotf_inverse_BT1886`,
+        :func:`colour.models.eotf_inverse_BT2100_HLG`,
+        :func:`colour.models.eotf_inverse_BT2100_PQ`,
+        :func:`colour.models.eotf_inverse_ST2084`,
+        :func:`colour.models.eotf_inverse_sRGB`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        :math:`R'G'B'` video component signal value.
+
+    Examples
+    --------
+    >>> eotf_inverse(0.11699185725296059)  # doctest: +ELLIPSIS
+    0.4090077...
+    >>> eotf_inverse(  # doctest: +ELLIPSIS
+    ...     0.11699185725296059, function="ITU-R BT.1886"
+    ... )
+    0.4090077...
+    """
+
+    function = validate_method(
+        function,
+        tuple(EOTF_INVERSES),
+        '"{0}" inverse "EOTF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = EOTF_INVERSES[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+__all__ += [
+    "OETFS",
+    "OETF_INVERSES",
+    "EOTFS",
+    "EOTF_INVERSES",
+]
+__all__ += [
+    "oetf",
+    "oetf_inverse",
+    "eotf",
+    "eotf_inverse",
+]
+
+CCTF_ENCODINGS: CanonicalMapping = CanonicalMapping(
+    {
+        "Gamma 2.2": partial(gamma_function, exponent=1 / 2.2),
+        "Gamma 2.4": partial(gamma_function, exponent=1 / 2.4),
+        "Gamma 2.6": partial(gamma_function, exponent=1 / 2.6),
+        "ProPhoto RGB": cctf_encoding_ProPhotoRGB,
+        "RIMM RGB": cctf_encoding_RIMMRGB,
+        "ROMM RGB": cctf_encoding_ROMMRGB,
+    }
+)
+CCTF_ENCODINGS.update(LOG_ENCODINGS)
+CCTF_ENCODINGS.update(OETFS)
+CCTF_ENCODINGS.update(EOTF_INVERSES)
+CCTF_ENCODINGS.__doc__ = """
+Supported encoding colour component transfer functions (Encoding CCTFs), a
+collection of the functions defined by :attr:`colour.LOG_ENCODINGS`,
+:attr:`colour.OETFS`, :attr:`colour.EOTF_INVERSES` attributes, the
+:func:`colour.models.cctf_encoding_ProPhotoRGB`,
+:func:`colour.models.cctf_encoding_RIMMRGB`,
+:func:`colour.models.cctf_encoding_ROMMRGB` definitions and 3 gamma encoding
+functions (1 / 2.2, 1 / 2.4, 1 / 2.6).
+
+Warnings
+--------
+For *ITU-R BT.2100*, only the inverse electro-optical transfer functions
+(EOTFs / EOCFs) are exposed by this attribute, See the
+:attr:`colour.OETFS` attribute for the opto-electronic transfer functions
+(OETF).
+"""
+
+
+def cctf_encoding(
+    value: ArrayLike,
+    function: Union[LiteralCCTFEncoding, str] = "sRGB",
+    **kwargs: Any
+) -> Union[NDArrayFloat, NDArrayInt]:
+    """
+    Encode linear :math:`RGB` values to non-linear :math:`R'G'B'` values using
+    given encoding colour component transfer function (Encoding CCTF).
+
+    Parameters
+    ----------
+    value
+        Linear :math:`RGB` values.
+    function
+        {:attr:`colour.CCTF_ENCODINGS`},
+        Encoding colour component transfer function.
+
+    Other Parameters
+    ----------------
+    kwargs
+        Keywords arguments for the relevant encoding *CCTF* of the
+        :attr:`colour.CCTF_ENCODINGS` attribute collection.
+
+    Warnings
+    --------
+    For *ITU-R BT.2100*, only the inverse electro-optical transfer functions
+    (EOTFs / EOCFs) are exposed by this definition, See the
+    :func:`colour.oetf` definition for the opto-electronic transfer functions
+    (OETF).
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Non-linear :math:`R'G'B'` values.
+
+    Examples
+    --------
+    >>> cctf_encoding(0.18, function="PLog", log_reference=400)
+    ... # doctest: +ELLIPSIS
+    0.3910068...
+    >>> cctf_encoding(0.18, function="ST 2084", L_p=1000)
+    ... # doctest: +ELLIPSIS
+    0.1820115...
+    >>> cctf_encoding(  # doctest: +ELLIPSIS
+    ...     0.11699185725296059, function="ITU-R BT.1886"
+    ... )
+    0.4090077...
+    """
+
+    function = validate_method(
+        function,
+        tuple(CCTF_ENCODINGS),
+        '"{0}" encoding "CCTF" is invalid, it must be one of {1}!',
+    )
+
+    if "itu-r bt.2100" in function:
+        usage_warning(
+            'With the "ITU-R BT.2100" method, only the inverse '
+            "electro-optical transfer functions (EOTFs / EOCFs) are exposed "
+            'by this definition, See the "colour.oetf" definition '
+            "for the opto-electronic transfer functions (OETF)."
+        )
+
+    callable_ = CCTF_ENCODINGS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+CCTF_DECODINGS: CanonicalMapping = CanonicalMapping(
+    {
+        "Gamma 2.2": partial(gamma_function, exponent=2.2),
+        "Gamma 2.4": partial(gamma_function, exponent=2.4),
+        "Gamma 2.6": partial(gamma_function, exponent=2.6),
+        "ProPhoto RGB": cctf_decoding_ProPhotoRGB,
+        "RIMM RGB": cctf_decoding_RIMMRGB,
+        "ROMM RGB": cctf_decoding_ROMMRGB,
+    }
+)
+CCTF_DECODINGS.update(LOG_DECODINGS)
+CCTF_DECODINGS.update(OETF_INVERSES)
+CCTF_DECODINGS.update(EOTFS)
+CCTF_DECODINGS.__doc__ = """
+Supported decoding colour component transfer functions (Decoding CCTFs), a
+collection of the functions defined by :attr:`colour.LOG_DECODINGS`,
+:attr:`colour.EOTFS`, :attr:`colour.OETF_INVERSES` attributes, the
+:func:`colour.models.cctf_decoding_ProPhotoRGB`,
+:func:`colour.models.cctf_decoding_RIMMRGB`,
+:func:`colour.models.cctf_decoding_ROMMRGB` definitions and 3 gamma decoding
+functions (2.2, 2.4, 2.6).
+
+Warnings
+--------
+For *ITU-R BT.2100*, only the electro-optical transfer functions
+(EOTFs / EOCFs) are exposed by this attribute, See the
+:attr:`colour.OETF_INVERSES` attribute for the inverse opto-electronic
+transfer functions (OETF).
+
+Notes
+-----
+-   The order by which this attribute is defined and updated is critically
+    important to ensure that *ITU-R BT.2100* definitions are reciprocal.
+"""
+
+
+def cctf_decoding(
+    value: Union[ArrayLike, ArrayLike],
+    function: Union[LiteralCCTFDecoding, str] = "sRGB",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Decode non-linear :math:`R'G'B'` values to linear :math:`RGB` values using
+    given decoding colour component transfer function (Decoding CCTF).
+
+    Parameters
+    ----------
+    value
+        Non-linear :math:`R'G'B'` values.
+    function
+        {:attr:`colour.CCTF_DECODINGS`},
+        Decoding colour component transfer function.
+
+    Other Parameters
+    ----------------
+    kwargs
+        Keywords arguments for the relevant decoding *CCTF* of the
+        :attr:`colour.CCTF_DECODINGS` attribute collection.
+
+    Warnings
+    --------
+    For *ITU-R BT.2100*, only the electro-optical transfer functions
+    (EOTFs / EOCFs) are exposed by this definition, See the
+    :func:`colour.oetf_inverse` definition for the inverse opto-electronic
+    transfer functions (OETF).
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Linear :math:`RGB` values.
+
+    Examples
+    --------
+    >>> cctf_decoding(0.391006842619746, function="PLog", log_reference=400)
+    ... # doctest: +ELLIPSIS
+    0.1...
+    >>> cctf_decoding(0.182011532850008, function="ST 2084", L_p=1000)
+    ... # doctest: +ELLIPSIS
+    0.1...
+    >>> cctf_decoding(  # doctest: +ELLIPSIS
+    ...     0.461356129500442, function="ITU-R BT.1886"
+    ... )
+    0.1...
+    """
+
+    function = validate_method(
+        function,
+        tuple(CCTF_DECODINGS),
+        '"{0}" decoding "CCTF" is invalid, it must be one of {1}!',
+    )
+
+    if "itu-r bt.2100" in function:
+        usage_warning(
+            'With the "ITU-R BT.2100" method, only the electro-optical '
+            "transfer functions (EOTFs / EOCFs) are exposed by this "
+            'definition, See the "colour.oetf_inverse" definition '
+            "for the inverse opto-electronic transfer functions (OETF)."
+        )
+
+    callable_ = CCTF_DECODINGS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+__all__ += [
+    "CCTF_ENCODINGS",
+    "CCTF_DECODINGS",
+]
+__all__ += [
+    "cctf_encoding",
+    "cctf_decoding",
+]
+
+OOTFS: CanonicalMapping = CanonicalMapping(
+    {
+        "ITU-R BT.2100 HLG": ootf_BT2100_HLG,
+        "ITU-R BT.2100 PQ": ootf_BT2100_PQ,
+    }
+)
+OOTFS.__doc__ = """
+Supported opto-optical transfer functions (OOTFs / OOCFs).
+"""
+
+
+def ootf(
+    value: ArrayLike,
+    function: Union[LiteralOOTF, str] = "ITU-R BT.2100 PQ",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Map relative scene linear light to display linear light using given
+    opto-optical transfer function (OOTF / OOCF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Opto-optical transfer function (OOTF / OOCF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.ootf_BT2100_HLG`,
+        :func:`colour.models.ootf_BT2100_PQ`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Luminance of a displayed linear component.
+
+    Examples
+    --------
+    >>> ootf(0.1)  # doctest: +ELLIPSIS
+    779.9883608...
+    >>> ootf(0.1, function="ITU-R BT.2100 HLG")  # doctest: +ELLIPSIS
+    63.0957344...
+    """
+
+    function = validate_method(
+        function,
+        tuple(OOTFS),
+        '"{0}" "OOTF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = OOTFS[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+OOTF_INVERSES: CanonicalMapping = CanonicalMapping(
+    {
+        "ITU-R BT.2100 HLG": ootf_inverse_BT2100_HLG,
+        "ITU-R BT.2100 PQ": ootf_inverse_BT2100_PQ,
+    }
+)
+OOTF_INVERSES.__doc__ = """
+Supported inverse opto-optical transfer functions (OOTFs / OOCFs).
+"""
+
+
+def ootf_inverse(
+    value: ArrayLike,
+    function: Union[LiteralOOTFInverse, str] = "ITU-R BT.2100 PQ",
+    **kwargs: Any
+) -> NDArrayFloat:
+    """
+    Map relative display linear light to scene linear light using given
+    inverse opto-optical transfer function (OOTF / OOCF).
+
+    Parameters
+    ----------
+    value
+        Value.
+    function
+        Inverse opto-optical transfer function (OOTF / OOCF).
+
+    Other Parameters
+    ----------------
+    kwargs
+        {:func:`colour.models.ootf_inverse_BT2100_HLG`,
+        :func:`colour.models.ootf_inverse_BT2100_PQ`},
+        See the documentation of the previously listed definitions.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Luminance of scene linear light.
+
+    Examples
+    --------
+    >>> ootf_inverse(779.988360834115840)  # doctest: +ELLIPSIS
+    0.1000000...
+    >>> ootf_inverse(  # doctest: +ELLIPSIS
+    ...     63.095734448019336, function="ITU-R BT.2100 HLG"
+    ... )
+    0.1000000...
+    """
+
+    function = validate_method(
+        function,
+        tuple(OOTF_INVERSES),
+        '"{0}" inverse "OOTF" is invalid, it must be one of {1}!',
+    )
+
+    callable_ = OOTF_INVERSES[function]
+
+    return callable_(value, **filter_kwargs(callable_, **kwargs))
+
+
+__all__ += [
+    "OOTFS",
+    "OOTF_INVERSES",
+]
+__all__ += [
+    "ootf",
+    "ootf_inverse",
+]

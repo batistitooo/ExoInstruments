@@ -59,14 +59,6 @@ namespace ExoInstruments.Core
             /// <summary>Cells the patch holds.</summary>
             public int CellCount => Values != null ? Values.Length : 0;
 
-            /// <summary>
-            /// Last run a lookup landed in. Consecutive frame pixels along a row fall in the same
-            /// ring and usually the same run, so checking this first turns the binary search into a
-            /// single comparison nearly always. Not thread-safe, which is why a caller filling a
-            /// frame takes its own cursor -- see EmissionPatchSet.Cursor.
-            /// </summary>
-            internal int LastRun;
-
             internal bool TryValue(long pixel, ref int cursor, out double rayleighs)
             {
                 rayleighs = double.NaN;

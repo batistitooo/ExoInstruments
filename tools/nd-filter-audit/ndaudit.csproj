@@ -20,6 +20,8 @@
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
     <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
     <Compile Include="$(Core)/AtmosphericNoise.cs" />
