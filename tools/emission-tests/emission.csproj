@@ -18,6 +18,11 @@
     <Compile Include="$(Core)/StellarColor.cs" />
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/EmissionLines.cs" />
+    <Compile Include="$(Core)/HorizontalToGalactic.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+    <Compile Include="$(Core)/GalacticCoordinates.cs" />
+    <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
+    <Compile Include="$(Core)/Pcg32.cs" />
     <Compile Include="$(Core)/ReddenedResponseCache.cs" />
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/Fitzpatrick99Table.cs" />

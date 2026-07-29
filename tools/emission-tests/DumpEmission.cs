@@ -16,7 +16,47 @@ static class DumpEmission
         DumpLines();
         DumpRayleigh();
         DumpNarrowband();
-        Console.WriteLine("written exo_lines.csv, exo_rayleigh.csv, exo_narrowband.csv");
+        DumpRotation();
+        Console.WriteLine("written exo_lines.csv, exo_rayleigh.csv, exo_narrowband.csv, exo_rotation.csv");
+    }
+
+    /// <summary>
+    /// The (north, east, up) to Galactic rotation the emission deposit uses, against the literal
+    /// chain it replaces. One is a matrix multiply, the other is four transforms; they must agree.
+    /// </summary>
+    static void DumpRotation()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("lst_deg,latitude_deg,alt_deg,az_deg,l_matrix,b_matrix,l_chain,b_chain");
+
+        double[] lsts = { 0.0, 73.4, 180.0, 291.7 };
+        double[] latitudes = { -24.6, 0.0, 33.4, 43.9, 89.0 };
+        var rng = new Pcg32(0x60A1AC01UL, 13UL);
+
+        foreach (double lst in lsts)
+        foreach (double lat in latitudes)
+        {
+            var rotation = HorizontalToGalactic.Build(lst, lat);
+            for (int i = 0; i < 200; i++)
+            {
+                double alt = Math.Asin(2.0 * rng.NextDouble() - 1.0) * 180.0 / Math.PI;
+                double az = 360.0 * rng.NextDouble();
+                SkyVector v = SkyVector.FromHorizontal(alt, az);
+
+                rotation.ToGalactic(v, out double lm, out double bm);
+
+                // The literal chain, written out here so the comparison is against a different
+                // route rather than against a refactor of the same one.
+                SkyCoordinates.HorizontalToEquatorial(alt, az, lst, lat,
+                                                      out double ra, out double dec);
+                GalacticCoordinates.EquatorialToGalactic(ra, dec, out double lc, out double bc);
+
+                sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+                    "{0:R},{1:R},{2:R},{3:R},{4:R},{5:R},{6:R},{7:R}",
+                    lst, lat, alt, az, lm, bm, lc, bc));
+            }
+        }
+        File.WriteAllText("exo_rotation.csv", sb.ToString());
     }
 
     static void DumpLines()

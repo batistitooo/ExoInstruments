@@ -65,14 +65,21 @@ and excluded at 3 nm**, which is what a 20.65 Å separation requires. An Hα ima
 the arithmetic of the separation, and it is why separating those two lines needs a filter narrower
 than about 4 nm.
 
+**The per-pixel rotation is exact.** Filling a frame from an all-sky map is the only thing in this
+pipeline that runs per *pixel*, so `HorizontalToGalactic` replaces four transforms with one matrix
+multiply built once per frame. Against the literal chain over 4000 directions at five latitudes and
+four sidereal times: latitude **3.7×10⁻¹³ deg**, longitude 6.0×10⁻¹³ deg.
+
 ## What this does NOT establish
 
-- **No line source exists yet.** The photometry is here; nothing in the game emits a line. A nebula
-  needs either a surface-brightness map (the Finkbeiner 2003 Hα composite is the all-sky one, in
-  rayleighs) or a modelled H II region.
-- **No narrowband filter positions in the roster.** `CameraFilter` still carries L/R/G/B/Hα. The
-  comparison above builds its filters directly, which is what let it hold peak transmission fixed;
-  real ones have their own published transmissions.
+- **No line source ships.** `Core/EmissionMap.cs` reads one and `tools/pack_halpha_map.py` builds
+  one from the Finkbeiner (2003) WHAM/VTSS/SHASSA composite, but like every other dataset here
+  nothing is distributed. With no map installed the deposit does nothing.
+- **6 arcmin is the data's limit.** That is 94 pixels across on the RedCat and 1300 on the RC20
+  behind its Barlow, so the map renders real structure in a wide field and a smooth glow at high
+  magnification. No published all-sky Hα map does better.
+- **Hα only.** [S II], [N II] and [O III] have no all-sky survey to read; they exist as filter
+  positions and as photometry, with nothing behind them yet.
 - **Top-hat filters.** No measured narrowband curve is digitised here, so the filters are the
   published FWHM and peak transmission — the same treatment `FilterCurves` replaced for FORS2's
   broadband set, and the same thing that should happen to these.

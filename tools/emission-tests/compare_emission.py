@@ -154,12 +154,32 @@ def narrowband():
           1.0 if (excludes.max() <= 3.0 and admits.min() >= 5.0) else 0.0, 1.0, 0.0, relative=False)
 
 
+def rotation():
+    """The frame-to-Galactic rotation the emission deposit uses, against the chain it replaces."""
+    print("\n5. Horizontal-to-Galactic rotation, against the literal transform chain")
+    print("   One matrix multiply against four transforms. Filling a frame from an all-sky map is")
+    print("   the only thing in this pipeline that runs per PIXEL, so the shortcut has to be exact.")
+    d = load("exo_rotation.csv")
+
+    db = np.abs(d["b_matrix"] - d["b_chain"])
+    dl = np.abs((d["l_matrix"] - d["l_chain"] + 180.0) % 360.0 - 180.0)
+    off_pole = np.abs(d["b_chain"]) < 89.0
+
+    check(f"Galactic latitude over {len(d)} directions", float(db.max()), 0.0, 1e-11, " deg",
+          relative=False)
+    check("Galactic longitude (off the Galactic poles)", float(dl[off_pole].max()), 0.0, 1e-10,
+          " deg", relative=False)
+    notes.append(f"the per-pixel rotation reproduces the four-transform chain to "
+                 f"{max(float(db.max()), float(dl[off_pole].max())):.1e} deg")
+
+
 def main():
     print(__doc__.split("Run:")[0].strip())
     rayleigh()
     photon_energy()
     lines()
     narrowband()
+    rotation()
 
     print("\n" + "-" * 78)
     for n in notes:

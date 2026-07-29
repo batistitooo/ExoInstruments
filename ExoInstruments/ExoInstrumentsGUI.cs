@@ -239,6 +239,7 @@ namespace ExoInstruments
             catalog = LoadCatalog();
             LoadRenderedStarCatalog();
             LoadDustMap();
+            LoadEmissionMap();
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
@@ -338,6 +339,31 @@ namespace ExoInstruments
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the dust map: {e.Message}");
+            }
+        }
+
+        /// <summary>Optional all-sky emission-line map. Same treatment as the dust map: nothing ships, absence is silent.</summary>
+        private void LoadEmissionMap()
+        {
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/HalphaMap.emission";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.Log("[ExoInstruments] No emission map installed, so narrowband frames show "
+                            + "no diffuse gas. Build one with tools/pack_halpha_map.py and place it at " + path);
+                    return;
+                }
+                var map = new EmissionMap();
+                map.Load(path);
+                SolarSystemCameraTexture.EmissionMap = map;
+                Debug.Log($"[ExoInstruments] Emission map: {map.LineName} at nside {map.Nside} "
+                        + $"({map.ResolutionArcmin:F1} arcmin), {map.Source}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the emission map: {e.Message}");
             }
         }
 
@@ -1720,6 +1746,14 @@ namespace ExoInstruments
                     $"Sky {sky}  |  limiting magnitude V {solarSystemCamera.LastLimitingVMag:F1}"
                     + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
                     smallCaptionStyle);
+
+                double emission = solarSystemCamera.LastEmissionRayleighs;
+                if (!double.IsNaN(emission))
+                {
+                    GUILayout.Label(
+                        $"Diffuse line emission in this filter: {emission:F1} R mean over the field "
+                        + $"({SolarSystemCameraTexture.EmissionMap.LineName})", smallCaptionStyle);
+                }
 
                 double fieldEbv = solarSystemCamera.LastFieldReddeningEBv;
                 if (!double.IsNaN(fieldEbv))

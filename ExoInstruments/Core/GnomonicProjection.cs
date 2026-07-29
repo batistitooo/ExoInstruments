@@ -106,6 +106,25 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// The inverse: which direction a pixel looks at. Needed by anything that fills the frame
+        /// FROM the sky rather than placing a source ON it -- a diffuse emission map, where every
+        /// pixel has to ask what lies behind it.
+        ///
+        /// Exact rather than iterative: the forward transform is a division by the boresight
+        /// component, so undoing it is a linear combination of the three axes and a normalisation.
+        /// </summary>
+        public SkyVector Deproject(double pixelX, double pixelY)
+        {
+            double xi = (pixelX / halfWidthPx - 1.0) * tanHalfWidth;
+            double eta = (pixelY / halfHeightPx - 1.0) * tanHalfHeight;
+
+            return SkyVector.Normalized(
+                boresight.X + xi * right.X + eta * up.X,
+                boresight.Y + xi * right.Y + eta * up.Y,
+                boresight.Z + xi * right.Z + eta * up.Z);
+        }
+
+        /// <summary>
         /// Angular radius (degrees) of a cone that certainly contains the whole sensor: the
         /// half-diagonal of the field, plus a caller-supplied margin. Used to size the
         /// catalogue cone search, which must not miss a star whose light spills onto the sensor

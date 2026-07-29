@@ -1829,6 +1829,16 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public static DustMap DustMap { get; set; }
 
+        /// <summary>
+        /// Optional all-sky emission-line map, set by the GUI at load time. Deposited only when the
+        /// active filter's passband actually contains the map's line, which is what makes a
+        /// narrowband frame show the gas and a broadband one drown it.
+        /// </summary>
+        public static EmissionMap EmissionMap { get; set; }
+
+        /// <summary>Mean line surface brightness the last capture collected, rayleighs, or NaN when no map contributed.</summary>
+        public double LastEmissionRayleighs { get; private set; } = double.NaN;
+
         /// <summary>Total Galactic E(B-V) toward the last capture's field centre, or NaN with no map installed.</summary>
         public double LastFieldReddeningEBv { get; private set; } = double.NaN;
 
@@ -1910,6 +1920,76 @@ namespace ExoInstruments.Visualization
         {
             Vector3d d = direction;
             return SkyVector.Normalized(Vector3d.Dot(d, north), Vector3d.Dot(d, east), Vector3d.Dot(d, up));
+        }
+
+        /// <summary>
+        /// Fills the frame from an all-sky emission-line map.
+        ///
+        /// This is the one source that is drawn FROM the sky rather than placed ON it, so every
+        /// pixel has to ask what lies behind it. Three things keep that affordable without
+        /// approximating anything:
+        ///
+        ///   * it does nothing at all unless a map is loaded AND the active filter's passband
+        ///     contains the map's line, so a broadband frame costs zero;
+        ///   * the (north, east, up) to Galactic chain is one rotation for the whole frame, built
+        ///     once (HorizontalToGalactic) rather than six trigonometric calls per pixel;
+        ///   * consecutive pixels along a row land in the same map cell almost always -- at 6
+        ///     arcmin a cell spans at least 94 pixels on the widest instrument here -- so the value
+        ///     lookup is skipped while the cell index is unchanged.
+        ///
+        /// Deposited into the SIGNAL plane, before the optics, because that is where sky light
+        /// enters. At this resolution the convolution barely changes it, which is a property of the
+        /// data rather than a reason to skip a step.
+        /// </summary>
+        private void DepositEmissionField(float[] signal, FrameComputeInputs inputs)
+        {
+            LastEmissionRayleighs = double.NaN;
+
+            EmissionMap map = EmissionMap;
+            if (map == null || !map.IsLoaded || !inputs.HaveFieldGeometry || signal == null) return;
+            if (inputs.Response == null) return;
+
+            // Does this filter admit the line at all? ThroughputAt is zero outside the passband,
+            // which answers the question and supplies the coefficient in one call.
+            double throughput = inputs.Response.ThroughputAt(map.LineWavelengthMeters);
+            if (!(throughput > 0.0)) return;
+
+            var rotation = HorizontalToGalactic.Build(inputs.EndMeridianRaDeg, inputs.ObserverLatitudeDeg);
+            if (!rotation.IsValid) return;
+
+            double perRayleighPerSecond = EmissionLines.ElectronsPerPixelPerSecond(
+                1.0, inputs.PlateScaleArcsec, inputs.ApertureAreaCm2, throughput);
+            double coefficient = perRayleighPerSecond * inputs.ExposureSeconds
+                               * Math.Max(0.0, inputs.StarNonAtmosphericTransmission);
+            if (!(coefficient > 0.0)) return;
+
+            int w = TextureWidth, h = TextureHeight;
+            long lastCell = -1;
+            double lastValue = 0.0;
+            double sum = 0.0;
+            long counted = 0;
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    SkyVector direction = inputs.Projection.Deproject(x + 0.5, y + 0.5);
+                    rotation.ToGalactic(direction, out double l, out double b);
+
+                    long cell = map.CellAtGalactic(l, b);
+                    if (cell != lastCell)
+                    {
+                        lastCell = cell;
+                        double r = map.RayleighsInCell(cell);
+                        lastValue = double.IsNaN(r) ? 0.0 : r;
+                        if (!double.IsNaN(r)) { sum += r; counted++; }
+                    }
+
+                    if (lastValue > 0.0) signal[y * w + x] += (float)(lastValue * coefficient);
+                }
+            }
+
+            LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
         }
 
         /// <summary>
@@ -2840,6 +2920,8 @@ namespace ExoInstruments.Visualization
                         response, reddening, area, exposure, transmission));
 
                 lastReddeningQuadratures = reddening.Evaluations;
+
+                DepositEmissionField(signal, inputs);
             }
 
             if (inputs.UnresolvedBodies != null)
