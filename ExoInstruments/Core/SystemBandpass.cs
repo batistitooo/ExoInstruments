@@ -221,6 +221,25 @@ namespace ExoInstruments.Core
             return LookUp(teffK, tableWidthAngstrom, EffectiveWidthAngstromFlat);
         }
 
+        /// <summary>
+        /// Effective width for a star of known INTRINSIC temperature seen through a known
+        /// reddening: the Planck shape of the star it really is, times the extinction curve,
+        /// normalised at V so its observed magnitude still sets the flux.
+        ///
+        /// Not tabulated. The colour table is a product grid over temperature, and adding a
+        /// reddening axis to it would multiply its build cost by the number of nodes on that axis
+        /// -- 48 ms per capture on the main thread for a grid worth having, against under a
+        /// millisecond today. This runs one quadrature per call instead, which is 25 microseconds,
+        /// and the caller is expected to cache across a frame (see ReddenedResponseCache). A frame
+        /// covers one small solid angle, so its stars share a sight line and a handful of distinct
+        /// reddenings serve all of them.
+        /// </summary>
+        public double EffectiveWidthAngstromForReddenedStar(double intrinsicTeffK, double eBv)
+        {
+            if (!(eBv > 0.0)) return EffectiveWidthAngstromForTemperature(intrinsicTeffK);
+            return Integrate(Math.Max(0.0, intrinsicTeffK), true, eBv);
+        }
+
         /// <summary>EffectiveWidthAngstromForTemperature with the atmosphere left out -- see EffectiveWidthAngstromFlatNoExtinction.</summary>
         public double EffectiveWidthAngstromForTemperatureNoExtinction(double teffK)
         {
@@ -248,7 +267,7 @@ namespace ExoInstruments.Core
         /// Simpson's rule over the filter's top-hat support. Returns Angstrom, since that is the
         /// unit the V-band photon flux density (948 photons/cm^2/s/Angstrom) is quoted per.
         /// </summary>
-        private double Integrate(double teffK, bool includeExtinction)
+        private double Integrate(double teffK, bool includeExtinction, double eBv = 0.0)
         {
             if (greyTransmission <= 0.0) return 0.0;
 
@@ -280,7 +299,7 @@ namespace ExoInstruments.Core
             {
                 double lambda = start + i * stepMeters;
                 double weight = (i == 0 || i == steps) ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0);
-                sum += weight * Integrand(lambda, teffK, includeExtinction);
+                sum += weight * Integrand(lambda, teffK, includeExtinction, eBv);
             }
 
             double integralMeters = sum * stepMeters / 3.0;
@@ -291,7 +310,7 @@ namespace ExoInstruments.Core
         /// The integrand: the source's photon spectral shape normalised at Johnson V, times the
         /// system's response at this wavelength.
         /// </summary>
-        private double Integrand(double lambda, double teffK, bool includeExtinction)
+        private double Integrand(double lambda, double teffK, bool includeExtinction, double eBv)
         {
             double shape = 1.0;
             if (teffK > 0.0)
@@ -315,7 +334,14 @@ namespace ExoInstruments.Core
             // with a top-hat it is flat across the band and already inside greyTransmission.
             double filter = filterTransmissionCurve != null ? filterTransmissionCurve.At(lambda) : 1.0;
 
-            return shape * filter * greyTransmission * qe * atmosphere;
+            // Interstellar reddening enters as a SHAPE, normalised at V so the observed
+            // magnitude stays the anchor -- see ReddenedStarSpectrum for why that is not double
+            // counting. Exactly 1 when the caller has no reddening estimate.
+            double reddening = eBv > 0.0
+                ? ReddenedStarSpectrum.NormalisedTransmission(lambda, eBv, InterstellarExtinction.MilkyWayRv)
+                : 1.0;
+
+            return shape * reddening * filter * greyTransmission * qe * atmosphere;
         }
     }
 

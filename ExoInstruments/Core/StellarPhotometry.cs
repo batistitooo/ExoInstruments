@@ -89,17 +89,44 @@ namespace ExoInstruments.Core
         public static double CollectedElectrons(
             double vMag, double colorIndexBV, SystemResponse response,
             double apertureAreaCm2, double exposureSeconds, double extraTransmission)
+            => CollectedElectrons(vMag, colorIndexBV, double.NaN, response, null,
+                                  apertureAreaCm2, exposureSeconds, extraTransmission);
+
+        /// <summary>
+        /// As above, with the star's reddening taken into account.
+        ///
+        /// The catalogue colour is an OBSERVED colour, so a reddened hot star and an intrinsically
+        /// cool one arrive here indistinguishable, and the overload above models both as the cool
+        /// one. Given E(B-V) they separate: the colour deredden to the star's real temperature, and
+        /// the extinction curve goes into the integrand as a shape normalised at V. The observed
+        /// magnitude still sets the flux, so nothing is attenuated twice -- see ReddenedStarSpectrum.
+        ///
+        /// eBv NaN or non-positive is the no-estimate case and reproduces the overload above
+        /// exactly, which is what a catalogue carrying no reddening column gets.
+        /// </summary>
+        public static double CollectedElectrons(
+            double vMag, double colorIndexBV, double eBv,
+            SystemResponse response, ReddenedResponseCache cache,
+            double apertureAreaCm2, double exposureSeconds, double extraTransmission)
         {
             if (response == null) return 0.0;
+
+            bool reddened = !double.IsNaN(eBv) && eBv > 0.0;
 
             double teffK = 0.0;
             if (!double.IsNaN(colorIndexBV))
             {
-                double? teff = StellarColor.TeffFromColorIndexBV(colorIndexBV);
+                double? teff = reddened
+                    ? ReddenedStarSpectrum.IntrinsicTeffK(colorIndexBV, eBv)
+                    : StellarColor.TeffFromColorIndexBV(colorIndexBV);
                 if (teff.HasValue && teff.Value > 0.0) teffK = teff.Value;
             }
 
-            double width = response.EffectiveWidthAngstromForTemperature(teffK);
+            double width = reddened
+                ? (cache != null
+                    ? cache.EffectiveWidthAngstrom(teffK, eBv)
+                    : response.EffectiveWidthAngstromForReddenedStar(teffK, eBv))
+                : response.EffectiveWidthAngstromForTemperature(teffK);
 
             return PhotonFluxModel.CollectedElectrons(vMag, width, apertureAreaCm2, exposureSeconds)
                  * Math.Max(0.0, extraTransmission);
