@@ -36,7 +36,17 @@ namespace ExoInstruments.Visualization
         Red,
         Green,
         Blue,
-        HAlpha     // narrowband: red channel only, low throughput (needs longer exposure)
+        HAlpha,    // narrowband: red channel only, low throughput (needs longer exposure)
+
+        // Narrowband positions on the forbidden lines. A filter here collects the same line
+        // photons as a broadband one while admitting a fraction of the sky, which is the whole
+        // point of it -- see Core/EmissionLines and tools/emission-tests for the measurement.
+        // An instrument only offers the ones it physically carries (VisualTelescopeSpec.AvailableFilters).
+        OIII,      // [O III] 5007
+        SII,       // [S II] 6716/6731
+        NII,       // [N II] 6584, 20.65 Angstrom from H-alpha: needs under about 4 nm to separate
+        OII,       // [O II] 3726/3729, below where an amateur CMOS has usable QE
+        OI         // [O I] 6300, which is also a bright terrestrial airglow line
     }
 
     /// <summary>
@@ -2779,6 +2789,16 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Green:  nm = Spec.GreenCentralWavelengthNm; break;
                 case CameraFilter.Blue:   nm = Spec.BlueCentralWavelengthNm; break;
                 case CameraFilter.HAlpha: nm = Spec.HAlphaCentralWavelengthNm; break;
+                case CameraFilter.OIII:
+                case CameraFilter.SII:
+                case CameraFilter.NII:
+                case CameraFilter.OII:
+                case CameraFilter.OI:
+                {
+                    NarrowbandFilterSpec? nb = Spec.Narrowband(filter);
+                    nm = nb.HasValue ? nb.Value.CentralWavelengthNm : 0.0;
+                    break;
+                }
                 default:                  nm = Spec.LuminanceCentralWavelengthNm; break;
             }
             if (nm <= 0.0) nm = Spec.LuminanceCentralWavelengthNm;
@@ -3104,7 +3124,11 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Green:  return Spec.GreenBandwidthAngstrom;
                 case CameraFilter.Blue:   return Spec.BlueBandwidthAngstrom;
                 case CameraFilter.HAlpha: return Spec.HAlphaBandwidthAngstrom;
-                default:                  return LuminanceBandwidthAngstrom;
+                default:
+                {
+                    NarrowbandFilterSpec? nb = Spec.Narrowband(filter);
+                    return nb.HasValue ? nb.Value.BandwidthAngstrom : LuminanceBandwidthAngstrom;
+                }
             }
         }
 
@@ -3122,7 +3146,12 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Green:  t = Spec.GreenFilterPeakTransmission; break;
                 case CameraFilter.Blue:   t = Spec.BlueFilterPeakTransmission; break;
                 case CameraFilter.HAlpha: t = Spec.HAlphaFilterPeakTransmission; break;
-                default:                  t = Spec.LuminanceFilterPeakTransmission; break;
+                default:
+                {
+                    NarrowbandFilterSpec? nb = Spec.Narrowband(filter);
+                    t = nb.HasValue ? nb.Value.PeakTransmission : Spec.LuminanceFilterPeakTransmission;
+                    break;
+                }
             }
             return t > 0.0 ? t : 1.0;
         }
@@ -3377,6 +3406,14 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Green:  return c.g;
                 case CameraFilter.Blue:   return c.b;
                 case CameraFilter.HAlpha: return c.r; // H-alpha sits in the deep red
+                // Which rendered channel a narrowband line falls in. The render is the only
+                // source of spatial shading for a resolved body, and a line lands in whichever
+                // channel covers its wavelength.
+                case CameraFilter.OII:    return c.b;  // 372.7 nm, the blue edge
+                case CameraFilter.OIII:   return c.g;  // 500.7 nm
+                case CameraFilter.OI:
+                case CameraFilter.NII:
+                case CameraFilter.SII:    return c.r;  // 630 to 673 nm
                 default:                  return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
             }
         }

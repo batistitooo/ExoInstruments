@@ -15,6 +15,10 @@
     <Compile Include="$(Core)/SystemBandpass.cs" />
     <Compile Include="$(Core)/PhotonFluxModel.cs" />
     <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
     <Compile Include="$(Core)/StellarColor.cs" />
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />

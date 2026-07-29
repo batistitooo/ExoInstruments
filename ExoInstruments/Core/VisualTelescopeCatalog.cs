@@ -10,6 +10,19 @@ namespace ExoInstruments.Core
     /// or a larger instrument that can reach the small/distant planets the RC20 can't) is a new
     /// entry in VisualTelescopeCatalog below, not a change to the rendering code.
     /// </summary>
+    /// <summary>
+    /// One narrowband filter on an instrument's wheel: the line it sits on, its FWHM and its peak
+    /// transmission. See VisualTelescopeSpec.NarrowbandFilters for why this is a table.
+    /// </summary>
+    public struct NarrowbandFilterSpec
+    {
+        public CameraFilter Position;
+        public double CentralWavelengthNm;
+        public double BandwidthAngstrom;
+        /// <summary>1.0 means NOT PUBLISHED for this filter, not a perfect one -- the same convention the broadband fields use.</summary>
+        public double PeakTransmission;
+    }
+
     public sealed class VisualTelescopeSpec
     {
         public string Name;
@@ -335,6 +348,26 @@ namespace ExoInstruments.Core
         public CameraFilter[] AvailableFilters;
 
         /// <summary>
+        /// The instrument's narrowband filters, one entry per position it physically carries.
+        ///
+        /// A table rather than four more flat fields per line: a narrowband filter is fully
+        /// described by which line it sits on, how wide it is and how much it passes at the top,
+        /// and adding one to an instrument should be a row rather than a spec-wide change. A
+        /// position absent from this table is absent from AvailableFilters too, and is a filter
+        /// the instrument does not have rather than one modelled with invented numbers.
+        /// </summary>
+        public NarrowbandFilterSpec[] NarrowbandFilters;
+
+        /// <summary>This instrument's entry for a narrowband position, or null when it carries none.</summary>
+        public NarrowbandFilterSpec? Narrowband(CameraFilter position)
+        {
+            if (NarrowbandFilters == null) return null;
+            for (int i = 0; i < NarrowbandFilters.Length; i++)
+                if (NarrowbandFilters[i].Position == position) return NarrowbandFilters[i];
+            return null;
+        }
+
+        /// <summary>
         /// Real AO-corrected resolution (FWHM, arcsec) this instrument achieves under good
         /// conditions, for an instrument with genuine adaptive optics -- see
         /// SolarSystemCameraTexture.ComputeGroundSeeingFwhmArcsec, which uses this INSTEAD OF the plain
@@ -390,9 +423,51 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class VisualTelescopeCatalog
     {
-        /// <summary>Every filter position, for an instrument (RC20/CDK1000/FORS2) that really has all five.</summary>
+        /// <summary>
+        /// Every broadband position plus H-alpha. FORS2 stays on this set: ESO publishes a real
+        /// narrowband list for it, and until those central wavelengths, widths and transmissions
+        /// are read off the instrument manual it carries no narrowband position rather than one
+        /// with numbers borrowed from an amateur filter.
+        /// </summary>
         private static readonly CameraFilter[] AllFilters =
             { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue, CameraFilter.HAlpha };
+
+        /// <summary>
+        /// The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the
+        /// three positions an amateur narrowband wheel is actually sold with. [N II], [O II] and
+        /// [O I] are deliberately absent -- [N II] at a width that separates it from H-alpha is a
+        /// specialist item, [O II] at 372 nm is below where a CMOS sensor has usable quantum
+        /// efficiency, and neither is a filter these telescopes would have.
+        /// </summary>
+        private static readonly CameraFilter[] AmateurNarrowbandFilters =
+        {
+            CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue,
+            CameraFilter.HAlpha, CameraFilter.OIII, CameraFilter.SII,
+        };
+
+        /// <summary>
+        /// The amateur narrowband set, at the same 7 nm the H-alpha position already carries.
+        /// Peak transmission is left at 1.0, which by this file's convention means the figure is
+        /// NOT PUBLISHED for these and the loss is unmodelled rather than a claim of a perfect
+        /// filter -- the same treatment the H-alpha position already gets.
+        /// </summary>
+        private static readonly NarrowbandFilterSpec[] AmateurNarrowbandSet =
+        {
+            new NarrowbandFilterSpec
+            {
+                Position = CameraFilter.OIII,
+                CentralWavelengthNm = 500.7,   // [O III] 5007
+                BandwidthAngstrom = 70.0,
+                PeakTransmission = 1.0,
+            },
+            new NarrowbandFilterSpec
+            {
+                Position = CameraFilter.SII,
+                CentralWavelengthNm = 671.6,   // [S II] 6716, the brighter of the doublet
+                BandwidthAngstrom = 70.0,
+                PeakTransmission = 1.0,
+            },
+        };
 
         /// <summary>
         /// PlaneWave RC20: 20-inch (0.51m) Ritchey-Chretien astrograph at f/6.8, 3.468m focal
@@ -510,7 +585,8 @@ namespace ExoInstruments.Core
             BlueFilterPeakTransmission = 1.0,
             HAlphaFilterPeakTransmission = 1.0,
 
-            AvailableFilters = AllFilters,
+            AvailableFilters = AmateurNarrowbandFilters,
+            NarrowbandFilters = AmateurNarrowbandSet,
             AstigmatismStrengthPxAtCorner = 3.0f,
         };
 
@@ -629,7 +705,8 @@ namespace ExoInstruments.Core
             BlueFilterPeakTransmission = 1.0,
             HAlphaFilterPeakTransmission = 1.0,
 
-            AvailableFilters = AllFilters,
+            AvailableFilters = AmateurNarrowbandFilters,
+            NarrowbandFilters = AmateurNarrowbandSet,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
 
@@ -760,7 +837,8 @@ namespace ExoInstruments.Core
             BlueFilterPeakTransmission = 1.0,
             HAlphaFilterPeakTransmission = 1.0,
 
-            AvailableFilters = AllFilters,
+            AvailableFilters = AmateurNarrowbandFilters,
+            NarrowbandFilters = AmateurNarrowbandSet,
             AstigmatismStrengthPxAtCorner = 0.0f,
         };
 

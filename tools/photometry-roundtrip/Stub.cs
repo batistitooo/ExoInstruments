@@ -4,4 +4,4 @@
 // VisualTelescopeCatalog -- which is the point: the aperture, obstruction, focal length, pixel
 // pitch, spider geometry and site seeing fed to GalSim are then the mod's own shipped figures.
 // Same device, and same reason, as tools/bandpass-wcs-tests/Stub.cs.
-namespace ExoInstruments.Visualization { public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha } }
+namespace ExoInstruments.Visualization { public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha, OIII, SII, NII, OII, OI } }

@@ -2239,6 +2239,11 @@ namespace ExoInstruments
                 case CameraFilter.Green: return "G";
                 case CameraFilter.Blue: return "B";
                 case CameraFilter.HAlpha: return "Ha";
+                case CameraFilter.OIII:   return "OIII";
+                case CameraFilter.SII:    return "SII";
+                case CameraFilter.NII:    return "NII";
+                case CameraFilter.OII:    return "OII";
+                case CameraFilter.OI:     return "OI";
                 default: return f.ToString();
             }
         }

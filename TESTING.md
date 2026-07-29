@@ -166,7 +166,33 @@ world basis it composes with comes from KSP and only the game can exercise it.
       sidereal repeat, unlike a planet's slowly-shifting one.
 - [ ] **9.9** Exported FITS: `OBJECT` carries the target name, and the file name is sanitised.
 
-## 10. Known open item
+## 10. Reddening, the dust map, and the narrowband wheel
+
+`tools/reddening-tests`, `tools/dustmap-tests` and `tools/emission-tests` cover the physics
+headlessly. These are the parts only the game exercises.
+
+- [ ] **10.1** With the OLD (version 2) catalogue still installed, captures must be unchanged. The
+      reddening path is inert without an estimate, and the harness proves that to 2e-16, so any
+      visible difference is a wiring bug rather than the new physics.
+- [ ] **10.2** Rebuild the catalogue with `tools/pack_gaia_catalog.py` (it now writes version 3 and
+      pulls `ag_gspphot`). It reports how many stars have no reddening estimate; toward the plane
+      most should have one, at high latitude many will not.
+- [ ] **10.3** With version 3 installed, a field in the Galactic plane should show its stars change
+      brightness slightly. Alt+F12 for exceptions on the first capture after the swap.
+- [ ] **10.4** Build a dust map with `tools/pack_dust_map.py` and install it. The observing panel
+      gains a line reporting E(B-V) and A(V) toward the field; point at the Galactic centre and at
+      the north Galactic pole and check the two differ by more than an order of magnitude.
+- [ ] **10.5** Export a FITS with the map installed: `EBV` and `AV` are present with the map's
+      provenance in a `COMMENT`. Without the map installed, both keywords must be ABSENT rather
+      than zero.
+- [ ] **10.6** The RC20, CDK1000 and RedCat filter rows gain `OIII` and `SII`. FORS2 does not, and
+      that is deliberate until its ESO narrowband figures are entered.
+- [ ] **10.7** Capture the same target in `Ha`, `OIII` and `SII`. All three are 70 Angstrom wide, so
+      a continuum source should come out at similar brightness; what must differ is the sky, which
+      is far darker than in Luminance.
+- [ ] **10.8** LRGB stacking still composes with the new positions present in the enum.
+
+## 11. Known open item
 
 There is no flat-field model. Pixel response non-uniformity is the dominant
 systematic in ground-based photometry of a bright target, and its absence makes
