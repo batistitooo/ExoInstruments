@@ -174,10 +174,16 @@ headlessly. These are the parts only the game exercises.
 - [ ] **10.1** With the OLD (version 2) catalogue still installed, captures must be unchanged. The
       reddening path is inert without an estimate, and the harness proves that to 2e-16, so any
       visible difference is a wiring bug rather than the new physics.
-- [ ] **10.2** Rebuild the catalogue with `tools/pack_gaia_catalog.py` (it now writes version 3 and
-      pulls `ag_gspphot`). It reports how many stars have no reddening estimate; toward the plane
-      most should have one, at high latitude many will not.
-- [ ] **10.3** With version 3 installed, a field in the Galactic plane should show its stars change
+- [ ] **10.2** Smoke-test the packer on a cone before committing to a full run:
+
+      python3 tools/pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
+
+      Verified against the archive on 2026-07-29: 456 sources at G < 13 in that cone, 259 of them
+      with `ag_gspphot`. The packer reproduced both exactly, so it neither drops a source nor
+      invents an estimate. A different count means the archive changed, not the packer.
+- [ ] **10.3** Rebuild the full catalogue (version 3, with `ag_gspphot`). The version 2 `<out>.cache`
+      is NOT reusable, so this is a full re-fetch.
+- [ ] **10.3b** With version 3 installed, a field in the Galactic plane should show its stars change
       brightness slightly. Alt+F12 for exceptions on the first capture after the swap.
 - [ ] **10.4** Build a dust map with `tools/pack_dust_map.py` and install it. The observing panel
       gains a line reporting E(B-V) and A(V) toward the field; point at the Galactic centre and at

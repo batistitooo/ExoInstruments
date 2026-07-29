@@ -181,18 +181,23 @@ The mod used to ship **Tycho-2**: 29.3 MB for 2.5 million stars complete to abou
 61.9 stars/deg², so an RC20 frame held roughly **four** stars where a real 30-second sub holds
 hundreds. It was the worst of both worlds, 29.3 MB carried to deliver a sky that still looked empty.
 
-A real star field means Gaia, and Gaia's own measured counts say what that weighs at the 12
-bytes/star this format uses:
+A real star field means Gaia, and Gaia's own counts say what that weighs at the 14 bytes/star
+this format uses:
 
-| Faint limit | Stars | File, and RAM while playing | One-time load at startup |
-|---|---|---|---|
-| G < 13 | 16.8 M | **202 MB** | ~2 s |
-| G < 14 | 36.9 M | **443 MB** | ~4.4 s |
-| G < 15 | 78.0 M | **935 MB** | ~9 s |
-| G < 16 | 157.7 M | **1.9 GB** | ~19 s |
-| G < 18 | 577.2 M | **6.9 GB** | ~70 s |
+| Faint limit | Stars | File, and RAM while playing |
+|---|---|---|
+| G < 13 | 7.4 M | **103 MB** |
+| G < 14 | 16.8 M | **236 MB** |
+| G < 15 | 36.9 M | **517 MB** |
+| G < 16 | 78.0 M | **1.1 GB** |
+| G < 18 | 304.9 M | **4.3 GB** |
 
-Load times measured on the real reader; memory is exactly 12 bytes/star, confirmed by measurement.
+Counts are `SELECT COUNT(*) FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < N`, asked of the
+archive rather than estimated. An earlier version of this table was shifted by one magnitude and
+its `G < 18` row was nearly double the real count.
+
+Memory is exactly 14 bytes/star. That was 12 before the reddening column landed (format version 3),
+so a catalogue costs a sixth more than it used to.
 
 None of that belongs in a mod download. On your own disk it is fine. So the choice is a real star
 field or an honestly empty one, rather than a heavy download that delivers neither.
@@ -202,6 +207,18 @@ field or an honestly empty one, rather than a heavy download that delivers neith
 ```
 python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
 ```
+
+**Try a cone first.** One command, under a minute, and it tells you the whole chain works before you
+commit to a run measured in hours:
+
+```
+python3 tools/pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
+```
+
+That is a 1° cone on the Orion Nebula. It should report a few hundred stars, a handful without a
+colour index, and roughly half without a reddening estimate — toward Orion the archive has
+`ag_gspphot` for 57% of sources brighter than G = 13, and the packer neither invents the rest nor
+drops them.
 
 **Register a free ESA archive account first** (<https://cosmos.esa.int/web/gaia-users/register>) and
 pass it with `--user`. This is not optional in practice. Anonymous access is the archive's degraded
@@ -227,16 +244,16 @@ Then copy the result to:
 ```
 
 The `.starcat` extension matters: Kopernicus reads every `*.bin` in GameData as a scaled-space
-mesh, and would try that on a 200-450 MB catalogue at every startup. That is the only star
+mesh, and would try that on a 100-500 MB catalogue at every startup. That is the only star
 catalogue the renderer looks for. The log line on startup tells you whether
 it found one. To go back to an empty sky, delete or rename the file.
 
 ### Choosing a depth
 
 The whole catalogue is held in memory, so the table above is also the RAM cost, **on top of KSP
-itself**. `G < 13` is a safe first try and already about seven times the density of the Tycho-2 file
-this replaces; `G < 14` is as deep as most machines will want. Beyond that, know what your RAM is
-doing.
+itself**. `G < 13` is a safe first try and already about three times the star count of the Tycho-2
+file this replaces, at a far deeper limit; `G < 15` is as deep as most machines will want. Beyond
+that, know what your RAM is doing.
 
 Search cost does *not* grow with catalogue size (the format is banded in declination and
 binary-searched in right ascension, so a frame only ever touches the stars near it). What does grow
@@ -259,6 +276,93 @@ colourless rather than given an invented colour.
 
 Proper motions are dropped: at the finest plate scale modelled here they would move a typical field
 star by one pixel every few years of in-game time.
+
+### Interstellar reddening (format version 3)
+
+Gaia's photometry is **observed** photometry: `G` and `G_BP − G_RP` already carry whatever dust sits
+in front of the star, and nothing in the conversion above deredden them. That used to leave a hot
+star behind two magnitudes of dust indistinguishable from an intrinsically cool one, and the
+photometry modelled both as the cool one — integrating a Planck curve at a temperature the star does
+not have. On FORS2's 7700 Å band that is worth a median 57 mmag and up to 807 mmag; on the RC20's
+2600 Å band, 8 and 166 mmag. Ten times worse on the wider band, because a *shape* error needs band
+to act on.
+
+Version 3 carries a per-star `E(B−V)` so the two separate: deredden the colour for the real
+photosphere, and put the extinction curve into the bandpass integral as a shape. **Nothing is
+attenuated twice** — the integrand is normalised at Johnson V, the extinction factor is written
+normalised at V too and is exactly 1 there, so the observed magnitude still sets the flux and only
+its distribution across the band changes. `tools/reddening-tests` checks that "exactly", not to a
+tolerance.
+
+The estimate is **Gaia's own**: `gspphot` fits an atmosphere model to each source's BP/RP spectrum
+and parallax and reports the extinction that fit implies, so it is per-source and needs no distance.
+Where `gspphot` has no solution the star is drawn exactly as version 2 drew it, which is honest
+rather than filled in from a sight-line average that would be wrong for a foreground star.
+
+**Version 2 files still load.** They simply have no reddening column, every star reads as "not
+estimated", and the result is bit-identical to before. Rebuilding is worth doing when convenient,
+not urgent — and note that a version 2 run's `<out>.cache` is **not reusable**, because it was
+fetched without the `ag_gspphot` column.
+
+## Optional: the interstellar dust map
+
+Total Galactic reddening along the line of sight, reported with every frame. **Nothing ships.**
+
+```
+cd tools
+python3 -m venv env && ./env/bin/pip install dustmaps healpy numpy astropy
+./env/bin/python pack_dust_map.py --out DustMap.dustmap
+cp DustMap.dustmap "<KSP>/GameData/ExoInstruments/PluginData/"
+```
+
+The first run fetches **SFD98** (Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525), about 150 MB,
+once. It is applied with the 0.86 recalibration of Schlafly & Finkbeiner (2011, ApJ 737, 103), which
+is the standard use of SFD98 today. `--map planck` uses Planck's GNILC map instead (5′ rather than
+6.1′, but a 1.6 GB fetch). At nside 1024 — finer than either source map's own beam — the whole sky
+is 24 MB and loads in one block.
+
+**This is the TOTAL column**, so it describes what lies beyond the whole Galaxy. It is deliberately
+never applied to a catalogue star: a star sits *inside* the Galaxy with an unknown fraction of the
+column in front of it, and using this on one would over-redden every foreground star by up to the
+whole column. That is what the per-star `gspphot` estimate above is for.
+
+What it does instead is get reported. The observing panel states `E(B−V)` and `A(V)` toward the
+field, and an exported FITS carries `EBV` and `AV` with the map's provenance in a `COMMENT`. Both
+are **omitted** rather than zero-filled when no map is installed: a missing keyword says "not
+measured", a zero would say "no dust", and only one of those is true.
+
+## Optional: the H-alpha emission map
+
+Diffuse ionised gas, which is what the narrowband filters exist for. **Nothing ships.**
+
+Download the composite from NASA's LAMBDA archive — the script deliberately does not fetch it, since
+the archive's URLs move and a wrong file silently producing a plausible sky is worse than an error:
+
+<https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html>
+
+```
+curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/halpha/lambda_halpha_fwhm06_0512.fits
+cd tools
+python3 -m venv env && ./env/bin/pip install healpy numpy
+./env/bin/python pack_halpha_map.py --input ../lambda_halpha_fwhm06_0512.fits --out HalphaMap.emission
+cp HalphaMap.emission "<KSP>/GameData/ExoInstruments/PluginData/"
+```
+
+That file is 12 MB, HEALPix nside 512, and is the **Finkbeiner (2003, ApJS 146, 407)** composite of
+WHAM, VTSS and SHASSA, already published in rayleighs — the unit the photometry converts from, so
+nothing is reinterpreted on the way in. The packer keeps its native resolution by default: going
+finer would store interpolation rather than data.
+
+**6 arcmin is the data's limit**, not the renderer's. That is 94 pixels across on the RedCat and
+1300 on the RC20 behind its Barlow, so the map shows real structure in a wide field and a smooth
+glow at high magnification. No published all-sky Hα map does better.
+
+It is deposited **only** when the active filter's passband actually contains Hα, so a Luminance
+frame costs nothing and an `OIII` or `SII` frame gets nothing from it. That gating is the same
+`ThroughputAt` call that supplies the coefficient, so the two cannot disagree.
+
+Hα only: [S II], [N II] and [O III] have no all-sky survey to read, and exist as filter positions
+and as photometry with nothing behind them yet.
 
 ## Future Roadmap
 

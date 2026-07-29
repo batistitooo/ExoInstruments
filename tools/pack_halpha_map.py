@@ -11,14 +11,15 @@ producing a plausible sky is worse than an error.
 
     https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html
 
-RESOLUTION IS THE REAL LIMIT, more than for dust. 6 arcmin is 94 pixels across on the RedCat and
-1300 on the RC20 behind its Barlow, so this renders real structure in a wide field and a smooth
-glow at high magnification. Defaults to nside 1024 (3.4 arcmin), finer than the data, so nothing
-of it is thrown away.
+The composite is distributed at HEALPix nside 512 with a 6 arcmin beam, and by default this keeps
+it there: regridding a map is never free of doubt, and going finer than nside 512 would store
+interpolation rather than data. 6 arcmin is 94 pixels across on the RedCat and 1300 on the RC20
+behind its Barlow, so the map renders real structure in a wide field and a smooth glow at high
+magnification. That is the data's limit and no all-sky H-alpha map does better.
 
 Run:
     python -m venv env && ./env/bin/pip install healpy numpy
-    ./env/bin/python pack_halpha_map.py --input Halpha_fwhm06_1024.fits --out HalphaMap.emission
+    ./env/bin/python pack_halpha_map.py --input lambda_halpha_fwhm06_0512.fits --out HalphaMap.emission
 """
 
 import argparse
@@ -42,7 +43,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", required=True, help="HEALPix FITS map in rayleighs")
-    parser.add_argument("--nside", type=int, default=1024)
+    parser.add_argument("--nside", type=int, default=0,
+                        help="regrid to this nside; 0 (the default) keeps the input's own")
     parser.add_argument("--out", default="HalphaMap.emission")
     parser.add_argument("--source", default="Finkbeiner (2003, ApJS 146, 407) WHAM/VTSS/SHASSA composite")
     args = parser.parse_args()
@@ -56,6 +58,11 @@ def main():
     raw = hp.read_map(args.input, dtype=np.float64)
     native = hp.npix2nside(len(raw))
     print(f"read {args.input}: nside {native} ({hp.nside2resol(native, arcmin=True):.1f} arcmin)")
+
+    if args.nside == 0:
+        args.nside = native
+    elif args.nside < 0 or args.nside & (args.nside - 1):
+        raise SystemExit("nside must be a power of two, or 0 to keep the input's own")
 
     if native != args.nside:
         # ud_grade is exact in both directions for HEALPix: down-grading averages the children of a
