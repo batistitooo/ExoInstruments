@@ -1747,6 +1747,29 @@ namespace ExoInstruments
                     + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
                     smallCaptionStyle);
 
+                // Where the target actually landed. The aim and the star field share one geometry,
+                // so this should read a fraction of a pixel; anything else is a pointing fault and
+                // this says which way it went.
+                double offset = solarSystemCamera.LastTargetOffsetArcsec;
+                double fieldArcsec = solarSystemCamera.LastFieldWidthArcsec;
+                if (!double.IsNaN(offset))
+                {
+                    string field = fieldArcsec < 120.0
+                        ? $"{fieldArcsec:F1}\""
+                        : $"{fieldArcsec / 60.0:F1}'";
+                    GUILayout.Label(
+                        $"Pointing: target at ({solarSystemCamera.LastTargetPixelX:F0}, "
+                        + $"{solarSystemCamera.LastTargetPixelY:F0}) px, {offset:F2}\" from centre, "
+                        + $"field {field} wide"
+                        + (solarSystemCamera.LastTargetInFrame ? "" : "  <-- OUTSIDE THE FRAME"),
+                        smallCaptionStyle);
+                }
+                else if (fieldArcsec > 0.0)
+                {
+                    GUILayout.Label($"Pointing: target did not project into the field "
+                                  + $"(field {fieldArcsec / 60.0:F1}' wide)", smallCaptionStyle);
+                }
+
                 double emission = solarSystemCamera.LastEmissionRayleighs;
                 if (!double.IsNaN(emission))
                 {
@@ -2559,10 +2582,20 @@ namespace ExoInstruments
             else if (e.type == EventType.MouseUp && e.button == 0 && skyChartDragging)
             {
                 skyChartDragging = false;
-                if (skyChartDragDistance < SkyChartDragClickThreshold && hoveredSkyChartStar != null)
+                if (skyChartDragDistance < SkyChartDragClickThreshold)
                 {
-                    selectedStar = hoveredSkyChartStar;
-                    SelectPhotographyStar(hoveredSkyChartStar);
+                    if (hoveredSkyChartStar != null)
+                    {
+                        selectedStar = hoveredSkyChartStar;
+                        SelectPhotographyStar(hoveredSkyChartStar);
+                    }
+                    else
+                    {
+                        // Empty sky. A nebula or a dark cloud has no marker on this chart, so
+                        // clicking where it is has to work or those targets are unreachable
+                        // without typing coordinates.
+                        PointAtChartPosition(chartRect, e.mousePosition);
+                    }
                 }
                 e.Use();
             }
@@ -2645,6 +2678,34 @@ namespace ExoInstruments
             altDeg = horizontal.AltitudeDeg;
             azDeg = horizontal.AzimuthDeg;
             return true;
+        }
+
+        /// <summary>
+        /// Points the telescope at whatever patch of sky a chart click landed on, by running the
+        /// chart's own projection backwards and then the horizontal-to-equatorial transform.
+        /// </summary>
+        void PointAtChartPosition(Rect chartRect, Vector2 screenPos)
+        {
+            float localX = screenPos.x - chartRect.x;
+            float localY = SkyChartHeight - (screenPos.y - chartRect.y);   // IMGUI y-down -> texture y-up
+            var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
+
+            if (!SkyChartTexture.TryScreenToAltAz(localX, localY, SkyChartWidth, SkyChartHeight,
+                                                  view, out double altDeg, out double azDeg))
+                return;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return;
+
+            double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                Planetarium.GetUniversalTime(), home.rotationPeriod, home.initialRotation,
+                ObservatorySite.LongitudeDeg);
+            SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, meridianRaDeg,
+                                                  ObservatorySite.LatitudeDeg,
+                                                  out double raDeg, out double decDeg);
+
+            SelectPhotographyTarget(SkyTarget.FromEquatorial(raDeg, decDeg, null),
+                                    clearStarSelection: true);
         }
 
         /// <summary>Turns a chart star into a pointing target. Requires coordinates, which is what the chart placed it by anyway.</summary>

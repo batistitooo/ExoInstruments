@@ -1768,10 +1768,63 @@ namespace ExoInstruments.Visualization
                 ComputeFieldCentreDrift(inputs, projection, latitudeDeg,
                                         out inputs.DriftPixelX, out inputs.DriftPixelY);
 
+            MeasurePointingError(target, projection, meridianRaDeg, latitudeDeg);
+
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
             inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
             inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds);
         }
+
+        /// <summary>
+        /// Where the target actually lands in the finished frame, measured through the very
+        /// projection that places the stars in it.
+        ///
+        /// The aim and the star field are built from one geometry, so this SHOULD be the frame
+        /// centre. When it is not, this says by how much and in which direction, which separates
+        /// "the telescope is pointed wrong" from "the target is simply not in the catalogue being
+        /// drawn" -- two failures that look identical on a frame with nothing in it.
+        /// </summary>
+        private void MeasurePointingError(SkyTarget target, GnomonicProjection projection,
+                                          double meridianRaDeg, double latitudeDeg)
+        {
+            LastTargetInFrame = false;
+            LastTargetOffsetArcsec = double.NaN;
+            LastFieldWidthArcsec = projection.WidthPx * PlateScaleArcsecPerPixel;
+
+            bool projected = false;
+            double px = 0.0, py = 0.0;
+
+            if (target.IsBody)
+            {
+                projected = TryProjectBody(target.Body, projection, out px, out py);
+            }
+            else if (target.IsEquatorial)
+            {
+                HorizontalCoordinates h = SkyCoordinates.EquatorialToHorizontal(
+                    target.RaDeg, target.DecDeg, meridianRaDeg, latitudeDeg);
+                projected = projection.TryProject(
+                    SkyVector.FromHorizontal(h.AltitudeDeg, h.AzimuthDeg), out px, out py);
+            }
+            if (!projected) return;
+
+            double dx = px - 0.5 * projection.WidthPx;
+            double dy = py - 0.5 * projection.HeightPx;
+
+            LastTargetPixelX = px;
+            LastTargetPixelY = py;
+            LastTargetOffsetArcsec = Math.Sqrt(dx * dx + dy * dy) * PlateScaleArcsecPerPixel;
+            LastTargetInFrame = px >= 0.0 && px <= projection.WidthPx
+                             && py >= 0.0 && py <= projection.HeightPx;
+        }
+
+        /// <summary>Where the target landed in the last frame, in pixels, and how far that is from the centre.</summary>
+        public double LastTargetPixelX { get; private set; }
+        public double LastTargetPixelY { get; private set; }
+        public double LastTargetOffsetArcsec { get; private set; } = double.NaN;
+        public bool LastTargetInFrame { get; private set; }
+
+        /// <summary>Field of view across the sensor's long axis, arcsec. Quoted because at the extreme ends of this roster it is the whole explanation of what a frame contains.</summary>
+        public double LastFieldWidthArcsec { get; private set; }
 
         /// <summary>
         /// Electron budget the rendered image is calibrated against: the target's own signal

@@ -340,6 +340,37 @@ namespace ExoInstruments.Visualization
             return new Vector2((float)screenX, (float)screenY);
         }
 
+        /// <summary>
+        /// The inverse: which altitude and azimuth a chart pixel sits at. Needed to point the
+        /// telescope at empty sky rather than only at a marker.
+        ///
+        /// Returns false above the horizon ring, where the projection has no sky to name.
+        /// </summary>
+        public static bool TryScreenToAltAz(float screenX, float screenY, int width, int height,
+                                            SkyChartView view, out double altDeg, out double azDeg)
+        {
+            altDeg = azDeg = 0.0;
+            double centerX = width / 2.0;
+            double centerY = height / 2.0;
+
+            double rawX = (screenX - centerX) / Math.Max(1e-6f, view.Zoom) + view.Pan.x;
+            double rawY = (screenY - centerY) / Math.Max(1e-6f, view.Zoom) + view.Pan.y;
+
+            double dx = rawX - centerX;
+            double dy = rawY - centerY;
+            double r = Math.Sqrt(dx * dx + dy * dy);
+
+            double rMax = ComputeRMax(width, height);
+            if (rMax <= 0.0) return false;
+
+            altDeg = 90.0 - 90.0 * r / rMax;
+            if (altDeg < 0.0) return false;   // below the horizon ring: not sky
+
+            azDeg = Math.Atan2(dx, dy) * 180.0 / Math.PI;
+            if (azDeg < 0.0) azDeg += 360.0;
+            return true;
+        }
+
         private static void DrawReferenceGrid(Color[] pixels, int width, int height, SkyChartView view)
         {
             foreach (double altDeg in AltitudeRingsDeg)
