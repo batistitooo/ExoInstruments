@@ -4731,6 +4731,7 @@ namespace ExoInstruments
                 case DeepSkyKind.SupernovaRemnant: kind = "supernova remnant"; break;
                 case DeepSkyKind.PlanetaryNebula: kind = "planetary nebula"; break;
                 case DeepSkyKind.Galaxy: kind = "galaxy"; break;
+                case DeepSkyKind.DarkNebula: kind = "dark nebula, seen in silhouette"; break;
                 default: kind = "reflection nebula"; break;
             }
             string size = obj.MajorArcmin >= 60.0
@@ -4738,8 +4739,29 @@ namespace ExoInstruments
                 : obj.MajorArcmin >= 1.0
                     ? $"{obj.MajorArcmin:F0} x {obj.MinorArcmin:F0} arcmin"
                     : $"{obj.MajorArcmin * 60.0:F0} x {obj.MinorArcmin * 60.0:F0} arcsec";
-            return kind + ", " + size;
+            string note = "";
+            var map = SolarSystemCameraTexture.EmissionMap;
+            if (obj.Kind == DeepSkyKind.DarkNebula)
+            {
+                // An emission map holds what is emitted, so a silhouette is not in it at all. Say
+                // so on the chart rather than let the player spend an exposure finding out.
+                note = " -- absorption, not emission: no installed map can show it";
+            }
+            else if (obj.EmitsLines && map != null && map.IsLoaded)
+            {
+                // The number that decides whether the installed data can render this object as a
+                // shape. The composite's beam is 6', coarser than its 3.4' sampling.
+                double beams = obj.BeamsAcross(EmissionMapBeamArcmin);
+                note = $" -- {beams:F0} beams across the installed map"
+                     + (beams < 1.5 ? ", so it cannot resolve it at all"
+                        : beams < 4.0 ? ", so expect a smudge"
+                        : beams < 12.0 ? ", so expect an outline and no detail" : "");
+            }
+            return kind + ", " + size + note;
         }
+
+        /// <summary>Beam of the Finkbeiner (2003) H-alpha composite, arcminutes FWHM. Coarser than its 3.4' HEALPix sampling, which is what actually limits what a frame can show.</summary>
+        private const double EmissionMapBeamArcmin = 6.0;
 
         /// <summary>
         /// The bright nebulae, placed on the chart the same way a star is. Pure computation on

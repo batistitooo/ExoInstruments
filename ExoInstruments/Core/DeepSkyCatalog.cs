@@ -15,6 +15,13 @@ namespace ExoInstruments.Core
         ReflectionNebula,
         /// <summary>A galaxy, placed on the chart from the packed GalaxyCatalog rather than from the list below.</summary>
         Galaxy,
+        /// <summary>
+        /// A dark nebula: a dust cloud seen in SILHOUETTE against emission behind it. An emission
+        /// map cannot show one at all -- what defines it is the absence of light, and the map holds
+        /// only what is emitted. Listed so the chart can say so rather than promise a target the
+        /// installed data cannot render.
+        /// </summary>
+        DarkNebula,
     }
 
     /// <summary>One catalogued nebula: what it is called, where it is, and how big.</summary>
@@ -37,6 +44,15 @@ namespace ExoInstruments.Core
         public bool EmitsLines => Kind == DeepSkyKind.HiiRegion
                                || Kind == DeepSkyKind.SupernovaRemnant
                                || Kind == DeepSkyKind.PlanetaryNebula;
+
+        /// <summary>
+        /// How many resolution elements of a map with the given beam this object spans, which is
+        /// the number that decides whether it can render as a shape at all. Below about 1.5 the
+        /// object is a single beam and no processing recovers anything; above about 12 its outline
+        /// is real.
+        /// </summary>
+        public double BeamsAcross(double beamArcmin)
+            => beamArcmin > 0.0 ? MajorArcmin / beamArcmin : 0.0;
     }
 
     /// <summary>
@@ -84,7 +100,11 @@ namespace ExoInstruments.Core
             O("NGC 1499", "California",       4,  3,  1, 36, 25,145, 40, DeepSkyKind.HiiRegion),
             O("NGC 1976", "Orion Nebula",     5, 35, -1,  5, 23, 85, 60, DeepSkyKind.HiiRegion),
             O("NGC 2024", "Flame",            5, 42, -1,  1, 51, 30, 30, DeepSkyKind.HiiRegion),
-            O("IC 434",   "Horsehead",        5, 41, -1,  2, 27, 60, 10, DeepSkyKind.HiiRegion),
+            // IC 434 is the emission ridge; the Horsehead itself is Barnard 33, the dust cloud
+            // silhouetted against it, and is 8' x 6'. They are listed separately because they are
+            // different things and only one of them emits.
+            O("IC 434",   "Horsehead ridge",  5, 41, -1,  2, 27, 60, 10, DeepSkyKind.HiiRegion),
+            O("B 33",     "Horsehead",        5, 41, -1,  2, 28,  8,  6, DeepSkyKind.DarkNebula),
             O("NGC 2070", "Tarantula",        5, 39, -1, 69,  6, 40, 25, DeepSkyKind.HiiRegion),
             O("NGC 2237", "Rosette",          6, 32,  1,  4, 57, 80, 80, DeepSkyKind.HiiRegion),
             O("IC 2177",  "Seagull",          7,  4, -1, 10, 27,120, 40, DeepSkyKind.HiiRegion),
