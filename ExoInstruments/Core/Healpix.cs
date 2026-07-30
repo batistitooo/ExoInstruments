@@ -253,6 +253,15 @@ namespace ExoInstruments.Core
             }
         }
 
+        /// <summary>Centre of a RING pixel, in the map's own frame, degrees. The inverse of SphericalDegreesToRing, for a caller that has a pixel and needs the direction it stands for.</summary>
+        public static void RingPixelCentreDegrees(int nside, long pixel, out double longitudeDeg, out double latitudeDeg)
+        {
+            CheckNside(nside);
+            RingCentre(nside, pixel, out double theta, out double phi);
+            longitudeDeg = phi * 180.0 / Math.PI;
+            latitudeDeg = 90.0 - theta * 180.0 / Math.PI;
+        }
+
         /// <summary>Centre of a RING pixel, in the map's own frame.</summary>
         private static void RingCentre(int nside, long pixel, out double theta, out double phi)
         {

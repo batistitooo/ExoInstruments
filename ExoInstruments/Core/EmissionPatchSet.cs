@@ -179,6 +179,8 @@ namespace ExoInstruments.Core
                     list[i] = patch;
                 }
 
+                MaskedCellsFilled = FillSubtractionResiduals(list, n);
+
                 patches = list;
                 nside = n;
                 nested = isNested;
@@ -271,6 +273,98 @@ namespace ExoInstruments.Core
                                       ref cursor, out rayleighs);
 
         /// <summary>As above, with the patch's index in the caller's list so each keeps its own run cursor.</summary>
+        /// <summary>How many cells were filled at load because their value was a subtraction residual rather than a measurement. Reported, never hidden.</summary>
+        public int MaskedCellsFilled { get; private set; }
+
+        /// <summary>
+        /// Replaces each non-positive cell by the mean of the neighbours that do carry a
+        /// measurement, iterating so that a small cluster fills from its rim inwards.
+        ///
+        /// WHY FILL RATHER THAN LEAVE A GAP. These cells are not measurements of zero emission;
+        /// they are where SHASSA's continuum subtraction over-corrected on a bright star (Gaustad
+        /// et al. 2001, PASP 113, 1326, Sect. 4). Something has to stand in for them, and there are
+        /// only three candidates: a hole, the base map, or the patch's own surroundings.
+        ///
+        /// A hole renders as a black disc. The base map is a DIFFERENT DATA SOURCE at a fifteen
+        /// times coarser beam, so handing over to it mid-nebula puts a step at the boundary --
+        /// measured at 34,409 frame pixels on the Horsehead field, in staircases 13 pixels a tread.
+        /// The surroundings are the same survey, the same calibration and the same resolution, so
+        /// the fill is continuous with what it replaces and carries no seam.
+        ///
+        /// It is interpolation and it is labelled as such: the count is reported at load, and the
+        /// affected area is 795 cells of 542,673, 0.146%, each a disc a couple of cells across.
+        /// Nothing is claimed to have been measured there.
+        /// </summary>
+        private static int FillSubtractionResiduals(Patch[] list, int nside)
+        {
+            int filled = 0;
+            double spacingDeg = Healpix.PixelResolutionDeg(nside);
+
+            foreach (Patch patch in list)
+            {
+                if (patch.Values == null) continue;
+
+                // Which entries need filling, and where each sits on the sky.
+                var masked = new List<int>();
+                for (int i = 0; i < patch.Values.Length; i++)
+                    if (!(patch.Values[i] > 0.0)) masked.Add(i);
+                if (masked.Count == 0) continue;
+                filled += masked.Count;
+
+                int cursor = 0;
+                for (int pass = 0; pass < 8 && masked.Count > 0; pass++)
+                {
+                    var remaining = new List<int>();
+                    var updates = new List<KeyValuePair<int, double>>();
+
+                    foreach (int index in masked)
+                    {
+                        long pixel = PixelForOffset(patch, index);
+                        if (pixel < 0) continue;
+                        Healpix.RingPixelCentreDegrees(nside, pixel, out double l, out double b);
+
+                        double sum = 0.0;
+                        int count = 0;
+                        double cosB = Math.Cos(b * Math.PI / 180.0);
+                        for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            double nb = b + dy * spacingDeg;
+                            if (nb > 90.0 || nb < -90.0) continue;
+                            double nl = l + (Math.Abs(cosB) > 1e-6 ? dx * spacingDeg / cosB : 0.0);
+                            long neighbour = Healpix.SphericalDegreesToRing(nside, nl, nb);
+                            if (!patch.TryValue(neighbour, ref cursor, out double v)) continue;
+                            if (!(v > 0.0)) continue;
+                            sum += v;
+                            count++;
+                        }
+
+                        if (count > 0) updates.Add(new KeyValuePair<int, double>(index, sum / count));
+                        else remaining.Add(index);
+                    }
+
+                    // Applied after the pass, so a cell filled this pass cannot seed another in the
+                    // same one -- which would make the result depend on the iteration order.
+                    foreach (var u in updates) patch.Values[u.Key] = Float16.FromDouble(u.Value);
+                    if (updates.Count == 0) break;
+                    masked = remaining;
+                }
+            }
+            return filled;
+        }
+
+        /// <summary>The HEALPix pixel a position in a patch's packed value array belongs to.</summary>
+        private static long PixelForOffset(Patch patch, int offset)
+        {
+            for (int r = 0; r < patch.RunStart.Length; r++)
+            {
+                if (offset < patch.RunOffset[r] || offset >= patch.RunOffset[r] + patch.RunLength[r]) continue;
+                return patch.RunStart[r] + (offset - patch.RunOffset[r]);
+            }
+            return -1;
+        }
+
         public bool TryRayleighsAtGalactic(Patch patch, int patchIndex, double lDeg, double bDeg,
                                            long[] pixelScratch, double[] weightScratch,
                                            ref Cursor cursor, out double rayleighs)
@@ -281,32 +375,38 @@ namespace ExoInstruments.Core
             if (patchIndex < 0 || patchIndex >= cursor.Runs.Length) patchIndex = 0;
 
             Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
-            double sum = 0.0;
+
+            // A NON-POSITIVE VALUE IS NOT A MEASUREMENT OF ZERO EMISSION. SHASSA is a
+            // continuum-subtracted survey: an off-band image is scaled and subtracted from the
+            // H-alpha one to remove stellar continuum, and at a bright star that subtraction
+            // over-corrects and drives the residual to zero or below (Gaustad et al. 2001,
+            // PASP 113, 1326, Sect. 4). 795 cells of 542,673 across the fourteen patches are such
+            // residuals, in discs on the brightest stars.
+            //
+            // They are MASKED, not handed back to the base map. Two reasons, and the second is the
+            // one that matters. First, a masked cell surrounded by good ones is fully covered by
+            // them: reweighting the interpolation over the neighbours that do carry a measurement
+            // is the same operation EmissionMap already performs for a gap, and it keeps the
+            // patch's own fine structure right up to the residual's edge. Second, falling through
+            // to the base map SWITCHES DATA SOURCE mid-frame, and the two do not agree at the
+            // patch's own resolution -- SHASSA resolves filaments a 6 arcmin beam averages away --
+            // so the handover shows as a step, and at 0.86 arcmin per cell that step is a 13-pixel
+            // staircase. Trading a black disc for a grey one with a jagged edge is not a fix.
+            double sum = 0.0, weight = 0.0;
             for (int i = 0; i < 4; i++)
             {
                 if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[patchIndex], out double v))
-                    return false;
-
-                // A NON-POSITIVE VALUE IS NOT A MEASUREMENT OF ZERO EMISSION. SHASSA is a
-                // continuum-subtracted survey: an off-band image is scaled and subtracted from the
-                // H-alpha one to remove stellar continuum, and at a bright star that subtraction
-                // over-corrects and drives the residual to zero or below (Gaustad et al. 2001,
-                // PASP 113, 1326, Sect. 4). The packer clamps the negative half away, so what
-                // survives is a disc of exact zeros centred on every bright star in the field.
-                //
-                // Rendered as sky brightness those become black holes in the middle of a nebula --
-                // which is what a 120 s H-alpha frame of the Horsehead showed, discs 20 to 33
-                // pixels across centred on the brightest stars, in every sub and both filters.
-                //
-                // So the patch declines to answer here and the caller falls through to the base
-                // map, whose 6 arcmin beam is far too coarse to carry a stellar residual. That is
-                // what a fall-through is for, and it is what every user of these surveys does with
-                // the subtraction residuals.
-                if (!(v > 0.0)) return false;
-
+                    return false;                       // outside the patch: that IS the base map's job
+                if (!(v > 0.0)) continue;               // a subtraction residual: no measurement here
                 sum += weightScratch[i] * v;
+                weight += weightScratch[i];
             }
-            rayleighs = sum;
+
+            // Only when every neighbour is a residual -- the core of a disc around a very bright
+            // star -- is there nothing left to interpolate from, and the base map takes over.
+            if (!(weight > 0.0)) return false;
+
+            rayleighs = sum / weight;
             return true;
         }
     }

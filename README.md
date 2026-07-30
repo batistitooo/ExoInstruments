@@ -605,10 +605,24 @@ Clamped to zero -- which the packer used to do -- those become *sky brightness o
 nebula. A 120 s frame of the Horsehead showed exactly that: seven discs, 20 to 33 px across,
 centred on the brightest stars, identical in every sub and in both filters.
 
-A non-positive value is not a measurement of zero emission. Both the packer and the reader now treat
-it as **no value**, so the patch declines to answer and the pixel falls through to the Finkbeiner
-composite, whose 6 arcmin beam is far too coarse to carry a stellar residual. The reader's check
-means an already-installed patch set is fixed without repacking.
+A non-positive value is not a measurement of zero emission, and there are only three things that can
+stand in for one: a hole, the base map, or the patch's own surroundings.
+
+A hole renders as a black disc. **The base map is the wrong answer too**, and measurably so: it is a
+different data source at a fifteen times coarser beam, so handing over to it mid-nebula puts a step
+at the boundary -- 34,409 frame pixels on the Horsehead field, in staircases 13 pixels a tread. That
+is trading a black disc for a grey one with a jagged edge.
+
+So the residuals are **masked and filled from their own neighbours**, at load, in two stages. The
+interpolation reweights over whichever of its four cells carry a measurement, which covers 96% of
+the affected pixels and keeps the patch's fine structure right up to the residual's edge; and the
+remaining cores -- where all four are masked -- are filled iteratively from the rim inwards before
+the patch is ever queried. Same survey, same calibration, same resolution, so there is no seam.
+
+It is interpolation and the load message says so, with the count. Nothing is claimed to have been
+measured there. The reader does all of it, so an already-installed patch set is repaired without
+repacking; the packer writes NaN rather than zero for the same cells so a fresh one carries the
+distinction explicitly.
 
 ## Optional: the galaxy catalogue
 

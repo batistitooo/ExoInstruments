@@ -437,8 +437,12 @@ frame to divide by.
       120 s. The black discs centred on the brightest stars must be gone: 795 patch cells of 542,673
       are non-positive SHASSA subtraction residuals, and at 0.86 arcmin a 2x2 clump of them is a
       27-pixel disc.
-- [ ] **17.2** The nebula's fine structure must be unchanged everywhere else -- the fall-through is
-      per pixel, so only the residual cells switch to the composite.
+- [ ] **17.2** No grey patches with staircase edges either. The first attempt at this fell through to
+      the base map, which is a different source at a fifteen times coarser beam, and put a 13-pixel
+      staircase around every residual over 34,409 pixels. The residuals are now filled from their
+      own neighbours instead, so the fine structure runs continuously across them.
+- [ ] **17.2b** `KSP.log` reports the count: `... | 795 cells filled from their neighbours:
+      continuum-subtraction residuals, not measurements`.
 - [ ] **17.3** Same in `SII`, where the residuals appeared identically.
 - [ ] **17.4** The other patches carry them too: IC 2177 Seagull has 362 such cells, the worst of
       the fourteen. Worth one frame.

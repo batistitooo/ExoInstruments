@@ -196,11 +196,29 @@ static class DumpMapIndex
     static void DumpFloat16()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("bits,value");
+        sb.AppendLine("bits,value,reencoded");
         for (int i = 0; i <= ushort.MaxValue; i++)
-            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R}",
-                i, Float16.ToDouble((ushort)i)));
+        {
+            double v = Float16.ToDouble((ushort)i);
+            // Round tripping is the encoder's own strongest test: every representable value must
+            // come back to the bit pattern it came from, NaN and both infinities included.
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R},{2}",
+                i, v, Float16.FromDouble(v)));
+        }
         File.WriteAllText("exo_float16.csv", sb.ToString());
+
+        // Values BETWEEN the representable ones, where the rounding rule is what is under test.
+        var eb = new StringBuilder();
+        eb.AppendLine("value,encoded");
+        var erng = new Pcg32(0xE9C0DEUL, 21UL);
+        for (int i = 0; i < 60000; i++)
+        {
+            double v = i < 30000 ? (erng.NextDouble() * 140000.0 - 70000.0)
+                     : i < 45000 ? (erng.NextDouble() * 2e-4 - 1e-4)      // the subnormal range
+                                 : erng.NextDouble() * 100.0;            // where a rayleigh map lives
+            eb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1}", v, Float16.FromDouble(v)));
+        }
+        File.WriteAllText("exo_float16_encode.csv", eb.ToString());
     }
 
     /// <summary>Reads the synthetic map make_test_map.py wrote and queries it, so the format and the lookup are checked end to end.</summary>

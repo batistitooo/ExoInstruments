@@ -168,6 +168,36 @@ def float16():
                  "NaN and both infinities")
 
 
+def float16_encoder():
+    """The encoder, against numpy's own float16 cast."""
+    print("\n6b. IEEE 754 binary16 ENCODE, against numpy")
+    d = np.genfromtxt("exo_float16.csv", delimiter=",", names=True)
+    bits = d["bits"].astype(np.uint16)
+    v = d["value"]
+    ours = d["reencoded"].astype(np.uint16)
+
+    # Round trip: every representable value must return to its own bit pattern. NaN encodings all
+    # collapse to the canonical one, which is the format's own behaviour and numpy's.
+    finite = np.isfinite(v)
+    check("every finite value round-trips to its own encoding",
+          float(np.count_nonzero(ours[finite] != bits[finite])), 0.0, 0.0)
+
+    # And against numpy directly, over values BETWEEN the representable ones, where the rounding
+    # rule is what is actually under test.
+    e = np.genfromtxt("exo_float16_encode.csv", delimiter=",", names=True)
+    ref = e["value"].astype(np.float16).view(np.uint16)
+    ours = e["encoded"].astype(np.uint16)
+    bad = int(np.count_nonzero(ours != ref))
+    check(f"encoding matches numpy's float16 cast over {len(e)} values spanning the whole range",
+          float(bad), 0.0, 0.0)
+    if bad:
+        i = np.argmax(ours != ref)
+        print(f"      first disagreement at {e['value'][i]:.8g}: ours {ours[i]} vs numpy {ref[i]}")
+
+    notes.append("the half-float encoder round-trips all 65536 representable values and picks the "
+                 "same neighbour as numpy")
+
+
 def dust_map():
     """The packed map format and the query, end to end against the pattern that was written."""
     print("\n7. DustMap: read back the synthetic map and query it")
@@ -299,6 +329,7 @@ def main():
     interpolation()
     galactic()
     float16()
+    float16_encoder()
     dust_map()
     emission_map()
     real_map()

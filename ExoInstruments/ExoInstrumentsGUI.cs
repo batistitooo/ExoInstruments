@@ -393,7 +393,11 @@ namespace ExoInstruments
                 set.Load(path);
                 SolarSystemCameraTexture.EmissionPatches = set;
                 Debug.Log($"[ExoInstruments] Emission patches: {set.PatchCount} regions at nside {set.Nside} "
-                        + $"({set.ResolutionArcmin:F2} arcmin), {set.Source}");
+                        + $"({set.ResolutionArcmin:F2} arcmin), {set.Source}"
+                        + (set.MaskedCellsFilled > 0
+                            ? $" | {set.MaskedCellsFilled} cells filled from their neighbours: "
+                              + "continuum-subtraction residuals, not measurements"
+                            : ""));
             }
             catch (Exception e)
             {
