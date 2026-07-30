@@ -16,7 +16,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// H-alpha to red, [O III] to green and blue. The bicolour convention every narrowband
-        /// imager uses, and a CONVENTION -- there is no sense in which [O III] is cyan.
+        /// imager uses, and a CONVENTION; there is no sense in which [O III] is cyan.
         /// </summary>
         NarrowbandHoo,
 
@@ -52,7 +52,7 @@ namespace ExoInstruments.Visualization
     ///   * The luminance range comes from the frame itself, by the same extended-source zscale the
     ///     single-frame display uses (Core.ZScale).
     ///   * A LUMINANCE frame, when there is one, supplies that luminance, because it is the deepest
-    ///     channel -- it collects the whole passband. The colour still comes from the colour
+    ///     channel; it collects the whole passband. The colour still comes from the colour
     ///     channels. Separating the two is standard LRGB practice and it is why observers spend
     ///     most of their integration on L.
     ///   * Out-of-gamut colours are desaturated toward the white point rather than clipped, so hue
@@ -121,7 +121,7 @@ namespace ExoInstruments.Visualization
                         new[] { CameraFilter.HAlpha },
                         new[] { CameraFilter.OIII },
                         new[] { CameraFilter.OIII },
-                        "bicolour HOO (H-alpha to red, [O III] to green and blue) -- a presentation "
+                        "bicolour HOO (H-alpha to red, [O III] to green and blue), a presentation "
                         + "convention, not a colour measurement");
 
                 case ColourCompositeMode.NarrowbandSho:
@@ -130,7 +130,7 @@ namespace ExoInstruments.Visualization
                         new[] { CameraFilter.HAlpha },
                         new[] { CameraFilter.OIII },
                         "Hubble palette SHO ([S II] to red, H-alpha to green, [O III] to blue, "
-                        + "ordered by wavelength) -- a presentation convention, not a colour measurement");
+                        + "ordered by wavelength), a presentation convention, not a colour measurement");
 
                 default:
                     return ComposeTrueColour(width, height, channels, spec, out report);
@@ -223,7 +223,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// A palette: each display channel is the sum of one or more narrowband frames, each stretched
-        /// on its own limits. No colorimetry, because there is none to do -- see the enum.
+        /// on its own limits. No colorimetry, because there is none to do; see the enum.
         /// </summary>
         private static UnityEngine.Color[] ComposePalette(
             int width, int height, IDictionary<CameraFilter, float[]> channels, out string report,
@@ -250,7 +250,7 @@ namespace ExoInstruments.Visualization
             report = description
                    + (missing.Count > 0
                         ? "; EMPTY channels: " + string.Join(", ", missing.ToArray())
-                          + " (no sub in the stack, or no such survey exists -- see the README)"
+                          + " (no sub in the stack, or no such survey exists; see the README)"
                         : "");
             return result;
         }

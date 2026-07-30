@@ -26,7 +26,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Name keys that mapped to more than one BSC star and were therefore
         /// refused (the host fell through to positional matching). Every entry
-        /// here deserves a manual look -- an over-eager guess in this situation
+        /// here deserves a manual look; an over-eager guess in this situation
         /// is exactly how a real host could survive as a phantom decoy.
         /// </summary>
         public List<string> AmbiguousNameKeys { get; set; } = new List<string>();
@@ -34,7 +34,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// exoplanet.eu hosts bright enough to plausibly be in BSC (V &lt;=
         /// BrightHostReviewMagnitude) that matched nothing. Either genuinely
-        /// absent from BSC or a missed dedup -- the harness prints these for
+        /// absent from BSC or a missed dedup; the harness prints these for
         /// human review rather than silently trusting the miss.
         /// </summary>
         public List<string> UnmatchedBrightHosts { get; set; } = new List<string>();
@@ -150,7 +150,7 @@ namespace ExoInstruments.Core
                         {
                             // Two BSC stars answer to this name (shared binary
                             // designation). Guessing is how a phantom decoy gets
-                            // made -- record it and let position decide instead.
+                            // made; record it and let position decide instead.
                             result.AmbiguousNameKeys.Add($"{hostKey}: name key '{nameKey}' matches {candidates.Count} BSC entries");
                             continue;
                         }

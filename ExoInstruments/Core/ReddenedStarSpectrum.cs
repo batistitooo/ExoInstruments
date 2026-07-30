@@ -7,8 +7,8 @@ namespace ExoInstruments.Core
     ///
     /// THE PROBLEM THIS SOLVES. StellarPhotometry.CollectedElectrons turns a catalogue B-V into an
     /// effective temperature (Ballesteros 2012) and integrates a blackbody at that temperature
-    /// across the passband. The catalogue colour is the OBSERVED one -- Gaia measures reddened
-    /// photometry and GaiaPhotometry converts it without dereddening anything -- so a hot star
+    /// across the passband. The catalogue colour is the OBSERVED one; Gaia measures reddened
+    /// photometry and GaiaPhotometry converts it without dereddening anything; so a hot star
     /// behind two magnitudes of dust is modelled as an intrinsically cool star. Those two have the
     /// same B-V by construction and genuinely different spectra: one is a smooth Planck curve
     /// peaking in the red, the other is a steeply blue Planck curve with the dust curve carved out
@@ -22,7 +22,7 @@ namespace ExoInstruments.Core
     ///
     /// leaves it exactly 1 at V by construction. The star's observed brightness is untouched;
     /// only the distribution of that brightness across the band changes. Nothing is attenuated
-    /// twice, because nothing is attenuated at all -- the observed magnitude already contains the
+    /// twice, because nothing is attenuated at all; the observed magnitude already contains the
     /// dimming, and this only stops the reddening from being mistaken for a cool photosphere.
     ///
     /// WHAT IT NEEDS. The intrinsic colour, (B-V)_0 = (B-V) - E(B-V), which needs E(B-V) for that

@@ -28,7 +28,7 @@ static class DumpEmission
     /// has been installed.
     ///
     /// This exists because "I pointed at M42 in H-alpha and saw nothing" has two very different
-    /// causes -- a signal that is not being computed, and a signal that is being computed and is a
+    /// causes: a signal that is not being computed, and a signal that is being computed and is a
     /// tenth of a percent of full well. Only the numbers separate them, and the second one is not a
     /// bug: it is why nebula photography is a stacking-and-stretching discipline.
     /// </summary>

@@ -10,7 +10,7 @@ namespace ExoInstruments.Core
     /// inner plane, a ratio of 3.6e5, against the 6.5e4 levels a 16-bit fixed-point value offers:
     /// any scale fine enough for the poles saturates in the plane, and any scale coarse enough for
     /// the plane quantises the poles to nothing. Choosing one silently discards the other, and the
-    /// first version of the packer did exactly that -- it marked 48615 pixels "no value", all of
+    /// first version of the packer did exactly that; it marked 48615 pixels "no value", all of
     /// them at |b| below a degree.
     ///
     /// A half float has 11 bits of mantissa, so its precision is RELATIVE: 4.9e-4 of the value
@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
     /// the sky, both far below SFD's own 16% calibration uncertainty, in the same two bytes.
     ///
     /// .NET Framework 4.7.2 has no System.Half, hence this. The layout is the standard one, so
-    /// numpy's float16 writes exactly what this reads -- the harness checks that against numpy.
+    /// numpy's float16 writes exactly what this reads; the harness checks that against numpy.
     ///
     /// Pure C#, no Unity dependency.
     /// </summary>

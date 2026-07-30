@@ -6,7 +6,7 @@ namespace ExoInstruments.Core
     /// Everything the imaging session needs to know about the observer: where it
     /// sits, how the home body spins, and where the home body is on its orbit
     /// (which fixes the Sun's apparent position in the same fictional sky frame
-    /// SkyCoordinates uses). Filled from FlightGlobals by the GUI layer -- this
+    /// SkyCoordinates uses). Filled from FlightGlobals by the GUI layer; this
     /// module stays pure C#.
     /// </summary>
     public struct ImagingObserverContext
@@ -16,7 +16,7 @@ namespace ExoInstruments.Core
         public double BodyRotationPeriodSeconds;
         public double BodyInitialRotationDeg;
 
-        /// <summary>False when the home body has no orbit (degenerate save/system) -- day/night gating is skipped.</summary>
+        /// <summary>False when the home body has no orbit (degenerate save/system); day/night gating is skipped.</summary>
         public bool HasSunOrbit;
         public double SunOrbitPeriodSeconds;      // home body's orbital period around the Sun
         public double SunMeanAnomalyAtEpochRad;   // home body's orbit, radians (KSP convention)
@@ -52,11 +52,11 @@ namespace ExoInstruments.Core
         /// Aggregate moonlit-sky factor along this line of sight: sqrt of the
         /// scattered-moonlight sky excess relative to a full Mün at 30 deg
         /// separation (see MoonlightPollution). 0 = moonless sky. Feeds the
-        /// photometric noise budget only -- RV and H-band imaging don't pay it.
+        /// photometric noise budget only; RV and H-band imaging don't pay it.
         /// </summary>
         public double MoonSkyFactor;
 
-        /// <summary>True when a moon's disk sits over the target -- nothing gets through, any method, any instrument.</summary>
+        /// <summary>True when a moon's disk sits over the target; nothing gets through, any method, any instrument.</summary>
         public bool OccultedByMoon;
         public string OccultingMoonName;
 

@@ -32,8 +32,8 @@ namespace ExoInstruments.Core
     ///     and no table to ship. It is also the single most-cited extinction law in astronomy.
     ///   * F99 (Fitzpatrick 1999, PASP 111, 63) is better in the optical, which is where every
     ///     instrument in this roster works: CCM89's optical polynomial carries systematic residuals
-    ///     of a few hundredths of a magnitude that F99's spline does not. It is not closed-form --
-    ///     it is a cubic spline through published anchor points -- so it is carried as a TABLE,
+    ///     of a few hundredths of a magnitude that F99's spline does not. It is not closed-form;
+    ///     it is a cubic spline through published anchor points, so it is carried as a TABLE,
     ///     generated from the published law and checked against the reference implementation.
     ///
     /// F99 is the default. CCM89 is kept because it is exactly implementable, which makes it the
@@ -75,7 +75,7 @@ namespace ExoInstruments.Core
         /// This is CCM89's own published boundary, not a choice made here: their optical and
         /// near-infrared polynomials (equations 3a/3b) are stated for 1.1 &lt;= x &lt;= 3.3, and above
         /// it the paper switches to a different ultraviolet parameterisation which this file does
-        /// not carry -- see the class summary for why the ultraviolet is refused rather than
+        /// not carry; see the class summary for why the ultraviolet is refused rather than
         /// extrapolated into. The two laws therefore have different blue limits, which is a
         /// property of the laws.
         /// </summary>
@@ -100,7 +100,7 @@ namespace ExoInstruments.Core
         ///     T = 10^(-0.4 * A(lambda)) = 10^(-0.4 * R_V * E(B-V) * k(lambda))
         ///
         /// Returns 1 for no reddening, and is the quantity SystemResponse multiplies into its
-        /// integrand -- the same place and the same form as the atmosphere's own transmission.
+        /// integrand, the same place and the same form as the atmosphere's own transmission.
         /// </summary>
         public static double Transmission(double wavelengthMeters, double eBv, double rv = MilkyWayRv)
         {

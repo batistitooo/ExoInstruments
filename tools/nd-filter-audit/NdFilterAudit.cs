@@ -9,15 +9,15 @@ using ExoInstruments.Core;
 /// and therefore whether the neutral-density roster is the right one.
 ///
 /// THE QUESTION THIS ANSWERS. A player photographing Jupiter or Saturn reports needing the ND1000
-/// stop routinely and still over-exposing, while the next stop up -- the solar filter -- leaves
+/// stop routinely and still over-exposing, while the next stop up, the solar filter, leaves
 /// nothing visible. That is a two-hundred-fold gap between the two, and the question is whether the
 /// gap is real (in which case an intermediate stop is missing) or whether the exposure control is
 /// doing something else.
 ///
 /// WHAT IT COMPUTES, AND WHY THAT IS RIGOROUS. A resolved planet is an extended source, so the
 /// quantity that fills a pixel is its SURFACE BRIGHTNESS, not its integrated magnitude. That makes
-/// SkyBrightnessModel.ElectronsPerPixelPerSecond -- the shipped function the pipeline already uses
-/// for the night sky, which takes exactly a V surface brightness -- the correct and unmodified tool
+/// SkyBrightnessModel.ElectronsPerPixelPerSecond, the shipped function the pipeline already uses
+/// for the night sky, which takes exactly a V surface brightness, the correct and unmodified tool
 /// for it. Nothing is reimplemented here: the bandpass, the throughput, the QE curve, the aperture
 /// area and the ND transmissions all come from the shipped Core and VisualTelescopeCatalog.
 ///
@@ -71,7 +71,7 @@ static class NdFilterAudit
         ("ND8",      0.9),
         ("ND64",     1.8),
         ("ND1000",   3.0),
-        ("OD3.8",    3.8),   // Baader AstroSolar PHOTO Film -- added because this audit found the gap
+        ("OD3.8",    3.8),   // Baader AstroSolar PHOTO Film, added because this audit found the gap
         ("solar",    5.0),
     };
 
@@ -174,7 +174,7 @@ static class NdFilterAudit
 
         void W(string line) { report.AppendLine(line); Console.WriteLine(line); }
 
-        W("ND FILTER AUDIT -- what a bright resolved target really puts in a pixel");
+        W("ND FILTER AUDIT: what a bright resolved target really puts in a pixel");
         W("=====================================================================");
         W("");
         W("Every figure below comes from the shipped Core: SkyBrightnessModel.ElectronsPerPixelPerSecond");
@@ -292,7 +292,7 @@ static class NdFilterAudit
 
     static string FormatTime(double seconds)
     {
-        if (double.IsInfinity(seconds) || double.IsNaN(seconds)) return "--";
+        if (double.IsInfinity(seconds) || double.IsNaN(seconds)) return "-";
         if (seconds >= 1.0) return $"{seconds:F1} s";
         if (seconds >= 1e-3) return $"{seconds * 1e3:F2} ms";
         return $"{seconds * 1e6:F1} us";

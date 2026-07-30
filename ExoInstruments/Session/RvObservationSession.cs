@@ -12,7 +12,7 @@ namespace ExoInstruments.Session
     /// </summary>
     public class RvObservationSession
     {
-        /// <summary>High-cadence epoch spacing inside a scheduled transit window -- the dense sequence a real Rossiter-McLaughlin run takes across one transit night.</summary>
+        /// <summary>High-cadence epoch spacing inside a scheduled transit window, the dense sequence a real Rossiter-McLaughlin run takes across one transit night.</summary>
         public const double RmBurstCadenceSeconds = 600.0;
 
         public StarTarget Target { get; private set; }
@@ -106,7 +106,7 @@ namespace ExoInstruments.Session
                 : Instrument.CadenceSeconds;
         }
 
-        /// <summary>A burst window spans mid-transit +/- one full duration -- enough out-of-transit shoulder on both sides to anchor the anomaly's baseline.</summary>
+        /// <summary>A burst window spans mid-transit +/- one full duration, enough out-of-transit shoulder on both sides to anchor the anomaly's baseline.</summary>
         private bool IsInBurstWindow(double ut)
         {
             for (int i = 0; i < TransitBurstPlanets.Count; i++)

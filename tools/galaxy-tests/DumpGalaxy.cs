@@ -76,7 +76,7 @@ static class DumpGalaxy
 
     /// <summary>
     /// The R_e that reconciles a catalogued total magnitude with a catalogued isophotal diameter,
-    /// over a grid spanning what HyperLEDA actually contains -- and the residual, which must be
+    /// over a grid spanning what HyperLEDA actually contains, and the residual, which must be
     /// zero by construction: feeding R_e back through the profile has to put mu = 25 exactly at
     /// D25/2, or the solve found the wrong root.
     /// </summary>
@@ -143,7 +143,7 @@ static class DumpGalaxy
 
             // The centroid is measured over the INNER profile only. Out at the truncation edge the
             // cut is a hard ellipse and the centre sits at a sub-pixel offset, so which boundary
-            // pixels fall inside is slightly asymmetric -- a real property of cutting a continuous
+            // pixels fall inside is slightly asymmetric, a real property of cutting a continuous
             // profile on a pixel grid, and not what "did it land where it was asked to" is asking.
             double sum = 0.0, mx = 0.0, my = 0.0;
             double inner = 3.0 * re;

@@ -5,8 +5,8 @@ can see the truncation. What it cannot conserve is the **surface brightness at t
 profile drops from its last sampled value to zero in one pixel. Around a bright enough source that
 step is a visible edge, and because the kernel is stored as a square array it is a square edge.
 
-This harness measures the two numbers that decide whether a support is big enough -- the enclosed
-energy inside it, and the profile value at its rim as a fraction of the peak -- for every instrument
+This harness measures the two numbers that decide whether a support is big enough: the enclosed
+energy inside it, and the profile value at its rim as a fraction of the peak, for every instrument
 in the roster, and then checks the frame-wide kernel that replaced the worst case.
 
 ## Run
@@ -17,21 +17,21 @@ dotnet run -p:Core=../../ExoInstruments/Core
 
 No Python side: the Kolmogorov profile itself is already cross-validated against GalSim in
 `tools/galsim-crossvalidation` (2.3e-4). What this adds is the radial integral of it, whose
-normalisation is analytic rather than numerical -- the profile is the order-zero Hankel transform of
+normalisation is analytic rather than numerical; the profile is the order-zero Hankel transform of
 Fried's OTF, that transform is self-reciprocal, so its integral over the plane is exactly 2*pi.
 
 ## What it found
 
 **SPHERE's adaptive-optics seeing halo, at the old 256 px cap.** The kernel was 513x513 in a
-1024x1024 frame -- half the frame width -- and stopped 1.28 seeing-FWHM out, where the profile is
+1024x1024 frame (half the frame width), and stopped 1.28 seeing-FWHM out, where the profile is
 still **3.1e-2 of its peak**. Enclosed energy inside the inscribed circle 90.4%, out to the square's
 corners 95.7%, so where the kernel ended depended on azimuth as well. Pushing that step below the
 read noise of a tenth-magnitude star needs about 10 FWHM, i.e. a 3985 px kernel: unreachable.
 
 Replaced by `FourierConvolution.RadialKernelSpectrum`, a kernel laid out across the whole padded
 frame. It truncates at a lag no two sensor pixels can span, so nothing detectable is left out.
-Measured against `OpticalPsf.AtmosphericIntensity` in absolute per-pixel fractions -- normalisation
-under test as well as shape -- it agrees to **4e-6 in the core and 3e-4 at 500 px**, holds 99.485% of
+Measured against `OpticalPsf.AtmosphericIntensity` in absolute per-pixel fractions; normalisation
+under test as well as shape; it agrees to **4e-6 in the core and 3e-4 at 500 px**, holds 99.485% of
 a source's flux (the rest falls at offsets larger than the sensor), and costs 463 ms to prepare, once
 per settings change, plus 750 ms to apply.
 
@@ -53,14 +53,14 @@ worse than the real-space route.
 Three changes together: the ceiling raised to 128, the atmospheric component sized by where its
 profile actually gets faint (1e-4 of peak, which the profile itself says is 9.87 FWHM) instead of by
 a multiple of its FWHM, and the support clipped to a circle so where the kernel ends no longer
-depends on azimuth. The transform cost rises about 1.5x -- a wider kernel needs a larger tile, but
+depends on azimuth. The transform cost rises about 1.5x; a wider kernel needs a larger tile, but
 proportionally fewer of them.
 
 ## Overlap-add tiling
 
 Added while chasing a report of visible squares on a nebula. Every other check in this project
 measures *kernels*, and a tiling bug is the one that leaves the kernel perfect while laying a grid
-of seams over the frame at the tile pitch -- which on a smooth, faint, hard-stretched subject is the
+of seams over the frame at the tile pitch, which on a smooth, faint, hard-stretched subject is the
 only thing in the picture with edges. The tile pitch is `n - k + 1`, about 58 px on the RedCat at
 4x4 and 108 px at 1x1, so seams would be roughly twice as coarse on screen at 4x4 for the same
 displayed size, which is what the report described.

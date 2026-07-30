@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     /// the [O I] green line at 557.7 nm, the [O I] red doublet at 630.0 and 636.4, the sodium D pair,
     /// and from 650 nm upward a dense forest of OH Meinel bands that dominates the whole red end.
     /// ESO's model puts 11148 rayleighs into those lines between 350 and 1000 nm against 5290 in the
-    /// residual continuum -- so most of the dark sky is LINES, and a narrowband filter either sits on
+    /// residual continuum; so most of the dark sky is LINES, and a narrowband filter either sits on
     /// one of them or it does not.
     ///
     /// That distinction decides what can be observed. An [O I] 6300 filter looks straight at 151
@@ -25,7 +25,7 @@ namespace ExoInstruments.Core
     ///     I(z) / I(0) = [ 1 - (R / (R + h))^2 sin^2 z ]^(-1/2)
     ///
     /// At 60 degrees from the zenith that gives 1.92 against sec z = 2.00, and by 80 degrees 4.19
-    /// against 5.76 -- a 27% difference, in the direction that makes low-altitude observing less bad
+    /// against 5.76, a 27% difference, in the direction that makes low-altitude observing less bad
     /// than a plain airmass scaling suggests.
     ///
     /// The table is generated from ESO's SkyCalc rather than typed; see tools/generate_airglow_table.py
@@ -50,7 +50,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Height of the [O I] red doublet's layer, kilometres. The red lines come from dissociative
         /// recombination of O2+ in the F region, far above the rest of the airglow, so their van
-        /// Rhijn factor is materially different -- 1.73 against 1.92 at 60 degrees from the zenith.
+        /// Rhijn factor is materially different, 1.73 against 1.92 at 60 degrees from the zenith.
         /// </summary>
         public const double RedLineLayerHeightKm = 250.0;
 
@@ -94,8 +94,8 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Electrons per pixel per second the airglow puts on the detector through a given response.
         ///
-        /// Integrated over the table's own bins, each scaled by its own van Rhijn factor -- which is
-        /// where the red doublet's different layer height enters -- and by the system's throughput at
+        /// Integrated over the table's own bins, each scaled by its own van Rhijn factor, which is
+        /// where the red doublet's different layer height enters, and by the system's throughput at
         /// that wavelength. Returns the same units as EmissionLines.ElectronsPerPixelPerSecond, and
         /// uses it, so the sky and a nebula arrive on one flux scale.
         /// </summary>
@@ -210,7 +210,7 @@ namespace ExoInstruments.Core
         ///
         /// Defined the way an ETC defines it: the airglow's photon flux through the Bessell V band,
         /// against a zero-magnitude reference of PhotonFluxModel.ZeroMagPhotonFluxPerAngstrom taken
-        /// flat across the same band -- the identical convention the rest of this mod's photometry
+        /// flat across the same band, the identical convention the rest of this mod's photometry
         /// anchors on, so the sky and the sources it competes with share one scale. The classical
         /// dark-sky figure this must reproduce is V = 21.7 (Patat 2008 measures 21.7 +/- 0.2 at
         /// Paranal), and tools/airglow-tests asserts it does.

@@ -134,7 +134,7 @@ namespace ExoInstruments.Core
         /// The same photometric chain a point source goes through (SystemResponse and
         /// PhotonFluxModel), applied to the flux inside one pixel's solid angle, so the sky and
         /// the stars sitting on it are on one flux scale by construction, which is what makes a
-        /// computed signal-to-noise ratio mean anything -- including the real optical throughput
+        /// computed signal-to-noise ratio mean anything, including the real optical throughput
         /// and QE curve, which the sky must lose exactly as the sources do.
         ///
         /// The response is used in its NO-EXTINCTION form and transmission is applied by the

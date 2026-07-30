@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     /// Why this exists rather than a direct convolution loop: a real point-spread function
     /// (see OpticalPsf) is radially symmetric but NOT separable, so it cannot be applied as a
     /// horizontal pass followed by a vertical one the way a box or Gaussian kernel can. Applied
-    /// directly, an instrument PSF a few tens of pixels across costs O(W*H*K^2) -- of order
+    /// directly, an instrument PSF a few tens of pixels across costs O(W*H*K^2), of order
     /// 10^10 operations on a multi-megapixel frame, i.e. minutes per exposure. Transforming
     /// tiles instead makes it O(W*H*log N), which keeps a capture in the second range while
     /// computing exactly the same result: overlap-add is an exact restructuring of linear
@@ -32,7 +32,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Convolves image (row-major, width*height) in place with a square kernel of
         /// half-width kernelRadius, i.e. (2*kernelRadius+1)^2 taps, centred on each pixel.
-        /// The kernel is used exactly as supplied -- normalise it beforehand if flux is to be
+        /// The kernel is used exactly as supplied; normalise it beforehand if flux is to be
         /// conserved (OpticalPsf.BuildKernel already does).
         /// </summary>
         public static void Convolve(float[] image, int width, int height, float[] kernel, int kernelRadius)
@@ -127,7 +127,7 @@ namespace ExoInstruments.Core
         /// of the array, which is the standard ordering that makes a circular convolution agree
         /// with a linear one. Two pixels of an N-wide frame are never more than N-1 apart, so every
         /// lag that can occur inside the frame is present in the kernel at its true value and no
-        /// wrap-around can reach the frame. The profile IS truncated -- at a lag no pair of sensor
+        /// wrap-around can reach the frame. The profile IS truncated, at a lag no pair of sensor
         /// pixels can realise. Light at larger offsets left the sensor, which is the same thing the
         /// zero-padding in Convolve above already assumes.
         ///

@@ -23,7 +23,7 @@ namespace ExoInstruments.Core
 
             public double BestUt;            // center of the single best cell; NaN when nothing is observable
 
-            /// <summary>The best cell's un-normalized quality (fraction of the zenith-moonless ideal) -- what the normalization divided by.</summary>
+            /// <summary>The best cell's un-normalized quality (fraction of the zenith-moonless ideal), what the normalization divided by.</summary>
             public double PeakQualityRaw;
 
             public double CellUt(int row, int col) => StartUt + (row * (double)Columns + col + 0.5) * CellSeconds;

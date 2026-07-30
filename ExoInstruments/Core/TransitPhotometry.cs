@@ -20,7 +20,7 @@ namespace ExoInstruments.Core
     /// The budget, in the order it is built:
     ///
     ///   1. Effective photometric width W for this star's own spectrum through this instrument at
-    ///      this airmass, from SystemResponse -- the filter, the optics, the QE curve, the
+    ///      this airmass, from SystemResponse: the filter, the optics, the QE curve, the
     ///      atmosphere and the star's colour, integrated over the passband.
     ///   2. Total source electrons over the exposure, from the star's apparent magnitude
     ///      (PhotonFluxModel), through the real obstructed collecting area.
@@ -55,7 +55,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The full breakdown behind one error bar, so the model can be inspected rather than
-        /// merely trusted -- the same reason SolarSystemCameraTexture publishes its own
+        /// merely trusted, the same reason SolarSystemCameraTexture publishes its own
         /// LastEffectiveWidthAngstrom, LastSkyBrightness and so on.
         /// </summary>
         public struct Budget
@@ -82,7 +82,7 @@ namespace ExoInstruments.Core
             public double PhotometricSigma;
             /// <summary>Young (1967) scintillation sigma at this airmass and exposure.</summary>
             public double ScintillationSigma;
-            /// <summary>The two above in quadrature -- the light-curve point's error bar.</summary>
+            /// <summary>The two above in quadrature, the light-curve point's error bar.</summary>
             public double TotalSigma;
         }
 
@@ -93,7 +93,7 @@ namespace ExoInstruments.Core
         /// planetRadiusMeters feeds the van Rhijn path-lengthening of the airglow term and is the
         /// observer's own world's radius. Passing 0 (the default, for callers with no CelestialBody
         /// in reach) drops that enhancement while extinction still dims the same term, so the
-        /// airglow contribution is then under-estimated away from zenith -- by a factor approaching
+        /// airglow contribution is then under-estimated away from zenith, by a factor approaching
         /// 1.9 at airmass 2 for an Earth-sized world. Supply it wherever it is available.
         /// </summary>
         public static bool TryEstimate(
@@ -295,8 +295,8 @@ namespace ExoInstruments.Core
         ///
         /// The wavelength term is small but has the right sign and is free: a red band sees a
         /// sharper image through the same air than a blue one, which is why it is applied rather
-        /// than dropped. The diffraction core is NOT convolved in here -- for every ground
-        /// instrument this model applies to it is far inside the seeing disc -- so for a space
+        /// than dropped. The diffraction core is NOT convolved in here; for every ground
+        /// instrument this model applies to it is far inside the seeing disc; so for a space
         /// instrument the detector's own delivered figure is used directly instead.
         /// </summary>
         private static double DeliveredFwhmArcsec(PhotometricDetector detector, InstrumentSpec instrument, double airmass)
@@ -321,11 +321,11 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Airmass grid the system response is tabulated on. Building one response costs a 160-entry
-        /// colour table of 64-node Simpson quadratures -- under a millisecond, but a light curve
+        /// colour table of 64-node Simpson quadratures, under a millisecond, but a light curve
         /// asks for thousands of samples, so it is built once per grid point and interpolated
         /// between. The effective width varies smoothly and monotonically with airmass (it is an
         /// integral of 10^(-0.4 k(lambda) X)), so linear interpolation on a 0.1 grid is accurate to
-        /// well under a tenth of a percent -- far inside the 0.03 mag scatter of the Gaia
+        /// well under a tenth of a percent, far inside the 0.03 mag scatter of the Gaia
         /// photometric transformations feeding the catalogue in the first place.
         /// </summary>
         private const double AirmassGridStep = 0.1;

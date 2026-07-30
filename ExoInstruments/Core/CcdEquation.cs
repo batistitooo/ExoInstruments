@@ -51,8 +51,8 @@ namespace ExoInstruments.Core
     /// to 1 as the background region grows, which is the limit most textbook statements of the
     /// equation quote.
     ///
-    /// The fractional uncertainty on the measured flux -- which is what a light curve point's
-    /// error bar is -- is exactly the reciprocal, sigma_F/F = 1/(S/N).
+    /// The fractional uncertainty on the measured flux, which is what a light curve point's
+    /// error bar is, is exactly the reciprocal, sigma_F/F = 1/(S/N).
     ///
     /// WHAT THIS FILE DOES NOT MODEL, deliberately, because each is either a separate published
     /// model or has no defensible value here:
@@ -81,7 +81,7 @@ namespace ExoInstruments.Core
         /// the regime the optimum is worth having in: a larger aperture then admits sky faster
         /// than it admits signal. For a bright, source-limited star the true optimum is wider,
         /// tending to "all of the flux" as the background vanishes, so 0.68 is conservative there
-        /// rather than wrong -- it discards 28% of the source photons that a wider aperture would
+        /// rather than wrong; it discards 28% of the source photons that a wider aperture would
         /// keep. Exposed as a parameter for that reason.
         /// </summary>
         public const double OptimalApertureRadiusInFwhm = 0.68;
@@ -93,7 +93,7 @@ namespace ExoInstruments.Core
         ///
         /// These are a DATA-REDUCTION convention, not physical constants, and they enter only
         /// through Merline &amp; Howell's (1 + n_pix/n_B) factor. The derived area ratio is
-        /// (3^2 - 2^2) = 5, so n_B = 5 n_pix and the factor is 1.2 -- a 20% inflation of the
+        /// (3^2 - 2^2) = 5, so n_B = 5 n_pix and the factor is 1.2, a 20% inflation of the
         /// background variance, from the sky level being estimated rather than known.
         /// </summary>
         public const double SkyAnnulusInnerRadiusInAperture = 2.0;
@@ -117,8 +117,8 @@ namespace ExoInstruments.Core
         /// exposure-time calculator uses for the encircled-energy factor.
         ///
         /// THE GAUSSIAN IS AN ASSUMPTION, and the only one in this file. It is a good one in the
-        /// regime it is applied to here -- a long exposure through the atmosphere, where the PSF
-        /// is seeing-dominated and the diffraction core is far inside it -- and a poor one in the
+        /// regime it is applied to here (a long exposure through the atmosphere, where the PSF
+        /// is seeing-dominated and the diffraction core is far inside it), and a poor one in the
         /// wings, since the real long-exposure Kolmogorov profile falls as theta^(-11/3) and so
         /// carries more flux outside any given radius than a Gaussian does. At the default 0.68
         /// FWHM aperture this returns 0.7226, and the true Kolmogorov figure is somewhat lower.
@@ -147,7 +147,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Signal-to-noise ratio of the aperture measurement -- the equation itself, with every
+        /// Signal-to-noise ratio of the aperture measurement, the equation itself, with every
         /// quantity in electrons.
         ///
         /// gainElectronsPerAdu may be null, which drops the G^2 sigma_f^2 digitisation term. That

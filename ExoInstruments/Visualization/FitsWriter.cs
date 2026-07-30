@@ -12,7 +12,7 @@ namespace ExoInstruments.Visualization
     /// representation convention, real acquisition-software header keywords matching the
     /// SharpCap/NINA/MaximDL conventions (EXPTIME, XPIXSZ/YPIXSZ, EGAIN, FOCALLEN, GAIN, FILTER,
     /// OBJECT, DATE-OBS), big-endian byte order and 80-byte-card/2880-byte-block padding as the
-    /// FITS standard requires -- what a real telescope+camera would actually write to disk.
+    /// FITS standard requires, what a real telescope+camera would actually write to disk.
     ///
     /// The header carries a full TAN world coordinate system (see Core.FitsWcs), the instrument
     /// and site identity, and the observing conditions the exposure was taken through. That is
@@ -34,7 +34,7 @@ namespace ExoInstruments.Visualization
             public double ElectronsPerAdu;
             /// <summary>Bit depth of the real converter that produced these counts.</summary>
             public int AdcBits;
-            /// <summary>Count at which this frame stopped responding -- the smaller of the physical well and the converter ceiling, expressed in ADU.</summary>
+            /// <summary>Count at which this frame stopped responding, the smaller of the physical well and the converter ceiling, expressed in ADU.</summary>
             public double SaturationAdu;
             /// <summary>
             /// True for a raw single frame straight off the converter, where the counts really
@@ -63,7 +63,7 @@ namespace ExoInstruments.Visualization
             public double SiteElevationMeters;
             /// <summary>On-chip binning factor, written to XBINNING/YBINNING (square binning throughout this pipeline).</summary>
             public int BinningFactor;
-            /// <summary>Read noise in electrons, RDNOISE -- the number a reduction needs to weight pixels correctly.</summary>
+            /// <summary>Read noise in electrons, RDNOISE: the number a reduction needs to weight pixels correctly.</summary>
             public double ReadNoiseElectrons;
             /// <summary>Dark current, e-/s/pixel at the detector's own operating temperature.</summary>
             public double DarkCurrentElectronsPerSecond;
@@ -82,12 +82,12 @@ namespace ExoInstruments.Visualization
             /// diffraction-core FWHM at this filter. Written as two separate keywords rather than
             /// one "delivered FWHM", because the pipeline knows these two and combining them into a
             /// single figure would require an addition rule that is exact for neither an Airy
-            /// pattern nor a Kolmogorov profile -- the same reason OpticalPsf solves for the
+            /// pattern nor a Kolmogorov profile, the same reason OpticalPsf solves for the
             /// atmospheric residual by bisection instead of subtracting in quadrature.
             /// </summary>
             public double SeeingFwhmArcsec;
             public double DiffractionFwhmArcsec;
-            /// <summary>Sky background, V mag/arcsec^2 -- the quantity SkyBrightnessModel computes and publishes in.</summary>
+            /// <summary>Sky background, V mag/arcsec^2: the quantity SkyBrightnessModel computes and publishes in.</summary>
             public double SkyBrightnessVMagPerArcsec2;
             /// <summary>Total Galactic E(B-V) toward the field, or NaN with no dust map installed. The whole column, so it describes what lies beyond the Galaxy rather than any star in the frame.</summary>
             public double GalacticReddeningEBv;
@@ -101,6 +101,13 @@ namespace ExoInstruments.Visualization
             /// <summary>Filter's central wavelength and FWHM, nanometres, so a colour term can be recomputed downstream.</summary>
             public double FilterCentralWavelengthNm;
             public double FilterBandwidthNm;
+
+            /// <summary>
+            /// Subs averaged into this frame. One means a single exposure; more means an average, and
+            /// a reader needs to know which before trusting the noise in it. Zero leaves the keyword
+            /// out entirely rather than claiming a stack of none.
+            /// </summary>
+            public int StackedSubs;
             /// <summary>IMAGETYP, following the de-facto acquisition-software vocabulary ('Light Frame', 'Dark Frame', ...).</summary>
             public string ImageType;
 
@@ -116,19 +123,19 @@ namespace ExoInstruments.Visualization
 
             /// <summary>
             /// Photometric zero point, MAGZERO: m = -2.5 log10(ADU/s) + MAGZERO, for a flat source
-            /// spectrum. NaN when not computed (a stacked product has none -- see IsCalibratedAdu).
+            /// spectrum. NaN when not computed (a stacked product has none; see IsCalibratedAdu).
             ///
             /// This is the keyword that makes the frame a MEASUREMENT rather than a picture. The
-            /// pipeline could always have produced it -- it is the system response, the real
+            /// pipeline could always have produced it; it is the system response, the real
             /// obstructed collecting area and the conversion gain, all of which it computes for
-            /// every capture -- and until now it published the ingredients without the result, so a
+            /// every capture, and until now it published the ingredients without the result, so a
             /// reader had to reconstruct the photometry equation to use them.
             /// </summary>
             public double PhotometricZeroPoint;
 
             /// <summary>
             /// Bias pedestal in ADU, BIASLVL. The constant the readout adds ahead of the converter,
-            /// so a reader can pedestal-correct the frame without a separate bias exposure -- and,
+            /// so a reader can pedestal-correct the frame without a separate bias exposure, and,
             /// more to the point, so the frame's zero level is a stated quantity rather than
             /// something to be inferred from the histogram.
             /// </summary>
@@ -154,7 +161,7 @@ namespace ExoInstruments.Visualization
             /// <summary>
             /// True when the frame was taken unguided, so the sky rotated during the exposure. The
             /// WCS then describes the sky at DATE-OBS, the start of the exposure, and every source
-            /// is a trail running forward from its catalogued position -- which a HISTORY card says
+            /// is a trail running forward from its catalogued position, which a HISTORY card says
             /// outright, because a plate solve of such a frame will not converge and the reason
             /// should be in the file rather than inferred.
             /// </summary>
@@ -167,7 +174,7 @@ namespace ExoInstruments.Visualization
         /// The values handed in are the detector's own digital output, not a display image: they
         /// are written unaltered, so EGAIN really does convert them back to electrons and the
         /// file can be reduced like an observed one. Writing a normalised [0,1] display frame
-        /// rescaled to 65535 -- which is what this used to receive -- produced a file whose
+        /// rescaled to 65535, which is what this used to receive, produced a file whose
         /// EGAIN was meaningless, because the counts had already been through a stretch and a
         /// renormalisation that no header keyword described.
         /// </summary>
@@ -203,7 +210,7 @@ namespace ExoInstruments.Visualization
             }
             else
             {
-                AppendStringCard(sb, "BUNIT", "", "processed product -- not raw counts");
+                AppendStringCard(sb, "BUNIT", "", "processed product, not raw counts");
                 AppendCommentaryCard(sb, "HISTORY", "stacked/aligned composite; EGAIN omitted deliberately");
             }
             AppendCard(sb, "FOCALLEN", info.FocalLengthMm.ToString("F2", CultureInfo.InvariantCulture), "focal length (mm)");
@@ -220,7 +227,7 @@ namespace ExoInstruments.Visualization
             AppendEnd(sb);
 
             // The header, like the data, must be padded to a whole number of 2880-byte
-            // blocks -- with blank (all-space) 80-byte cards, per the FITS standard.
+            // blocks, with blank (all-space) 80-byte cards, per the FITS standard.
             int cardCount = sb.Length / CardSizeBytes;
             int cardsPerBlock = BlockSizeBytes / CardSizeBytes;
             int remainderCards = cardCount % cardsPerBlock;
@@ -246,6 +253,9 @@ namespace ExoInstruments.Visualization
             AppendStringCard(sb, "INSTRUME", info.InstrumentName, "instrument / camera");
             AppendStringCard(sb, "OBSERVAT", info.ObservatoryName, "observatory site");
             AppendStringCard(sb, "IMAGETYP", info.ImageType, "frame type");
+            if (info.StackedSubs > 0)
+                AppendCard(sb, "NSTACK", info.StackedSubs.ToString(CultureInfo.InvariantCulture),
+                           "sub-exposures averaged into this frame");
             AppendCard(sb, "SITELAT", info.SiteLatitudeDeg.ToString("F6", CultureInfo.InvariantCulture), "site latitude (deg)");
             AppendCard(sb, "SITELONG", info.SiteLongitudeDeg.ToString("F6", CultureInfo.InvariantCulture), "site longitude (deg, E positive)");
             AppendCard(sb, "SITEELEV", info.SiteElevationMeters.ToString("F1", CultureInfo.InvariantCulture), "site elevation (m)");
@@ -313,7 +323,7 @@ namespace ExoInstruments.Visualization
                 AppendCard(sb, "PHOTWIDT", info.EffectiveWidthAngstrom.ToString("F3", CultureInfo.InvariantCulture), "effective photometric width, flat SED (A)");
 
             // The zero point and the pedestal: the two numbers a reduction needs before it can turn
-            // this frame's counts into a magnitude. Written together and only for a raw frame --
+            // this frame's counts into a magnitude. Written together and only for a raw frame;
             // a processed composite has neither, for the same reason it has no EGAIN.
             if (info.IsCalibratedAdu)
             {
@@ -331,7 +341,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Provenance: what made this frame, and how to make it again.
         ///
-        /// A simulated data product can offer something a real one cannot -- exact reproducibility --
+        /// A simulated data product can offer something a real one cannot: exact reproducibility,
         /// and it is worth almost nothing unless the seed is written down next to the result. This
         /// is the same reason Pyxel serialises its YAML configuration into its own outputs.
         /// </summary>
@@ -350,7 +360,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// The world coordinate system: a TAN (gnomonic) projection described exactly as
-        /// Calabretta &amp; Greisen (2002) prescribe. Written only when the geometry resolved -- a
+        /// Calabretta &amp; Greisen (2002) prescribe. Written only when the geometry resolved; a
         /// header claiming a pointing it does not have would send a plate solve or a catalogue
         /// cross-match somewhere wrong and silently, which is worse than a frame that admits it
         /// does not know where it looked.
@@ -382,7 +392,7 @@ namespace ExoInstruments.Visualization
                 AppendCommentaryCard(sb, "HISTORY", "unguided: WCS valid at DATE-OBS; sources are trailed");
         }
 
-        /// <summary>Right ascension as hours, minutes and seconds -- the sexagesimal form OBJCTRA carries by convention.</summary>
+        /// <summary>Right ascension as hours, minutes and seconds: the sexagesimal form OBJCTRA carries by convention.</summary>
         private static string FormatRaSexagesimal(double raDeg)
         {
             double hours = ((raDeg % 360.0) + 360.0) % 360.0 / 15.0;

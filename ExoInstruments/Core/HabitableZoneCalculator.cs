@@ -28,7 +28,7 @@ namespace ExoInstruments.Core
     ///   Seff = Seff_sun + a*T* + b*T*^2 + c*T*^3 + d*T*^4
     /// and the boundary distance follows from d(AU) = sqrt(L/Lsun / Seff).
     /// Luminosity comes from Stefan-Boltzmann: L/Lsun = (R/Rsun)^2 (Teff/5778)^4.
-    /// The fits are only valid for 2600 K &lt;= Teff &lt;= 7200 K -- outside that,
+    /// The fits are only valid for 2600 K &lt;= Teff &lt;= 7200 K; outside that,
     /// Compute returns null rather than extrapolating.
     /// </summary>
     public static class HabitableZoneCalculator

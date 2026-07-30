@@ -5,7 +5,7 @@ using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
-    /// <summary>Result of AstroImageStack.AddSub -- lets the caller give the player a clear reason when a sub was rejected instead of silently dropping it.</summary>
+    /// <summary>Result of AstroImageStack.AddSub, lets the caller give the player a clear reason when a sub was rejected instead of silently dropping it.</summary>
     public enum AstroSubResult
     {
         Added,
@@ -14,6 +14,24 @@ namespace ExoInstruments.Visualization
     }
 
     /// <summary>One captured sub: its pixels plus the settings it was shot under, kept alongside the pixels so a later sub can be checked for compatibility (FOV) and so the stack can report real integration time.</summary>
+    /// <summary>
+    /// What an export writes.
+    ///
+    /// Three products because they serve three jobs, and the difference between them is how much of
+    /// the reduction has already been done: a finished picture, one calibrated frame per band with
+    /// the registration and averaging applied, or the individual subs with neither, for a package
+    /// that means to do that work itself.
+    /// </summary>
+    public enum StackExportMode
+    {
+        /// <summary>The colour composite as displayed: one PNG, plus a FITS of its luminance.</summary>
+        Composite,
+        /// <summary>One stacked, registered, background-subtracted FITS and PNG per band.</summary>
+        PerFilter,
+        /// <summary>Every sub, cosmetically corrected only: one FITS and one PNG each.</summary>
+        EverySub,
+    }
+
     internal struct AstroSub
     {
         public float[] Gray;
@@ -23,14 +41,14 @@ namespace ExoInstruments.Visualization
         public double RegistrationY;
         public float ExposureSeconds;
 
-        /// <summary>Variance-of-Laplacian sharpness score (see AstroImageStack.ComputeSharpness) -- the lucky-imaging selection metric for this sub.</summary>
+        /// <summary>Variance-of-Laplacian sharpness score (see AstroImageStack.ComputeSharpness), the lucky-imaging selection metric for this sub.</summary>
         public float Quality;
     }
 
     /// <summary>
     /// Holds raw monochrome subs captured per filter by the RC20 (see
     /// SolarSystemCameraTexture) and combines them into a stacked LRGB
-    /// composite -- the real amateur-astrophotography workflow: many short
+    /// composite, the real amateur-astrophotography workflow: many short
     /// subs per filter average down read/shot noise far better than one long
     /// exposure, and the Luminance channel (usually the sharpest/deepest
     /// stack) supplies detail while the R/G/B stacks only supply color.
@@ -45,7 +63,7 @@ namespace ExoInstruments.Visualization
         private const long TotalStackMemoryBudgetBytes = 1_000_000_000L; // ~1 GB across all filters
         private const int FilterCount = 5;
         private const int MinSubsPerFilter = 3;
-        private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning -- diminishing returns past this many subs
+        private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning, diminishing returns past this many subs
 
         public static int MaxSubsPerFilter
         {
@@ -63,7 +81,7 @@ namespace ExoInstruments.Visualization
         private const float FovMatchToleranceDeg = 0.01f; // subs of the same filter must share (near enough) the same FOV, or a pixel means a different angle in each and stacking would just blur the target
 
         // Strength of the display-only asinh stretch applied to the finished
-        // composite (see AsinhStretch) -- higher lifts shadows more
+        // composite (see AsinhStretch); higher lifts shadows more
         // aggressively. Only ever applied to the returned composite, never to
         // the stored raw subs.
         private const float StretchStrength = 5f;
@@ -84,13 +102,13 @@ namespace ExoInstruments.Visualization
         private const float LuckyKeepFraction = 0.3f;
 
         // Sharpness scoring window: the RC20 always centers its aim, so scoring only the
-        // central fraction of the frame -- the actual target, not background stars or
-        // corner vignetting/coma -- mirrors AutoStakkert!'s alignment-point "quality box"
+        // central fraction of the frame (the actual target, not background stars or
+        // corner vignetting/coma) mirrors AutoStakkert!'s alignment-point "quality box"
         // used for real planetary lucky imaging.
         private const float SharpnessRegionFraction = 0.6f;
 
         // Trims the sharpest-magnitude 2% of Laplacian values before computing the
-        // variance, the same robust-trimming idiom EstimateBackground already uses --
+        // variance, the same robust-trimming idiom EstimateBackground already uses;
         // without it, a single cosmic-ray hit or hot pixel (a huge, isolated Laplacian
         // spike) would inflate the variance enough to make a contaminated frame look
         // like the sharpest one, exactly backwards from what the metric is for.
@@ -101,7 +119,7 @@ namespace ExoInstruments.Visualization
         // pipeline. Sharpness/focus is a spatially broad property (real focus operators are
         // routinely evaluated on a representative sub-sample rather than every pixel), so this
         // strides through the region to keep the sample count roughly constant regardless of
-        // resolution -- statistically equivalent, orders of magnitude cheaper to sort.
+        // resolution, statistically equivalent, orders of magnitude cheaper to sort.
         private const int SharpnessTargetSampleCount = 50_000;
 
         private readonly Dictionary<CameraFilter, List<AstroSub>> rawSubs = new Dictionary<CameraFilter, List<AstroSub>>();
@@ -110,7 +128,7 @@ namespace ExoInstruments.Visualization
         /// Adds a raw grayscale sub for the given filter. Rejects if MaxSubsPerFilter is
         /// reached or if fovDeg doesn't match the existing subs — mixing FOVs makes alignment
         /// meaningless. defectPixelIndices (SolarSystemCameraTexture.GetDefectPixelIndices) is
-        /// cosmetically corrected out before the sub is stored -- see CosmeticCorrect.
+        /// cosmetically corrected out before the sub is stored; see CosmeticCorrect.
         /// </summary>
         public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds, int[] defectPixelIndices)
             => AddSub(filter, gray, fovDeg, exposureSeconds, defectPixelIndices, double.NaN, double.NaN);
@@ -156,7 +174,7 @@ namespace ExoInstruments.Visualization
         /// skipping any neighbor that's itself a known defect. This is the standard
         /// professional calibration step real pipelines run before registration/stacking
         /// (PixInsight's CosmeticCorrection process, IRAF/ccdproc's fixpix, ESO Reflex
-        /// bad-pixel handling) -- run here, once per sub, before alignment. Doing it before
+        /// bad-pixel handling), run here, once per sub, before alignment. Doing it before
         /// alignment matters: a fixed sensor defect co-added with per-sub alignment shifts
         /// would scatter into a cloud of artifacts at different composite positions instead
         /// of being corrected once at its one true location.
@@ -185,7 +203,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Variance-of-Laplacian focus/sharpness measure (Pech-Pacheco et al. 2000,
-        /// "Diatom autofocusing in brightfield microscopy: a comparative study" -- the
+        /// "Diatom autofocusing in brightfield microscopy: a comparative study", the
         /// top-performing general-purpose sharpness operator in the Pertuz, Puig &amp; Garcia
         /// 2013 survey of focus measures). A sharp, well-resolved frame has strong local
         /// contrast everywhere (high Laplacian variance); a seeing-blurred one is smoothed
@@ -240,7 +258,45 @@ namespace ExoInstruments.Visualization
 
         public int SubCount(CameraFilter filter) => rawSubs.TryGetValue(filter, out List<AstroSub> list) ? list.Count : 0;
 
-        /// <summary>Total real exposure time stacked into this filter so far, in seconds -- the actual integration time a real stack of this many subs represents.</summary>
+        /// <summary>Every filter holding at least one sub, in the order they were first captured.</summary>
+        public IEnumerable<CameraFilter> FiltersWithSubs
+        {
+            get
+            {
+                foreach (var pair in rawSubs)
+                    if (pair.Value != null && pair.Value.Count > 0) yield return pair.Key;
+            }
+        }
+
+        /// <summary>
+        /// One filter's stacked frame, registered and averaged exactly as the composite's channels
+        /// are, so an exported per-filter frame is the same data the composite was built from rather
+        /// than a second reduction of it.
+        /// </summary>
+        public float[] StackedFrame(CameraFilter filter, bool align, bool lucky)
+            => StackFilter(filter, align, lucky);
+
+        /// <summary>
+        /// One individual sub, cosmetically corrected but NOT registered, background-subtracted or
+        /// averaged. This is the frame a reduction package wants: the calibration steps that belong
+        /// to the instrument are done, and every step that belongs to the astronomer is not.
+        /// </summary>
+        public float[] SubFrame(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return null;
+            if (index < 0 || index >= list.Count) return null;
+            return (float[])list[index].Gray.Clone();
+        }
+
+        /// <summary>That sub's own integration time, which is what its FITS header has to carry rather than the stack's total.</summary>
+        public float SubExposureSeconds(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return 0f;
+            if (index < 0 || index >= list.Count) return 0f;
+            return list[index].ExposureSeconds;
+        }
+
+        /// <summary>Total real exposure time stacked into this filter so far, in seconds, the actual integration time a real stack of this many subs represents.</summary>
         public float TotalExposureSeconds(CameraFilter filter)
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return 0f;
@@ -267,7 +323,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Normalized arcsinh stretch: 0 -> 0, 1 -> 1, monotonic, lifting
-        /// shadows more than it compresses highlights -- the standard
+        /// shadows more than it compresses highlights, the standard
         /// astrophotography "make the faint stacked detail visible" curve.
         /// Display-only; never applied to stored sub or stack data.
         /// </summary>
@@ -282,7 +338,7 @@ namespace ExoInstruments.Visualization
         /// <summary>Aligns (if requested) and averages all subs for one filter, then subtracts the sky background. Null if the filter has no subs.</summary>
         /// <summary>
         /// Stacks every filter that has subs and hands the set to ColourComposite, which is where the
-        /// colour is decided. Replaces ComposeLRGB's channel-per-primary assignment -- see
+        /// colour is decided. Replaces ComposeLRGB's channel-per-primary assignment; see
         /// ColourComposite for why that was wrong and what it does instead.
         /// </summary>
         public Color[] Compose(ColourCompositeMode mode, bool align, bool lucky,
@@ -291,7 +347,7 @@ namespace ExoInstruments.Visualization
             report = null;
             if (!HasAnySubs)
             {
-                report = "No subs captured yet -- capture at least one series first.";
+                report = "No subs captured yet; capture at least one series first.";
                 return null;
             }
 
@@ -359,7 +415,7 @@ namespace ExoInstruments.Visualization
             var sum = new float[n];
 
             // COVERAGE, not the sub count. A shifted sub contributes nothing to the strip the shift
-            // vacated, so dividing every pixel by the full count darkens exactly those strips --
+            // vacated, so dividing every pixel by the full count darkens exactly those strips,
             // which is what put a ragged black staircase around an aligned stack. Counting what
             // actually landed on each pixel makes the border noisier, which is true, instead of
             // darker, which is not.
@@ -461,7 +517,7 @@ namespace ExoInstruments.Visualization
             return samples[keep / 2];
         }
 
-        /// <summary>Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls back to the frame center when nothing exceeds it (target too faint/absent to detect -- avoids a divide-by-zero and just skips alignment for that sub).</summary>
+        /// <summary>Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls back to the frame center when nothing exceeds it (target too faint/absent to detect, avoids a divide-by-zero and just skips alignment for that sub).</summary>
         private static (double cx, double cy) ComputeCentroid(float[] gray)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;

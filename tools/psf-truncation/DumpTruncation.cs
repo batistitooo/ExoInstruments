@@ -10,7 +10,7 @@ using ExoInstruments.Core;
 /// A truncated-then-renormalised kernel conserves flux by construction, so no photometry test can
 /// see the truncation. What it cannot conserve is the SURFACE BRIGHTNESS at the boundary: the
 /// profile drops from its last sampled value to zero in one pixel, and around a bright enough
-/// source that step is a visible edge with the shape of the kernel's support -- a square, because
+/// source that step is a visible edge with the shape of the kernel's support, a square, because
 /// the kernel is stored as a square array and sampled all the way into its corners.
 ///
 /// The numbers here are the ones that decide whether a support is big enough: the enclosed energy
@@ -100,7 +100,7 @@ static class DumpTruncation
         for (int i = 0; i < plane.Length; i++) onFrame += plane[i];
         Console.WriteLine($"  of that, {onFrame:F6} landed inside the {w}x{h} frame itself");
 
-        // Radial agreement with the profile, in absolute per-pixel fractions -- no peak scaling, so
+        // Radial agreement with the profile, in absolute per-pixel fractions, no peak scaling, so
         // the normalisation is under test as well as the shape.
         double worst = 0.0, worstAt = 0.0;
         Console.WriteLine("      r(px)        frame           profile        rel.diff");
@@ -210,7 +210,7 @@ static class DumpTruncation
     /// float round-off. What makes it worth testing separately is the failure mode: every existing
     /// check in this project measures KERNELS, and a tiling bug leaves the kernel perfect while
     /// laying a grid of seams over the frame at the tile pitch. On a smooth, faint, hard-stretched
-    /// subject -- a nebula -- that grid is the only thing with edges in the picture.
+    /// subject (a nebula), that grid is the only thing with edges in the picture.
     ///
     /// The tile pitch is n - k + 1, which for the small kernels a short focal length produces is
     /// around 60 pixels whatever the binning, so the seams would be four times coarser on screen at

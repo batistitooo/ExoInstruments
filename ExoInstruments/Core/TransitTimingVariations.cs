@@ -20,7 +20,7 @@ namespace ExoInstruments.Core
         /// <summary>|Δ| floor — exactly on-resonance would diverge (real dynamics saturate into libration there).</summary>
         private const double MinResonanceDistance = 0.01;
 
-        /// <summary>Amplitude cap as a fraction of the transiter's period -- beyond this the sinusoidal approximation has no business being trusted.</summary>
+        /// <summary>Amplitude cap as a fraction of the transiter's period; beyond this the sinusoidal approximation has no business being trusted.</summary>
         private const double MaxAmplitudeFractionOfPeriod = 0.02;
 
         /// <summary>Sinusoidal TTV of one transiting planet: transit k occurs at linear ephemeris + this shift.</summary>
@@ -111,7 +111,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Deterministic phase for a (transiter, perturber) pair -- same FNV-1a idiom as StellarActivity.</summary>
+        /// <summary>Deterministic phase for a (transiter, perturber) pair, same FNV-1a idiom as StellarActivity.</summary>
         private static double PairHash01(StarTarget a, StarTarget b)
         {
             string identity = (a.Name ?? "") + "|ttv|" + (b.Name ?? "");

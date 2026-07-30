@@ -1,13 +1,13 @@
 # Where black and white are
 
-A display transfer curve -- log, asinh -- decides how the range between black and white is
+A display transfer curve (log, asinh) decides how the range between black and white is
 distributed. It does **not** decide where black and white are, and on an astronomical frame that is
 the larger question by far.
 
 40 s on the Elephant's Trunk with the RedCat puts about 73 electrons in the brightest pixel: 18 ADU
 of a 16383-count converter. Map the converter's whole range to the display and the entire subject
 occupies **0.4 of 255 display levels**. No curve applied afterwards recovers contrast that was never
-allocated, and the result is a uniform grey fog -- which is what the frame genuinely looked like
+allocated, and the result is a uniform grey fog, which is what the frame genuinely looked like
 before this existed.
 
 zscale (Tody 1986, SPIE 627, 733) is how IRAF, DS9 and their descendants answer it, and it is not a
@@ -39,7 +39,7 @@ Against `astropy.visualization.ZScaleInterval`, the same algorithm implemented i
 | linear gradient | 0.00% |
 
 On the faint frame it is a **697x stretch**: the subject goes from 0.4 of 255 display levels to all
-255. On the star field the white point stays at 0.0026 of full scale while the frame reaches 1.0 --
+255. On the star field the white point stays at 0.0026 of full scale while the frame reaches 1.0;
 the saturated stars are rejected from the fit rather than setting the scale.
 
 ## The other half: an extended subject
@@ -48,13 +48,13 @@ zscale finds the sky beautifully, and sets the white point from the sky's own no
 assumption that **sources are a small minority of pixels**. A nebula filling a third of the frame
 breaks that outright. On a 40 s exposure of M42 the emission spans 34 to 5116 rayleighs; zscale's
 limits stop at 329, so an eighth of the frame clips to flat white and the nebula becomes a
-featureless polygon -- the shape of an iso-contour rather than of a nebula.
+featureless polygon, the shape of an iso-contour rather than of a nebula.
 
 The two halves of the question therefore get different answers. The **black** point still comes from
 zscale. The **white** point comes from the 99.5th percentile of a block-MEDIAN copy of the frame:
 a median over 64 pixels is untouched by anything covering fewer than 32 of them, so a star vanishes
 completely while a nebula, which fills the block, is unchanged. The white point ends up set by the
-brightest *extended* structure and never by a star -- which is right on physical grounds, since a
+brightest *extended* structure and never by a star, which is right on physical grounds, since a
 stretch exists to show structure and a point source has none, and is also what every real
 astrophotograph does.
 

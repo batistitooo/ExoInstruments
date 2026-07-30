@@ -27,7 +27,7 @@ namespace ExoInstruments.Core
 
         /// <summary>de Vaucouleurs numerical morphological type T: -6 elliptical through 10 irregular.</summary>
         public double MorphologicalType;
-        /// <summary>Sersic index. Measured where the catalogue carries one, otherwise set from the type -- see IsSersicIndexMeasured.</summary>
+        /// <summary>Sersic index. Measured where the catalogue carries one, otherwise set from the type; see IsSersicIndexMeasured.</summary>
         public double SersicIndex;
         /// <summary>False when SersicIndex came from the morphological type rather than from a profile fit.</summary>
         public bool IsSersicIndexMeasured;
@@ -43,8 +43,8 @@ namespace ExoInstruments.Core
     ///
     /// WHAT A GALAXY NEEDS THAT A STAR DOES NOT. A star is a point source: a position and a
     /// magnitude, and the instrument's PSF decides the rest. A galaxy is resolved by every
-    /// instrument in this roster -- M31 is 3 degrees long, and even a distant one is arcseconds
-    /// across against SPHERE's 3.6 mas pixels -- so it needs a SHAPE as well, and the shape has to
+    /// instrument in this roster; M31 is 3 degrees long, and even a distant one is arcseconds
+    /// across against SPHERE's 3.6 mas pixels; so it needs a SHAPE as well, and the shape has to
     /// come from measurement rather than from an artist. Four catalogued quantities are enough:
     /// the total magnitude, the isophotal diameter D25, the axis ratio and the position angle.
     /// Those plus a profile (see SersicProfile) determine the surface brightness at every point.
@@ -142,7 +142,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Every galaxy whose CENTRE lies within radiusDeg of a direction, plus those whose centre
-        /// lies outside it but whose own extent reaches in -- a two-degree galaxy half a degree off
+        /// lies outside it but whose own extent reaches in; a two-degree galaxy half a degree off
         /// the edge still lights up the frame, and dropping it would put a straight edge across the
         /// image where its disk was cut off.
         /// </summary>
@@ -194,12 +194,12 @@ namespace ExoInstruments.Core
         /// Not an interpolation anyone invented: the two anchors are the two classical profile
         /// laws, de Vaucouleurs (1948) R^(1/4) for spheroids, which is n = 4, and Freeman (1970)
         /// exponential for disks, which is n = 1. Lenticulars sit between because they are
-        /// structurally between -- Graham &amp; Worley (2008, MNRAS 388, 1708) find bulge-to-total
+        /// structurally between; Graham &amp; Worley (2008, MNRAS 388, 1708) find bulge-to-total
         /// ratios falling monotonically from S0 through Sd, and a single-component fit to a
         /// two-component galaxy returns an index that tracks that ratio.
         ///
         /// Stated as a step function of type rather than a smooth fit, because a smooth fit would
-        /// claim a precision the underlying relation does not have -- its scatter at fixed type is
+        /// claim a precision the underlying relation does not have; its scatter at fixed type is
         /// about a factor of two in n.
         /// </summary>
         public static double SersicIndexForType(double morphologicalType)

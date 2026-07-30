@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
     /// the poles to thousands in an H II region core, and no fixed-point scale covers both.
     ///
     /// RESOLUTION IS A REAL LIMIT HERE, more than it is for dust. The composite is smoothed to 6
-    /// arcmin, which is 94 pixels across on the RedCat and 1300 on the RC20 with its Barlow -- so
+    /// arcmin, which is 94 pixels across on the RedCat and 1300 on the RC20 with its Barlow; so
     /// this renders real structure in a wide field and a smooth glow at high magnification. That is
     /// the data's limit, not the renderer's, and it is why the header carries the resolution.
     ///
@@ -125,7 +125,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Line surface brightness toward a Galactic direction, rayleighs, bilinearly interpolated
-        /// between the four surrounding pixels -- see Healpix.InterpolationWeights for why a
+        /// between the four surrounding pixels; see Healpix.InterpolationWeights for why a
         /// beam-smoothed map has to be read that way. NaN where the map has no value.
         ///
         /// Not thread-safe: a per-call scratch pair would allocate once per frame pixel. Callers

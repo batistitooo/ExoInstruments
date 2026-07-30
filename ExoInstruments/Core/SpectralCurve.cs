@@ -3,15 +3,15 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// A measured quantity tabulated against wavelength -- a detector's quantum efficiency
-    /// curve, a coating's reflectivity, a filter's transmission profile -- sampled at whatever
+    /// A measured quantity tabulated against wavelength (a detector's quantum efficiency
+    /// curve, a coating's reflectivity, a filter's transmission profile), sampled at whatever
     /// wavelengths its source actually publishes, and read back at any wavelength in between.
     ///
     /// This exists because a single "peak" number is not the quantity the photometry needs. A
     /// detector's peak QE is by definition the best it ever does; using it across a whole
     /// passband overstates every filter that does not sit exactly on the peak. FORS2's own
     /// published curve runs 58% at 400nm to 86% at 600nm, so its blue filter collects a
-    /// factor 1.5 fewer electrons than the peak figure implies -- an error larger than most of
+    /// factor 1.5 fewer electrons than the peak figure implies, an error larger than most of
     /// the effects this pipeline models carefully elsewhere.
     ///
     /// Interpolation is linear between published points, and FLAT beyond the ends rather than

@@ -11,7 +11,7 @@ using ExoInstruments.Core;
 /// Nothing here reimplements the physics. Every kernel comes out of OpticalPsf.BuildKernel /
 /// BuildSeeingHaloKernel called exactly as SolarSystemCameraTexture.EnsurePsfKernels calls them,
 /// and every instrument parameter is read from the shipped VisualTelescopeCatalog rather than
-/// restated -- so what the Python side compares is what the mod convolves a capture with.
+/// restated; so what the Python side compares is what the mod convolves a capture with.
 ///
 /// Three kernels per instrument, because the comparison has to separate what it is testing:
 ///
@@ -64,7 +64,7 @@ class DumpKernel
         double lambda = spec.LuminanceCentralWavelengthNm * 1e-9;
 
         // Zenith (airmass 1), so the airmass^0.6 term is exactly 1 and only the chromatic factor
-        // applies -- the same expression ComputeGroundSeeingFwhmArcsec evaluates.
+        // applies, the same expression ComputeGroundSeeingFwhmArcsec evaluates.
         double atmFwhm = spec.ZenithSeeingFwhmArcsec
                        * Math.Pow(lambda / SeeingReferenceWavelengthMeters, SeeingChromaticExponent);
 

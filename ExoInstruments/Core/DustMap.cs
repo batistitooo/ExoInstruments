@@ -7,7 +7,7 @@ namespace ExoInstruments.Core
     /// An all-sky reddening map: E(B-V) integrated through the whole Galaxy along a sight line.
     ///
     /// WHAT IT IS FOR, AND WHAT IT IS NOT FOR. This is the TOTAL column, so it applies to something
-    /// beyond all the dust -- an external galaxy, or a quasar. It does NOT apply to a catalogue
+    /// beyond all the dust, an external galaxy, or a quasar. It does NOT apply to a catalogue
     /// star: a star sits inside the Galaxy with an unknown fraction of the column in front of it,
     /// and Gaia's gspphot already publishes a per-source estimate that needs no distance of ours
     /// (see RenderedStar.ReddeningEBv). Using this for a star would over-redden every foreground
@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
     ///
     /// FORMAT. HEALPix, Galactic coordinates, one IEEE 754 half float per pixel. Half rather than
     /// a scaled integer because SFD98 spans 0.00037 to 135 magnitudes and no fixed-point scale
-    /// covers both ends -- see Float16. At the map's own 6.1 arcmin resolution the whole sky is
+    /// covers both ends; see Float16. At the map's own 6.1 arcmin resolution the whole sky is
     /// nside 1024 and 24 MB, so it loads whole and needs no block index. tools/pack_dust_map.py writes it.
     ///
     /// NOTHING SHIPS, for the same reason the star catalogue ships nothing: the map is a published
@@ -81,7 +81,7 @@ namespace ExoInstruments.Core
         /// loaded or the map has no value there.
         ///
         /// Bilinearly interpolated between the four surrounding pixels, which is what a map
-        /// smoothed to a beam (SFD98's is 6.1 arcmin) is a sampling of -- see
+        /// smoothed to a beam (SFD98's is 6.1 arcmin) is a sampling of; see
         /// Healpix.InterpolationWeights. Taking the containing pixel instead would make the
         /// reddening jump discontinuously between two stars a few arcmin apart, structure the
         /// survey does not contain.

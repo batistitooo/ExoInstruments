@@ -7,16 +7,16 @@ using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
-    /// <summary>Filter-wheel positions. A mono CCD shoots one filter at a time, so each is its own grayscale frame -- the filter just selects which of the rendered scene's channels (and how much throughput) forms the signal.</summary>
+    /// <summary>Filter-wheel positions. A mono CCD shoots one filter at a time, so each is its own grayscale frame; the filter just selects which of the rendered scene's channels (and how much throughput) forms the signal.</summary>
     /// <summary>
     /// Display transfer function applied when a finished frame is turned into something the eye
-    /// can read. DISPLAY ONLY -- the science path (GetLastCaptureFullPrecision, the FITS export
+    /// can read. DISPLAY ONLY, the science path (GetLastCaptureFullPrecision, the FITS export
     /// and everything AstroImageStack stacks) always receives the untouched linear signal, which
     /// is the same separation every real observing tool keeps between its viewer and its data.
     ///
     /// No astronomical image is looked at linearly. A resolved planetary disk puts almost all of
-    /// its pixels into a narrow bright range, so real surface contrast -- a few percent of the
-    /// local level -- occupies a handful of the 256 levels an 8-bit display has and is invisible,
+    /// its pixels into a narrow bright range, so real surface contrast, a few percent of the
+    /// local level, occupies a handful of the 256 levels an 8-bit display has and is invisible,
     /// even though the data holds it perfectly. Every real viewer (DS9, PixInsight, IRAF, ESO's
     /// Reflex) therefore offers exactly this choice of stretch.
     /// </summary>
@@ -26,7 +26,7 @@ namespace ExoInstruments.Visualization
         Linear,
         /// <summary>Logarithmic, DS9's own formulation y = log(a*x + 1) / log(a + 1) with its default a = 1000 (Joye &amp; Mandel 2003, ADASS XII, the SAOImage DS9 paper). Strong lift of faint detail; compresses the bright end hard.</summary>
         Log,
-        /// <summary>Inverse hyperbolic sine, the astronomical standard from Lupton et al. 2004 (PASP 116, 133, "Preparing Red-Green-Blue Images from CCD Data"). Linear near zero and logarithmic far from it, so it lifts faint structure without crushing bright regions the way a pure log does -- what SDSS's own imagery uses.</summary>
+        /// <summary>Inverse hyperbolic sine, the astronomical standard from Lupton et al. 2004 (PASP 116, 133, "Preparing Red-Green-Blue Images from CCD Data"). Linear near zero and logarithmic far from it, so it lifts faint structure without crushing bright regions the way a pure log does, what SDSS's own imagery uses.</summary>
         Asinh
     }
 
@@ -40,7 +40,7 @@ namespace ExoInstruments.Visualization
 
         // Narrowband positions on the forbidden lines. A filter here collects the same line
         // photons as a broadband one while admitting a fraction of the sky, which is the whole
-        // point of it -- see Core/EmissionLines and tools/emission-tests for the measurement.
+        // point of it; see Core/EmissionLines and tools/emission-tests for the measurement.
         // An instrument only offers the ones it physically carries (VisualTelescopeSpec.AvailableFilters).
         OIII,      // [O III] 5007
         SII,       // [S II] 6716/6731
@@ -52,7 +52,7 @@ namespace ExoInstruments.Visualization
     /// <summary>
     /// Neutral-density filter slot, real optical-density stops used by real astrophotographers
     /// on targets too bright for exposure/gain alone to handle (Kerbin's compressed-scale solar
-    /// system puts nearby moons in exactly that regime -- Mun sits only a few magnitudes fainter
+    /// system puts nearby moons in exactly that regime; Mun sits only a few magnitudes fainter
     /// than Kerbol itself). OD/transmission values: Nd8/Nd64/Nd1000 are the standard photographic
     /// ND stops (OD 0.9/1.8/3.0, transmission = 10^-OD); Nd100000 matches the real optical density
     /// of a Baader AstroSolar safety film / Thousand Oaks solar filter (OD ~5.0), the real
@@ -76,7 +76,7 @@ namespace ExoInstruments.Visualization
         Nd8,
         Nd64,
         Nd1000,
-        /// <summary>Baader AstroSolar PHOTO Film, OD 3.8. Photographic only -- never safe for visual use.</summary>
+        /// <summary>Baader AstroSolar PHOTO Film, OD 3.8. Photographic only, never safe for visual use.</summary>
         Nd6300,
         Nd100000
     }
@@ -87,14 +87,14 @@ namespace ExoInstruments.Visualization
     /// Technology's TSTCameraModule, reimplemented here to avoid the dependency.
     /// Outputs a monochrome, noisy "single raw CCD frame" through a full physics
     /// pipeline (extinction, shot noise, seeing, EVE cloud cover, moon scattering,
-    /// cosmic rays, full-well blooming, charge-transfer smear, astigmatism) -- see
+    /// cosmic rays, full-well blooming, charge-transfer smear, astigmatism); see
     /// ProcessFrame for the per-effect citations.
     /// </summary>
     public class SolarSystemCameraTexture : IDisposable
     {
         // All optics/sensor identity constants (aperture, focal length, native resolution,
         // pixel pitch, QE, full well, exposure/gain range, ...) live in VisualTelescopeCatalog,
-        // not here -- this class is the rendering pipeline for whichever spec it's pointed at.
+        // not here; this class is the rendering pipeline for whichever spec it's pointed at.
         // Mutable (not readonly): the player can switch instruments from the Observatory dropdown
         // in the GUI (ExoInstrumentsGUI.SelectObservatory), which re-derives every optics/sensor-
         // driven quantity below from whichever VisualTelescopeSpec is now active. See
@@ -114,7 +114,7 @@ namespace ExoInstruments.Visualization
         ///
         /// Exposure is rescaled by the ratio of the two telescopes' real effective collecting
         /// area (aperture squared, minus obstruction), the same thing a real astronomer redoes
-        /// with an exposure-time calculator when changing instruments -- without it, a exposure
+        /// with an exposure-time calculator when changing instruments; without it, a exposure
         /// tuned for the RC20's 0.51m aperture carried straight over to the VLT's 8.2m one
         /// (~258x the collecting area) blows every pixel far past full well, and the pipeline's
         /// per-column blooming (ApplyBlooming, real CCD physics, only ever spills vertically)
@@ -122,11 +122,11 @@ namespace ExoInstruments.Visualization
         /// the new instrument's real exposure range.
         ///
         /// Forces Autoguiding on for a spec with AlwaysAutoguided (a real research telescope like
-        /// the VLT has no bare/unguided mode) -- otherwise Autoguiding, being a plain player-set
+        /// the VLT has no bare/unguided mode); otherwise Autoguiding, being a plain player-set
         /// toggle, would silently carry over whatever the player last chose on the RC20/CDK1000,
         /// including off.
         ///
-        /// Does NOT discard an already-captured photo or stacked subs -- those belong to the
+        /// Does NOT discard an already-captured photo or stacked subs; those belong to the
         /// instrument that took them, so ExoInstrumentsGUI.SwitchTelescope discards them itself
         /// before calling this.
         /// </summary>
@@ -154,7 +154,7 @@ namespace ExoInstruments.Visualization
             ResetCoolerSetpoint();
         }
 
-        /// <summary>Real effective light-collecting area (m^2): full aperture minus the real secondary-mirror obstruction. Shared by SetActiveTelescope's exposure rescaling and RealApertureAreaCm2's per-frame photon-flux calc -- same physical quantity, different units for each caller's convenience.</summary>
+        /// <summary>Real effective light-collecting area (m^2): full aperture minus the real secondary-mirror obstruction. Shared by SetActiveTelescope's exposure rescaling and RealApertureAreaCm2's per-frame photon-flux calc, same physical quantity, different units for each caller's convenience.</summary>
         private static double EffectiveApertureAreaM2(VisualTelescopeSpec spec)
         {
             double radiusM = spec.ApertureMeters / 2.0;
@@ -173,7 +173,7 @@ namespace ExoInstruments.Visualization
         public static int NativeTextureHeight => Spec.NativeSensorHeightPx;
 
         /// <summary>
-        /// Pixel binning factor (1=native resolution, 2/3/4 = NxN binning) -- the real technique
+        /// Pixel binning factor (1=native resolution, 2/3/4 = NxN binning), the real technique
         /// astrophotography acquisition software (SharpCap, NINA) offers for exactly this
         /// trade-off (resolution vs. processing cost/noise). Changing this rebuilds the
         /// camera's textures and scratch buffers on the next capture.
@@ -187,11 +187,11 @@ namespace ExoInstruments.Visualization
         /// Bytes of MANAGED memory this pipeline holds per pixel of the frame, counted from the
         /// buffers it actually allocates rather than estimated:
         ///
-        ///   float[] at 4 bytes each  -- pixelScratch, frameScratch, lastCaptureSnapshot,
+        ///   float[] at 4 bytes each: pixelScratch, frameScratch, lastCaptureSnapshot,
         ///                               rawScratch, signalScratch, lastAduFrame,
         ///                               passScratch                                = 28
-        ///   byte[]                   -- displayScratch, three bytes for an RGB24 texture =  3
-        ///   float[] transient        -- FourierConvolution's overlap-add accumulator =  4
+        ///   byte[]: displayScratch, three bytes for an RGB24 texture =  3
+        ///   float[] transient: FourierConvolution's overlap-add accumulator =  4
         ///
         /// The rendered Color[] is NOT counted: it is released before the optics run (see
         /// pendingSrc), so it does not coincide with the convolution's own peak. It is 16 bytes a
@@ -212,8 +212,8 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// What one capture at the current instrument and binning will cost, in bytes.
         ///
-        /// This exists because the cost is quartic in the binning factor -- halving the binning
-        /// quadruples the pixel count -- and nothing told the player. At its native resolution the
+        /// This exists because the cost is quartic in the binning factor; halving the binning
+        /// quadruples the pixel count, and nothing told the player. At its native resolution the
         /// largest instrument in the roster needs about two gigabytes across the heap and the
         /// graphics device together, on top of everything KSP already holds, and a native
         /// allocation failure at that size does not raise a catchable exception: the process
@@ -232,14 +232,14 @@ namespace ExoInstruments.Visualization
         /// <summary>Above this, the panel warns: the combination is one where a failure kills the process rather than raising an error.</summary>
         public const long CaptureMemoryWarningBytes = 1_200L * 1024 * 1024;
 
-        /// <summary>Real (binned) pixel pitch in microns -- for FITS XPIXSZ/YPIXSZ header keywords.</summary>
+        /// <summary>Real (binned) pixel pitch in microns, for FITS XPIXSZ/YPIXSZ header keywords.</summary>
         public static double PixelSizeMicrons => NativePixelSizeMeters * BinningFactor * 1e6;
 
-        /// <summary>Real focal length in mm -- for the FITS FOCALLEN header keyword.</summary>
+        /// <summary>Real focal length in mm, for the FITS FOCALLEN header keyword.</summary>
         public static double FocalLengthMm => RealFocalLengthMeters * 1000.0;
 
         /// <summary>
-        /// Real full well AT THE CURRENT BINNING, in electrons -- for FITS header info and the
+        /// Real full well AT THE CURRENT BINNING, in electrons, for FITS header info and the
         /// shot-noise/saturation pipeline. Binning here is real on-chip/charge-domain summing
         /// (the same assumption BinningFactor's own doc comment already makes), which combines
         /// BinningFactor^2 physical pixels' charge into one before it's ever read out, so a
@@ -261,7 +261,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Charge at which the ADC's top count is reached. Deliberately NOT scaled by binning:
         /// on-chip binning sums charge ahead of one amplifier and one converter, so the digital
-        /// ceiling stays put in ADU while the well below it grows -- which is why binning a
+        /// ceiling stays put in ADU while the well below it grows, which is why binning a
         /// sensor hard makes it digitally saturation-limited rather than well-limited.
         /// </summary>
         /// <remarks>
@@ -282,7 +282,7 @@ namespace ExoInstruments.Visualization
         ///
         /// These are two different limits and real instruments live on both sides of the line.
         /// ESO's FORS2 manual says plainly that "none of the CCDs will saturate before reaching
-        /// the numerical truncation limits (65535 adu)" -- its 150,000 e- well is never reached,
+        /// the numerical truncation limits (65535 adu)"; its 150,000 e- well is never reached,
         /// because at K = 1.25 e-/ADU the converter tops out at 81,919 e- first. A pipeline
         /// carrying fractions of full well cannot represent that at all: it has only one ceiling,
         /// and it is the wrong one.
@@ -290,7 +290,7 @@ namespace ExoInstruments.Visualization
         public static double SaturationElectrons(double gainMultiplier)
             => Math.Min(FullWellElectrons, DigitalSaturationElectrons(gainMultiplier));
 
-        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch. Public because it's the single number that decides whether a target is resolvable at all -- real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it front and center for exactly that reason.</summary>
+        /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch. Public because it's the single number that decides whether a target is resolvable at all; real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it front and center for exactly that reason.</summary>
         public static float PlateScaleArcsecPerPixel
         {
             get
@@ -301,10 +301,10 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Native (no-accessory) field of view across the sensor's long axis -- the "wide" end of the zoom range.</summary>
+        /// <summary>Native (no-accessory) field of view across the sensor's long axis, the "wide" end of the zoom range.</summary>
         public static float MaxFovDeg => (TextureWidth * PlateScaleArcsecPerPixel) / 3600f;
 
-        /// <summary>Field of view with a real Barlow -- the "high power" end of the zoom range.</summary>
+        /// <summary>Field of view with a real Barlow, the "high power" end of the zoom range.</summary>
         public static float MinFovDeg => MaxFovDeg / BarlowFactor;
 
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
@@ -314,7 +314,7 @@ namespace ExoInstruments.Visualization
         // CMOS LRGB filter design); H-alpha is a real ~7nm (70 Angstrom) narrowband filter.
         private static double LuminanceBandwidthAngstrom => Spec.LuminanceBandwidthAngstrom;
 
-        /// <summary>Real sensor exposure range -- see VisualTelescopeCatalog for sourcing.</summary>
+        /// <summary>Real sensor exposure range; see VisualTelescopeCatalog for sourcing.</summary>
         public static float MinExposureSeconds => Spec.MinExposureSeconds;
         public static float MaxExposureSeconds => Spec.MaxExposureSeconds;
 
@@ -322,7 +322,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Airmass at which the seeing power law stops growing. X = 6 is about 9.5 degrees
-        /// altitude -- already below where anyone would image, and far below where the
+        /// altitude, already below where anyone would image, and far below where the
         /// plane-parallel atmosphere the X^(3/5) law assumes still holds.
         /// </summary>
         private const double MaxSeeingAirmass = 6.0;
@@ -337,10 +337,10 @@ namespace ExoInstruments.Visualization
         // silently depended on the plate scale, so binning the sensor or fitting a Barlow
         // changed how bright the night sky was.
         internal const double CloudMaxAttenuation = 0.85;                // thick cloud, never 100% opaque
-        // NOT amplified by gain (applied after the analog stage) -- the active telescope's real
+        // NOT amplified by gain (applied after the analog stage), the active telescope's real
         // read noise (a fixed per-readout-event electron figure, unaffected by binning) as a
         // fraction of the CURRENT BINNED full well (this class's own FullWellElectrons, not
-        // Spec.FullWellElectrons directly) -- the same sensor anchor used for shot and
+        // Spec.FullWellElectrons directly), the same sensor anchor used for shot and
         // dark-current noise. Binning genuinely reduces read noise's relative significance in a
         // real sensor (same read noise electrons, now a smaller slice of a bigger binned well),
         // which this correctly reflects.
@@ -354,7 +354,7 @@ namespace ExoInstruments.Visualization
         /// different things on different home worlds. Stock's Mün is a 200km body only 12,000km
         /// away; the real Moon is 1737km at 384,400km, and the ratio of those two fluxes is a
         /// factor of ~13.6. A constant calibrated on one makes moonlight roughly an order of
-        /// magnitude wrong on the other -- and it is a real observational effect worth getting
+        /// magnitude wrong on the other, and it is a real observational effect worth getting
         /// right, since lunar phase is the single biggest driver of usable dark time at any site.
         ///
         /// Cached per home body: this depends only on the system's geometry, which does not change.
@@ -394,12 +394,12 @@ namespace ExoInstruments.Visualization
         // (2001, "Scientific Charge-Coupled Devices", SPIE Press) as charge spilling along the
         // column (parallel/vertical shift-register) direction; absent a specific device's
         // anti-blooming-gate asymmetry data, the textbook default is a charge-conserving,
-        // symmetric split between the two vertical neighbors -- 0.5 to each means all of the
+        // symmetric split between the two vertical neighbors; 0.5 to each means all of the
         // excess is conserved, none invented or discarded.
         private const float BloomingSpillFraction = 0.5f;
 
         // Numerical convergence cap for the cascading overflow above (a spilled-over pixel can
-        // itself overflow into the next), not a physical quantity -- same role as the 50-
+        // itself overflow into the next), not a physical quantity, same role as the 50-
         // iteration cap on RvSimulator's Kepler-equation solver elsewhere in this codebase.
         private const int BloomingMaxIterations = 4;
 
@@ -430,7 +430,7 @@ namespace ExoInstruments.Visualization
         // ray (mostly muon) flux is ~1 cm^-2 min^-1 (Particle Data Group, "Passage of Particles
         // Through Matter" review; Grieder 2001, "Cosmic Rays at Earth"), applied to the active
         // telescope's own real physical silicon area (native sensor width/height at its real
-        // pixel pitch -- the physical exposed area doesn't change with binning, only how pixels
+        // pixel pitch; the physical exposed area doesn't change with binning, only how pixels
         // are grouped on readout, so this is computed from the native resolution regardless of
         // the camera's current BinningFactor). A property, not a cached field: it must re-read
         // Spec every call so a telescope switch with a different sensor recomputes the real
@@ -447,13 +447,13 @@ namespace ExoInstruments.Visualization
         private const float CosmicRayDepositWellFraction = 0.85f;
 
         // Astigmatism: the radial-quadratic FORM (Seidel aberration theory: S_II/coma scales
-        // linearly with field, S_III/astigmatism quadratically -- see Schroeder, "Astronomical
+        // linearly with field, S_III/astigmatism quadratically; see Schroeder, "Astronomical
         // Optics" 2nd ed. 2000, Ch. 6, or Rutten & van Venrooij, "Telescope Optics") is the same
         // for every two-mirror astrograph in this pipeline, so it's applied here regardless of
         // which telescope is active; the PEAK amplitude at the frame corner is instrument-
         // specific (VisualTelescopeSpec.AstigmatismStrengthPxAtCorner) since it depends on that
         // telescope's own optical prescription and how completely its design cancels off-axis
-        // aberrations -- see each catalog entry's own comment for its sourcing.
+        // aberrations; see each catalog entry's own comment for its sourcing.
         private static float AstigmatismStrengthPxAtCorner => Spec.AstigmatismStrengthPxAtCorner;
 
         private bool builtOnce;
@@ -474,15 +474,15 @@ namespace ExoInstruments.Visualization
         /// The Unity render handed to the background pass, held in a field rather than inside
         /// FrameComputeInputs so that the pass can RELEASE it the moment it is done reading.
         ///
-        /// It is a Color[] over the whole frame -- 270 MB on the largest instrument at native
-        /// resolution -- and it is read exactly once, at the very start, before the expensive
+        /// It is a Color[] over the whole frame, 270 MB on the largest instrument at native
+        /// resolution, and it is read exactly once, at the very start, before the expensive
         /// optics. Carried in the struct it stayed reachable from the task's closure for the whole
         /// capture, holding that memory across the convolution that needs it most.
         /// </summary>
         private Color[] pendingSrc;
 
-        // The pipeline is MONOCHROME end to end -- every write was new Color(v, v, v, 1f) and
-        // every read was .r -- so these carried four copies of one number plus a constant alpha,
+        // The pipeline is MONOCHROME end to end; every write was new Color(v, v, v, 1f) and
+        // every read was .r; so these carried four copies of one number plus a constant alpha,
         // at 16 bytes a pixel where 4 will do. Nothing is lost: the float stored is the identical
         // float that used to sit in Color.r.
         private float[] pixelScratch;
@@ -493,7 +493,7 @@ namespace ExoInstruments.Visualization
         ///
         /// They run strictly in sequence and each one fills the whole buffer before reading it
         /// (Array.Clear for the smear, Array.Copy for the other two), so none can observe another's
-        /// leftovers. Three separate planes cost three times the memory for no benefit -- 135 MB of
+        /// leftovers. Three separate planes cost three times the memory for no benefit, 135 MB of
         /// it on the largest instrument at native resolution.
         /// </summary>
         private float[] passScratch;
@@ -506,6 +506,38 @@ namespace ExoInstruments.Visualization
         private byte[] displayScratch;
 
         /// <summary>
+        /// Renders a monochrome frame to 8-bit RGB through the SAME display chain a live preview
+        /// gets: zscale limits from the frame's own extended structure, then the selected stretch.
+        ///
+        /// Exists so an exported per-filter or per-sub PNG looks like what the observer saw rather
+        /// than like a second, differently-scaled rendering of it. The FITS beside it carries the
+        /// linear data; this is the quick look.
+        /// </summary>
+        public static byte[] RenderMonoPreviewRgb24(float[] gray, int width, int height)
+        {
+            if (gray == null || width <= 0 || height <= 0 || gray.Length != width * height) return null;
+
+            double black = 0.0, white = 1.0;
+            bool scaled = AutoScaleDisplay
+                       && ZScale.TryExtendedSourceLimits(gray, width, height, out black, out white)
+                       && white > black;
+            float offset = scaled ? (float)black : 0f;
+            float invRange = scaled ? (float)(1.0 / (white - black)) : 1f;
+
+            var rgb = new byte[gray.Length * 3];
+            for (int i = 0; i < gray.Length; i++)
+            {
+                float v = ApplyDisplayStretch((gray[i] - offset) * invRange);
+                byte b = (byte)(Mathf.Clamp01(v) * 255f + 0.5f);
+                int o = i * 3;
+                rgb[o] = b;
+                rgb[o + 1] = b;
+                rgb[o + 2] = b;
+            }
+            return rgb;
+        }
+
+        /// <summary>
         /// Display transfer function for finished frames. Affects only what is shown and the PNG
         /// quick-look; the FITS export and the stacking path always get the linear signal.
         /// </summary>
@@ -514,7 +546,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Whether the display picks its own black and white points from the frame (zscale) rather
         /// than mapping the converter's whole range. On by default, because off is only right for
-        /// a frame whose subject fills that range -- a bright planet -- and wrong for everything
+        /// a frame whose subject fills that range, a bright planet, and wrong for everything
         /// faint, where it buries the subject in the bottom few percent of the display.
         ///
         /// A VIEWER control, like Stretch: the FITS export and the stacker always get the linear
@@ -538,7 +570,7 @@ namespace ExoInstruments.Visualization
         private const double AsinhSoftening = 0.02;
 
         /// <summary>
-        /// Radius ceiling for the seeing-halo kernel, which is now only the FALLBACK path -- see
+        /// Radius ceiling for the seeing-halo kernel, which is now only the FALLBACK path; see
         /// ApplyPsf, which applies the halo as a transfer function and truncates nothing.
         ///
         /// The kernel form could not be made correct by raising this number. At Paranal's 0.72"
@@ -553,7 +585,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Cells a padded frequency-domain pass may allocate. 2048x2048 complex singles is 33 MB
-        /// of transient working set, which covers every frame small enough for the halo to span --
+        /// of transient working set, which covers every frame small enough for the halo to span;
         /// ZIMPOL binned 2x2 is 1024x1024 and pads to exactly this. Beyond it the kernel fallback
         /// takes over rather than the allocation growing unbounded.
         /// </summary>
@@ -604,8 +636,8 @@ namespace ExoInstruments.Visualization
         /// source spectrum. Written to the FITS MAGZERO keyword. NaN when it could not be computed.
         ///
         /// This is the keyword that turns an exported frame from a picture into a measurement. All
-        /// of its ingredients were already being computed -- the integrated system response, the
-        /// real obstructed collecting area, the conversion gain -- and never combined into the one
+        /// of its ingredients were already being computed: the integrated system response, the
+        /// real obstructed collecting area, the conversion gain, and never combined into the one
         /// number a reduction needs.
         /// </summary>
         public double LastPhotometricZeroPoint => lastPhotometricZeroPoint;
@@ -619,7 +651,7 @@ namespace ExoInstruments.Visualization
         /// The two numbers that say whether the last capture's TARGET made it into the frame, and
         /// which half of the pipeline to blame if it did not.
         ///
-        /// LastTargetElectrons is what the physics computed the body should deliver -- aperture,
+        /// LastTargetElectrons is what the physics computed the body should deliver: aperture,
         /// exposure, bandpass, distance, phase. LastRenderedLuminanceSum is what Unity actually
         /// drew of it. The pipeline multiplies the render by their ratio, so a healthy capture has
         /// both non-zero; electrons without luminance means the physics is fine and the RENDER
@@ -665,7 +697,7 @@ namespace ExoInstruments.Visualization
         public static double CoolerMinimumTemperatureCelsius => Spec.CoolerMinimumTemperatureCelsius;
         public static double CoolerMaximumTemperatureCelsius => Spec.CoolerMaximumTemperatureCelsius;
 
-        /// <summary>Returns the setpoint to the instrument's own published operating temperature -- the one its catalogued dark current was measured at, so the model is back on its calibration point.</summary>
+        /// <summary>Returns the setpoint to the instrument's own published operating temperature, the one its catalogued dark current was measured at, so the model is back on its calibration point.</summary>
         public static void ResetCoolerSetpoint() => detectorTemperatureOverrideCelsius = double.NaN;
 
         private static double ClampToCoolerRange(double celsius)
@@ -676,12 +708,12 @@ namespace ExoInstruments.Visualization
                             Math.Min(Spec.CoolerMaximumTemperatureCelsius, celsius));
         }
 
-        /// <summary>Charge at which the last capture stopped responding -- the smaller of the physical well and the converter's ceiling.</summary>
+        /// <summary>Charge at which the last capture stopped responding, the smaller of the physical well and the converter's ceiling.</summary>
         public double LastSaturationElectrons => lastSaturationElectrons;
         private double lastSaturationElectrons;
 
         /// <summary>
-        /// The last capture as the detector's own ADU counts -- the calibratable data product.
+        /// The last capture as the detector's own ADU counts, the calibratable data product.
         ///
         /// This is what FITS export writes, unaltered, so that EGAIN converts it back to
         /// electrons and the frame reduces like an observed one. Distinct from CapturedPhoto and
@@ -695,11 +727,11 @@ namespace ExoInstruments.Visualization
         private int[] hotPixelIndices;
         private int[] deadPixelIndices;
 
-        /// <summary>Real continuous gain control range -- see VisualTelescopeCatalog for sourcing.</summary>
+        /// <summary>Real continuous gain control range; see VisualTelescopeCatalog for sourcing.</summary>
         public static float MinGain => Spec.MinGain;
         public static float MaxGain => Spec.MaxGain;
         /// <summary>Field of view in degrees (zoom). Clamped to [MinFovDeg, MaxFovDeg]. Defaults to
-        /// the wide end (MaxFovDeg) -- the old flat 3.0 default predates the real derived FOV
+        /// the wide end (MaxFovDeg); the old flat 3.0 default predates the real derived FOV
         /// range (roughly 0.06-0.32 deg for the RC20) and sat outside it, which is why the GUI
         /// slider showed a stale "3.0 deg" label until the user's first drag: GUILayout.HorizontalSlider
         /// only clamps the value it returns once there's actual pointer interaction, so an
@@ -719,7 +751,7 @@ namespace ExoInstruments.Visualization
         /// <summary>Neutral-density filter slot: optical attenuation for targets too bright for exposure/gain alone.</summary>
         public NdFilterStop NdFilter { get; set; } = NdFilterStop.None;
 
-        /// <summary>Real optical-density transmission (10^-OD) for each ND filter stop -- see NdFilterStop for sourcing.</summary>
+        /// <summary>Real optical-density transmission (10^-OD) for each ND filter stop; see NdFilterStop for sourcing.</summary>
         public static double NdFilterTransmission(NdFilterStop stop)
         {
             switch (stop)
@@ -744,7 +776,7 @@ namespace ExoInstruments.Visualization
         private SkyTarget pendingTarget;
 
         // --- Background processing state (the heavy per-pixel physics pipeline runs off the
-        // main thread once the exposure's integration time has elapsed -- see GatherFrameInputs
+        // main thread once the exposure's integration time has elapsed; see GatherFrameInputs
         // /ComputeFramePixels/PollProcessTask) ------------------------------
         private Task<float[]> processTask;
         private bool isProcessing;
@@ -778,7 +810,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Fraction of the last capture's pixels that reached or exceeded full well BEFORE the
-        /// sensor's clipping was applied -- i.e. genuinely blown-out, their real surface contrast
+        /// sensor's clipping was applied, i.e. genuinely blown-out, their real surface contrast
         /// irrecoverably destroyed by saturation rather than merely softened.
         ///
         /// Diagnostic, and a necessary one on a large-aperture instrument: an 8.2m telescope on a
@@ -798,10 +830,10 @@ namespace ExoInstruments.Visualization
         /// can differ in brightness, which is real, and it must never be negative, which is the
         /// bug that used to turn a bright planet into a black disc on a lit sky.
         /// </summary>
-        /// <summary>Why the last capture failed, or null if it succeeded. Shown in the panel -- see PollProcessTask.</summary>
+        /// <summary>Why the last capture failed, or null if it succeeded. Shown in the panel; see PollProcessTask.</summary>
         public string LastProcessingError { get; private set; }
 
-        /// <summary>True when the graphics device refused the render target at the current binning -- every capture at this resolution will be garbage until the player bins down.</summary>
+        /// <summary>True when the graphics device refused the render target at the current binning; every capture at this resolution will be garbage until the player bins down.</summary>
         public bool RenderTargetRefused => renderTextureRefused;
         private bool renderTextureRefused;
 
@@ -812,7 +844,7 @@ namespace ExoInstruments.Visualization
         /// how the clone cameras are set up, and no change to the optical or sensor model can
         /// recover detail that was never drawn; if this is right and the finished frame is not,
         /// the fault is downstream and reproducible offline. Written out only when the player
-        /// asks for it (see the Diagnostics toggle) -- it costs a second full-resolution PNG.
+        /// asks for it (see the Diagnostics toggle); it costs a second full-resolution PNG.
         /// </summary>
         public Texture2D RawRenderFrame => readbackTexture;
 
@@ -821,11 +853,11 @@ namespace ExoInstruments.Visualization
         private float lastScintillationFactor = 1f;
         private float lastScintillationSigma;
 
-        /// <summary>Atmospheric FWHM (arcsec) fed to the PSF for the last capture -- the residual left by adaptive optics, or the plain ground-based seeing figure. 0 means diffraction-limited.</summary>
+        /// <summary>Atmospheric FWHM (arcsec) fed to the PSF for the last capture, the residual left by adaptive optics, or the plain ground-based seeing figure. 0 means diffraction-limited.</summary>
         /// <summary>
         /// Where the last capture actually pointed, as a FITS world coordinate system. Invalid
         /// (and therefore not written to the header) when the field geometry could not be
-        /// resolved -- outside the scenes where the observatory site is available, for instance.
+        /// resolved, outside the scenes where the observatory site is available, for instance.
         /// </summary>
         public Core.FitsWcs LastWcs { get; private set; }
 
@@ -834,7 +866,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// The effective photometric width (Angstrom) the last capture was calibrated with, for a
-        /// flat source spectrum -- the single number that turns an apparent magnitude into
+        /// flat source spectrum, the single number that turns an apparent magnitude into
         /// electrons through this instrument at this airmass (see SystemBandpass). Recorded in the
         /// exported header because with it, the aperture area and the exposure time, a reader can
         /// reproduce this frame's photometry exactly rather than having to trust it.
@@ -844,6 +876,12 @@ namespace ExoInstruments.Visualization
         /// <summary>Central wavelength (nm) of the fitted filter.</summary>
         public double ActiveFilterCentralWavelengthNm => FilterCentralWavelengthMeters(Filter) * 1e9;
 
+        /// <summary>Central wavelength of any filter position, nanometres. Needed by an export that writes one file per filter rather than only the active one.</summary>
+        public static double CentralWavelengthNmOf(CameraFilter filter) => FilterCentralWavelengthMeters(filter) * 1e9;
+
+        /// <summary>Bandwidth of any filter position, nanometres.</summary>
+        public static double BandwidthNmOf(CameraFilter filter) => FilterBandwidthAngstrom(filter) * 0.1;
+
         /// <summary>Published FWHM (nm) of the fitted filter.</summary>
         public double ActiveFilterBandwidthNm => FilterBandwidthAngstrom(Filter) * 0.1;
 
@@ -852,7 +890,7 @@ namespace ExoInstruments.Visualization
 
         public double LastAtmosphericFwhmArcsec { get; private set; }
 
-        /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
+        /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil, the hard floor no observing condition can beat.</summary>
         public double LastDiffractionFwhmArcsec { get; private set; }
 
         /// <summary>
@@ -878,7 +916,7 @@ namespace ExoInstruments.Visualization
         public double LastHaloEnclosedFraction { get; private set; }
 
         /// <summary>
-        /// Last capture at full float precision, straight from the physics pipeline -- NOT
+        /// Last capture at full float precision, straight from the physics pipeline, NOT
         /// CapturedPhoto, which round-trips through an 8-bit RGB24 Texture2D and destroys nearly
         /// all of the real, physically-computed noise (shot/dark/read noise live at a small
         /// fraction of full well, far below 1/255). This is what AstroImageStack consumes.
@@ -953,7 +991,7 @@ namespace ExoInstruments.Visualization
         ///
         /// This is what lets a stacking series PIPELINE. An exposure is real elapsed time and the
         /// physics pass behind it is a background task of a few seconds, so a series that waits for
-        /// each frame to finish reducing before opening the shutter again throws that time away --
+        /// each frame to finish reducing before opening the shutter again throws that time away;
         /// on a ten-sub series at two minutes it is minutes of dead sky. The next exposure can start
         /// the moment the previous one's INTEGRATION ends; only the render and the reduction need
         /// exclusive use of the frame buffers, and TickCapture holds the shutter closed if the
@@ -983,7 +1021,7 @@ namespace ExoInstruments.Visualization
             if (!integrationComplete) return;
 
             // The buffers are still owned by the previous frame's reduction. The photons for this
-            // one are already counted -- the integration is over -- so nothing is lost by waiting
+            // one are already counted; the integration is over, so nothing is lost by waiting
             // here, and overlapping two reductions would have them share scratch arrays.
             if (isProcessing) return;
 
@@ -995,7 +1033,7 @@ namespace ExoInstruments.Visualization
             // that gap draws the body's geometry with no colour map: a black disc with a lit rim.
             //
             // So the capture waits for residency rather than racing it. Bounded, because a body
-            // whose loader never flips its own isLoaded flag must not hang the shutter forever --
+            // whose loader never flips its own isLoaded flag must not hang the shutter forever;
             // after the cap the frame is taken regardless, which is exactly the old behaviour.
             if (!KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(pendingTarget.Body))
             {
@@ -1015,7 +1053,7 @@ namespace ExoInstruments.Visualization
         private void RenderExposure(SkyTarget target)
         {
             if (!target.HasTarget) return;
-            // Without autoguiding, the aim stays locked at the last UpdateAim position -- which is
+            // Without autoguiding, the aim stays locked at the last UpdateAim position, which is
             // how a body drifts off-center if it moved, and how a fixed target drifts as the sky turns.
             if (Autoguiding) UpdateAim(target);
             RenderScene(target);
@@ -1025,7 +1063,7 @@ namespace ExoInstruments.Visualization
             processTask = Task.Run(() => ComputeFramePixels(inputs));
         }
 
-        /// <summary>Checks the background frame-processing Task; once complete, uploads the result to the output/captured textures and snapshots it for AstroImageStack -- the only parts that must happen on the main thread.</summary>
+        /// <summary>Checks the background frame-processing Task; once complete, uploads the result to the output/captured textures and snapshots it for AstroImageStack, the only parts that must happen on the main thread.</summary>
         private void PollProcessTask()
         {
             if (processTask == null) { isProcessing = false; return; }
@@ -1065,7 +1103,7 @@ namespace ExoInstruments.Visualization
             isProcessing = false;
 
             // The snapshot is taken from the LINEAR pipeline output, before any display transfer
-            // function -- it is what the FITS export and AstroImageStack consume, and stretching
+            // function; it is what the FITS export and AstroImageStack consume, and stretching
             // it would corrupt every downstream measurement.
             if (lastCaptureSnapshot == null || lastCaptureSnapshot.Length != pixelScratch.Length)
                 lastCaptureSnapshot = new float[pixelScratch.Length];
@@ -1078,7 +1116,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Rebuilds the on-screen/preview textures from the stored linear capture through the
         /// current display stretch. Separate from PollProcessTask so changing the stretch
-        /// re-renders the existing frame instead of forcing a new exposure -- the same way a real
+        /// re-renders the existing frame instead of forcing a new exposure, the same way a real
         /// viewer restretches what is already on screen.
         /// </summary>
         public void UploadDisplayTextures()
@@ -1093,8 +1131,8 @@ namespace ExoInstruments.Visualization
             }
 
             // Straight into the texture's own raw bytes rather than through a Color[] staging
-            // array. The destination is RGB24 -- three bytes a pixel, which is all a monitor can
-            // show and all this path ever claimed to carry -- so a 16-byte Color per pixel was
+            // array. The destination is RGB24, three bytes a pixel, which is all a monitor can
+            // show and all this path ever claimed to carry; so a 16-byte Color per pixel was
             // buying nothing on the way there. On the largest instrument at native resolution that
             // staging array alone was 270 MB.
             //
@@ -1132,7 +1170,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Display transfer function -- see the DisplayStretch enum for what each mode is and
+        /// Display transfer function; see the DisplayStretch enum for what each mode is and
         /// where it comes from. Input and output are both normalised to [0,1].
         /// </summary>
         private static float ApplyDisplayStretch(float linear)
@@ -1197,7 +1235,7 @@ namespace ExoInstruments.Visualization
         /// horizontal by SkyCoordinates, horizontal to a (north, east, up) triple by SkyVector, and
         /// that triple back onto the observatory's own world basis. Scaled space is a uniform
         /// scaling of the world about a moving origin, so a DIRECTION is the same vector in both
-        /// and no conversion is needed -- the same fact TryBuildFieldGeometry relies on.
+        /// and no conversion is needed, the same fact TryBuildFieldGeometry relies on.
         /// </summary>
         private static bool TryEquatorialDirection(double raDeg, double decDeg, double ut, out Vector3d direction)
         {
@@ -1265,7 +1303,7 @@ namespace ExoInstruments.Visualization
         private void RenderScene(SkyTarget target)
         {
             if (!target.HasTarget || !IsAvailable) return;
-            if (target.IsBody && target.Body.scaledBody == null) return; // no scaled stand-in -- nothing to frame
+            if (target.IsBody && target.Body.scaledBody == null) return; // no scaled stand-in, nothing to frame
             if (!hasLockedAim) UpdateAim(target); // first-ever shot on this target: always start centered
 
             CelestialBody home = FlightGlobals.GetHomeBody();
@@ -1278,14 +1316,14 @@ namespace ExoInstruments.Visualization
             // distant bodies like Jool, but only with a technique that can't affect the game view.
 
             // Large planet packs unload a body's scaled-space textures when no camera the GAME
-            // knows about can see it -- and the telescope's cameras are clones it doesn't know
+            // knows about can see it, and the telescope's cameras are clones it doesn't know
             // about. Photographing an unloaded body draws its mesh with no colour map: a black
             // disc with a lit rim. Force the target (and its moons, which share the field)
             // resident first. No-op without Kopernicus.
             KopernicusOnDemandIntegration.EnsureScaledSpaceTexturesLoaded(target.Body);
 
             // A RenderTexture's contents are volatile: Unity documents them as lost on graphics-
-            // device events, fullscreen transitions among them -- which is what alt-tabbing is.
+            // device events, fullscreen transitions among them, which is what alt-tabbing is.
             // A texture whose backing surface was released reports IsCreated() false and must be
             // re-created before anything renders into it.
             if (renderTexture != null && !renderTexture.IsCreated()) renderTexture.Create();
@@ -1304,14 +1342,14 @@ namespace ExoInstruments.Visualization
             // around the camera: a large smooth coloured gradient across the frame, brightest
             // where the shell is lit, with a curved terminator running through it. Skipping it
             // only avoided switching it on; whether it was already on was left to KSP's own
-            // distance fade, whose thresholds are set per body and differ between planet packs
-            // -- so the same code could look clean on one install and produce a coloured wash on
+            // distance fade, whose thresholds are set per body and differ between planet packs;
+            // so the same code could look clean on one install and produce a coloured wash on
             // another. Restored afterwards, so the live scene is unaffected.
             // Every fader touched is recorded and put back, not just the home body's. A capture
             // is an observation and must leave the game exactly as it found it: forcing every
             // body's stand-in on and walking away leaves the live scene drawing stand-ins KSP had
             // deliberately faded out. That relied on ScaledSpaceFader re-deciding the flag on its
-            // own next frame -- probably true, never verified, and not something a capture should
+            // own next frame, probably true, never verified, and not something a capture should
             // be betting the player's scene on.
             if (faderRestoreBuffer == null || faderRestoreBuffer.Length != scaledSpaceFaders.Length)
                 faderRestoreBuffer = new bool[scaledSpaceFaders.Length];
@@ -1331,7 +1369,7 @@ namespace ExoInstruments.Visualization
             // 4096 pixels across a 90-degree face, i.e. 1.32 arcmin per texel, while FORS2's
             // field is 8.6 arcmin: the frame covers about six texels and magnifies them 628x.
             // What reaches the sensor is therefore not a sky but a bilinear interpolation of a
-            // handful of texels -- vast smooth blobs, which the 8-bit render target then slices
+            // handful of texels, vast smooth blobs, which the 8-bit render target then slices
             // into hard-edged contour bands as soon as any non-linear display stretch pulls the
             // bottom of the range up. (This was latent until the galaxy camera's projection
             // matrix was correctly reset to the telescope's own field; before that it rendered
@@ -1346,15 +1384,15 @@ namespace ExoInstruments.Visualization
             // pipeline now draws itself.
             //
             // Everything the background should contain is modelled instead, in real V surface
-            // brightness, by SkyBrightnessModel -- airglow (Patat 2003), zodiacal light (Leinert
+            // brightness, by SkyBrightnessModel: airglow (Patat 2003), zodiacal light (Leinert
             // et al. 1998), moonlight (Krisciunas & Schaefer 1991) and twilight (Patat et al.
-            // 2006) -- and added after the optics, where a uniform sky belongs.
+            // 2006), and added after the optics, where a uniform sky belongs.
             //
             // Rendered TWICE, and only the second pass is read back.
             //
-            // The first capture after the window regains focus was reliably wrong -- a black disc
+            // The first capture after the window regains focus was reliably wrong, a black disc
             // with a lit rim where the planet should be, i.e. its geometry drawn without its
-            // surface texture -- while every subsequent capture from the same setup was correct.
+            // surface texture, while every subsequent capture from the same setup was correct.
             // That is a graphics-device reset: alt-tabbing releases GPU-side resources, and the
             // scaled-space bodies' textures are restored lazily, on demand, by the frame that
             // first asks for them. Our capture WAS that frame, so it rendered against surfaces
@@ -1383,8 +1421,8 @@ namespace ExoInstruments.Visualization
                     // the galaxy camera ran first and filled the colour buffer with KSP's painted
                     // sky; that pass is gone (see the comment above), so this camera now owns the
                     // clear. An empty background is the correct starting point: everything that
-                    // belongs in it -- airglow, zodiacal light, moonlight, twilight, and every
-                    // catalogue star -- is added later by the physics, in real surface brightness.
+                    // belongs in it (airglow, zodiacal light, moonlight, twilight, and every
+                    // catalogue star) is added later by the physics, in real surface brightness.
                     scaledSpaceCam.clearFlags = CameraClearFlags.SolidColor;
                     scaledSpaceCam.backgroundColor = Color.black;
                     scaledSpaceCam.farClipPlane = 3e15f;
@@ -1398,7 +1436,7 @@ namespace ExoInstruments.Visualization
             {
                 RenderTexture.active = activeRT;
 
-                // Hand every stand-in back exactly as it was found -- the live scene draws
+                // Hand every stand-in back exactly as it was found; the live scene draws
                 // through them and must not be left rearranged by a capture.
                 for (int i = 0; i < scaledSpaceFaders.Length; i++)
                 {
@@ -1457,7 +1495,7 @@ namespace ExoInstruments.Visualization
         private void EnsureSceneBuilt()
         {
             if (builtOnce && builtBinningFactor == BinningFactor && builtSpec == Spec) return;
-            if (builtOnce) Dispose(); // binning or active telescope changed since the last build -- tear down and rebuild at the new resolution
+            if (builtOnce) Dispose(); // binning or active telescope changed since the last build; tear down and rebuild at the new resolution
             builtOnce = true;
             builtBinningFactor = BinningFactor;
             builtSpec = Spec;
@@ -1467,7 +1505,7 @@ namespace ExoInstruments.Visualization
                 Camera liveScaledSpace = FindCameraByName(ScaledSpaceCameraName);
                 if (liveScaledSpace == null)
                 {
-                    Debug.LogWarning("[ExoInstruments] Could not find KSP's scaled-space camera -- solar-system camera disabled.");
+                    Debug.LogWarning("[ExoInstruments] Could not find KSP's scaled-space camera, solar-system camera disabled.");
                     available = false;
                     return;
                 }
@@ -1476,16 +1514,16 @@ namespace ExoInstruments.Visualization
 
                 // Half-float capture, not 8-bit.
                 //
-                // The rendered scene supplies every bit of spatial structure this pipeline has --
+                // The rendered scene supplies every bit of spatial structure this pipeline has (
                 // the belts, the terminator, the limb darkening, and any companion sharing the
-                // frame -- and the physics then multiplies the whole plane by a single
+                // frame), and the physics then multiplies the whole plane by a single
                 // calibration factor. Quantising it first therefore quantises the finished
                 // photograph, and 8 bits is nowhere near enough for the range a real frame holds:
                 // sRGB-encoded ARGB32 resolves 3295:1, i.e. 8.8 magnitudes, so Jupiter at V=-2.5
                 // and a Galilean moon at V=5.0 (a real 1000:1 ratio) put that moon on 3.3
                 // quantisation levels. Its limb, its phase and its shading are gone before the
                 // optics are even applied, and any non-linear display stretch then slices what
-                // remains into visible contour bands -- the same mechanism that made the painted
+                // remains into visible contour bands, the same mechanism that made the painted
                 // sky cube's texels show up as hard-edged polygons (see RenderScene).
                 //
                 // Half float removes the quantisation and nothing else. It is NOT a claim that
@@ -1497,7 +1535,7 @@ namespace ExoInstruments.Visualization
                 // building on the game's own renderer and is documented rather than papered over;
                 // what changes here is only that this mod stops ADDING an error of its own.
                 // ReadWrite.Linear accordingly means "store what the renderer produced, verbatim",
-                // which is exactly the intent -- a float target needs no encoding to hold range.
+                // which is exactly the intent; a float target needs no encoding to hold range.
                 //
                 // Falls back to the previous 8-bit target on a device that cannot give a
                 // half-float render surface, since a working capture beats no capture.
@@ -1514,7 +1552,7 @@ namespace ExoInstruments.Visualization
                 };
                 // Create() reports whether the graphics device actually granted the surface. At
                 // the largest instrument's native resolution this is a 4096x4128 half-float
-                // target with a 24-bit depth buffer -- 12 bytes per pixel, so about 203 MB of
+                // target with a 24-bit depth buffer, 12 bytes per pixel, so about 203 MB of
                 // VRAM for this one texture, on top of whatever the game already holds. A
                 // refusal here is silent otherwise: the camera still "renders", and the readback
                 // returns whatever was in memory.
@@ -1538,7 +1576,7 @@ namespace ExoInstruments.Visualization
 
                 // Matches the render target: a half-float readback would be pointless through an
                 // 8-bit intermediate, which is exactly what this used to be. Marked linear so
-                // Unity applies no colour conversion on the way through -- the readback is a
+                // Unity applies no colour conversion on the way through; the readback is a
                 // copy, not an interpretation.
                 readbackTexture = halfFloatCapture
                     ? new Texture2D(TextureWidth, TextureHeight, TextureFormat.RGBAHalf, false, true)
@@ -1561,7 +1599,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Plain-data snapshot of everything ComputeFramePixels needs -- gathered on the main thread (it touches CelestialBody/Unity APIs), then handed to a background Task that touches none of that, mirroring the StartImagingRefresh/PollImagingRenderTask pattern used elsewhere in this mod.</summary>
+        /// <summary>Plain-data snapshot of everything ComputeFramePixels needs, gathered on the main thread (it touches CelestialBody/Unity APIs), then handed to a background Task that touches none of that, mirroring the StartImagingRefresh/PollImagingRenderTask pattern used elsewhere in this mod.</summary>
         private struct FrameComputeInputs
         {
             public long TargetSeed;
@@ -1574,8 +1612,8 @@ namespace ExoInstruments.Visualization
             public float CloudCoverage;
             public double TotalElectrons;
             // PSF ingredients rather than a finished kernel. Building the kernel is pure C# that
-            // touches nothing Unity-owned, so it belongs on the background side of this boundary
-            // -- doing it here would stall the main thread at the moment the player presses
+            // touches nothing Unity-owned, so it belongs on the background side of this boundary;
+            // doing it here would stall the main thread at the moment the player presses
             // Capture, which is exactly when a stall is most visible.
             public double PlateScaleArcsec;
             /// <summary>Plain ground-based seeing (arcsec), already resolved from the target's airmass on the main thread. Ignored when the instrument has adaptive optics.</summary>
@@ -1616,14 +1654,14 @@ namespace ExoInstruments.Visualization
             public double SignalCutoffElectrons;
             // Photometric chain for a catalogue star, resolved on the main thread so the
             // background pass needs nothing but arithmetic.
-            /// <summary>The instrument's integrated spectral response for this filter and airmass -- optics, filter, QE curve and extinction in one object (see SystemBandpass). Built on the main thread, read-only thereafter.</summary>
+            /// <summary>The instrument's integrated spectral response for this filter and airmass: optics, filter, QE curve and extinction in one object (see SystemBandpass). Built on the main thread, read-only thereafter.</summary>
             public SystemResponse Response;
             public double ApertureAreaCm2;
             /// <summary>Atmospheric extinction at the fitted filter's own wavelength: extinction alone, no ND filter, no cloud.</summary>
             public double CloudTransmission;
             /// <summary>
             /// Transmission a catalogue star loses OUTSIDE the spectral response: cloud and the ND
-            /// filter. Atmospheric extinction is deliberately not here -- it is wavelength
+            /// filter. Atmospheric extinction is deliberately not here; it is wavelength
             /// dependent and now lives inside Response's integral, so including it again would
             /// attenuate every source twice.
             /// </summary>
@@ -1639,13 +1677,13 @@ namespace ExoInstruments.Visualization
         /// Gathers every CelestialBody/Unity-API-touching input ComputeFramePixels needs, on
         /// the main thread. Real photon-flux calibration: the imaged body's actual apparent
         /// magnitude (real albedo/radius/Sun-distance/observer-distance/phase-angle, Lambertian
-        /// phase law -- see PhotonFluxModel) converted into real electrons collected through
+        /// phase law; see PhotonFluxModel) converted into real electrons collected through
         /// the RC20's real aperture/obstruction/QE/filter-bandwidth/exposure/extinction.
         /// </summary>
         private FrameComputeInputs GatherFrameInputs(SkyTarget target)
         {
             // Handed to the background pass through a field rather than through the inputs struct,
-            // so that pass can drop it as soon as it has read it -- see pendingSrc.
+            // so that pass can drop it as soon as it has read it; see pendingSrc.
             pendingSrc = readbackTexture.GetPixels();
             EnsureDefectMap();
 
@@ -1673,7 +1711,7 @@ namespace ExoInstruments.Visualization
             float coverage = ComputeCloudCoverage();
 
             // The instrument's whole spectral response for this filter and airmass, integrated
-            // once here and then reused by every source in the frame -- bodies, stars and sky
+            // once here and then reused by every source in the frame, bodies, stars and sky
             // alike, which is what keeps them on one flux scale (see SystemBandpass).
             SystemResponse response = BuildSystemResponse(Filter, airmass);
             LastAirmass = airmass;
@@ -1687,14 +1725,14 @@ namespace ExoInstruments.Visualization
             // a blur here, and no longer does, for two independent reasons.
             //
             // It was quoted in PIXELS (a fixed 2px scaled by the plate scale), so the same
-            // overcast sky delivered four times the angular blur at binning 4 as at binning 1 --
+            // overcast sky delivered four times the angular blur at binning 4 as at binning 1,
             // exactly the defect this function was rewritten to remove from the seeing term.
             //
             // And correcting the unit would only have moved the problem: there is no published
             // coefficient relating cloud cover to delivered FWHM, because it is not an optical
-            // mechanism. Cloud ATTENUATES, and that is modelled -- CloudTransmission removes up
+            // mechanism. Cloud ATTENUATES, and that is modelled; CloudTransmission removes up
             // to CloudMaxAttenuation of every source's flux, from EVE's real cloud texture
-            // sampled at the observatory's own zenith -- and cloud VEILS, which is modelled too
+            // sampled at the observatory's own zenith, and cloud VEILS, which is modelled too
             // (see CloudVeilingSkyGain). Bad seeing and cloud are correlated symptoms of unsettled
             // weather, not one causing the other, so a blur term here would have been an invented
             // constant standing in for a mechanism that does not exist.
@@ -1756,18 +1794,18 @@ namespace ExoInstruments.Visualization
             double transmission = AtmosphericImagingNoise.ExtinctionTransmissionAt(airmass, wavelength, Spec.SiteAltitudeMeters);
 
             // The sky is summed in two groups, because its terms do not share a spectrum. Three of
-            // the four are sunlight scattered off something -- the zodiacal dust cloud, the Moon,
-            // and the daytime atmosphere itself -- so they genuinely carry the solar spectral
+            // the four are sunlight scattered off something (the zodiacal dust cloud, the Moon,
+            // and the daytime atmosphere itself), so they genuinely carry the solar spectral
             // shape. Airglow does not: it is atmospheric LINE emission, and it is no longer
-            // integrated flat. ESO's measured sky model supplies its real spectrum -- the [O I]
-            // lines, sodium, the OH Meinel forest and the residual continuum -- so a narrowband
+            // integrated flat. ESO's measured sky model supplies its real spectrum (the [O I]
+            // lines, sodium, the OH Meinel forest and the residual continuum), so a narrowband
             // filter now sees the sky IT sees: an H-alpha filter sits in a window between OH
             // bands, an [O I] 6300 filter stares straight at 150 rayleighs of the very line it is
             // trying to image. A flat sky made those two look equally easy. See Core/Airglow.
             //
             // Extinction is inside ThroughputAt (the response carries the field's own airmass) and
             // the van Rhijn factor is applied per bin inside Airglow, with the [O I] red doublet
-            // on its own 250 km layer -- so neither appears here, where applying either again
+            // on its own 250 km layer; so neither appears here, where applying either again
             // would double it.
 
             // Zodiacal light originates outside the atmosphere, so it is simply attenuated by it.
@@ -1781,7 +1819,7 @@ namespace ExoInstruments.Visualization
 
             // Cloud veiling: cloud scatters ground and sky light back down, which is why an
             // overcast night sky is brighter than a clear one rather than darker. Modelled as a
-            // multiplier on the sky that is already there, since that light is its source -- so it
+            // multiplier on the sky that is already there, since that light is its source; so it
             // applies to both groups alike.
             double veiling = 1.0 + cloudCoverage * CloudVeilingSkyGain;
             fluxSolar *= veiling;
@@ -1911,7 +1949,7 @@ namespace ExoInstruments.Visualization
         /// The aim and the star field are built from one geometry, so this SHOULD be the frame
         /// centre. When it is not, this says by how much and in which direction, which separates
         /// "the telescope is pointed wrong" from "the target is simply not in the catalogue being
-        /// drawn" -- two failures that look identical on a frame with nothing in it.
+        /// drawn", two failures that look identical on a frame with nothing in it.
         /// </summary>
         private void MeasurePointingError(SkyTarget target, GnomonicProjection projection,
                                           double meridianRaDeg, double latitudeDeg)
@@ -2007,7 +2045,7 @@ namespace ExoInstruments.Visualization
         /// Optional all-sky reddening map, set by the GUI at load time. Null simply means no
         /// sight-line extinction is reported, and nothing else changes: this is the TOTAL Galactic
         /// column, so it describes what lies beyond the whole Galaxy and is never applied to a
-        /// catalogue star -- see DustMap.
+        /// catalogue star; see DustMap.
         /// </summary>
         public static DustMap DustMap { get; set; }
 
@@ -2021,7 +2059,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Optional high-resolution patches of the same line over the sky where a finer survey
         /// exists, set by the GUI at load time. Null simply means every field is drawn at the
-        /// all-sky map's own 6 arcmin beam -- see EmissionPatchSet for why that is the difference
+        /// all-sky map's own 6 arcmin beam; see EmissionPatchSet for why that is the difference
         /// between a nebula and a smudge.
         /// </summary>
         public static EmissionPatchSet EmissionPatches { get; set; }
@@ -2030,7 +2068,7 @@ namespace ExoInstruments.Visualization
         public string LastEmissionPatchName { get; private set; }
 
         /// <summary>
-        /// Where the aim point landed in the last frame, pixels -- the registration reference a
+        /// Where the aim point landed in the last frame, pixels: the registration reference a
         /// stack aligns on.
         ///
         /// Measured through the very projection that placed every source in the frame, so it
@@ -2043,13 +2081,13 @@ namespace ExoInstruments.Visualization
         /// <summary>Fraction of the last frame the high-resolution patch answered for; the rest came from the all-sky map, joined by the patch's own apodised rim.</summary>
         public double LastEmissionPatchCoverage { get; private set; }
 
-        /// <summary>Resolution the last frame's emission actually came at, arcminutes -- the patch's when one covered the field, the base map's otherwise.</summary>
+        /// <summary>Resolution the last frame's emission actually came at, arcminutes: the patch's when one covered the field, the base map's otherwise.</summary>
         public double LastEmissionResolutionArcmin { get; private set; }
 
         /// <summary>
         /// Optional galaxy catalogue, set by the GUI at load time. Unlike a star, a galaxy is
         /// resolved by every instrument here, so it is drawn from its own measured shape rather
-        /// than by the PSF -- see GalaxyCatalog and GalaxyRenderer.
+        /// than by the PSF; see GalaxyCatalog and GalaxyRenderer.
         /// </summary>
         public static GalaxyCatalog GalaxyCatalog { get; set; }
 
@@ -2167,7 +2205,7 @@ namespace ExoInstruments.Visualization
         /// EVERY LINE THE FILTER ADMITS, not just the mapped one. The map measures H-alpha, but a
         /// 7 nm filter centred on it also passes [N II] 6548 and 6584, and an [S II] filter passes
         /// a doublet the map says nothing about directly. Those are derived from the H-alpha
-        /// brightness by the physics that sets them -- see NebularLineRatios, where the ratio is a
+        /// brightness by the physics that sets them; see NebularLineRatios, where the ratio is a
         /// thermometer rather than a coefficient. Each admitted line gets its own throughput at its
         /// own wavelength, which is the whole point of narrowband: a 3 nm filter separates H-alpha
         /// from [N II] 6584 and a 7 nm one does not.
@@ -2328,7 +2366,7 @@ namespace ExoInstruments.Visualization
         /// The source spectrum used for the weights is a 6000 K blackbody: the FIELD's dispersion
         /// smear is one kernel shared by everything in the frame, so it has to be built on one
         /// spectrum, and a solar-type continuum is the middle of what this roster photographs. The
-        /// error that leaves is second order -- a redder source's smear is slightly shorter -- while
+        /// error that leaves is second order (a redder source's smear is slightly shorter) while
         /// the first-order effect, the shift of a source's own centroid with its colour, is a
         /// per-source scalar and belongs where the source is deposited rather than in a shared kernel.
         /// </summary>
@@ -2448,8 +2486,8 @@ namespace ExoInstruments.Visualization
         ///
         /// PHOTOMETRY goes down the same path as a catalogue star: an apparent magnitude and a
         /// colour, through the instrument's integrated response, with the Galactic foreground
-        /// extinction applied. For a galaxy the extinction is the WHOLE column -- it sits behind
-        /// all of it -- which is the one case DustMap's total reddening applies to without
+        /// extinction applied. For a galaxy the extinction is the WHOLE column; it sits behind
+        /// all of it, which is the one case DustMap's total reddening applies to without
         /// qualification, and it is why LastFieldReddeningEBv exists.
         ///
         /// The colour is used the way a star's is, to set a blackbody standing in for the source's
@@ -2508,8 +2546,8 @@ namespace ExoInstruments.Visualization
 
                 // R_e from the two measured quantities together, with no free constant.
                 //
-                // Where they are inconsistent -- a galaxy whose total magnitude is too faint to
-                // reach 25 mag/arcsec^2 anywhere at its catalogued size -- the isophote cannot be
+                // Where they are inconsistent (a galaxy whose total magnitude is too faint to
+                // reach 25 mag/arcsec^2 anywhere at its catalogued size), the isophote cannot be
                 // honoured by any R_e, and the fallback keeps the SIZE, which is what the frame
                 // shows, by reading D25/2 as the radius enclosing FallbackEnclosedAtD25 of the
                 // light instead. tools/galaxy-tests reports what fraction the solved cases put
@@ -2661,7 +2699,7 @@ namespace ExoInstruments.Visualization
         /// The apparent magnitude whose collected signal equals the frame's noise floor, which is the
         /// faintest star this exposure can show. Inverts PhotonFluxModel's own flux relation
         /// rather than approximating it, so it stays consistent with what the sources are
-        /// actually drawn at -- including the optical throughput, which makes this figure
+        /// actually drawn at, including the optical throughput, which makes this figure
         /// shallower than it used to be and correctly so.
         ///
         /// Evaluated for a flat spectrum: this sets the catalogue search's depth cut, and the
@@ -2800,7 +2838,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Builds (or reuses) the instrument's PSF for this frame. Runs on the background pipeline
-        /// thread -- none of it touches Unity or KSP state.
+        /// thread; none of it touches Unity or KSP state.
         ///
         /// Cached on everything it depends on, because none of those change between two captures
         /// with the same settings, and the adaptive-optics solve alone builds a couple of dozen
@@ -2816,7 +2854,7 @@ namespace ExoInstruments.Visualization
             if (hasAo)
             {
                 // The published delivered figure already contains diffraction, which is now
-                // computed separately from the pupil -- solve for the residual that reproduces it.
+                // computed separately from the pupil; solve for the residual that reproduces it.
                 atmosphericFwhm = OpticalPsf.AtmosphericFwhmForDelivered(
                     Spec.AdaptiveOpticsFwhmArcsec, inputs.PlateScaleArcsec,
                     Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
@@ -2844,7 +2882,7 @@ namespace ExoInstruments.Visualization
                 // pattern scales as lambda/D, the seeing disc as lambda^(-1/5), and the atmosphere
                 // refracts blue more than red so the source is smeared toward the zenith. Convolution
                 // is linear, so summing the monochromatic kernels with their photon weights and
-                // convolving once is not an approximation of a chromatic PSF -- it is one, at no cost
+                // convolving once is not an approximation of a chromatic PSF; it is one, at no cost
                 // beyond building the kernel. See OpticalPsf.BuildChromaticKernel.
                 ChromaticSubBand[] subBands = BuildSubBands(inputs, wavelength);
                 psfCacheCore = subBands != null
@@ -2964,7 +3002,7 @@ namespace ExoInstruments.Visualization
             float[] signal = signalScratch;
 
             // Deliberately the NATIVE (unbinned) Spec.FullWellElectrons here, paired with the
-            // native per-physical-pixel DarkCurrentElectronsPerSecond -- both real electron
+            // native per-physical-pixel DarkCurrentElectronsPerSecond; both real electron
             // quantities scale by BinningFactor^2 together in a real binned pixel, so the
             // resulting pedestal/sigma FRACTION (what DarkCurrent actually returns) comes out
             // identical either way; using the raw per-pixel numbers is just simpler than
@@ -2973,7 +3011,7 @@ namespace ExoInstruments.Visualization
             // rate scales with the binned area. In electrons, like everything else here.
             // Dark current at the detector's ACTUAL temperature, scaled from its published rate at
             // its own published operating temperature by the depletion-generation law (Janesick
-            // 2001; Varshni 1967 band gap -- see Core.DarkCurrentModel). While the two agree, which
+            // 2001; Varshni 1967 band gap; see Core.DarkCurrentModel). While the two agree, which
             // is the case for every instrument until a cooler setpoint exists, this returns exactly
             // the catalogue figure and changes nothing; what it buys now is that CCD-TEMP has
             // become a live physical input rather than a header decoration, and that hot pixels
@@ -2987,8 +3025,8 @@ namespace ExoInstruments.Visualization
 
             // ONE recorded 64-bit seed per exposure, mixed from what identifies the exposure, and
             // written to the FITS header: given the seed, the frame is reproducible bit for bit.
-            // That was impossible before -- System.Random's sequence for a seed is not part of
-            // .NET's contract and has changed between runtimes -- and it is what any regression
+            // That was impossible before; System.Random's sequence for a seed is not part of
+            // .NET's contract and has changed between runtimes, and it is what any regression
             // test on this pipeline's stochastic output has to stand on. See Core.Pcg32.
             //
             // Each stochastic process draws from its OWN stream of that seed rather than sharing
@@ -3006,20 +3044,20 @@ namespace ExoInstruments.Visualization
             float cloudTransmission = (float)inputs.CloudTransmission;
 
             // Unity's own rendered pixel values (src[]) keep supplying the real spatial shading
-            // (terminator, limb, craters from the game's own 3D lighting) -- only the ABSOLUTE
+            // (terminator, limb, craters from the game's own 3D lighting); only the ABSOLUTE
             // scale of that shading is recalibrated to match the physically-derived total
             // electron count (inputs.TotalElectrons), so noise/saturation/SNR are all anchored
             // to real physics rather than an invented flat exposure multiplier.
             //
             // Calibrating against THIS filter's own rendered sum (e.g. sum of src[].r for the
-            // Red filter) would force every filter's stack to the same total electron budget --
+            // Red filter) would force every filter's stack to the same total electron budget;
             // TotalElectrons is the same physical value for R/G/B (one body-wide albedo, split
             // into equal thirds, see ComputeCollectedElectrons), so that erases the body's real
             // per-channel color balance (a green-dominant body like Jool would have its R and B
             // channels artificially boosted to match G's total, then LRGB-composited into
-            // whatever arbitrary hue survives the per-pixel contrast differences -- not Jool's
-            // actual color). Calibrating every filter against the SAME reference -- the frame's
-            // luminance-weighted sum, matching FilterSignal's own Luminance formula -- instead
+            // whatever arbitrary hue survives the per-pixel contrast differences, not Jool's
+            // actual color). Calibrating every filter against the SAME reference (the frame's
+            // luminance-weighted sum, matching FilterSignal's own Luminance formula) instead
             // scales each channel by its real relative share of that luminance, so R:G:B keeps
             // the body's true color ratio through calibration and into the later luminance-
             // transfer step in the colour composite (which already assumes R/G/B carry
@@ -3048,8 +3086,8 @@ namespace ExoInstruments.Visualization
             // electron count the physics computed for the scene.
             //
             // THE ZERO BRANCH IS A SILENT FAILURE and is recorded rather than swallowed. If the
-            // Unity render came back empty -- a refused render target, a readback that produced
-            // nothing, a scaled-space body that was not drawn -- then this sum is zero, the factor
+            // Unity render came back empty (a refused render target, a readback that produced
+            // nothing, a scaled-space body that was not drawn), then this sum is zero, the factor
             // is zero, and every scene pixel is multiplied to nothing. The frame still comes out
             // with its sky, its noise and its catalogue stars, because those are deposited by the
             // physics rather than taken from the render, so the result looks like a working
@@ -3128,7 +3166,7 @@ namespace ExoInstruments.Visualization
             // The zero point, so the exported frame can actually be turned back into magnitudes:
             //   m = -2.5 log10(ADU/s) + ZP,   ZP = 2.5 log10(F0 * W * A * T_nd / K)
             // which is just the pipeline's own photometry equation solved for m. Quoted for a FLAT
-            // source spectrum, as a zero point always is -- a real star's own colour enters through
+            // source spectrum, as a zero point always is; a real star's own colour enters through
             // its own effective width, which is the colour term (see SystemBandpass). It lives here
             // rather than in the detector chain because it describes the OPTICS as much as the
             // sensor, and a calibration frame taken with the shutter closed has no zero point.
@@ -3147,13 +3185,13 @@ namespace ExoInstruments.Visualization
             // No defect overlay here any more. Hot and dead pixels are applied in the charge domain
             // (ApplyPixelDefects, above) where they physically originate, so by this point they
             // have already been through blooming, charge transfer, read noise and digitisation like
-            // every other pixel -- which is what makes them removable by a dark frame and a bad
+            // every other pixel, which is what makes them removable by a dark frame and a bad
             // pixel map instead of being permanent marks on the data.
             //
             // The frame stays genuinely raw and uncorrected: AstroImageStack.AddSub still receives
             // it and cosmetically corrects it against the same fixed defect map before aligning and
             // stacking, the order real calibration pipelines (PixInsight, IRAF/ccdproc, ESO Reflex)
-            // use -- raw frame -> bad-pixel-map correction -> registration -> stacking.
+            // use: raw frame -> bad-pixel-map correction -> registration -> stacking.
 
             return pixels;
         }
@@ -3174,8 +3212,8 @@ namespace ExoInstruments.Visualization
         ///
         /// Extracted so that a shutter-closed calibration frame runs the SAME code as a science
         /// frame. That is the whole point of the exercise: a dark frame is only worth subtracting if
-        /// it was produced by the same chain, and a second implementation of the chain -- however
-        /// carefully written -- is free to drift from the first the moment either is edited.
+        /// it was produced by the same chain, and a second implementation of the chain, however
+        /// carefully written, is free to drift from the first the moment either is edited.
         ///
         /// signal may be null, which means no scene light reached the sensor at all. That is not a
         /// convenience: it is exactly what a closed shutter is.
@@ -3198,7 +3236,7 @@ namespace ExoInstruments.Visualization
             // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
             // counting process, and the two only agree once the count is large. At the few
             // electrons per pixel a faint sky or a short dark reaches, a Gaussian goes negative
-            // and is measurably the wrong distribution -- the same reason GalSim and Pyxel both
+            // and is measurably the wrong distribution, the same reason GalSim and Pyxel both
             // draw real Poisson deviates here.
             for (int i = 0; i < n; i++)
             {
@@ -3207,8 +3245,8 @@ namespace ExoInstruments.Visualization
                 raw[i] = (float)SamplePoisson(rng, meanElectrons);
             }
 
-            // The sensor's own defects, applied HERE -- in the charge domain, alongside the dark
-            // current they are made of -- rather than stamped over the finished counts after
+            // The sensor's own defects, applied HERE (in the charge domain, alongside the dark
+            // current they are made of) rather than stamped over the finished counts after
             // digitisation, which is what this pipeline used to do.
             //
             // A hot pixel is not a bright dot the readout paints on. It is a pixel whose depletion
@@ -3218,7 +3256,7 @@ namespace ExoInstruments.Visualization
             // follow that the old treatment got wrong: the defect now GROWS WITH EXPOSURE TIME (a
             // 1-second sub shows a faint speck where a 300-second one shows a blown pixel, instead
             // of both showing the same near-full-scale dot), it responds to detector temperature
-            // through the same law as the rest of the dark current, and -- the point of all of it --
+            // through the same law as the rest of the dark current, and, the point of all of it,
             // subtracting a dark frame REMOVES it, which is the entire reason an observer takes one.
             //
             // A dead pixel is the converse: no photo response at all, so it collects no signal and
@@ -3239,7 +3277,7 @@ namespace ExoInstruments.Visualization
                 raw[i] += NextGaussian(rngRead, readNoiseElectrons);
 
             // Digitisation: charge divided by the real conversion factor K, truncated to an integer
-            // count the way an ADC actually works, and clipped at the converter's own top code --
+            // count the way an ADC actually works, and clipped at the converter's own top code,
             // which for FORS2 arrives well before its full well ever does.
             var result = new DetectorChainResult
             {
@@ -3250,7 +3288,7 @@ namespace ExoInstruments.Visualization
 
             // The bias pedestal, added ahead of the converter exactly where the readout electronics
             // add it. Without one, the clip at zero below removed the negative half of the read
-            // noise wherever a pixel's total charge sat within a read noise of zero -- biasing it
+            // noise wherever a pixel's total charge sat within a read noise of zero, biasing it
             // upward, destroying the Gaussian shape at the faint floor, and leaving the read noise
             // unmeasurable from the exported data. That regime is rare in a long exposure on a
             // bright sky, common in a short one, and UNIVERSAL in the calibration frames this
@@ -3295,7 +3333,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// A calibration frame, in the detector's own ADU -- the shutter-closed companion to a
+        /// A calibration frame, in the detector's own ADU: the shutter-closed companion to a
         /// science exposure, and what makes one reducible.
         ///
         /// It runs the same RunDetectorChain a science frame does, with no scene light and no sky,
@@ -3303,7 +3341,7 @@ namespace ExoInstruments.Visualization
         /// noise, and (for a dark) the dark current with its hot pixels and whatever cosmic rays
         /// arrived. Subtracting a dark of matching exposure and temperature from a light frame
         /// removes all of it, which is now true of this pipeline in the way it is true of a real
-        /// one -- it was not while hot pixels were stamped on after digitisation.
+        /// one; it was not while hot pixels were stamped on after digitisation.
         ///
         /// The exposure is what a dark must match: a dark frame is only valid for lights of the
         /// SAME exposure time, gain, binning and detector temperature, which is why the caller
@@ -3346,7 +3384,7 @@ namespace ExoInstruments.Visualization
             return raw;
         }
 
-        /// <summary>Seed, conversion factor, saturation and dark rate of the last calibration frame -- the header fields its FITS export needs, kept apart from the science frame's own.</summary>
+        /// <summary>Seed, conversion factor, saturation and dark rate of the last calibration frame, the header fields its FITS export needs, kept apart from the science frame's own.</summary>
         public ulong LastCalibrationSeed => lastCalibrationSeed;
         public double LastCalibrationElectronsPerAdu => lastCalibrationElectronsPerAdu;
         public double LastCalibrationSaturationElectrons => lastCalibrationSaturationElectrons;
@@ -3375,7 +3413,7 @@ namespace ExoInstruments.Visualization
             // fixed impurity concentration in its own silicon, so what it owns is a RATIO to the
             // array around it. Deriving the ratio from the current rate instead would make it fall
             // by exactly as much as the dark current rose, and a hot pixel would then look identical
-            // at -20 C and at ambient -- which is the opposite of what warming a sensor does.
+            // at -20 C and at ambient, which is the opposite of what warming a sensor does.
             double referenceBinnedDarkPerSecond =
                 Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor;
 
@@ -3404,7 +3442,7 @@ namespace ExoInstruments.Visualization
         /// imposes on the target's light, drawn once per frame.
         ///
         /// Drawn from a LOG-NORMAL distribution, not an additive Gaussian. Scintillation is a
-        /// multiplicative modulation of an intensity, and an intensity cannot be negative --
+        /// multiplicative modulation of an intensity, and an intensity cannot be negative;
         /// atmospheric turbulence redistributes starlight, it does not remove more than all of
         /// it. Real scintillation is in fact measured to be approximately log-normal (Dravins,
         /// Lindegren, Mezey &amp; Young 1997, the same series this pipeline's Young formula and
@@ -3413,7 +3451,7 @@ namespace ExoInstruments.Visualization
         ///
         /// The previous form, 1 + N(0, sigma), was unbounded below. Because this factor scales
         /// the TARGET's signal but not the sky background added after it, a single unlucky draw
-        /// at large sigma did not merely dim the frame -- it INVERTED it: the target went
+        /// at large sigma did not merely dim the frame; it INVERTED it: the target went
         /// negative and clamped to black while the sky kept its own positive background and
         /// saturated white. A bright planet came out as a black disc on a white field.
         ///
@@ -3469,14 +3507,14 @@ namespace ExoInstruments.Visualization
         /// at the airmass and wavelength this frame is actually being taken at.
         ///
         /// This is the term that decides what a ground-based image looks like. It is NOT a small
-        /// correction on top of diffraction -- for every instrument in the catalog it is three to
+        /// correction on top of diffraction; for every instrument in the catalog it is three to
         /// ten times larger than the telescope's own Airy FWHM, which is precisely why the whole
         /// profession describes these telescopes as seeing-limited.
         ///
         /// Two things it must not do, both of which the previous model did:
         ///
         ///   * It must not vanish at the zenith. The old form was (airmass - 1) * k, i.e. zero
-        ///     blur for anything overhead, leaving a perfectly sharp diffraction-limited disk --
+        ///     blur for anything overhead, leaving a perfectly sharp diffraction-limited disk,
         ///     the 8.2m FORS2 resolving Jupiter at 0.017" from the ground. Seeing is the
         ///     atmosphere's own turbulence; looking straight up traverses less of it, not none.
         ///     Zenith is where the site's median DIMM figure is quoted, so that figure IS the
@@ -3488,7 +3526,7 @@ namespace ExoInstruments.Visualization
         ///     telescope. Everything below is angles throughout.
         ///
         /// Airmass scaling is the standard Kolmogorov result: r0 goes as cos(z)^(3/5), and
-        /// FWHM = 0.98*lambda/r0, so FWHM goes as X^(3/5) -- the relation every site-monitoring
+        /// FWHM = 0.98*lambda/r0, so FWHM goes as X^(3/5), the relation every site-monitoring
         /// paper uses to reduce DIMM measurements to zenith.
         ///
         /// Wavelength scaling comes from the same two relations: r0 goes as lambda^(6/5), so the
@@ -3497,7 +3535,7 @@ namespace ExoInstruments.Visualization
         /// planetary imagers stack far more blue frames to get a usable one.
         ///
         /// An instrument with real adaptive optics (VisualTelescopeSpec.AdaptiveOpticsFwhmArcsec,
-        /// e.g. SPHERE/ZIMPOL) never takes this path -- SAXO cancels the wavefront distortion in
+        /// e.g. SPHERE/ZIMPOL) never takes this path; SAXO cancels the wavefront distortion in
         /// front of the sensor rather than suffering it, so its atmospheric term is the residual
         /// left after correction, solved for in EnsurePsfKernels.
         /// </summary>
@@ -3522,7 +3560,7 @@ namespace ExoInstruments.Visualization
             return zenithFwhm * Math.Pow(airmass, 0.6) * chromatic;
         }
 
-        /// <summary>Real central wavelength (metres) of the filter currently in the wheel -- the lambda in lambda/D. Falls back to Luminance for a position this instrument doesn't physically carry.</summary>
+        /// <summary>Real central wavelength (metres) of the filter currently in the wheel, the lambda in lambda/D. Falls back to Luminance for a position this instrument doesn't physically carry.</summary>
         private static double FilterCentralWavelengthMeters(CameraFilter filter)
         {
             double nm;
@@ -3587,7 +3625,7 @@ namespace ExoInstruments.Visualization
 
             // Outside the block above on purpose. The diffuse gas does not depend on whether any
             // catalogue star happened to fall in the field, and while it was nested there a frame
-            // with no star in it -- a narrow field, a short exposure, a gap in the catalogue --
+            // with no star in it (a narrow field, a short exposure, a gap in the catalogue)
             // rendered no nebula at all.
             DepositEmissionField(signal, inputs);
 
@@ -3628,7 +3666,7 @@ namespace ExoInstruments.Visualization
             Array.Clear(smearScratch, 0, smearScratch.Length);
 
             // The axis the drift travels furthest along is stepped one pixel at a time, so the
-            // rasterised lines have |slope| <= 1 and together cover every pixel exactly once --
+            // rasterised lines have |slope| <= 1 and together cover every pixel exactly once,
             // which is what makes the smear conserve flux rather than gain or lose it to gaps.
             bool xMajor = Math.Abs(driftX) >= Math.Abs(driftY);
             double majorDrift = xMajor ? driftX : driftY;
@@ -3700,7 +3738,7 @@ namespace ExoInstruments.Visualization
                         && (haloSpectrum != null || (haloKernel != null && haloRadius >= 1));
 
             // Convolution is linear, so a PSF that is the sum of two components can be applied as
-            // the weighted sum of two convolutions -- exactly equivalent to convolving once with
+            // the weighted sum of two convolutions, exactly equivalent to convolving once with
             // the combined kernel, but it lets each component be sized to its own scale instead
             // of forcing the compact core to carry the halo's enormous support.
             float[] haloPlane = null;
@@ -3712,7 +3750,7 @@ namespace ExoInstruments.Visualization
                 // The halo goes in as a kernel spanning the whole frame, which is the only support
                 // at which it can stop without leaving a step: its theta^(-11/3) wings are still
                 // percent-level at any radius a tile can afford. Cut instead at a lag no two
-                // sensor pixels can span, it truncates nothing that could have been detected --
+                // sensor pixels can span, it truncates nothing that could have been detected,
                 // and the square that used to appear around bright stars on SPHERE was exactly
                 // that step. See MaxHaloKernelRadiusPx for the measurements.
                 if (haloSpectrum == null)
@@ -3794,7 +3832,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Real electrons collected from the imaged body this exposure: its real apparent
         /// magnitude (PhotonFluxModel.ApparentMagnitude, from real albedo/radius/positions),
-        /// converted through the instrument's integrated spectral response -- aperture and
+        /// converted through the instrument's integrated spectral response: aperture and
         /// obstruction, mirror and relay throughput, filter profile, the detector's own QE curve,
         /// and atmospheric extinction across the whole passband (see SystemBandpass).
         ///
@@ -3837,12 +3875,12 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Angular diameter (radians) of targetBody as seen from KSC right now -- feeds
+        /// Angular diameter (radians) of targetBody as seen from KSC right now, feeds
         /// AtmosphericImagingNoise.ScintillationExcessSigma's extended-source suppression
         /// (a resolved planetary disk, unlike a star, isn't a point source). Small-angle
         /// approximation (2*radius/distance), which is fine at solar-system distances.
         /// </summary>
-        /// <summary>targetBody's apparent diameter in arcsec as seen from KSC right now -- paired with PlateScaleArcsecPerPixel this is what decides how many pixels across the disk actually lands on, i.e. whether any surface detail is resolvable in principle.</summary>
+        /// <summary>targetBody's apparent diameter in arcsec as seen from KSC right now, paired with PlateScaleArcsecPerPixel this is what decides how many pixels across the disk actually lands on, i.e. whether any surface detail is resolvable in principle.</summary>
         public static double AngularDiameterArcsec(CelestialBody targetBody)
             => ComputeAngularDiameterRad(targetBody) * (180.0 / Math.PI) * 3600.0;
 
@@ -3875,7 +3913,7 @@ namespace ExoInstruments.Visualization
             return (float)(fluxPerCm2PerMinute * areaCm2 / 60.0);
         }
 
-        /// <summary>Real filter bandwidth in Angstrom for the active telescope's own real filter set (VisualTelescopeSpec) -- each filter's real bandwidth, not a fraction of Luminance, since a research instrument's R/G/B are each their own named filter with their own published FWHM (unlike an amateur LRGB wheel, where an even split is the real design -- see VisualTelescopeCatalog.Rc20's own comment).</summary>
+        /// <summary>Real filter bandwidth in Angstrom for the active telescope's own real filter set (VisualTelescopeSpec), each filter's real bandwidth, not a fraction of Luminance, since a research instrument's R/G/B are each their own named filter with their own published FWHM (unlike an amateur LRGB wheel, where an even split is the real design; see VisualTelescopeCatalog.Rc20's own comment).</summary>
         private static double FilterBandwidthAngstrom(CameraFilter filter)
         {
             switch (filter)
@@ -3895,7 +3933,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Peak transmission of the fitted filter. A non-positive value means the instrument's
         /// maker publishes no figure for that filter, in which case the loss is left unmodelled
-        /// (1.0) rather than invented -- see VisualTelescopeSpec's own field comment.
+        /// (1.0) rather than invented; see VisualTelescopeSpec's own field comment.
         /// </summary>
         private static double FilterPeakTransmission(CameraFilter filter)
         {
@@ -3935,7 +3973,7 @@ namespace ExoInstruments.Visualization
             SpectralCurve filterCurve = FilterTransmissionCurve(filter);
 
             // A measured curve carries the filter's own transmission, so the published peak must
-            // NOT be applied on top of it -- that would count the filter twice.
+            // NOT be applied on top of it; that would count the filter twice.
             double transmission = filterCurve != null
                 ? Spec.OpticsTransmission
                 : FilterPeakTransmission(filter) * Spec.OpticsTransmission;
@@ -3966,7 +4004,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Full-well overflow: any pixel above FullWellValue spills the excess into its
         /// vertical neighbors (the CCD column/shift-register direction), which can themselves
-        /// overflow in turn -- producing the familiar bloom trail through a saturated star or
+        /// overflow in turn, producing the familiar bloom trail through a saturated star or
         /// planet limb instead of a hard-clipped blob. Operates in place, pre-clamp.
         /// </summary>
         private void ApplyBlooming(float[] raw, float fullWellElectrons)
@@ -3997,7 +4035,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Charge-transfer smear along the vertical (readout) direction: walks each column
         /// top to bottom, capturing a fraction of every pixel's signal into a per-column trap
-        /// state and releasing a fraction of what's trapped back into the next pixel down --
+        /// state and releasing a fraction of what's trapped back into the next pixel down,
         /// the nc/nr structure of Short et al. (2010)'s CDM, simplified to constant per-row
         /// capture/release fractions (see CtiCaptureFraction/CtiReleaseFraction). Reads as a
         /// faint trailing streak below anything bright, the classic CTI signature.
@@ -4024,7 +4062,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Cosmic ray hits: a flat Poisson process over the exposure deposits short, randomly
-        /// angled bright tracks (Pyxel's CosmiX/TARS approach, minus the angle model -- see
+        /// angled bright tracks (Pyxel's CosmiX/TARS approach, minus the angle model; see
         /// CosmicRayHitsPerSecond), distinct from the fixed hot-pixel map since a real muon/proton
         /// strike lands anywhere, at a random angle, on every exposure independently.
         /// </summary>
@@ -4065,7 +4103,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Third-order astigmatism: transverse blur scaling with the square of the normalized
-        /// field radius, smeared radially outward from frame center -- a simplified stand-in
+        /// field radius, smeared radially outward from frame center, a simplified stand-in
         /// for the radially-elongated star image real astigmatism produces at one of its two
         /// focus positions in an off-axis RC/Ritchey-Chretien field. Zero at the target itself
         /// (centered by definition), worst for background stars near the corners.
@@ -4121,7 +4159,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// The sensor's known, fixed bad-pixel map (hot + dead indices combined) -- the same
+        /// The sensor's known, fixed bad-pixel map (hot + dead indices combined), the same
         /// list a real calibration workflow would have from a dark-frame characterization,
         /// used by AstroImageStack to cosmetically correct each sub before stacking.
         /// </summary>
@@ -4141,7 +4179,7 @@ namespace ExoInstruments.Visualization
             // The defect map is a property of this particular piece of silicon, so it is drawn from
             // a fixed "serial number" seed and is the same every session. On its own stream, and on
             // Pcg32 rather than System.Random, so that it is also the same on every machine and
-            // every .NET runtime -- a bad pixel map that moved between platforms would make any
+            // every .NET runtime; a bad pixel map that moved between platforms would make any
             // reference frame unusable as a comparison.
             const long SensorSerialSeed = 20260721L;
             var rng = new Pcg32(Pcg32.MixSeed(SensorSerialSeed), Pcg32.StreamDefectMap);

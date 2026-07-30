@@ -58,7 +58,7 @@ namespace ExoInstruments
         private double imagingDetectionUt = double.NaN;
         private double imagingNextWindowUt = double.NaN;
         // Cap the 5-sigma forward search at ~400 Kerbin days of additional wall
-        // clock -- beyond that the campaign is not a sane use of flagship time.
+        // clock; beyond that the campaign is not a sane use of flagship time.
         private const double ImagingPredictionMaxWallSeconds = 400.0 * 21600.0;
         private LightCurvePlotRange rawPlotRange;
         private RvPlotRange rvRawPlotRange;
@@ -68,7 +68,7 @@ namespace ExoInstruments
         private const float RawPlotRefreshIntervalSeconds = 1f;
         private float nextRawPlotRefreshTime = 0f;
         // The imaging frame is a full per-pixel raster (400x400, several
-        // transcendental calls per pixel) -- expensive enough that computing it
+        // transcendental calls per pixel), expensive enough that computing it
         // synchronously on the main thread stalls the frame that's rendering the
         // game (tens of milliseconds), which shows up as a visible hitch/flash.
         // ComputePixels runs on a background Task instead (see RefreshImagingTexture);
@@ -105,7 +105,7 @@ namespace ExoInstruments
         private const int SkyChartWidth = 640;
         private const int SkyChartHeight = 640;
         // Full refresh re-transforms the whole catalog (thousands of background
-        // stars once merged in) AND re-rasters a 640x640 canvas -- same
+        // stars once merged in) AND re-rasters a 640x640 canvas, same
         // background-Task treatment as the imaging frame, for the same reason.
         private const float SkyChartRefreshIntervalSeconds = 1f;
         private float nextSkyChartRefreshTime = 0f;
@@ -113,7 +113,7 @@ namespace ExoInstruments
         private Task<(List<SkyChartPoint> Points, Color[] Pixels)> skyChartRenderTask;
 
         // Sky chart camera: zoom 1 = whole sky fits the view (old fixed behavior).
-        // Pan is in raw (unzoomed) dome-projection pixel space -- see SkyChartView.
+        // Pan is in raw (unzoomed) dome-projection pixel space; see SkyChartView.
         private float skyChartZoom = 1f;
         private Vector2 skyChartPan = new Vector2(SkyChartWidth / 2f, SkyChartHeight / 2f);
         private bool skyChartDragging = false;
@@ -130,7 +130,7 @@ namespace ExoInstruments
         // Observing-quality forecast heatmap for the selected (target, instrument)
         // pairing: rows = nights ahead, columns = time of night. Recomputed on a
         // background Task (it re-runs the conditions evaluator over thousands of
-        // cells -- same treatment as the sky chart) whenever the selection changes
+        // cells, same treatment as the sky chart) whenever the selection changes
         // or the clock has advanced meaningfully since the last compute.
         private Texture2D forecastTexture;
         private ObservingForecast.ForecastResult forecastResult;
@@ -138,11 +138,11 @@ namespace ExoInstruments
         private StarTarget forecastRenderedStar;
         private int forecastRenderedInstrumentIndex = -1;
         // What the on-screen grid was actually computed for (set when a compute
-        // lands, not when it starts) -- the guard DrawForecastPanel trusts.
+        // lands, not when it starts), the guard DrawForecastPanel trusts.
         private StarTarget forecastAppliedStar;
         private int forecastAppliedInstrumentIndex = -1;
         private double forecastComputedUt = double.NaN;
-        // Set when a heatmap click issues a warp, cleared once it lands --
+        // Set when a heatmap click issues a warp, cleared once it lands,
         // the only on-screen sign a click actually did something, since the
         // heatmap itself only refreshes every ForecastRefreshUtSeconds and
         // gave no feedback that a warp was even running.
@@ -150,7 +150,7 @@ namespace ExoInstruments
 
         // Solar-system-body forecast: same heatmap widget/rendering
         // (ForecastTexture/ObservingForecast.ForecastResult reused as-is), but
-        // computed synchronously -- it's one body's altitude timeline, not a
+        // computed synchronously; it's one body's altitude timeline, not a
         // whole catalog, so a background Task would be pure overhead.
         private Texture2D photoForecastTexture;
         private ObservingForecast.ForecastResult photoForecastResult;
@@ -169,8 +169,8 @@ namespace ExoInstruments
         // fallback body-rotation length) rather than a fraction of a whole
         // night: the previous quarter-night threshold (5400s) was ~32 columns
         // coarser than the grid it gated, so the "now" edge and the highlighted
-        // cell sat frozen for up to 1.5 in-game hours -- highly visible during
-        // any warp faster than a few hundred x -- then jumped a third of a
+        // cell sat frozen for up to 1.5 in-game hours, highly visible during
+        // any warp faster than a few hundred x; then jumped a third of a
         // night in one frame.
         private const double ForecastRefreshUtSeconds = 21600.0 / ForecastColumns;
 
@@ -209,10 +209,12 @@ namespace ExoInstruments
         private bool stackLuckyImaging = false;
         private bool saveDiagnosticFrames = false;
         private ColourCompositeMode compositeMode = ColourCompositeMode.TrueColour;
+        private StackExportMode exportMode = StackExportMode.Composite;
         private string compositeReport;
         private Texture2D stackedCompositeTexture;
         private Color[] lastComposedPixels;
         private string stackComposeError;
+        private string stackExportReport;
         private string stackBatchInterruptedMessage;
         private SkyTarget selectedPhotographyTarget;
 
@@ -254,11 +256,11 @@ namespace ExoInstruments
 
             // The building itself is a persistent (DontDestroyOnLoad) real KSC
             // facility built by ExoObservatoryFacility, not owned by this
-            // per-scene addon -- we just subscribe to its click event.
+            // per-scene addon; we just subscribe to its click event.
             ExoObservatoryBuilding.Clicked += OnObservatoryBuildingClicked;
 
             // ExoObservatoryTelescopeTracker.TrackedBody is a static field, so it
-            // survives scene reloads -- without this, a target selected in an
+            // survives scene reloads; without this, a target selected in an
             // earlier SpaceCentre visit keeps the telescope (and doors) pointed
             // off-rest even though this fresh GUI instance's own
             // selectedPhotographyBody correctly starts null.
@@ -267,7 +269,7 @@ namespace ExoInstruments
 
         private void OnObservatoryBuildingClicked()
         {
-            Debug.Log("[Exoplanets] ExoObservatoryBuilding.Clicked received by ExoInstrumentsGUI -- opening window.");
+            Debug.Log("[Exoplanets] ExoObservatoryBuilding.Clicked received by ExoInstrumentsGUI, opening window.");
             OpenObservatoryWindow();
         }
 
@@ -307,7 +309,7 @@ namespace ExoInstruments
                     Debug.Log("[ExoInstruments] No star catalogue installed, so photographs will "
                             + "have an empty sky behind their subject. To render a real star "
                             + "field, build one with tools/pack_gaia_catalog.py and place it at "
-                            + path + " -- see the README for depths and their memory cost.");
+                            + path + "; see the README for depths and their memory cost.");
                     return;
                 }
                 var catalog = new RenderedStarCatalog();
@@ -436,7 +438,7 @@ namespace ExoInstruments
                 var result = ExoplanetCsvLoader.LoadFromCsv(csvText);
                 Debug.Log($"[ExoInstruments] Loaded {result.Loaded} targets from real catalog " +
                           $"(skipped {result.SkippedNoStarData} missing star data, {result.SkippedNoMagnitude} missing magnitude, " +
-                          $"{result.NoCoordinates} loaded without sky coordinates -- won't appear on the sky chart).");
+                          $"{result.NoCoordinates} loaded without sky coordinates, won't appear on the sky chart).");
                 return result.Targets;
             }
             catch (Exception e)
@@ -450,7 +452,7 @@ namespace ExoInstruments
         /// Folds the Yale Bright Star Catalogue into the target list as decoy
         /// stars (HasPlanet = false), deduplicated against real planet hosts by
         /// StarCatalogMerger. On any failure the exoplanet catalog alone is
-        /// returned -- the mod stays fully usable without decoys.
+        /// returned; the mod stays fully usable without decoys.
         /// </summary>
         private List<StarTarget> MergeWithBackgroundStars(List<StarTarget> exoplanetTargets)
         {
@@ -484,7 +486,7 @@ namespace ExoInstruments
         void Update()
         {
             // Apply whatever the background render Tasks finished since last
-            // frame -- cheap (an IsCompleted check, at most a texture upload),
+            // frame, cheap (an IsCompleted check, at most a texture upload),
             // safe to do every frame regardless of which session is active.
             PollImagingRenderTask();
             PollSkyChartRenderTask();
@@ -502,7 +504,7 @@ namespace ExoInstruments
                 // ended, ...). Filter and FOV are locked (their GUI controls
                 // are disabled) for the duration of a batch, so every sub
                 // added here is guaranteed to share the filter/FOV of the
-                // first one -- AddSub's FOV check is a defensive backstop,
+                // first one; AddSub's FOV check is a defensive backstop,
                 // not the primary guarantee.
                 // PIPELINED. The next exposure is started as soon as the previous one's integration
                 // ends (below), not after its reduction finishes, so the several seconds of physics
@@ -525,7 +527,7 @@ namespace ExoInstruments
                     }
                     else if (subResult == AstroSubResult.FovMismatch)
                     {
-                        stackBatchInterruptedMessage = $"FOV changed since earlier {FilterLabel(solarSystemCamera.Filter)} subs -- clear the stack or match the original FOV.";
+                        stackBatchInterruptedMessage = $"FOV changed since earlier {FilterLabel(solarSystemCamera.Filter)} subs; clear the stack or match the original FOV.";
                         stackBatchRemaining = 0;
                     }
                     else
@@ -541,7 +543,7 @@ namespace ExoInstruments
                 }
 
                 // Open the shutter again the moment nothing is integrating and nothing is waiting to
-                // be rendered -- which is true while the previous frame is still being reduced.
+                // be rendered, which is true while the previous frame is still being reduced.
                 if (stackBatchRemaining > 0 && stackBatchQueued < stackBatchRemaining
                     && solarSystemCamera.CanBeginExposure)
                 {
@@ -605,7 +607,7 @@ namespace ExoInstruments
                 imagingSession.Tick(ut);
                 if (imagingSession.IsRunning && windowVisible && Time.realtimeSinceStartup >= nextImagingRefreshTime)
                 {
-                    // Paused: UT hasn't moved, nothing in the frame would change -- skip starting a new refresh.
+                    // Paused: UT hasn't moved, nothing in the frame would change; skip starting a new refresh.
                     if (ut != lastImagingRefreshUt)
                     {
                         StartImagingRefresh();
@@ -660,14 +662,14 @@ namespace ExoInstruments
         void OpenObservatoryWindow()
         {
             // button.SetTrue() invokes its own registered OnToggleOn callback (this
-            // method), even when called programmatically -- without this guard that
+            // method), even when called programmatically; without this guard that
             // recurses forever and crashes with a StackOverflowException, e.g. when
             // returning to the Space Center with the window already open re-fires
             // this via the AppLauncher button restoring its toggled state.
             if (windowVisible) return;
             windowVisible = true;
             if (button != null) button.SetTrue();
-            // KSC_ALL alone doesn't cover camera scroll/pan/rotate -- CAMERACONTROLS is a
+            // KSC_ALL alone doesn't cover camera scroll/pan/rotate; CAMERACONTROLS is a
             // separate flag, and without it the mouse wheel zooms the KSC camera right
             // through this fullscreen panel.
             InputLockManager.SetControlLock(ControlTypes.KSC_ALL | ControlTypes.CAMERACONTROLS, InputLockId);
@@ -704,7 +706,7 @@ namespace ExoInstruments
 
             // GUILayout.Window is built for draggable windows and does its own
             // internal Rect<->content-area remapping tuned for the "window" skin
-            // style. BeginArea/EndArea has none of that -- mouse coordinates stay
+            // style. BeginArea/EndArea has none of that; mouse coordinates stay
             // in plain screen space the whole way through, which is what we want
             // for a fixed fullscreen panel with no dragging.
             GUI.Box(fullscreenRect, GUIContent.none, fullscreenWindowStyle);
@@ -737,7 +739,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
 
             GUILayout.EndVertical();
-            // Fullscreen fixed panel via BeginArea -- nothing to drag, no window chrome.
+            // Fullscreen fixed panel via BeginArea, nothing to drag, no window chrome.
         }
 
 
@@ -867,17 +869,17 @@ namespace ExoInstruments
                                  $"Detection reward: x{SelectedInstrument.ScienceRewardMultiplier:0.#}.", smallCaptionStyle);
             }
 
-            // The feasibility hints below are about a selected catalog star --
+            // The feasibility hints below are about a selected catalog star,
             // meaningless, and selectedStar may well be null, whenever a
             // solar-system body is the active target instead (the unified
             // chart lets either be selected regardless of which instrument
-            // happens to be chosen right now -- DrawStartObservationButton is
+            // happens to be chosen right now; DrawStartObservationButton is
             // what actually blocks a mismatched instrument/target pairing).
             if (SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography) return;
             if (selectedStar == null) return;
 
             // The feasibility hints below derive from catalog truth (system
-            // periods, planet contrast) -- on an unscanned career target they
+            // periods, planet contrast); on an unscanned career target they
             // would leak whether it's a known host before any data is taken.
             if (IsIdentityHidden(selectedStar))
             {
@@ -945,7 +947,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Selects an Observatories.All row. If it's a SolarSystemPhotography instrument (RC20,
-        /// CDK1000, ...), also syncs SolarSystemCameraTexture's active telescope to match --
+        /// CDK1000, ...), also syncs SolarSystemCameraTexture's active telescope to match,
         /// re-deriving every optics/sensor-driven quantity the physics pipeline uses (aperture,
         /// focal length, FOV range, exposure/gain range, QE, full well, read/dark noise,
         /// cosmic-ray rate, astigmatism) from the newly selected instrument's real spec (see
@@ -1012,7 +1014,7 @@ namespace ExoInstruments
             }
             else if (instrument.Method == DetectionMethod.SolarSystemPhotography)
             {
-                GUILayout.Label($"Platform: ground-based, {instrument.ApertureMeters:0.##} m aperture. Only at night -- no target altitude limit modeled yet.", smallCaptionStyle);
+                GUILayout.Label($"Platform: ground-based, {instrument.ApertureMeters:0.##} m aperture. Only at night, no target altitude limit modeled yet.", smallCaptionStyle);
             }
             else
             {
@@ -1038,7 +1040,7 @@ namespace ExoInstruments
                 case DetectionMethod.DirectImaging:
                     return "direct imaging. Blocks the starlight and integrates on the planet's own faint glow.";
                 case DetectionMethod.SolarSystemPhotography:
-                    return "amateur astrophotography. Points at a solar-system body and takes a real photograph -- no exoplanet detection involved.";
+                    return "amateur astrophotography. Points at a solar-system body and takes a real photograph, no exoplanet detection involved.";
                 default:
                     return method.ToString();
             }
@@ -1087,7 +1089,7 @@ namespace ExoInstruments
         /// <summary>
         /// System members an RV session can schedule a Rossiter-McLaughlin
         /// sequence around: a known transit ephemeris (geometry + duration) is
-        /// the prerequisite -- and in career, "known" means the target has been
+        /// the prerequisite, and in career, "known" means the target has been
         /// identified. Scheduling around a hidden star's catalog ephemeris would
         /// leak the fog answer, so hidden targets get an empty list (the RM
         /// physics stays in the signal either way, only the scheduling is off).
@@ -1105,7 +1107,7 @@ namespace ExoInstruments
             return schedulable;
         }
 
-        /// <summary>Longest RV-detectable catalog period in the system -- the baseline driver, since the slowest planet is the last to close two full orbits.</summary>
+        /// <summary>Longest RV-detectable catalog period in the system, the baseline driver, since the slowest planet is the last to close two full orbits.</summary>
         static double LongestRvPeriodDays(List<StarTarget> planets)
         {
             double longest = 0.0;
@@ -1118,7 +1120,7 @@ namespace ExoInstruments
 
         void StartObservation()
         {
-            // Telescope time is paid up front, per observation started -- the
+            // Telescope time is paid up front, per observation started; the
             // button that calls this is disabled when it isn't affordable.
             if (CareerFogActive && SelectedInstrument.ScanCostFunds > 0.0 && Funding.Instance != null)
             {
@@ -1187,7 +1189,7 @@ namespace ExoInstruments
                 GUILayout.Label($"Planet mass (min): {target.PlanetMassJupiter.Value:F3} M_jup");
             }
             // Activity is knowable for an identified target (real surveys read it
-            // off archival photometry / Ca II indices) -- and it tells the player
+            // off archival photometry / Ca II indices), and it tells the player
             // why an ultra-precise spectrograph still can't see below ~1 m/s here.
             GUILayout.Label($"Stellar activity: RV jitter ~{StellarActivity.RvJitterMps(target):F1} m/s, spot variability ~{StellarActivity.SpotAmplitudePpm(target):F0} ppm (P_rot ~{StellarActivity.RotationPeriodDays(target):F0} d)");
             DrawHabitableZoneLines(target);
@@ -1211,7 +1213,7 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Career, unscanned: only what pointing a telescope actually gives you --
+        /// Career, unscanned: only what pointing a telescope actually gives you,
         /// where it is and how bright it is. No name, no catalog status, no
         /// stellar parameters, and no feasibility estimates anywhere else either.
         /// </summary>
@@ -1229,7 +1231,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Revealed background star: a real BSC5 entry with no catalogued planet.
-        /// Distance/radius/mass lines are omitted, not zero-filled -- the Bright
+        /// Distance/radius/mass lines are omitted, not zero-filled; the Bright
         /// Star Catalogue genuinely doesn't carry them.
         /// </summary>
         void DrawDecoyInfoCard(StarTarget target)
@@ -1321,7 +1323,7 @@ namespace ExoInstruments
         /// thread (reads KSP CelestialBody positions/radii). Each above-horizon
         /// body becomes a SkyChartPoint with IsBody set and a marker radius sized
         /// to the body's real physical radius (log-compressed), so a big planet
-        /// plots as a bigger dot than a small moon -- just larger than any star.
+        /// plots as a bigger dot than a small moon, just larger than any star.
         /// Uses the same 0-deg geometric horizon as stars, matching the RC20
         /// capture gate and the body forecast.
         ///
@@ -1375,7 +1377,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Nudges apart body markers whose real alt/az project to (nearly) the same screen
-        /// point -- a moon and its parent planet routinely do this in KSP's compressed solar
+        /// point; a moon and its parent planet routinely do this in KSP's compressed solar
         /// system, stacking their dots on the chart and making them impossible to click apart.
         /// Detects overlapping clusters using the UNZOOMED (raw) projection, so the fix holds at
         /// any zoom level: SkyChartTexture's projection scales linearly with zoom, so a
@@ -1383,7 +1385,7 @@ namespace ExoInstruments
         /// harder. Each cluster's members are then arranged evenly on a small circle around
         /// their shared position, sized so adjacent markers clear each other's click radius.
         ///
-        /// Chart display and hit-testing ONLY -- BuildChartBodyPoints feeds these adjusted alt/az
+        /// Chart display and hit-testing ONLY; BuildChartBodyPoints feeds these adjusted alt/az
         /// into both the rendered SkyChartPoint and the hitList used for click hit-testing, so
         /// the dot the player sees is always the dot they can click. Every other use of a body's
         /// real position (capture aim, tracking, physics) calls TryComputeBodyAltAz or reads the
@@ -1402,7 +1404,7 @@ namespace ExoInstruments
             }
 
             // Union-find: two markers join a cluster if their discs overlap (plus a little
-            // padding for comfortable clicking), transitively -- so a short chain of moons all
+            // padding for comfortable clicking), transitively; so a short chain of moons all
             // near the same spot ends up as one cluster, not several partially-overlapping pairs.
             int[] parent = new int[candidates.Count];
             for (int i = 0; i < parent.Length; i++) parent[i] = i;
@@ -1472,11 +1474,11 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Real-ish body color by name (stock Kerbol system) -- a rough match to
+        /// Real-ish body color by name (stock Kerbol system), a rough match to
         /// each body's actual albedo/surface color, so Duna reads rust-red, Jool
         /// green, Eve purple, etc., rather than every body being the same dot.
         /// Covers both the stock system and the real one (Real Solar System and any pack sharing
-        /// those body names), matched by name rather than gated on which pack is installed -- a
+        /// those body names), matched by name rather than gated on which pack is installed; a
         /// name that isn't present simply never matches. Falls back to a neutral pale grey for
         /// anything in neither list (another Kopernicus pack's own bodies).
         /// </summary>
@@ -1576,7 +1578,7 @@ namespace ExoInstruments
 
             // The frame area: the finished photo, or a placeholder while exposing
             // / before the first capture. No live feed. Displayed at a fixed on-screen size
-            // regardless of the camera's actual (possibly multi-megapixel) native resolution --
+            // regardless of the camera's actual (possibly multi-megapixel) native resolution;
             // GUI.DrawTexture scales to the target Rect, so this never tries to lay out an
             // IMGUI window at native sensor size.
             Rect rect = GUILayoutUtility.GetRect(
@@ -1588,7 +1590,7 @@ namespace ExoInstruments
             GUI.color = prevBg;
             if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.CapturedPhoto != null)
             {
-                // The real sensor is non-square (4144x2822) -- draw at its true aspect ratio,
+                // The real sensor is non-square (4144x2822); draw at its true aspect ratio,
                 // letterboxed within the fixed preview box, instead of stretching to fill it.
                 GUI.DrawTexture(AspectFitRect(rect), solarSystemCamera.CapturedPhoto);
             }
@@ -1618,7 +1620,7 @@ namespace ExoInstruments
             else if (!solarSystemCamera.HasCapturedPhoto)
             {
                 GUI.Label(new Rect(rect.x, rect.center.y - 10, rect.width, 20),
-                    "No frame yet -- set up and press Capture.", plotTitleStyle);
+                    "No frame yet; set up and press Capture.", plotTitleStyle);
             }
 
             DrawResolutionControls();
@@ -1626,7 +1628,7 @@ namespace ExoInstruments
             DrawStackingControls(CanExposePhotography());
         }
 
-        // Fixed on-screen preview size -- independent of the camera's real, possibly much
+        // Fixed on-screen preview size, independent of the camera's real, possibly much
         // larger, native sensor resolution (see SolarSystemCameraTexture.BinningFactor).
         private const int PreviewDisplaySize = 480;
 
@@ -1644,7 +1646,7 @@ namespace ExoInstruments
             return new Rect(bounds.x + (bounds.width - w) / 2f, bounds.y + (bounds.height - h) / 2f, w, h);
         }
 
-        /// <summary>Real sensor binning selector (1x1 native resolution down to 4x4) -- the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
+        /// <summary>Real sensor binning selector (1x1 native resolution down to 4x4), the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
         void DrawResolutionControls()
         {
             GUILayout.BeginHorizontal();
@@ -1681,7 +1683,7 @@ namespace ExoInstruments
             if (solarSystemCamera.RenderTargetRefused)
             {
                 GUILayout.Label(
-                    $"The graphics device refused a {w}x{h} render target -- captures at this binning will be garbage. "
+                    $"The graphics device refused a {w}x{h} render target; captures at this binning will be garbage. "
                     + "Select a higher binning factor.", smallCaptionStyle);
             }
 
@@ -1693,7 +1695,7 @@ namespace ExoInstruments
             {
                 GUILayout.Label(
                     $"Last capture: the physics computed {solarSystemCamera.LastTargetElectrons:E2} electrons from the "
-                    + $"target, but the scene render came back empty ({w}x{h}). The target is ABSENT from that frame -- "
+                    + $"target, but the scene render came back empty ({w}x{h}). The target is ABSENT from that frame; "
                     + "this is a rendering failure, not an exposure problem. Try a higher binning factor.",
                     smallCaptionStyle);
             }
@@ -1713,7 +1715,7 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Display transfer function selector. This is a VIEWER control, not an instrument one --
+        /// Display transfer function selector. This is a VIEWER control, not an instrument one;
         /// the saved FITS and everything the stacker consumes stay linear no matter what is
         /// picked here, exactly as in a real observing tool.
         /// </summary>
@@ -1768,11 +1770,11 @@ namespace ExoInstruments
             switch (mode)
             {
                 case DisplayStretch.Log:
-                    return "Logarithmic (DS9 formulation, a=1000) -- strongest lift of faint detail, compresses the bright end hard. Viewer only; the FITS stays linear.";
+                    return "Logarithmic (DS9 formulation, a=1000): strongest lift of faint detail, compresses the bright end hard. Viewer only; the FITS stays linear.";
                 case DisplayStretch.Asinh:
-                    return "Asinh (Lupton et al. 2004, the SDSS standard) -- linear near zero, logarithmic beyond, so faint surface detail lifts without crushing bright regions. Viewer only; the FITS stays linear.";
+                    return "Asinh (Lupton et al. 2004, the SDSS standard): linear near zero, logarithmic beyond, so faint surface detail lifts without crushing bright regions. Viewer only; the FITS stays linear.";
                 default:
-                    return "Linear -- the detector's raw signal. Faithful, but a bright resolved disk hides its own few-percent surface contrast in a handful of display levels.";
+                    return "Linear: the detector's raw signal. Faithful, but a bright resolved disk hides its own few-percent surface contrast in a handful of display levels.";
             }
         }
 
@@ -1781,12 +1783,12 @@ namespace ExoInstruments
         /// stage is the binding constraint: the real plate scale, how many pixels the target's
         /// disk actually spans at it, and how much blur the optical model is adding on top.
         /// Real acquisition/planning tools (SharpCap, NINA, ESO's ETCs) surface exactly this,
-        /// and without it a soft frame is indistinguishable from a correctly-modelled one --
+        /// and without it a soft frame is indistinguishable from a correctly-modelled one;
         /// the player can't tell "too few pixels on the disk" from "the model is over-blurring"
         /// from "the game's own texture ran out of detail", which are three different problems
         /// with three different answers.
         /// </summary>
-        /// <summary>Angular size in whichever unit reads naturally at that scale -- milliarcsec below 0.1", arcsec above.</summary>
+        /// <summary>Angular size in whichever unit reads naturally at that scale, milliarcsec below 0.1", arcsec above.</summary>
         static string Arcsec(double arcsec)
             => arcsec < 0.1 ? $"{arcsec * 1000.0:F1} mas" : $"{arcsec:F2}\"";
 
@@ -1797,7 +1799,7 @@ namespace ExoInstruments
             float plateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
             if (plateScale <= 0f) return;
 
-            // A star or a nebula has no resolvable disk, so the disk terms below drop out -- but
+            // A star or a nebula has no resolvable disk, so the disk terms below drop out, but
             // everything else here (pointing, PSF, sky, extinction, line emission) is exactly what
             // those targets are photographed for. This used to return early unless the target was a
             // solar-system body, which hid every one of those readouts on the only targets they
@@ -1851,7 +1853,7 @@ namespace ExoInstruments
                 }
 
                 // A single per-exposure draw applied to the whole target, so it is the reason two
-                // otherwise identical captures differ in brightness. It can never be negative --
+                // otherwise identical captures differ in brightness. It can never be negative;
                 // if it ever reads below zero, the running build predates that fix.
                 float sc = solarSystemCamera.LastScintillationFactor;
                 GUILayout.Label(
@@ -1863,7 +1865,7 @@ namespace ExoInstruments
                 // how dark it was, how faint this exposure could reach, and what it actually
                 // caught. All are quantities a real observer records with the frame.
                 double skyMag = solarSystemCamera.LastSkyBrightnessVMagPerArcsec2;
-                string sky = double.IsPositiveInfinity(skyMag) ? "--" : $"{skyMag:F2} mag/arcsec²";
+                string sky = double.IsPositiveInfinity(skyMag) ? "-" : $"{skyMag:F2} mag/arcsec²";
                 GUILayout.Label(
                     $"Sky {sky}  |  limiting magnitude V {solarSystemCamera.LastLimitingVMag:F1}"
                     + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
@@ -1892,7 +1894,7 @@ namespace ExoInstruments
                                   + $"(field {fieldArcsec / 60.0:F1}' wide)", smallCaptionStyle);
                 }
 
-                // What the sky itself emits into this filter -- the number a nebula's surface
+                // What the sky itself emits into this filter, the number a nebula's surface
                 // brightness competes against, and the reason [O I] is not imaged from the ground.
                 double airglow = solarSystemCamera.LastAirglowRayleighsInBand;
                 if (airglow > 0.0)
@@ -1927,7 +1929,7 @@ namespace ExoInstruments
                                 ? $"   {solarSystemCamera.LastEmissionPatchCoverage * 100.0:F0}% of the frame from the "
                                   + $"{solarSystemCamera.LastEmissionPatchName} patch at {beam:F2}' sampling, "
                                   + "the rest from the all-sky map"
-                                : $"   from the all-sky map at {beam:F2}' sampling (6' beam) -- no patch covers this field",
+                                : $"   from the all-sky map at {beam:F2}' sampling (6' beam); no patch covers this field",
                             smallCaptionStyle);
                     }
                     if (!double.IsNaN(peak) && well > 0.0)
@@ -1938,7 +1940,7 @@ namespace ExoInstruments
                         // the technique the exposure requires.
                         GUILayout.Label(
                             $"   brightest pixel of it: {peak:F1} e- = {100.0 * peak / well:F3}% of full well"
-                            + (peak < 0.01 * well ? " -- below what a linear stretch can show; use log/asinh and stack" : ""),
+                            + (peak < 0.01 * well ? ", below what a linear stretch can show; use log/asinh and stack" : ""),
                             smallCaptionStyle);
                     }
                 }
@@ -1969,13 +1971,13 @@ namespace ExoInstruments
 
             // Saturation is the one failure here that silently destroys real detail rather than
             // just softening it, and on a large-aperture instrument it is the DEFAULT outcome on a
-            // bright disk -- worth calling out explicitly instead of leaving it as a percentage
+            // bright disk, worth calling out explicitly instead of leaving it as a percentage
             // the player has to know how to interpret.
             if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.LastSaturatedFraction > 0.01f)
             {
                 GUILayout.Label(
                     "Over-exposed: saturated pixels have lost their real surface contrast. "
-                    + "Shorten the exposure, drop the gain, or add ND -- exactly what a real observer does on a bright target.",
+                    + "Shorten the exposure, drop the gain, or add ND, exactly what a real observer does on a bright target.",
                     smallCaptionStyle);
             }
         }
@@ -2001,7 +2003,7 @@ namespace ExoInstruments
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            // Exposure time. Real range spans 32us to 2000s (six decades) -- a linear slider
+            // Exposure time. Real range spans 32us to 2000s (six decades); a linear slider
             // can't usefully address that, so drag position maps to log10(seconds), the same
             // convention real acquisition tools (SharpCap, FireCapture) use for this exact reason.
             GUILayout.BeginHorizontal();
@@ -2050,13 +2052,13 @@ namespace ExoInstruments
                 GUILayout.Label("Cooler", GUILayout.Width(150));
                 GUILayout.Label(
                     double.IsNaN(fixedTemp)
-                        ? "not modelled for this instrument -- no published operating temperature"
-                        : $"fixed at {fixedTemp:F0} C -- cryogenic detector, not an observer control",
+                        ? "not modelled for this instrument, no published operating temperature"
+                        : $"fixed at {fixedTemp:F0} C, cryogenic detector, not an observer control",
                     smallCaptionStyle);
             }
             GUILayout.EndHorizontal();
 
-            // Filter wheel -- only the active telescope's real filters (VisualTelescopeSpec.
+            // Filter wheel, only the active telescope's real filters (VisualTelescopeSpec.
             // AvailableFilters). Most instruments have all five; one that genuinely lacks a
             // filter (e.g. SPHERE/ZIMPOL has no real blue filter) simply doesn't offer it here,
             // rather than faking a channel that doesn't exist on the real hardware.
@@ -2073,7 +2075,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
 
             // ND filter: real optical-density stops for targets too bright for exposure/gain
-            // alone -- Kerbin's compressed-scale system puts nearby moons in that regime.
+            // alone; Kerbin's compressed-scale system puts nearby moons in that regime.
             GUILayout.BeginHorizontal();
             GUILayout.Label("ND filter", GUILayout.Width(150));
             GUI.enabled = !stackBatchRunning;
@@ -2096,7 +2098,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
 
             // Autoguiding. Forced on and locked for an instrument with no real bare/unguided
-            // mode (VisualTelescopeSpec.AlwaysAutoguided, e.g. the VLT) -- SetActiveTelescope
+            // mode (VisualTelescopeSpec.AlwaysAutoguided, e.g. the VLT); SetActiveTelescope
             // already flips the property itself; this just stops the player from toggling it
             // back off and reintroducing drift trailing a real 8.2m research telescope never has.
             bool autoguidingLocked = SolarSystemCameraTexture.AutoguidingForced;
@@ -2104,11 +2106,11 @@ namespace ExoInstruments
             GUI.enabled = !autoguidingLocked;
             solarSystemCamera.Autoguiding = GUILayout.Toggle(solarSystemCamera.Autoguiding,
                 autoguidingLocked
-                    ? " Autoguiding (always on -- this instrument has no unguided mode)"
+                    ? " Autoguiding (always on; this instrument has no unguided mode)"
                     : " Autoguiding (tracks the sky; off = the target drifts between shots unless re-centered)");
             GUI.enabled = true;
             GUILayout.FlexibleSpace();
-            // Manual re-center: only meaningful without autoguiding -- with it
+            // Manual re-center: only meaningful without autoguiding; with it
             // on, every capture already re-centers automatically.
             GUI.enabled = !solarSystemCamera.Autoguiding;
             if (GUILayout.Button("Update telescope target", GUILayout.Height(22), GUILayout.Width(180)))
@@ -2150,7 +2152,7 @@ namespace ExoInstruments
 
             // Calibration frames. Deliberately NOT gated on canExpose: the shutter stays closed, so
             // there is nothing to be night for and nothing to be above the horizon. That is the
-            // point of them -- a real observer takes darks with the dome shut, in daylight, whenever
+            // point of them; a real observer takes darks with the dome shut, in daylight, whenever
             // the detector is at the temperature the lights were taken at.
             GUILayout.BeginHorizontal();
             GUI.enabled = !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
@@ -2186,7 +2188,7 @@ namespace ExoInstruments
         /// pedestal, the dark current, and the hot pixels that are made of dark current.
         ///
         /// No WCS and no zero point: the shutter was shut, so the frame points nowhere and measures
-        /// no flux. Writing either would describe a frame this is not -- the same standard the
+        /// no flux. Writing either would describe a frame this is not, the same standard the
         /// stacked composite is already held to.
         /// </summary>
         void SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType type)
@@ -2253,7 +2255,7 @@ namespace ExoInstruments
         /// current filter in one batch (see the Update() batch driver), stack
         /// each filter's subs (optionally aligned by brightness centroid),
         /// then compose a colour image through the instrument's own fitted
-        /// colour transform, or a named narrowband palette -- see
+        /// colour transform, or a named narrowband palette; see
         /// Visualization/ColourComposite. Separate from the single-shot
         /// Capture/Save above, which is unaffected.
         /// </summary>
@@ -2302,12 +2304,19 @@ namespace ExoInstruments
                 GUILayout.Label(stackBatchInterruptedMessage, smallCaptionStyle);
             }
 
-            GUILayout.Label(
-                $"Stacked subs -- L {astroStack.SubCount(CameraFilter.Luminance)} ({astroStack.TotalExposureSeconds(CameraFilter.Luminance):F1}s) | " +
-                $"R {astroStack.SubCount(CameraFilter.Red)} ({astroStack.TotalExposureSeconds(CameraFilter.Red):F1}s) | " +
-                $"G {astroStack.SubCount(CameraFilter.Green)} ({astroStack.TotalExposureSeconds(CameraFilter.Green):F1}s) | " +
-                $"B {astroStack.SubCount(CameraFilter.Blue)} ({astroStack.TotalExposureSeconds(CameraFilter.Blue):F1}s) | " +
-                $"Ha {astroStack.SubCount(CameraFilter.HAlpha)} ({astroStack.TotalExposureSeconds(CameraFilter.HAlpha):F1}s)", smallCaptionStyle);
+            // Every channel the instrument's own wheel can shoot (so the narrowband lines, OIII
+            // and SII, are listed on the same footing as L R G B Ha), plus any filter that
+            // already holds subs from a telescope swapped out mid-session, which would otherwise
+            // vanish from the readout while still sitting in the stack.
+            var subsReadout = new System.Text.StringBuilder("Stacked subs: ");
+            List<CameraFilter> readoutFilters = StackReadoutFilters();
+            for (int i = 0; i < readoutFilters.Count; i++)
+            {
+                CameraFilter f = readoutFilters[i];
+                if (i > 0) subsReadout.Append(" | ");
+                subsReadout.Append($"{FilterLabel(f)} {astroStack.SubCount(f)} ({astroStack.TotalExposureSeconds(f):F1}s)");
+            }
+            GUILayout.Label(subsReadout.ToString(), smallCaptionStyle);
 
             GUILayout.BeginHorizontal();
             stackAlignSubs = GUILayout.Toggle(stackAlignSubs, " Align subs (brightness centroid)", GUILayout.Width(220));
@@ -2317,7 +2326,7 @@ namespace ExoInstruments
             // Replaces the old "Ha blend strength" slider, which was an artist's knob with no
             // physical meaning: it added an arbitrary fraction of the H-alpha frame to the red
             // channel. Colour now comes from the instrument's own fitted transform (true colour) or
-            // from a named palette convention -- see Visualization/ColourComposite.
+            // from a named palette convention; see Visualization/ColourComposite.
             GUILayout.BeginHorizontal();
             GUILayout.Label("Composite:", GUILayout.Width(80));
             foreach (ColourCompositeMode m in new[] { ColourCompositeMode.TrueColour,
@@ -2343,7 +2352,7 @@ namespace ExoInstruments
                 GUILayout.Label(
                     (astroStack.LastAlignmentUsedPointing
                         ? $"Registered on the recorded pointing, worst shift {astroStack.LastAlignmentShiftPx:F1} px"
-                        : "Registered on the brightness centroid (no pointing recorded) -- unreliable on an extended object")
+                        : "Registered on the brightness centroid (no pointing recorded), unreliable on an extended object")
                     + $"; every sub covers {astroStack.LastFullCoverageFraction * 100.0:F1}% of the frame",
                     smallCaptionStyle);
             }
@@ -2353,14 +2362,33 @@ namespace ExoInstruments
             GUI.enabled = astroStack.HasAnySubs;
             if (GUILayout.Button("Compose colour", GUILayout.Height(26), GUILayout.Width(150)))
                 ComposeAstroStack();
-            GUI.enabled = stackedCompositeTexture != null;
-            if (GUILayout.Button("Save composite", GUILayout.Height(26), GUILayout.Width(150)))
-                SaveStackedComposite();
+            GUI.enabled = astroStack.HasAnySubs;
+            if (GUILayout.Button("Export", GUILayout.Height(26), GUILayout.Width(150)))
+                ExportStack();
             GUI.enabled = astroStack.HasAnySubs;
             if (GUILayout.Button("Clear stack", GUILayout.Height(26), GUILayout.Width(110)))
                 ClearAstroStack();
             GUI.enabled = true;
             GUILayout.EndHorizontal();
+
+            // What "Export" writes. Three products, because they serve three different jobs: a
+            // finished picture, one calibrated frame per band for an external stacker, and the
+            // individual subs for a package that wants to do the registration itself.
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Export:", GUILayout.Width(80));
+            foreach (StackExportMode m in new[] { StackExportMode.Composite,
+                                                 StackExportMode.PerFilter,
+                                                 StackExportMode.EverySub })
+            {
+                bool selected = exportMode == m;
+                if (GUILayout.Toggle(selected, " " + ExportLabel(m), GUILayout.Width(160)) && !selected)
+                    exportMode = m;
+            }
+            GUILayout.EndHorizontal();
+            GUILayout.Label(ExportDescription(exportMode), smallCaptionStyle);
+
+            if (!string.IsNullOrEmpty(stackExportReport))
+                GUILayout.Label(stackExportReport, smallCaptionStyle);
 
             if (!string.IsNullOrEmpty(stackComposeError))
             {
@@ -2398,7 +2426,7 @@ namespace ExoInstruments
             compositeReport = stackComposeError;
             if (pixels == null) return;
 
-            // Keep the full-precision composite for FITS export -- stackedCompositeTexture
+            // Keep the full-precision composite for FITS export; stackedCompositeTexture
             // below is only for on-screen preview and round-trips through an 8-bit RGB24
             // Texture2D, which would otherwise crush the real sub-1/255 noise floor to nothing.
             lastComposedPixels = pixels;
@@ -2413,16 +2441,92 @@ namespace ExoInstruments
             stackedCompositeTexture.Apply();
         }
 
-        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file -- same scheme as SaveSolarSystemPhoto.</summary>
-        void SaveStackedComposite()
+        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file, same scheme as SaveSolarSystemPhoto.</summary>
+        /// <summary>
+        /// Writes the stack out in whichever of the three products the export selector asks for, into
+        /// one timestamped folder per session.
+        ///
+        /// A folder rather than a pile of files in Screenshots: the per-sub product alone is forty
+        /// files for a two-filter series, and the point of exporting is to hand a coherent dataset to
+        /// something else. The name carries the target and the instrument so two sessions on the same
+        /// object from different telescopes do not merge.
+        /// </summary>
+        void ExportStack()
         {
-            if (stackedCompositeTexture == null || lastComposedPixels == null) return;
-            string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots");
-            System.IO.Directory.CreateDirectory(dir);
-            string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
+            if (!astroStack.HasAnySubs) { stackExportReport = "Nothing to export: capture a series first."; return; }
 
+            string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
+            string dir = System.IO.Path.Combine(KSPUtil.ApplicationRootPath, "Screenshots", "ExoInstruments",
+                $"{TargetFileName()}_{SafeName(SolarSystemCameraTexture.ActiveTelescope.CameraName)}_{stamp}");
+            System.IO.Directory.CreateDirectory(dir);
+
+            int files;
+            switch (exportMode)
+            {
+                case StackExportMode.PerFilter: files = ExportPerFilter(dir); break;
+                case StackExportMode.EverySub: files = ExportEverySub(dir); break;
+                default: files = ExportComposite(dir, stamp); break;
+            }
+
+            stackExportReport = files > 0
+                ? $"Wrote {files} file{(files == 1 ? "" : "s")} to Screenshots/ExoInstruments/{System.IO.Path.GetFileName(dir)}"
+                : "Nothing was written: see the log.";
+            Debug.Log($"[ExoInstruments] Exported {files} files to {dir}");
+        }
+
+        static string SafeName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "unknown";
+            var chars = s.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+                if (!char.IsLetterOrDigit(chars[i])) chars[i] = '_';
+            return new string(chars);
+        }
+
+        static string ExportLabel(StackExportMode m)
+        {
+            switch (m)
+            {
+                case StackExportMode.PerFilter: return "One per filter";
+                case StackExportMode.EverySub: return "Every sub";
+                default: return "Composite";
+            }
+        }
+
+        string ExportDescription(StackExportMode m)
+        {
+            switch (m)
+            {
+                case StackExportMode.PerFilter:
+                {
+                    int n = 0;
+                    foreach (CameraFilter f in astroStack.FiltersWithSubs) n++;
+                    return $"One stacked FITS and PNG per band ({n} band{(n == 1 ? "" : "s")} held), "
+                         + "registered and averaged, background subtracted. What an external stacker "
+                         + "or PixInsight wants as its channels.";
+                }
+                case StackExportMode.EverySub:
+                {
+                    int n = 0;
+                    foreach (CameraFilter f in astroStack.FiltersWithSubs) n += astroStack.SubCount(f);
+                    return $"Every individual sub: {n} FITS and {n} PNG, cosmetically corrected but "
+                         + "NOT registered, averaged or background subtracted. For a package that "
+                         + "does its own registration.";
+                }
+                default:
+                    return "The colour composite as shown: one PNG and one FITS of its luminance.";
+            }
+        }
+
+        int ExportComposite(string dir, string stamp)
+        {
+            if (stackedCompositeTexture == null || lastComposedPixels == null)
+            {
+                stackExportReport = "Compose the colour image first.";
+                return 0;
+            }
             byte[] pngData = stackedCompositeTexture.EncodeToPNG();
-            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_LRGB_{stamp}.png"), pngData);
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"{TargetFileName()}_{CompositeLabel(compositeMode).Replace(" ", "")}.png"), pngData);
 
             var fitsInfo = new FitsWriter.FitsHeaderInfo
             {
@@ -2447,16 +2551,112 @@ namespace ExoInstruments
             // the stars between subs, so no single pointing describes the stack: the planet is
             // aligned and the field around it is not. Writing the last sub's WCS here would give a
             // plate solve or a catalogue cross-match a pointing that is wrong by however far the
-            // body travelled, silently. Same standard as the omitted EGAIN above -- a processed
+            // body travelled, silently. Same standard as the omitted EGAIN above; a processed
             // product does not get keywords that describe a raw one.
             FitsWriter.WriteGrayscale(
-                System.IO.Path.Combine(dir, $"ExoInstruments_{TargetFileName()}_LRGB_{stamp}.fits"),
+                System.IO.Path.Combine(dir, $"{TargetFileName()}_{CompositeLabel(compositeMode).Replace(" ", "")}.fits"),
                 ToAduScale(lastComposedPixels), stackedCompositeTexture.width, stackedCompositeTexture.height, fitsInfo);
+            return 2;
+        }
+
+        /// <summary>One stacked frame per band: the composite's own channels, before they were combined.</summary>
+        int ExportPerFilter(string dir)
+        {
+            int written = 0;
+            foreach (CameraFilter filter in astroStack.FiltersWithSubs)
+            {
+                float[] stacked = astroStack.StackedFrame(filter, stackAlignSubs, stackLuckyImaging);
+                if (stacked == null) continue;
+                written += WriteFrame(dir, stacked, FilterLabel(filter) + "_stack", filter,
+                                     astroStack.TotalExposureSeconds(filter),
+                                     astroStack.SubCount(filter), calibrated: false);
+            }
+            return written;
+        }
+
+        /// <summary>Every sub, as it came off the converter. Numbered so an external stacker sees them in order.</summary>
+        int ExportEverySub(string dir)
+        {
+            int written = 0;
+            foreach (CameraFilter filter in astroStack.FiltersWithSubs)
+            {
+                int count = astroStack.SubCount(filter);
+                for (int i = 0; i < count; i++)
+                {
+                    float[] sub = astroStack.SubFrame(filter, i);
+                    if (sub == null) continue;
+                    written += WriteFrame(dir, sub, $"{FilterLabel(filter)}_sub{i + 1:D3}", filter,
+                                          astroStack.SubExposureSeconds(filter, i), 1, calibrated: true);
+                }
+            }
+            return written;
+        }
+
+        /// <summary>
+        /// Writes one monochrome frame as a FITS and a PNG beside it.
+        ///
+        /// The FITS carries the frame's OWN band, not the camera's currently selected one, and its
+        /// own integration time rather than the stack's total; a header that describes a different
+        /// exposure than the pixels is worse than no header. NSTACK says how many subs went in, so a
+        /// reader can tell a single sub from an average of ten.
+        /// </summary>
+        int WriteFrame(string dir, float[] gray, string suffix, CameraFilter filter,
+                       float exposureSeconds, int subCount, bool calibrated)
+        {
+            int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            if (gray.Length != w * h) return 0;
+
+            var fitsInfo = new FitsWriter.FitsHeaderInfo
+            {
+                ExposureSeconds = exposureSeconds,
+                PixelSizeMicrons = SolarSystemCameraTexture.PixelSizeMicrons,
+                FullWellElectrons = SolarSystemCameraTexture.FullWellElectrons,
+                AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
+                ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
+                SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
+                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                Gain = solarSystemCamera.Gain,
+                IsCalibratedAdu = calibrated,
+                FilterName = FilterLabel(filter),
+                ObjectName = selectedPhotographyTarget.DisplayName,
+                UtcTimestamp = DateTime.UtcNow,
+                ImageType = "Light Frame",
+            };
+            FillCommonFitsMetadata(ref fitsInfo);
+            fitsInfo.FilterCentralWavelengthNm = SolarSystemCameraTexture.CentralWavelengthNmOf(filter);
+            fitsInfo.FilterBandwidthNm = SolarSystemCameraTexture.BandwidthNmOf(filter);
+            fitsInfo.StackedSubs = subCount;
+
+            string baseName = System.IO.Path.Combine(dir, $"{TargetFileName()}_{suffix}");
+            FitsWriter.WriteGrayscale(baseName + ".fits", ToAduScaleGray(gray), w, h, fitsInfo);
+
+            byte[] rgb = SolarSystemCameraTexture.RenderMonoPreviewRgb24(gray, w, h);
+            int count = 1;
+            if (rgb != null)
+            {
+                var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
+                tex.LoadRawTextureData(rgb);
+                tex.Apply();
+                System.IO.File.WriteAllBytes(baseName + ".png", tex.EncodeToPNG());
+                Destroy(tex);
+                count = 2;
+            }
+            return count;
+        }
+
+        /// <summary>Fractions of full scale to ADU, for a monochrome plane rather than a Color[].</summary>
+        static float[] ToAduScaleGray(float[] gray)
+        {
+            if (gray == null) return null;
+            int max = SolarSystemCameraTexture.AdcMaxCount;
+            var outp = new float[gray.Length];
+            for (int i = 0; i < gray.Length; i++) outp[i] = Mathf.Clamp01(gray[i]) * max;
+            return outp;
         }
 
         /// <summary>
         /// Fills the header fields that describe the instrument, the site, and the conditions the
-        /// exposure was taken through -- everything common to a raw sub and a stacked composite.
+        /// exposure was taken through, everything common to a raw sub and a stacked composite.
         ///
         /// Kept in one place because these are the fields a reduction pipeline actually keys off,
         /// and having two save paths fill them independently is how they drift apart. What differs
@@ -2474,7 +2674,7 @@ namespace ExoInstruments
             info.BinningFactor = SolarSystemCameraTexture.BinningFactor;
             info.ReadNoiseElectrons = spec.ReadNoiseElectrons;
             // The rate the capture ACTUALLY used, at the detector's actual temperature, rather than
-            // the catalogue's reference figure -- the two are the same today and would silently
+            // the catalogue's reference figure; the two are the same today and would silently
             // disagree the moment a cooler setpoint exists (see Core.DarkCurrentModel).
             info.DarkCurrentElectronsPerSecond = solarSystemCamera.LastDarkCurrentElectronsPerSecond > 0.0
                 ? solarSystemCamera.LastDarkCurrentElectronsPerSecond
@@ -2508,7 +2708,7 @@ namespace ExoInstruments
             info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;
         }
 
-        /// <summary>Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit container. Not a calibration -- see FitsHeaderInfo.IsCalibratedAdu.</summary>
+        /// <summary>Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit container. Not a calibration; see FitsHeaderInfo.IsCalibratedAdu.</summary>
         static float[] ToAduScale(Color[] pixels)
         {
             if (pixels == null) return null;
@@ -2534,6 +2734,16 @@ namespace ExoInstruments
                 case CameraFilter.OI:     return "OI";
                 default: return f.ToString();
             }
+        }
+
+        /// <summary>Channels the stacked-subs readout lists, in enum order: the active instrument's own wheel, plus any filter that still holds subs (a telescope swapped mid-session).</summary>
+        List<CameraFilter> StackReadoutFilters()
+        {
+            var listed = new List<CameraFilter>(SolarSystemCameraTexture.ActiveTelescope.AvailableFilters);
+            foreach (CameraFilter f in (CameraFilter[])Enum.GetValues(typeof(CameraFilter)))
+                if (!listed.Contains(f) && astroStack.SubCount(f) > 0) listed.Add(f);
+            listed.Sort();
+            return listed;
         }
 
         static string NdFilterLabel(NdFilterStop stop)
@@ -2583,10 +2793,10 @@ namespace ExoInstruments
 
             string sky = conditions.IsNight
                 ? $"Night (Sun {conditions.SunAltitudeDeg:F0} deg)."
-                : $"Daytime -- dome closed (Sun {conditions.SunAltitudeDeg:F0} deg, reopens below {ImagingObservingConditions.TwilightSunAltitudeDeg:F0} deg).";
+                : $"Daytime, dome closed (Sun {conditions.SunAltitudeDeg:F0} deg, reopens below {ImagingObservingConditions.TwilightSunAltitudeDeg:F0} deg).";
             string targetLine = alt > 0.0
                 ? $"{name} is up: altitude {alt:F0} deg, azimuth {az:F0} deg."
-                : $"{name} is below the horizon ({alt:F0} deg) -- warp/wait for it to rise.";
+                : $"{name} is below the horizon ({alt:F0} deg); warp/wait for it to rise.";
             GUILayout.Label(sky + "  " + targetLine, smallCaptionStyle);
         }
 
@@ -2632,7 +2842,7 @@ namespace ExoInstruments
                 ObjectName = selectedPhotographyTarget.DisplayName,
                 UtcTimestamp = DateTime.UtcNow,
                 ImageType = "Light Frame",
-                // A raw sub is one pointing at one instant, so it can carry a real WCS -- measured
+                // A raw sub is one pointing at one instant, so it can carry a real WCS, measured
                 // from the same projection that placed the stars in it (see Core.FitsWcs).
                 Wcs = solarSystemCamera.LastWcs,
                 TrailedByDrift = solarSystemCamera.LastFrameTrailed,
@@ -2693,7 +2903,7 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Catalog entries with no RaDeg/DecDeg never appear on the sky chart --
+        /// Catalog entries with no RaDeg/DecDeg never appear on the sky chart;
         /// this is the only way to still select them, shown only while filtering
         /// so it doesn't bloat the view for the common case.
         /// </summary>
@@ -2706,7 +2916,7 @@ namespace ExoInstruments
             {
                 if (star.RaDeg.HasValue && star.DecDeg.HasValue) continue;
                 // Career: an unscanned target with no coordinates is unreachable by
-                // construction -- there's no position to point the telescope at and
+                // construction; there's no position to point the telescope at and
                 // no name the player could search for. Skip rather than leak.
                 if (IsIdentityHidden(star)) continue;
                 if (star.Name.IndexOf(searchFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -2745,7 +2955,7 @@ namespace ExoInstruments
         /// <summary>
         /// Recomputes which star the cursor is hovering, every OnGUI pass. Cheap:
         /// reuses HitTest (an O(n) loop over already-projected points), no
-        /// texture rebuild -- unlike a click, this can safely run every frame.
+        /// texture rebuild; unlike a click, this can safely run every frame.
         /// </summary>
         void UpdateSkyChartHover(Rect chartRect)
         {
@@ -2781,7 +2991,7 @@ namespace ExoInstruments
             if (e.type == EventType.MouseDown && e.button == 0 && overChart)
             {
                 // Bodies are checked first and resolved immediately (no
-                // drag-vs-click distinction needed -- their markers are big,
+                // drag-vs-click distinction needed; their markers are big,
                 // deliberate targets): a hit selects the body as the
                 // photography target straight away and never starts a pan drag.
                 if (TryHitBodyMarker(chartRect, e.mousePosition, out CelestialBody hitBody))
@@ -2803,7 +3013,7 @@ namespace ExoInstruments
                 skyChartDragDistance = deltaImgui.magnitude;
 
                 // IMGUI y grows downward; the chart's raw pixel space grows upward
-                // (row 0 = bottom, see SkyChartTexture) -- flip the y component.
+                // (row 0 = bottom, see SkyChartTexture); flip the y component.
                 Vector2 textureDelta = new Vector2(deltaImgui.x, -deltaImgui.y);
                 skyChartPan = skyChartDragStartPan - textureDelta / skyChartZoom;
                 ClampSkyChartPan();
@@ -2955,7 +3165,7 @@ namespace ExoInstruments
                 clearStarSelection: false);
         }
 
-        /// <summary>Drops all stacked subs and the composite preview -- the stack is specific to one target, it must not survive a target switch.</summary>
+        /// <summary>Drops all stacked subs and the composite preview; the stack is specific to one target, it must not survive a target switch.</summary>
         void ClearAstroStack()
         {
             astroStack.ClearAll();
@@ -2970,7 +3180,7 @@ namespace ExoInstruments
             lastComposedPixels = null;
         }
 
-        /// <summary>Refreshes IsSelectedTarget on the cached body points to match selectedPhotographyBody and re-rasters -- so the ring appears/moves the instant a body is (de)selected, without waiting for the next full catalog refresh.</summary>
+        /// <summary>Refreshes IsSelectedTarget on the cached body points to match selectedPhotographyBody and re-rasters; so the ring appears/moves the instant a body is (de)selected, without waiting for the next full catalog refresh.</summary>
         void UpdateBodySelectionRingAndRerender()
         {
             double selAlt = double.NaN, selAz = double.NaN;
@@ -2998,7 +3208,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Hand-entered coordinates. Everything worth photographing that is not a planet and not in
-        /// the loaded catalogue -- a nebula, a galaxy, a dark cloud -- is reachable only this way.
+        /// the loaded catalogue (a nebula, a galaxy, a dark cloud) is reachable only this way.
         /// </summary>
         void DrawManualPointingEntry()
         {
@@ -3029,7 +3239,7 @@ namespace ExoInstruments
         {
             if (!selectedPhotographyTarget.HasTarget)
             {
-                GUILayout.Label("Telescope not pointed at anything -- click this star on the chart to point at it.",
+                GUILayout.Label("Telescope not pointed at anything; click this star on the chart to point at it.",
                                 smallCaptionStyle);
                 return;
             }
@@ -3062,7 +3272,7 @@ namespace ExoInstruments
             float localX = e.mousePosition.x - chartRect.x;
             float localY = chartRect.height - (e.mousePosition.y - chartRect.y);
 
-            // The raw-space point currently under the cursor, before zoom changes --
+            // The raw-space point currently under the cursor, before zoom changes,
             // solving pan afterwards so this same point stays under the cursor.
             Vector2 rawUnderCursor = new Vector2(
                 (localX - SkyChartWidth / 2f) / skyChartZoom + skyChartPan.x,
@@ -3132,7 +3342,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Converts a duration in real seconds to whatever "day" KSP itself is
-        /// currently displaying -- 6h Kerbin days by default (GameSettings.KERBIN_TIME),
+        /// currently displaying, 6h Kerbin days by default (GameSettings.KERBIN_TIME),
         /// or 24h Earth days if the player enabled that setting. Session/detector math
         /// stays in real seconds/days throughout (astronomically correct, matches the
         /// catalog's real orbital periods); this only affects operational labels the
@@ -3162,7 +3372,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// True when the star's identity must be withheld from the player. If the
-        /// scenario state is unavailable in career (shouldn't happen -- it's added
+        /// scenario state is unavailable in career (shouldn't happen; it's added
         /// to all games), fail toward hiding rather than leaking.
         /// </summary>
         private static bool IsIdentityHidden(StarTarget star)
@@ -3175,7 +3385,7 @@ namespace ExoInstruments
         /// <summary>
         /// What the player is allowed to call this star right now: its real
         /// designation once revealed, else a positional provisional designation
-        /// ("Unscanned J2257+2046") -- the naming a real survey would use for a
+        /// ("Unscanned J2257+2046"), the naming a real survey would use for a
         /// source it hasn't identified.
         /// </summary>
         private static string GetDisplayName(StarTarget star)
@@ -3189,20 +3399,20 @@ namespace ExoInstruments
         /// <summary>
         /// Career bookkeeping when a detection analysis completes: reveals the
         /// star's identity whatever the outcome (a null result still charts the
-        /// sky) and awards Science -- once per star for the scan itself, plus a
+        /// sky) and awards Science, once per star for the scan itself, plus a
         /// one-time bonus per host for a confirmed real detection. The detection
         /// bonus is gated on the catalog truth as well as the analysis verdict so
         /// a statistical false positive on a decoy's noise can't be farmed.
         ///
         /// The detection bonus is scaled by the observing instrument's explicit
-        /// ScienceRewardMultiplier (bigger telescope, bigger payoff -- see
+        /// ScienceRewardMultiplier (bigger telescope, bigger payoff; see
         /// InstrumentSpec) and, when realPlanetsDetectedCount is more than 1 (an
         /// RV campaign resolving several catalog planets at once), by the jackpot
-        /// bonus -- the single biggest payout the survey loop offers, by design.
+        /// bonus, the single biggest payout the survey loop offers, by design.
         ///
         /// stellarCharacterization additionally claims the one-time
         /// characterization award (direct imaging of a star with a measurable
-        /// temperature) -- flat, tracked separately from the scan reveal so a
+        /// temperature), flat, tracked separately from the scan reveal so a
         /// star identified earlier by transit/RV still pays out the first time
         /// it's actually imaged.
         /// </summary>
@@ -3218,7 +3428,7 @@ namespace ExoInstruments
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             if (scenario == null)
             {
-                Debug.LogWarning("[ExoInstruments] Career scan completed but no scenario instance is loaded -- reveal not persisted.");
+                Debug.LogWarning("[ExoInstruments] Career scan completed but no scenario instance is loaded, reveal not persisted.");
                 return;
             }
 
@@ -3283,7 +3493,7 @@ namespace ExoInstruments
 
         // --- Career progression: instrument unlock economy --------------------
         // Sandbox/science-sandbox: every instrument is available from the start
-        // and scans are free, same as before this feature existed -- gated on the
+        // and scans are free, same as before this feature existed, gated on the
         // same CareerFogActive check as the star fog above, no separate setting.
         // Unlocking happens exclusively through the locked rows inside the
         // observatory selector: a separate bottom-of-column "program" table
@@ -3388,7 +3598,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>Catalog-status report line, decoy-aware -- a background star has no planet status to report.</summary>
+        /// <summary>Catalog-status report line, decoy-aware, a background star has no planet status to report.</summary>
         private static string CatalogStatusLine(StarTarget target)
         {
             if (!target.HasPlanet) return "Catalog status: no catalogued planet on this star";
@@ -3404,7 +3614,7 @@ namespace ExoInstruments
             int transitingCount = CountTransiting(session.SystemPlanets);
 
             GUILayout.Label($"Observing: {GetDisplayName(session.Target)}");
-            // "N transiting planets" is catalog truth -- withheld until identified.
+            // "N transiting planets" is catalog truth, withheld until identified.
             if (transitingCount > 1 && !IsIdentityHidden(session.Target))
             {
                 GUILayout.Label($"Host system: {transitingCount} known transiting planets superpose on this light curve.");
@@ -3463,11 +3673,11 @@ namespace ExoInstruments
             {
                 DetectionResult stageResult = lastTransitStages[i].Result;
                 if (stageResult.InsufficientData || i >= transitPhaseFoldedTextures.Count) continue;
-                // The final, below-threshold stage keeps its folded plot too --
+                // The final, below-threshold stage keeps its folded plot too;
                 // seeing residual points fold into nothing is the visual proof the
                 // masking search bottomed out, same idiom as the RV stages. That
                 // stage isn't a confirmed planet, so its title must say so instead
-                // of reading as "signal N" like the genuine detections above it --
+                // of reading as "signal N" like the genuine detections above it;
                 // otherwise a below-threshold noise fold looks like a second planet.
                 string plotTitle;
                 if (!stageResult.Detected)
@@ -3508,7 +3718,7 @@ namespace ExoInstruments
 
         // In flight while the transit "Run Detection Analysis" button's work
         // (iterative multi-planet box search over the whole light curve, plus
-        // the O-C timing search) runs off the main thread -- both were
+        // the O-C timing search) runs off the main thread; both were
         // previously synchronous and, on a long baseline with many samples,
         // took long enough to read as a multi-second game freeze. Neither
         // TransitDetector.DetectMultiple nor TransitTimingVariations.Analyze
@@ -3521,7 +3731,7 @@ namespace ExoInstruments
         // computing) gets discarded instead of overwriting the new session.
         private ObservationSession transitAnalysisSession;
         // Real time and sample count captured at task start, purely to give
-        // the "Analyzing..." label something concrete to say -- a box search
+        // the "Analyzing..." label something concrete to say; a box search
         // over thousands of samples can legitimately run for minutes, and a
         // static caption with no elapsed time reads exactly like a freeze.
         private float transitAnalysisStartRealtime;
@@ -3549,7 +3759,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Applies a completed background transit analysis: textures and the
-        /// career bookkeeping -- including the multi-planet jackpot (confirmed
+        /// career bookkeeping, including the multi-planet jackpot (confirmed
         /// count capped by how many catalog planets actually transit, same
         /// anti-farming reasoning as the RV path) and the one-time TTV award.
         /// The only part of the transit-analysis pipeline allowed to touch a
@@ -3591,7 +3801,7 @@ namespace ExoInstruments
         /// <summary>
         /// One-time TTV Science: requires the measured O-C sinusoid to clear the
         /// threshold AND the catalog to actually carry a perturbing companion for
-        /// some transiting member of this system -- an O-C wobble fit onto pure
+        /// some transiting member of this system; an O-C wobble fit onto pure
         /// noise can't be farmed, same truth-gating as the detection bonus.
         /// </summary>
         private float lastTtvScienceAwarded;
@@ -3629,7 +3839,7 @@ namespace ExoInstruments
         /// Transit-timing section of the scan report: the O-C series (each
         /// measured mid-transit against the linear ephemeris) and the sinusoid
         /// search verdict. A detected TTV is dynamical evidence of a companion
-        /// tugging the transiter -- the way planets that never transit have been
+        /// tugging the transiter, the way planets that never transit have been
         /// discovered, and the way TRAPPIST-1's planets were weighed.
         /// </summary>
         void DrawTtvSection()
@@ -3671,7 +3881,7 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Fixed real-time top-up used by the "Warp +N days" button -- a physically meaningful week of extra epochs, independent of display convention.</summary>
+        /// <summary>Fixed real-time top-up used by the "Warp +N days" button, a physically meaningful week of extra epochs, independent of display convention.</summary>
         private const double RvTopUpRealDays = 7.0;
 
         void DrawRvObservation()
@@ -3680,7 +3890,7 @@ namespace ExoInstruments
             int rvDetectableCount = CountRvDetectable(rvSession.SystemPlanets);
 
             GUILayout.Label($"Observing: {GetDisplayName(rvSession.Target)}");
-            // "N known planets" is catalog truth -- withheld until the target is identified.
+            // "N known planets" is catalog truth, withheld until the target is identified.
             if (rvDetectableCount > 1 && !IsIdentityHidden(rvSession.Target))
             {
                 GUILayout.Label($"Host system: {rvDetectableCount} known planets contribute to the measured reflex velocity.");
@@ -3699,7 +3909,7 @@ namespace ExoInstruments
 
                 if (IsIdentityHidden(rvSession.Target))
                 {
-                    // The suggested baseline is computed from the catalog period --
+                    // The suggested baseline is computed from the catalog period,
                     // exactly the information a blind survey doesn't have. The
                     // player samples as long as they judge useful, like a real
                     // blind RV campaign.
@@ -3807,7 +4017,7 @@ namespace ExoInstruments
 
         // --- Rossiter-McLaughlin: scheduling and analysis ----------------------
 
-        /// <summary>Next fully observable transit window among the session's schedulable planets -- cached, recomputed on the 1s plot-refresh throttle (the search re-runs the conditions evaluator across upcoming transits).</summary>
+        /// <summary>Next fully observable transit window among the session's schedulable planets, cached, recomputed on the 1s plot-refresh throttle (the search re-runs the conditions evaluator across upcoming transits).</summary>
         private double rmNextTransitUt = double.NaN;
         private StarTarget rmNextTransitPlanet;
         private float lastRmScienceAwarded;
@@ -3836,7 +4046,7 @@ namespace ExoInstruments
         /// Live RM status while the RV session runs: the high-cadence sequence in
         /// progress, or the next observable transit window with a warp shortcut.
         /// Only shown when scheduling is possible at all (identified target with
-        /// a transiting companion -- see GetRmSchedulablePlanets).
+        /// a transiting companion; see GetRmSchedulablePlanets).
         /// </summary>
         void DrawRmSchedulingLine(double ut)
         {
@@ -3881,7 +4091,7 @@ namespace ExoInstruments
         // In flight while the RV "Run Detection Analysis" button's work (the
         // Lomb-Scargle-style prewhitening search, up to RvDetector.MaxPlanetsPerSearch
         // passes over the whole series, plus the Rossiter-McLaughlin fit on the
-        // residuals) runs off the main thread -- same freeze this caused as the
+        // residuals) runs off the main thread, same freeze this caused as the
         // transit path, same fix. Career-fog and scheduling ("is this target
         // identified, which planets can we fit RM for") depend on
         // ExoInstrumentsScenario.Instance and must be read on the main thread
@@ -3955,7 +4165,7 @@ namespace ExoInstruments
             // One campaign scans the whole system, so the reveal and the
             // (single, per-host) detection bonus are host-level. Count of "real"
             // planets confirmed is capped at how many catalog planets are
-            // actually RV-detectable in this system -- never higher, even if
+            // actually RV-detectable in this system, never higher, even if
             // prewhitening reports more Detected stages. This matters because a
             // single eccentric orbit's un-subtracted harmonics (P/2, P/3) can
             // masquerade as extra "detected" stages (see
@@ -4045,7 +4255,7 @@ namespace ExoInstruments
             GUILayout.Label($"On-sky integration: {effectiveSeconds / 3600.0:F1} h (zenith-equivalent)   " +
                              $"Elapsed: {ToDisplayDays(imagingSession.ElapsedSeconds):F2} days");
             GUILayout.Label(DescribeImagingConditions(imagingSession.CurrentConditions));
-            // Live SNR is computed from catalog truth (companion contrast) -- on an
+            // Live SNR is computed from catalog truth (companion contrast); on an
             // unidentified career target it would answer "is there a planet here?"
             // for free. The frame itself stays visible: that IS the observation.
             if (assessment.HasRequiredData && assessment.Resolvable && assessment.SignalPresent
@@ -4081,7 +4291,7 @@ namespace ExoInstruments
                 if (IsIdentityHidden(imagingSession.Target))
                 {
                     // Required-exposure predictions come from catalog truth
-                    // (contrast, separation, or their absence) -- withheld on an
+                    // (contrast, separation, or their absence), withheld on an
                     // unidentified target. Blind imaging means deciding yourself
                     // when the frame has gone deep enough.
                     GUILayout.Label("Unidentified target: required integration can't be predicted without prior data. " +
@@ -4145,9 +4355,9 @@ namespace ExoInstruments
                 {
                     lastImagingResult = DirectImagingSimulator.Analyze(assessment, effectiveSeconds);
                     // Detected already implies a real, resolvable catalog companion
-                    // (ComputeSnr returns 0 otherwise) -- no extra truth gate needed.
+                    // (ComputeSnr returns 0 otherwise), no extra truth gate needed.
                     // Imaging additionally characterizes the star itself whenever a
-                    // temperature is measurable -- that's the payoff for pointing
+                    // temperature is measurable; that's the payoff for pointing
                     // the ELT at a star with no companion to find.
                     RegisterScanCompleted(imagingSession.Target, imagingSession.Instrument, lastImagingResult.Detected,
                         stellarCharacterization: imagingSession.Target.EffectiveTempK.HasValue);
@@ -4239,7 +4449,7 @@ namespace ExoInstruments
             }
 
             // Every natural satellite of the home body (Mün and Minmus, stock)
-            // becomes an occultation and sky-pollution source -- read generically
+            // becomes an occultation and sky-pollution source, read generically
             // so planet packs with different moons work unchanged.
             if (home.orbitingBodies != null && home.orbitingBodies.Count > 0)
             {
@@ -4267,7 +4477,7 @@ namespace ExoInstruments
         /// <summary>
         /// One status line for the running transit/RV session: is the telescope
         /// actually collecting right now, and if not, why. Space-based
-        /// instruments report their continuous coverage -- that IS the feature
+        /// instruments report their continuous coverage; that IS the feature
         /// the player paid for.
         /// </summary>
         void DrawObservingConditionsLine(InstrumentSpec instrument, ImagingConditionsSnapshot cond)
@@ -4297,7 +4507,7 @@ namespace ExoInstruments
         /// <summary>
         /// Moonlight annotation for the on-sky status line. Only photometry pays
         /// the sky-noise tax (see MoonlightPollution), so only transit
-        /// instruments get the warning -- but a bright moon near anyone's target
+        /// instruments get the warning, but a bright moon near anyone's target
         /// is still worth a mention at high levels.
         /// </summary>
         static string DescribeMoonNote(InstrumentSpec instrument, ImagingConditionsSnapshot cond)
@@ -4319,7 +4529,7 @@ namespace ExoInstruments
         /// <summary>
         /// Recomputes the forward-simulated campaign markers: next observing
         /// window (when currently blocked) and the UT at which effective exposure
-        /// reaches 5-sigma (identified targets only -- for hidden ones this would
+        /// reaches 5-sigma (identified targets only; for hidden ones this would
         /// leak catalog truth). Throttled to the texture refresh cadence because
         /// each call re-integrates the nights ahead.
         /// </summary>
@@ -4356,7 +4566,7 @@ namespace ExoInstruments
             GUILayout.Space(6);
 
             // A resolved AO image characterizes the star whether or not any
-            // companion turns up -- this section is the scan's guaranteed yield.
+            // companion turns up; this section is the scan's guaranteed yield.
             GUILayout.Label("Stellar characterization", sectionHeaderStyle);
             if (target.EffectiveTempK.HasValue)
             {
@@ -4416,7 +4626,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Light curve plot with a title, numeric y-axis ticks (min/mid/max flux)
-        /// and x-axis endpoints -- mirrors DrawRvPlot's layout and idiom.
+        /// and x-axis endpoints, mirrors DrawRvPlot's layout and idiom.
         /// </summary>
         void DrawPlot(Texture2D tex, LightCurvePlotRange range, double minXDays, double maxXDays, string xAxisLabel, string title)
         {
@@ -4449,7 +4659,7 @@ namespace ExoInstruments
         /// <summary>
         /// RV plot with a title, numeric y-axis ticks (min/mid/max velocity) and
         /// x-axis endpoints, drawn as GUI.Label overlays positioned relative to a
-        /// single reserved Rect -- the same "GetRect once, position absolutely
+        /// single reserved Rect, the same "GetRect once, position absolutely
         /// afterwards" idiom already used for the sky chart above.
         /// </summary>
         void DrawRvPlot(Texture2D tex, RvPlotRange range, double minXDays, double maxXDays, string xAxisLabel, string title,
@@ -4526,7 +4736,7 @@ namespace ExoInstruments
                 {
                     // Eccentricity 0 here, not the catalog value: a prewhitened sinusoid
                     // carries no eccentricity information of its own, and the catalog's e
-                    // belongs to the selected planet -- not necessarily to this signal.
+                    // belongs to the selected planet, not necessarily to this signal.
                     double impliedMassJupiterSini = ImpliedMinimumMassJupiter(
                         r.BestSemiAmplitudeMps, r.BestPeriodDays, rvSession.Target.StellarMassSolar, 0.0);
                     GUILayout.Label($"    Implied Mp*sin(i): {impliedMassJupiterSini:F3} M_jup");
@@ -4615,7 +4825,7 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Period of an earlier detected stage this one sits at a near-integer ratio of (within 5%, ratios 1:1 to 3:1), else null -- mirrors RvDetector.FindHarmonicParentPeriodDays.</summary>
+        /// <summary>Period of an earlier detected stage this one sits at a near-integer ratio of (within 5%, ratios 1:1 to 3:1), else null, mirrors RvDetector.FindHarmonicParentPeriodDays.</summary>
         static double? FindTransitHarmonicParent(List<TransitDetectionStage> stages, int stageIndex)
         {
             double periodDays = stages[stageIndex].Result.BestPeriodDays;
@@ -4641,7 +4851,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// One folded plot per transit-search stage, each rendered from the
-        /// masked series that stage actually searched -- folding the full data on
+        /// masked series that stage actually searched; folding the full data on
         /// a weaker second period would just show the first planet's deeper
         /// transit. Mirrors RefreshRvPhaseFoldedTextures.
         /// </summary>
@@ -4673,7 +4883,7 @@ namespace ExoInstruments
         /// <summary>
         /// O-C series rendered through the RV scatter-plot pipeline: each
         /// measured mid-transit becomes one point (y = O-C in minutes, error bar
-        /// = its timing uncertainty). Same plot, different physical quantity --
+        /// = its timing uncertainty). Same plot, different physical quantity;
         /// the GUI relabels the axis.
         /// </summary>
         void RefreshTtvPlotTexture()
@@ -4698,7 +4908,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// One folded plot per prewhitening stage, each rendered from the residual
-        /// series that stage actually searched -- folding the raw data on a weak
+        /// series that stage actually searched; folding the raw data on a weak
         /// second period would just show the first planet's much larger signal.
         /// </summary>
         void RefreshRvPhaseFoldedTextures()
@@ -4726,7 +4936,7 @@ namespace ExoInstruments
             rvPhaseFoldedRanges.Clear();
         }
 
-        /// <summary>One-off synchronous refresh, for the rare calls that aren't on the periodic timer (session start/stop) -- a single hitch on a user-triggered action is imperceptible, unlike a repeating one.</summary>
+        /// <summary>One-off synchronous refresh, for the rare calls that aren't on the periodic timer (session start/stop); a single hitch on a user-triggered action is imperceptible, unlike a repeating one.</summary>
         void RefreshImagingTexture()
         {
             if (imagingSession == null) return;
@@ -4740,7 +4950,7 @@ namespace ExoInstruments
         /// Kicks off the frame raster + forward-simulated predictions on a
         /// background Task: at 400x400 with several transcendental calls per
         /// pixel, plus predictions that can step through days of upcoming nights,
-        /// this is the single most expensive thing the mod does per refresh --
+        /// this is the single most expensive thing the mod does per refresh,
         /// expensive enough that running it synchronously on the main thread
         /// stalls the frame that's rendering the game (visible as a periodic
         /// hitch/flash). Neither DirectImagingTexture.ComputePixels nor
@@ -4785,7 +4995,7 @@ namespace ExoInstruments
             });
         }
 
-        /// <summary>Applies a completed background render (see StartImagingRefresh) -- the only part of the pipeline that's allowed to touch the Texture2D.</summary>
+        /// <summary>Applies a completed background render (see StartImagingRefresh), the only part of the pipeline that's allowed to touch the Texture2D.</summary>
         void PollImagingRenderTask()
         {
             if (imagingRenderTask == null || !imagingRenderTask.IsCompleted) return;
@@ -4808,7 +5018,7 @@ namespace ExoInstruments
         /// Kicks off the full catalog re-transform (RA/Dec -> Alt/Az for every
         /// loaded target, thousands once background stars are merged in) plus the
         /// 640x640 raster on a background Task, for the same reason as
-        /// StartImagingRefresh -- SkyCoordinates' math and SkyChartTexture.ComputePixels
+        /// StartImagingRefresh; SkyCoordinates' math and SkyChartTexture.ComputePixels
         /// touch no UnityEngine.Object API, so both are safe off the main thread.
         /// </summary>
         void StartSkyChartRefresh()
@@ -4862,7 +5072,7 @@ namespace ExoInstruments
             });
         }
 
-        /// <summary>What the object is and how much sky it covers -- the two things that decide which instrument can frame it.</summary>
+        /// <summary>What the object is and how much sky it covers, the two things that decide which instrument can frame it.</summary>
         static string DescribeDeepSky(DeepSkyObject obj)
         {
             string kind;
@@ -4886,14 +5096,14 @@ namespace ExoInstruments
             {
                 // An emission map holds what is emitted, so a silhouette is not in it at all. Say
                 // so on the chart rather than let the player spend an exposure finding out.
-                note = " -- absorption, not emission: no installed map can show it";
+                note = ", absorption, not emission: no installed map can show it";
             }
             else if (obj.EmitsLines && map != null && map.IsLoaded)
             {
                 // The number that decides whether the installed data can render this object as a
                 // shape. The composite's beam is 6', coarser than its 3.4' sampling.
                 double beams = obj.BeamsAcross(EmissionMapBeamArcmin);
-                note = $" -- {beams:F0} beams across the installed map"
+                note = $", {beams:F0} beams across the installed map"
                      + (beams < 1.5 ? ", so it cannot resolve it at all"
                         : beams < 4.0 ? ", so expect a smudge"
                         : beams < 12.0 ? ", so expect an outline and no detail" : "");
@@ -4969,10 +5179,10 @@ namespace ExoInstruments
             return points;
         }
 
-        /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut -- it draws whatever clears the frame's own noise floor.</summary>
+        /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut; it draws whatever clears the frame's own noise floor.</summary>
         private const double ChartGalaxyMagnitudeLimit = 11.0;
 
-        /// <summary>Applies a completed background chart render (see StartSkyChartRefresh) -- the only part of the pipeline that's allowed to touch the Texture2D.</summary>
+        /// <summary>Applies a completed background chart render (see StartSkyChartRefresh), the only part of the pipeline that's allowed to touch the Texture2D.</summary>
         void PollSkyChartRenderTask()
         {
             if (skyChartRenderTask == null || !skyChartRenderTask.IsCompleted) return;
@@ -4993,7 +5203,7 @@ namespace ExoInstruments
         /// <summary>
         /// Kicks off a forecast recompute on a background Task when the selected
         /// (target, instrument) pairing changed or the clock moved a quarter-night
-        /// past the last compute -- same background-Task treatment as the sky
+        /// past the last compute, same background-Task treatment as the sky
         /// chart, for the same reason (thousands of conditions evaluations).
         /// ObservingForecast and ForecastTexture.ComputePixels touch no
         /// UnityEngine.Object API, so both are safe off the main thread.
@@ -5016,7 +5226,7 @@ namespace ExoInstruments
             int instrumentIndex = selectedObservatoryIndex;
             // Request markers: what the in-flight task is computing for. The
             // applied markers (forecastAppliedStar/-InstrumentIndex, set when
-            // the result lands) are what DrawForecastPanel trusts -- these ones
+            // the result lands) are what DrawForecastPanel trusts; these ones
             // only exist so this method doesn't re-request the same compute
             // every frame while one is running.
             forecastRenderedStar = star;
@@ -5032,7 +5242,7 @@ namespace ExoInstruments
             });
         }
 
-        /// <summary>Applies a completed background forecast render -- the only part allowed to touch the Texture2D.</summary>
+        /// <summary>Applies a completed background forecast render, the only part allowed to touch the Texture2D.</summary>
         void PollForecastRenderTask()
         {
             if (forecastRenderTask == null || !forecastRenderTask.IsCompleted) return;
@@ -5060,7 +5270,7 @@ namespace ExoInstruments
         /// upcoming night, one column per time of night, every constraint the
         /// session models folded into a single color. Click a cell to warp
         /// there. Fog-safe by construction: the grid consumes only the target's
-        /// position and magnitude -- both things the sky already gives away.
+        /// position and magnitude, both things the sky already gives away.
         /// </summary>
         void DrawForecastPanel()
         {
@@ -5076,7 +5286,7 @@ namespace ExoInstruments
                 return;
             }
             // A grid computed for a previously selected star/instrument stays on
-            // screen (and clickable!) until the new background compute lands --
+            // screen (and clickable!) until the new background compute lands;
             // warping the player to another target's "best window" would be a
             // genuine bug, so a mismatched grid is treated as still computing.
             if (forecastTexture == null || forecastResult == null
@@ -5139,7 +5349,7 @@ namespace ExoInstruments
         /// Same heatmap widget as DrawForecastPanel (ForecastTexture render +
         /// click-to-warp + "warp to best window"), fed by a body altitude
         /// timeline instead of a star's fixed RA/Dec. "Quality" here is simply
-        /// 1.0 when the body is up AND it's night, 0.0 otherwise -- there's no
+        /// 1.0 when the body is up AND it's night, 0.0 otherwise; there's no
         /// airmass/precision model for a photograph the way there is for
         /// photometry, so the map is a clean observable/not-observable
         /// calendar rather than a graded one.
@@ -5200,10 +5410,10 @@ namespace ExoInstruments
                 }
             }
 
-            GUILayout.Label("Compiles: twilight, target altitude and airmass seeing efficiency (1/X^2) -- the same real variable behind the camera's own atmospheric blur. No weather term: stock KSP has none to read.", smallCaptionStyle);
+            GUILayout.Label("Compiles: twilight, target altitude and airmass seeing efficiency (1/X^2), the same real variable behind the camera's own atmospheric blur. No weather term: stock KSP has none to read.", smallCaptionStyle);
         }
 
-        /// <summary>Recomputes the body forecast (synchronous -- cheap enough) when the target changed or the clock moved a quarter-night since the last compute.</summary>
+        /// <summary>Recomputes the body forecast (synchronous, cheap enough) when the target changed or the clock moved a quarter-night since the last compute.</summary>
         void RefreshPhotographyForecastIfStale()
         {
             if (!selectedPhotographyTarget.HasTarget) return;
@@ -5237,7 +5447,7 @@ namespace ExoInstruments
         ///   0       = fermé / sous l'horizon / jour
         ///   1 / X²  = efficacité de seeing à l'airmass X, multipliée par la
         ///             transmission nuageuse EVE (couverture actuelle sur KSC,
-        ///             appliquée à toutes les cellules -- pas de simulation du
+        ///             appliquée à toutes les cellules, pas de simulation du
         ///             déplacement futur des nuages)
         ///   1       = zénith, ciel dégagé
         /// </summary>
@@ -5288,7 +5498,7 @@ namespace ExoInstruments
              */
             double nowUt = Planetarium.GetUniversalTime();
 
-            // EVE clouds aren't a time simulation -- this samples the current sky over KSC
+            // EVE clouds aren't a time simulation; this samples the current sky over KSC
             // and applies it to every future cell, same "clouds persist" approximation the
             // live RC20 camera already makes for wind drift.
             float cloudCoverage = SolarSystemCameraTexture.ComputeCloudCoverage();
@@ -5489,7 +5699,7 @@ namespace ExoInstruments
                 orbitVector.z,
                 orbitVector.y);
         }
-        /// <summary>What the forecast folds together for this method -- honest about what each pipeline actually pays for, and about the absence of weather.</summary>
+        /// <summary>What the forecast folds together for this method, honest about what each pipeline actually pays for, and about the absence of weather.</summary>
         static string DescribeForecastInputs(InstrumentSpec instrument)
         {
             string methodInputs;
@@ -5525,7 +5735,7 @@ namespace ExoInstruments
             RenderSkyChartTexture();
         }
 
-        /// <summary>Synchronous: re-rasters the already-computed points at the current zoom/pan, with no catalog work -- used for drag/zoom/recenter, where the user expects an immediate response.</summary>
+        /// <summary>Synchronous: re-rasters the already-computed points at the current zoom/pan, with no catalog work, used for drag/zoom/recenter, where the user expects an immediate response.</summary>
         void RenderSkyChartTexture()
         {
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };

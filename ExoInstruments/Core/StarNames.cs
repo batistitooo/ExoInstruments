@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     /// Star-name normalization and identifier extraction, shared by the catalog
     /// merger (cross-matching exoplanet.eu host names against Bright Star
     /// Catalogue designations) and by the career fog-of-war save state (stable
-    /// per-star keys). Pure C# -- no Unity/KSP dependency.
+    /// per-star keys). Pure C#, no Unity/KSP dependency.
     ///
     /// The same physical star appears under different conventions across the two
     /// catalogs: "51 Peg" / "51 Pegasi" / "HD 217014" are one star. Normalization
@@ -102,7 +102,7 @@ namespace ExoInstruments.Core
         };
 
         // exoplanet.eu exports carry raw HTML entities in a few names
-        // ("24 Bo&ouml;" for 24 Boo) -- reduce accented entities to their base
+        // ("24 Bo&ouml;" for 24 Boo); reduce accented entities to their base
         // ASCII letter before any other processing.
         private static readonly Regex HtmlEntityRegex = new Regex(
             @"&([a-zA-Z])(acute|grave|uml|circ|tilde|ring|cedil|slash);?",
@@ -111,7 +111,7 @@ namespace ExoInstruments.Core
         private static readonly Regex ParentheticalRegex = new Regex(@"\([^)]*\)", RegexOptions.Compiled);
         private static readonly Regex TrailingDigitRegex = new Regex(@"^([a-z]+)([1-9])$", RegexOptions.Compiled);
 
-        // "HD 217014", "HD217014", "hd 217014  b" -- the digits are what matters.
+        // "HD 217014", "HD217014", "hd 217014  b"; the digits are what matters.
         private static readonly Regex HdRegex = new Regex(@"\bHD[\s-]*(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex HrRegex = new Regex(@"\bHR[\s-]*(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
@@ -177,7 +177,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Every HD number found anywhere in the given designation strings
-        /// (host name, alternate-name lists, planet designations -- a trailing
+        /// (host name, alternate-name lists, planet designations; a trailing
         /// planet letter doesn't disturb the match).
         /// </summary>
         public static List<int> ExtractHdNumbers(params string[] designations)
@@ -219,7 +219,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// IAU-style truncated positional designation ("J2257+2046") -- what a
+        /// IAU-style truncated positional designation ("J2257+2046"), what a
         /// survey would call a source it hasn't identified yet. Truncation, not
         /// rounding, per the IAU specification for coordinate-based identifiers.
         /// </summary>

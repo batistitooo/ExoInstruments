@@ -77,7 +77,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The full electron budget behind one exposure's error bar, when the instrument has a
-        /// sourced detector -- for a diagnostic readout, the same way the imaging pipeline exposes
+        /// sourced detector, for a diagnostic readout, the same way the imaging pipeline exposes
         /// its own last-capture figures. False when the empirical path is in use, in which case
         /// there is no budget to show.
         /// </summary>
@@ -153,7 +153,7 @@ namespace ExoInstruments.Core
                 if (Math.Abs(phaseCentered) > 0.25) return 0.0;
 
                 // Projected star-planet separation in stellar radii, circular
-                // chord -- same approximation EstimatedTransitDurationHours uses.
+                // chord, same approximation EstimatedTransitDurationHours uses.
                 double x = aRs * Math.Sin(2.0 * Math.PI * phaseCentered);
                 double z = Math.Sqrt(x * x + b.Value * b.Value);
 
@@ -200,7 +200,7 @@ namespace ExoInstruments.Core
         {
             if (d >= 1.0 + p) return 0.0;
             if (d <= 1.0 - p) return Math.PI * p * p;
-            if (d <= p - 1.0) return Math.PI;  // planet larger than star -- not physical here, completeness only
+            if (d <= p - 1.0) return Math.PI;  // planet larger than star, not physical here, completeness only
 
             double d2 = d * d;
             double cosHalf1 = Clamp((d2 + 1.0 - p * p) / (2.0 * d), -1.0, 1.0);

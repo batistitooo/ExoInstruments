@@ -139,7 +139,7 @@ class Program
               worstRatio < 2e-4, $"worst disagreement {worstRatio * 100:F4}% over 2800-20000 K");
 
         // The Sun's own shape must be mildly red-favouring relative to flat, and much less
-        // extreme than an M dwarf's -- a sanity check on the reflected-sunlight spectrum used for
+        // extreme than an M dwarf's, a sanity check on the reflected-sunlight spectrum used for
         // every planet in the frame.
         double sunB = blue.EffectiveWidthAngstromForTemperatureNoExtinction(SourceSpectra.SolarPhotosphereTemperatureK);
         double sunR = red.EffectiveWidthAngstromForTemperatureNoExtinction(SourceSpectra.SolarPhotosphereTemperatureK);
@@ -325,7 +325,7 @@ class Program
 
         // Round trip, at the centre and at all four corners. TAN is an exact tangent plane and
         // the pixel-to-plane map is exactly linear, so the CD matrix taken at the reference point
-        // is exact everywhere on the sensor -- the corners must round-trip as well as the centre.
+        // is exact everywhere on the sensor; the corners must round-trip as well as the centre.
         double worstArcsec = 0.0;
         foreach (var probe in new[]
                  {
@@ -455,8 +455,8 @@ class Program
         // --- The one-dimensional reduction, measured against a true square pixel -----------
 
         // Beyond six pixels the average collapses to an integral over the pixel's radial extent.
-        // Brute-force the real two-dimensional average of a square pixel -- written independently,
-        // in this file -- and report the residual across the full range of plate scales the
+        // Brute-force the real two-dimensional average of a square pixel (written independently,
+        // in this file) and report the residual across the full range of plate scales the
         // display produces, from a tightly sampled core to several rings inside one pixel.
         double worstAzimuthal = 0.0, worstAt = 0.0, worstPlate = 0.0;
         foreach (double pxInLod in new[] { 0.1, 0.5, 1.5, 4.0 })
@@ -486,7 +486,7 @@ class Program
             double step = Math.Abs(inside - outside);
             if (step > worstSeam) { worstSeam = step; seamPlate = pxInLod; }
         }
-        // The seam cannot be made to vanish -- it IS the residual of the one-dimensional reduction,
+        // The seam cannot be made to vanish; it IS the residual of the one-dimensional reduction,
         // evaluated at the radius where that reduction takes over. What must hold is that the
         // crossover adds nothing to the error budget the check above already bounds.
         Check("the crossover between the two regimes adds nothing to the model's own residual",
@@ -554,7 +554,7 @@ class Program
         // entries would change a companion's apparent brightness with the field of view.
         //
         // Sampled at the MIDPOINTS between table entries, which is where linear interpolation of a
-        // convex profile is at its worst -- a check on the table's spacing rather than a
+        // convex profile is at its worst, a check on the table's spacing rather than a
         // restatement of it.
         double tabulated = 0.0, direct = 0.0, worstEntry = 0.0;
         double platePerPxRad = platePerPx / ArcsecPerRad;
@@ -660,7 +660,7 @@ class Program
         double offAxis = Math.Abs(onAngle % 60.0 - 30.0);
         Check("the spikes lie perpendicular to the vanes that cast them",
               offAxis < 1.0,
-              $"brightest azimuth at {onAngle:F2} deg, with vane axes every 60 deg from 0 -- "
+              $"brightest azimuth at {onAngle:F2} deg, with vane axes every 60 deg from 0, "
               + $"perpendicular to the {(onAngle + 90.0) % 180.0:F0} deg vane");
         Check("and they stand well above the ring background they cross",
               bestOn / bestOff > 20.0,
@@ -995,7 +995,7 @@ class Program
               $"{bright.Count} of {found.Count} stars brighter than V = 13");
         Check("photometry is in Johnson V, converted from G by Gaia's own relation",
               brightest > 5.0 && faintest > 16.0 && faintest < 20.0 && withColour > found.Count / 2,
-              $"V from {brightest:F2} to {faintest:F2} at a G < 15 cut -- the faint tail is real: "
+              $"V from {brightest:F2} to {faintest:F2} at a G < 15 cut; the faint tail is real: "
               + $"a heavily reddened bulge star at BP-RP = 5 has G - V = {GaiaPhotometry.GMinusV(5.0):F2}, "
               + $"so G = 15 is V = {15.0 - GaiaPhotometry.GMinusV(5.0):F1}. {withColour} of {found.Count} carry a colour index");
 
@@ -1097,7 +1097,7 @@ class Program
 
     /// <summary>
     /// Brute-force average of the exact intensity over a real SQUARE pixel of side p whose centre
-    /// sits at angular offset theta along the x axis -- written independently of RadialPsfProfile
+    /// sits at angular offset theta along the x axis, written independently of RadialPsfProfile
     /// so it is a genuine check on the radial-extent approximation rather than a restatement of it.
     /// </summary>
     static double SquarePixelAverage(double thetaRad, double pixelRad, double D, double eps, double lambda, int n, int orientations)
@@ -1140,7 +1140,7 @@ class Program
     }
 
     /// <summary>
-    /// The standard inverse gnomonic (TAN) deprojection, from FITS keywords to sky coordinates --
+    /// The standard inverse gnomonic (TAN) deprojection, from FITS keywords to sky coordinates,
     /// written independently here, from the textbook relations, so it is a real check on
     /// FitsWcs rather than a rearrangement of it:
     ///

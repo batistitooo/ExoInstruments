@@ -90,7 +90,7 @@ namespace ExoInstruments.Visualization
                 if (cloudsObjectType == null || cloudsManagerType == null || cloudsMaterialType == null
                     || textureWrapperType == null || cubemapWrapperType == null)
                 {
-                    Debug.Log("[ExoInstruments] EVE (Environmental Visual Enhancements) not detected -- RC20 clouds stay unmodeled.");
+                    Debug.Log("[ExoInstruments] EVE (Environmental Visual Enhancements) not detected; RC20 clouds stay unmodeled.");
                     return;
                 }
 
@@ -103,7 +103,7 @@ namespace ExoInstruments.Visualization
                 texNegativeField = cubemapWrapperType.GetField("texNegative", BindingFlags.NonPublic | BindingFlags.Instance);
 
                 // ObjectList is declared on the GENERIC base GenericEVEManager<CloudsObject>,
-                // not on CloudsManager itself -- walk up BaseType to find it.
+                // not on CloudsManager itself; walk up BaseType to find it.
                 for (Type t = cloudsManagerType.BaseType; t != null; t = t.BaseType)
                 {
                     objectListField = t.GetField("ObjectList", BindingFlags.NonPublic | BindingFlags.Static);
@@ -113,12 +113,12 @@ namespace ExoInstruments.Visualization
                 if (bodyProperty == null || settingsField == null || mainTexField == null
                     || fetchCubeMapMethod == null || texListField == null || objectListField == null)
                 {
-                    Debug.LogWarning("[ExoInstruments] EVE found but its internal layout changed since this was verified -- cloud integration disabled.");
+                    Debug.LogWarning("[ExoInstruments] EVE found but its internal layout changed since this was verified, cloud integration disabled.");
                     return;
                 }
 
                 available = true;
-                Debug.Log("[ExoInstruments] EVE detected -- RC20 clouds will sample real cloud-layer textures where a body has one configured.");
+                Debug.Log("[ExoInstruments] EVE detected; RC20 clouds will sample real cloud-layer textures where a body has one configured.");
             }
             catch (Exception e)
             {

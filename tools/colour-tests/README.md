@@ -28,7 +28,7 @@ with the observer table and the matrix **generated** from colour-science rather 
 (`tools/generate_cie_table.py`), and every step compared back against it.
 
 For a multi-filter frame, `Core/ColourCalibration` fits the 3x3 transform from the instrument's own
-band responses to tristimulus values, over a training set of blackbodies and nebular line spectra --
+band responses to tristimulus values, over a training set of blackbodies and nebular line spectra,
 the same construction as a raw converter's colour matrix.
 
 ## Run
@@ -60,11 +60,11 @@ different Planck constants in one codebase would be worse than either.
 
 A pure emission line is a monochromatic stimulus: it lies **on** the spectral locus and therefore
 outside every real set of display primaries. It is desaturated toward the white point rather than
-clipped, which preserves hue and luminance and gives up only saturation -- the one attribute the
+clipped, which preserves hue and luminance and gives up only saturation, the one attribute the
 display genuinely cannot reproduce. H-alpha at 656.3 nm gives up 62% of its saturation to fit sRGB.
 
 Both directions are handled. A colour can also need **more** of a primary than the display can emit
-at that luminance -- a saturated red at Y = 0.3 asks for a linear R of 1.4 -- and handling only the
+at that luminance; a saturated red at Y = 0.3 asks for a linear R of 1.4, and handling only the
 negative side is what shifts a bright H-alpha nebula's hue as the exposure lengthens, its red channel
 pinning at 1 while green and blue stay put.
 
@@ -72,7 +72,7 @@ pinning at 1 while green and blue stay put.
 
 The fit's control is an **ideal colorimeter**: three bands proportional to `xbar(lambda)/lambda`.
 Divided by wavelength, because tristimulus values are integrals of *energy* against the observer
-while a detector counts *photons* -- so a photon-counting instrument with x-bar-shaped filters is not
+while a detector counts *photons*; so a photon-counting instrument with x-bar-shaped filters is not
 a colorimeter, and getting that wrong left the control at 2.4% rms and made every real residual
 uninterpretable. Corrected, the control fits to **1.5e-8**, which proves the machinery.
 
@@ -83,7 +83,7 @@ Against that floor, the real filter sets:
 | ideal colorimeter | 2e-9 | 9e-9 | 6e-8 |
 | ZWO ASI294MM Pro (RedCat, RC20, CDK1000) | 0.0165 | 0.0756 | 0.32 |
 | FORS2 (ESO measured curves) | 0.0086 | 0.0580 | 0.22 |
-| SPHERE/ZIMPOL | no blue filter exists -- cannot make true colour | | |
+| SPHERE/ZIMPOL | no blue filter exists, cannot make true colour | | |
 
 A just-noticeable chromaticity difference is about 0.002, so a typical star's colour through 88 nm
 top-hat filters carries several JND, and FORS2's measured curves do twice as well as the top-hats.

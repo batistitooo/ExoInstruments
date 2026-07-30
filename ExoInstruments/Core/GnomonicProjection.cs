@@ -107,7 +107,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The inverse: which direction a pixel looks at. Needed by anything that fills the frame
-        /// FROM the sky rather than placing a source ON it -- a diffuse emission map, where every
+        /// FROM the sky rather than placing a source ON it, a diffuse emission map, where every
         /// pixel has to ask what lies behind it.
         ///
         /// Exact rather than iterative: the forward transform is a division by the boresight

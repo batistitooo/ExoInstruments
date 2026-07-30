@@ -10,7 +10,7 @@ namespace ExoInstruments.Visualization
     /// gradient (dark red -> orange -> yellow -> green -> blue, worst to best)
     /// runs across the whole grid rather than stopping at the observable
     /// boundary: unobservable cells get the coldest, darkest red on the same
-    /// scale -- a deliberate, readable "closed" color instead of a near-black
+    /// scale, a deliberate, readable "closed" color instead of a near-black
     /// void that could pass for a rendering gap. Unity-dependent by design,
     /// same split as the other texture classes: Core computes, this class only
     /// paints.
@@ -23,15 +23,15 @@ namespace ExoInstruments.Visualization
         // "closed" cells read as the bottom of the same scale, not a separate palette.
         private static readonly Color[] GradientStops =
         {
-            new Color(0.55f, 0.09f, 0.08f, 1f),  // red -- worst / floor
+            new Color(0.55f, 0.09f, 0.08f, 1f),  // red, worst / floor
             new Color(0.83f, 0.40f, 0.10f, 1f),  // orange
             new Color(0.88f, 0.78f, 0.20f, 1f),  // yellow
             new Color(0.30f, 0.68f, 0.42f, 1f),  // green
             new Color(0.22f, 0.52f, 0.80f, 1f),  // cyan-blue
-            new Color(0.32f, 0.30f, 0.78f, 1f),  // deep blue/violet -- best
+            new Color(0.32f, 0.30f, 0.78f, 1f),  // deep blue/violet, best
         };
 
-        // Unobservable cells: same hue as the gradient floor, darkened further --
+        // Unobservable cells: same hue as the gradient floor, darkened further,
         // reads as "off the bottom of the scale, deliberately", not a void.
         private static readonly Color UnobservableColor = new Color(
             GradientStops[0].r * 0.45f, GradientStops[0].g * 0.45f, GradientStops[0].b * 0.45f, 1f);
@@ -71,7 +71,7 @@ namespace ExoInstruments.Visualization
             return pixels;
         }
 
-        /// <summary>Grid cell under an image-local pixel (x right, y DOWN from the top -- IMGUI convention); false when out of bounds.</summary>
+        /// <summary>Grid cell under an image-local pixel (x right, y DOWN from the top, IMGUI convention); false when out of bounds.</summary>
         public static bool TryHitCell(ObservingForecast.ForecastResult forecast, int width, int height, float x, float yDown, out int row, out int col)
         {
             row = col = 0;
@@ -93,7 +93,7 @@ namespace ExoInstruments.Visualization
             return SampleGradient(q);
         }
 
-        /// <summary>Continuous interpolation across GradientStops -- N-1 evenly spaced segments spanning [0, 1].</summary>
+        /// <summary>Continuous interpolation across GradientStops, N-1 evenly spaced segments spanning [0, 1].</summary>
         private static Color SampleGradient(float t)
         {
             t = Mathf.Clamp01(t);
@@ -104,7 +104,7 @@ namespace ExoInstruments.Visualization
             return Color.Lerp(GradientStops[i], GradientStops[i + 1], local);
         }
 
-        /// <summary>Uploads a pixel buffer into a reusable Texture2D -- same idiom as SkyChartTexture.ApplyToTexture.</summary>
+        /// <summary>Uploads a pixel buffer into a reusable Texture2D, same idiom as SkyChartTexture.ApplyToTexture.</summary>
         public static Texture2D ApplyToTexture(Color[] pixels, int width, int height, Texture2D existing)
         {
             Texture2D tex = existing;

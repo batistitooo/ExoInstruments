@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     ///
     /// WHY A FIT AND NOT AN ASSIGNMENT. A frame taken through a red filter is not the red primary of
     /// a display. It is the source's spectrum integrated against that filter times the optics times
-    /// the detector's quantum efficiency times the atmosphere -- a completely different weighting
+    /// the detector's quantum efficiency times the atmosphere, a completely different weighting
     /// function from the CIE x-bar. Feeding the three band counts straight into R, G and B, which is
     /// what this replaces, produces an image whose colours depend on the filter set rather than on
     /// the sky: the same star comes out a different colour on two instruments.
@@ -22,7 +22,7 @@ namespace ExoInstruments.Core
     ///
     /// where f is the vector of band responses. This is the same construction as a raw converter's
     /// colour matrix, and like one it has a residual, because three numbers cannot describe every
-    /// spectrum -- two different spectra with the same band counts are metamers and must come out the
+    /// spectrum; two different spectra with the same band counts are metamers and must come out the
     /// same colour. That residual is measured and reported rather than hidden.
     ///
     /// THE TRAINING SET is what the instrument is pointed at: blackbodies across the stellar
@@ -48,14 +48,14 @@ namespace ExoInstruments.Core
         /// The same two figures split by what the spectrum is, because they mean different things: a
         /// continuum residual is how well the instrument measures a STAR's colour, and a line
         /// residual is how well it measures a NEBULA's. A filter set with gaps between its bands can
-        /// be excellent at the first and hopeless at the second -- an [O III] line at 500.7 nm falls
+        /// be excellent at the first and hopeless at the second; an [O III] line at 500.7 nm falls
         /// exactly between the RedCat's green and blue passbands, so almost no light from it reaches
         /// either, and no matrix can recover a colour from a measurement that was not made.
         /// </summary>
         public double ContinuumChromaticityError { get; }
         public double LineChromaticityError { get; }
 
-        /// <summary>Median chromaticity error over the continuum training set -- the typical star, rather than the worst one at the end of the temperature range.</summary>
+        /// <summary>Median chromaticity error over the continuum training set, the typical star, rather than the worst one at the end of the temperature range.</summary>
         public double MedianContinuumChromaticityError { get; }
 
         /// <summary>Spectra the fit was built from.</summary>
@@ -75,7 +75,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Fits the transform for a set of bands. Returns null when the bands are degenerate -- fewer
+        /// Fits the transform for a set of bands. Returns null when the bands are degenerate, fewer
         /// than three, or three that cannot span colour because two of them are the same filter.
         /// </summary>
         public static ColourCalibration Fit(IList<SystemResponse> bands)
@@ -94,7 +94,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// The same, for bands given directly as throughput functions of wavelength in metres.
         ///
-        /// This is the form the fit actually needs -- a band is nothing more than its throughput --
+        /// This is the form the fit actually needs; a band is nothing more than its throughput,
         /// and it is what lets the harness fit an IDEAL colorimeter, three bands proportional to the
         /// colour matching functions themselves. Those are a colorimeter by definition, so the fit
         /// against them must come out essentially exact, which separates "the fitting machinery is
@@ -216,7 +216,7 @@ namespace ExoInstruments.Core
         ///
         /// Continuum carries more because it is what a broadband filter set can actually measure and
         /// what most of the sky is: every star, planet and galaxy. Weighting the two equally drags the
-        /// continuum fit toward line spectra it cannot reproduce anyway -- an [O III] line falls in
+        /// continuum fit toward line spectra it cannot reproduce anyway; an [O III] line falls in
         /// the gap between two passbands, and no matrix recovers a colour from light that was not
         /// collected. Both residuals are reported separately so the trade is visible rather than
         /// buried in one number.
@@ -234,7 +234,7 @@ namespace ExoInstruments.Core
         /// Three regimes, all real: an H II region where H-alpha dominates and the forbidden lines
         /// are a quarter of it; the diffuse warm ionised medium where [N II] rivals H-alpha; and a
         /// high-excitation object where [O III] leads. Together they span the colours a line source
-        /// can have, which is what the fit needs -- not a claim about any particular object.
+        /// can have, which is what the fit needs, not a claim about any particular object.
         /// </summary>
         private static IEnumerable<double[]> NebularCombs()
         {
@@ -274,7 +274,7 @@ namespace ExoInstruments.Core
             // The comb is in PHOTON rates, because that is what a line list and a detector both
             // count. A band response is therefore the photon rate times the throughput, while the
             // tristimulus values are defined on ENERGY, so each line's photon rate is converted with
-            // its own hc/lambda -- the constant hc drops out of the normalisation below, leaving 1/lambda.
+            // its own hc/lambda; the constant hc drops out of the normalisation below, leaving 1/lambda.
             // Mixing the two, which this did, put the line samples and the continuum samples on
             // different scales and asked one matrix to fit both: 33% rms rather than 2%.
             var f = new double[bands.Count];

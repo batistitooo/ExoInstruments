@@ -562,14 +562,14 @@ base map continuously instead of leaving a step. Measured residual after matchin
 which is the uncertainty on the *amplitude* of the fine structure and is reported per patch.
 
 **What it does not fix, and one thing it exposes.** Two of these objects are unusable at any
-resolution: both all-sky Hα surveys carry a **detector bleed streak** through M42 -- a saturated
+resolution: both all-sky Hα surveys carry a **detector bleed streak** through M42; a saturated
 core spills charge along a CCD row, leaving a bright horizontal spike across 31% of one row of the
-cutout -- and Carina and the Tarantula have milder versions. It is in the published data and nothing
+cutout, and Carina and the Tarantula have milder versions. It is in the published data and nothing
 here removes it, so the packer detects it (by contrast against the vertical neighbourhood, since a
 row percentile cannot separate a one-row trail from a row that merely crosses a bright nebula) and
 warns per patch. The per-patch **rim agreement** with the base map is printed too, and it is the
 number that says which targets are worth pointing at: the Horsehead, Flame and Eagle join within 8%,
-the Lagoon within 10%, the Rosette within 26% -- while M42's rim disagrees by **392%**.
+the Lagoon within 10%, the Rosette within 26%, while M42's rim disagrees by **392%**.
 
 SHASSA stops at +15°, so IC 1396 (+57°), North America (+44°), the Heart and
 Soul, the Bubble and the Cave stay at 6′. VTSS covers the northern plane at 1.6′ and is the obvious
@@ -629,9 +629,9 @@ Three deeper layers of realism, each validated against an independent profession
 
 **Colour is colorimetry, not channel assignment.** A red filter is not the display's red primary, so
 composing colour by feeding band counts into R, G and B makes the colours depend on the filter set
-rather than on the sky. The mod now carries the full CIE 1931 chain -- the standard observer table
+rather than on the sky. The mod now carries the full CIE 1931 chain: the standard observer table
 generated from `colour-science`, the exact IEC sRGB transform, gamut mapping that desaturates instead
-of clipping so hue survives -- and fits each instrument's own 3x3 colour matrix from its real filter
+of clipping so hue survives, and fits each instrument's own 3x3 colour matrix from its real filter
 curves, the same construction as a raw converter's, with the residual measured and reported (typical
 star: 0.017 in CIE xy for the ZWO top-hats, 0.009 for FORS2's measured curves). Emission lines are an
 order of magnitude worse for any broadband set, which is *why* narrowband imaging uses stated
@@ -641,17 +641,17 @@ colour instead of washing to white.
 
 **The atmosphere is a prism.** Air's refractive index (Filippenko 1982, checked against three
 published formulations to the literature's own spread of 6e-5) depends on wavelength, so a star at
-z = 45 deg is smeared over 1.35" between 400 and 700 nm -- twenty RC20 pixels, three hundred ZIMPOL
+z = 45 deg is smeared over 1.35" between 400 and 700 nm, twenty RC20 pixels, three hundred ZIMPOL
 pixels. The PSF is now built across the passband: each sub-band's kernel at its own wavelength
-(Airy scale, seeing's lambda^(-1/5), dispersion offset), summed with photon weights -- exactly a
+(Airy scale, seeing's lambda^(-1/5), dispersion offset), summed with photon weights, exactly a
 chromatic PSF, since convolution is linear. SPHERE carries its real dispersion corrector (Beuzit et
 al. 2019) at a stated 5% residual.
 
 **The night sky is mostly lines.** ESO's measured sky model (Noll et al. 2012, on the Hanuschik 2003
 Paranal spectra) replaces the flat 21.7 mag/arcsec^2: 11148 R of [O I], Na and OH-forest lines
 against 5290 R of continuum, scaled by the van Rhijn shell geometry (with the [O I] red doublet on
-its own 250 km layer). An [O I] 6300 filter now sees **11x** the sky an [S II] filter does -- the
-real reason ground-based [O I] imaging is hopeless -- and pushed through the Bessell V band and the
+its own 250 km layer). An [O I] 6300 filter now sees **11x** the sky an [S II] filter does (the
+real reason ground-based [O I] imaging is hopeless), and pushed through the Bessell V band and the
 mod's own zero point, the dark sky comes out **V = 21.78** against Patat's measured 21.7 +/- 0.2, a
 number that never entered the model.
 

@@ -3,7 +3,7 @@
 The night sky is not a continuum. Above 85 km the atmosphere glows: the [O I] green line at 557.7 nm,
 the [O I] red doublet at 630.0/636.4, the sodium D pair, and from 650 nm upward a dense forest of OH
 Meinel bands. ESO's model puts **11148 rayleighs into lines** between 350 and 1000 nm against 5290 in
-the residual continuum -- most of the dark sky is lines, and a narrowband filter either sits on one
+the residual continuum: most of the dark sky is lines, and a narrowband filter either sits on one
 or it does not.
 
 The mod's sky used to be a flat 21.7 mag/arcsec^2 through every filter. That made an [O I] 6300 frame
@@ -18,7 +18,7 @@ and an [S II] frame look equally easy, and they are not:
 | [O III] 3 nm | 3.5 R | 1% |
 
 An [O I] filter stares at **11x** the sky an [S II] filter does, in the very line it is trying to
-image -- the real reason nobody images [O I] from the ground while [S II] is routine.
+image, the real reason nobody images [O I] from the ground while [S II] is routine.
 
 ## Where the numbers come from
 
@@ -27,7 +27,7 @@ A92; Jones et al. 2013, A&A 560, A91), whose airglow component rests on the flux
 sky spectra of Hanuschik (2003) and Patat (2008). Solar radio flux 130 sfu, mid-cycle, and stated:
 the red line varies by a factor of several across the solar cycle.
 
-The 0.02 nm model grid is **bin-integrated** onto 0.1 nm -- an average that preserves the integral
+The 0.02 nm model grid is **bin-integrated** onto 0.1 nm, an average that preserves the integral
 over every window exactly, where resampling would move flux and smear the narrow lines. Lines and
 continuum are stored separately because they scale differently with zenith distance.
 

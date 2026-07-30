@@ -29,7 +29,7 @@ namespace ExoInstruments.Visualization
 
         // Pointing offset: how far off-center the star may land, as a fraction
         // of the field of view per axis. With FOV >= 4.6x the separation, star
-        // offset + separation stays inside ~0.38 FOV -- planet always in frame.
+        // offset + separation stays inside ~0.38 FOV, planet always in frame.
         private const double MaxPointingOffsetFovFraction = 0.12;
 
         // Spider spikes used to live here as three invented constants: an amplitude of 4e-4 at
@@ -44,7 +44,7 @@ namespace ExoInstruments.Visualization
 
         // Sky + detector background, 1-sigma at 1 hour of effective integration,
         // in display units (fractions of a magnitude-3 star's peak). Does NOT
-        // scale with the target's brightness -- that's the point: bright stars
+        // scale with the target's brightness; that's the point: bright stars
         // tower over it, faint ones sit closer to it.
         private const double BackgroundSigma1Hr = 3.0e-9;
 
@@ -145,7 +145,7 @@ namespace ExoInstruments.Visualization
 
             // The instrument's real pupil: annular aperture plus the ELT's six 50 cm support vanes.
             // Rings AND spikes come out of this one object, because on the real telescope they come
-            // from one pupil. There is nothing left to tune -- amplitude, angular width and radial
+            // from one pupil. There is nothing left to tune; amplitude, angular width and radial
             // falloff of the spikes are all consequences of the vane geometry.
             var pupil = new PupilDiffraction(
                 DirectImagingSimulator.ApertureMeters,
@@ -193,7 +193,7 @@ namespace ExoInstruments.Visualization
                     double planetIntensity = 0.0;
                     if (placePlanet)
                     {
-                        // Same instrument, same pupil, so the companion carries the same pattern --
+                        // Same instrument, same pupil, so the companion carries the same pattern,
                         // rings included. It had none under the old Gaussian, which is why a
                         // marginally resolved companion used to read as a featureless blob.
                         double dx = xArc - planetX;
@@ -268,7 +268,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Neutral black-orange-white heat ramp (near-IR imaging convention) -- kept for stars with no measured color.</summary>
+        /// <summary>Neutral black-orange-white heat ramp (near-IR imaging convention), kept for stars with no measured color.</summary>
         private static Color MapIntensityHeatRamp(double intensity)
         {
             float v = LogStretch(intensity);
@@ -293,7 +293,7 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Uncorrected bad detector pixels: fixed positions per target (the same
         /// physical detector would put them at fixed positions per instrument, but
-        /// per-target keeps each frame visually distinct). Rendered neutral white --
+        /// per-target keeps each frame visually distinct). Rendered neutral white;
         /// they're electronics, not light, so no false-color tint.
         /// </summary>
         private static void DrawHotPixels(Color[] pixels, int size, int seed)
@@ -308,7 +308,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Faint marker ring at the diffraction limit, centered on the star's actual position -- inside it, nothing is resolvable no matter the exposure.</summary>
+        /// <summary>Faint marker ring at the diffraction limit, centered on the star's actual position; inside it, nothing is resolvable no matter the exposure.</summary>
         private static void DrawDiffractionLimitRing(Color[] pixels, int size, double centerX, double centerY, double radiusPixels)
         {
             var ringColor = new Color(0.3f, 0.6f, 0.7f, 1f);
@@ -335,13 +335,13 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Deterministic [0,1) from a string -- per-target angles and offsets.</summary>
+        /// <summary>Deterministic [0,1) from a string, per-target angles and offsets.</summary>
         private static double Hash01(string name)
         {
             return (DeterministicSeed(name) % 100000) / 100000.0;
         }
 
-        /// <summary>Deterministic per-pixel noise in [0,1) -- a fixed speckle pattern per target, so refreshes don't strobe.</summary>
+        /// <summary>Deterministic per-pixel noise in [0,1), a fixed speckle pattern per target, so refreshes don't strobe.</summary>
         private static double HashNoise01(int x, int y, int seed)
         {
             unchecked

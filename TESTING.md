@@ -41,7 +41,7 @@ difference at all.
 - [ ] **2.2** Move it from -20 C to 0 C. The dark current readout must rise by a
       factor of about 8.2, and from -20 C to +11.8 C by about 25.
 - [ ] **2.3** Select VLT FORS2. The slider is replaced by
-      `fixed at -120 C -- cryogenic detector, not an observer control`.
+      `fixed at -120 C, cryogenic detector, not an observer control`.
 - [ ] **2.4** Switch RC20 -> FORS2 -> RC20. The setpoint resets to the
       instrument's own operating temperature rather than carrying over.
 
@@ -211,7 +211,7 @@ game and an installed map.
       appear. Capture the same field in `Luminance`: the gas should be far weaker against the sky,
       which is the whole point of the narrowband filter.
 - [ ] **11.4** Capture in `OIII` and `SII`. Those filters do not contain H-alpha, so the map must
-      contribute NOTHING -- the deposit is gated on the filter's own passband.
+      contribute NOTHING; the deposit is gated on the filter's own passband.
 - [ ] **11.5** The observing panel reports the mean surface brightness in rayleighs, and an exported
       FITS carries `LINEBRIT` and `LINE`.
 - [ ] **11.6** **Cost.** This is the only per-pixel source in the pipeline. Time a capture in `Ha`
@@ -227,14 +227,14 @@ game and an installed map.
 - [ ] **12.1** **The square is gone.** On SPHERE/ZIMPOL, point at a bright star and expose until it
       saturates. There must be no square, no rectangle and no ring around it: the halo now runs to
       the edge of the frame and fades. The measurements it replaces are in
-      `tools/psf-truncation/README.md` -- the old kernel stopped where the profile was still 3.1e-2
+      `tools/psf-truncation/README.md`; the old kernel stopped where the profile was still 3.1e-2
       of its peak, which is what drew the edge.
 - [ ] **12.2** Same test on the RC20 and the CDK1000 at 1x1, on a bright star. The old 48 px kernel
       stopped at 1.8e-2 and 6.3e-3 of peak respectively, so a saturated star showed a 97 px square.
       It should now be a smooth falloff.
 - [ ] **12.3** **Cost.** The first capture after changing instrument, filter, binning or seeing
       rebuilds the halo spectrum, which measured 463 ms on ZIMPOL. Later captures with the same
-      settings must not pay it again -- time two captures in a row.
+      settings must not pay it again; time two captures in a row.
 - [ ] **12.4** **The nebulae are on the chart.** Crosses, sized to the object's own extent and
       tinted red for line emitters and blue for reflection nebulae. Hovering names the object and
       says what it is and how big; clicking points the telescope at it. Check IC 1396 (2.8 deg) is a
@@ -244,7 +244,7 @@ game and an installed map.
       across. What remains is the 6 arcmin beam of the survey itself, which is real.
 - [ ] **12.6** **What "nothing appeared" was.** The observing panel now reports the brightest pixel
       of the diffuse emission in electrons and as a fraction of full well. On the RedCat, M42 in
-      `Ha` at 30 s is about 67 e-, i.e. 0.1% of the well and 17 ADU of 16383 -- correct, and
+      `Ha` at 30 s is about 67 e-, i.e. 0.1% of the well and 17 ADU of 16383, correct, and
       invisible in a linear stretch. Check the readout matches roughly what the frame shows, and
       that the RC20 reports far less for the same object (a 55x finer plate scale collects 3000x
       less light per pixel from an extended source).
@@ -271,13 +271,13 @@ frame to divide by.
       clearly elongated at the catalogued position angle, and have a bright nucleus. Check the
       readout line `Galaxies in frame: <n> drawn`.
 - [ ] **13.4** **The same galaxy at the CDK1000.** The field is 11' x 7.5', so M31's disk covers it
-      entirely and the frame should be a smooth gradient with no edge -- the search deliberately
+      entirely and the frame should be a smooth gradient with no edge; the search deliberately
       includes galaxies whose centre lies outside the field.
 - [ ] **13.5** **An elliptical against a spiral**, e.g. M87 against M101. The elliptical's light must
       be far more concentrated (Sersic n = 4 against n = 1) at a similar total magnitude.
 - [ ] **13.6** **[N II] comes with H-alpha.** Photograph M42 or the Rosette in `Ha` on the RedCat.
-      The readout must now say which lines the filter admitted -- for a 7 nm filter that is
-      `[N II] 6548, H-alpha, [N II] 6584` -- and report the temperature the ratios were taken at.
+      The readout must now say which lines the filter admitted; for a 7 nm filter that is
+      `[N II] 6548, H-alpha, [N II] 6584`, and report the temperature the ratios were taken at.
 - [ ] **13.7** **The [S II] position works.** The same target in `SII` should show the nebula at
       roughly a third of its H-alpha brightness, and nothing at all in `OIII`, `OII` or `OI`, which
       are not derived from an H-alpha map on purpose.
@@ -289,7 +289,7 @@ frame to divide by.
 
 - [ ] **14.1** **The Elephant's Trunk again.** RedCat, `Ha`, 4x4, 40 s, log. It used to be uniform
       grey fog because the subject occupied 0.4 of 255 display levels. With the new
-      `Auto black/white points` toggle on -- it is on by default -- the same frame should show the
+      `Auto black/white points` toggle on (it is on by default), the same frame should show the
       nebula's gradient across the full display range.
 - [ ] **14.2** The readout under the stretch buttons reports the limits, e.g.
       `showing 0.106% to 0.249% of full scale, i.e. a 697x stretch`.
@@ -315,15 +315,15 @@ frame to divide by.
       the CDK1000 in `Ha`. The frame must show the ridge with structure and the dark cloud beside it,
       not a smooth gradient. The readout must say
       `from the IC 434 Horsehead high-resolution patch at 0.86' sampling`.
-- [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it --
-      31% of one cutout row, a bright horizontal spike -- and its patch rim disagrees with the base
+- [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it (
+      31% of one cutout row, a bright horizontal spike), and its patch rim disagrees with the base
       map by 392%. The packer warns about it. Use the Lagoon (rim 10%), the Horsehead (8%), the Flame
       (7%) or the Eagle (7%) instead.
 - [ ] **15.3b** **M42 at the RedCat.** Same check. The patch covers 1.1 degrees, the RedCat's field is
-      4.4 x 3.0, so the frame does NOT fit inside the patch and must fall back to the all-sky map --
+      4.4 x 3.0, so the frame does NOT fit inside the patch and must fall back to the all-sky map;
       the readout should say so. Use the RC20 or CDK1000 to get inside the patch.
-- [ ] **15.4** **A target with no patch** -- IC 1396 at +57 degrees is outside SHASSA -- must report
-      `from the all-sky map at 3.44' sampling (6' beam) -- no patch covers this field`.
+- [ ] **15.4** **A target with no patch**: IC 1396 at +57 degrees is outside SHASSA, must report
+      `from the all-sky map at 3.44' sampling (6' beam); no patch covers this field`.
 - [ ] **15.5** **No seam.** Frame a patch edge with an instrument whose field is small enough to sit
       just inside, then just outside. The two frames should differ in detail, never show a step.
 - [ ] **15.6** **Cost.** Time a capture inside a patch against one outside at the same binning. The
@@ -340,7 +340,7 @@ frame to divide by.
       must state the fitted transform's residuals.
 - [ ] **16.3** **A nebula core must hold its colour.** Stack Ha+OIII on M8's core (SHASSA patch
       installed) in HOO. As total integration grows, the core must stay salmon-red rather than
-      washing to white -- the stretch now applies to luminance only.
+      washing to white; the stretch now applies to luminance only.
 - [ ] **16.4** **SPHERE cannot do true colour** (no blue filter exists) and the composite must say
       so rather than produce something.
 
@@ -350,24 +350,24 @@ frame to divide by.
       z = N deg = M px toward the zenith`. At the zenith it reads ~0; it grows as tan z.
 - [ ] **17.2** **Stars at low altitude are tiny spectra.** RC20, `Luminance`, a bright star below
       30 degrees altitude: the PSF should be visibly elongated (~20 px at z = 60), and the same shot
-      in `Ha` (7 nm) should be nearly round -- the smear scales with the passband width.
+      in `Ha` (7 nm) should be nearly round; the smear scales with the passband width.
 - [ ] **17.3** **SPHERE stays sharp.** The same low-altitude shot on SPHERE must show almost no
       elongation, and the readout must say "after the instrument's dispersion corrector".
 - [ ] **17.4** **Direction check.** The elongation must point along the line from the target toward
-      the zenith in the frame -- on an alt-az frame that is "up", rotated by the field rotation.
+      the zenith in the frame, on an alt-az frame that is "up", rotated by the field rotation.
 
 ## 18. The sky's own emission lines
 
 - [ ] **18.1** **The readout.** Any capture shows `Airglow in this band: X R (Y% sky emission
       lines...)`. Luminance at the zenith reads a few R-per-band with ~36% lines.
 - [ ] **18.2** **[O I] 6300 is hopeless and now says why.** Select the OI filter: the airglow
-      readout should show ~10x the [S II] figure, nearly all lines -- the sky glowing in the very
+      readout should show ~10x the [S II] figure, nearly all lines, the sky glowing in the very
       line the filter isolates.
 - [ ] **18.3** **The sky brightens toward the horizon** more slowly than sec z (van Rhijn): compare
       the airglow readout at the zenith and at 60 degrees altitude difference; the ratio should be
       ~1.9, not 2.0.
 - [ ] **18.4** **The dark sky is still 21.7.** The `Sky` figure on a moonless night at the zenith
-      should read close to 21.7-21.8 mag/arcsec^2 -- now derived from ESO's measured spectrum plus
+      should read close to 21.7-21.8 mag/arcsec^2, now derived from ESO's measured spectrum plus
       the zodiacal term rather than asserted.
 
 ## 19. Registration and the pipelined series
@@ -385,3 +385,24 @@ frame to divide by.
 - [ ] **19.4** **Nothing is dropped or double-counted.** A series of 8 must end with exactly 8 subs
       on that filter, and the progress counter must reach 8/8.
 - [ ] **19.5** **Cancel mid-series** leaves the subs already collected and stops cleanly.
+
+## 20. Exporting a stack
+
+- [ ] **20.1** **The folder.** Any export writes into
+      `KSP/Screenshots/ExoInstruments/<Target>_<Camera>_<timestamp>/`, created on demand. Two sessions
+      on the same object with different instruments must land in different folders.
+- [ ] **20.2** **Composite** writes 2 files: the colour PNG as displayed, and a FITS of its
+      luminance. The filenames carry the palette (TrueColour / HOO / SHOHubble).
+- [ ] **20.3** **One per filter.** Capture 10 x `Ha` and 10 x `SII`, compose, then export: exactly
+      **4 files** -- `..._Ha_stack.fits/.png` and `..._SII_stack.fits/.png`. Each FITS must carry its
+      OWN band in `FILTER`/`WAVELNTH`/`BANDWID`, the stack's total in `EXPTIME`, and `NSTACK = 10`.
+- [ ] **20.4** **Every sub.** Same stack exported this way gives **40 files** -- 20 FITS and 20 PNG,
+      numbered `_Ha_sub001` .. `_Ha_sub010`, `_SII_sub001` .. Each carries its own single exposure in
+      `EXPTIME` and `NSTACK = 1`.
+- [ ] **20.5** **The subs are unregistered.** Open two `sub` FITS from an unguided series in an
+      external viewer: the field must be offset between them. That is the point -- the registration is
+      left to the external package. The `_stack` frames are registered.
+- [ ] **20.6** **The PNGs are quick looks, the FITS are the data.** A per-sub PNG is stretched the
+      same way the live preview is (zscale + the selected curve); the FITS beside it is linear ADU.
+- [ ] **20.7** **Export with no composed image** but with subs held: `Composite` should say to compose
+      first, while `One per filter` and `Every sub` must still work.

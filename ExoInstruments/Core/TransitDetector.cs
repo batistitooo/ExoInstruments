@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
         /// A candidate box must contain at least this many points. With
         /// thousands of trial (period, phase, width) combinations, a box
         /// holding a handful of samples will eventually catch a low-flux noise
-        /// cluster and clear any SNR threshold -- the small-number false alarms
+        /// cluster and clear any SNR threshold, the small-number false alarms
         /// real BLS searches suppress the same way.
         /// </summary>
         public const int MinInTransitPoints = 12;
@@ -35,7 +35,7 @@ namespace ExoInstruments.Core
         /// transit's duration scales as P^(1/3) while the period grows as P, so
         /// duty shrinks as P^(-2/3) (Kepler's third law through T14 ~ P/(pi*a/R*);
         /// the same q ~ P^(-2/3) envelope BLS implementations use). C = 0.23 is
-        /// ~3x the solar-density value -- room for giants and grazing chords,
+        /// ~3x the solar-density value, room for giants and grazing chords,
         /// but a 54-hour "transit" on a 15-day period (exactly what a starspot
         /// rotation signal tries to book itself as) stays rejected.
         /// </summary>
@@ -44,7 +44,7 @@ namespace ExoInstruments.Core
         private const int MinPhaseBins = 50;
         // 400 -> 320: the box-slide cost scales roughly with bins^2 (bins x
         // maxWidth, and maxWidth itself scales with bins), so this alone cuts
-        // it to ~(320/400)^2 = 64% -- on a long baseline with thousands of
+        // it to ~(320/400)^2 = 64%; on a long baseline with thousands of
         // samples this search was legitimately taking minutes with nothing on
         // screen but a static "Analyzing..." label (see the elapsed-time
         // readout added where this button is drawn). Still well above
@@ -56,7 +56,7 @@ namespace ExoInstruments.Core
         // Auto period grid (periodSteps = 0): uniform in frequency, not period.
         // The trial-period spacing must keep a transit's phase drift across the
         // whole baseline under a fraction of its own duration, or the folded
-        // transit smears out and the peak dies -- the requirement is
+        // transit smears out and the peak dies; the requirement is
         // dP < q*P^2/(OverSampling*T), which in frequency space (df = dP/P^2)
         // is a *constant* step df = q/(OverSampling*T): exactly why every real
         // BLS implementation (Kovacs 2002; astropy BLS) walks a uniform
@@ -211,7 +211,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Iterative multi-planet transit search, the photometric analogue of
         /// RvDetector.DetectMultiple's prewhitening: detect the strongest box,
-        /// mask out its in-transit points (with margin -- a subtraction would
+        /// mask out its in-transit points (with margin; a subtraction would
         /// need the exact shape, masking only needs the ephemeris), search the
         /// remaining points for the next signal, repeat until nothing clears the
         /// threshold or maxPlanets is reached. This is how compact multi-transit
@@ -219,12 +219,12 @@ namespace ExoInstruments.Core
         /// apart from a single light curve.
         ///
         /// Every attempted stage is returned (the final, below-threshold one
-        /// included), each carrying the masked series it searched -- that's the
+        /// included), each carrying the masked series it searched; that's the
         /// series its phase-folded plot should display.
         /// </summary>
         public const int MaxPlanetsPerSearch = 4;
 
-        /// <summary>Masking margin around the detected box, in box durations -- covers ingress/egress wings and modest period error.</summary>
+        /// <summary>Masking margin around the detected box, in box durations, covers ingress/egress wings and modest period error.</summary>
         private const double MaskMarginFactor = 0.6;
 
         public static List<TransitDetectionStage> DetectMultiple(
@@ -238,7 +238,7 @@ namespace ExoInstruments.Core
             // Detrend first: starspot rotation puts real, coherent structure in
             // the light curve, and once the genuine transits are masked out the
             // residual search will happily book a spot dip as a "transit" (long
-            // period, maximum duty -- the classic false positive). Every real
+            // period, maximum duty, the classic false positive). Every real
             // multi-planet pipeline detrends before its BLS for exactly this reason.
             var working = DetrendSamples(samples);
 
@@ -276,11 +276,11 @@ namespace ExoInstruments.Core
         /// each bin's median flux, linearly interpolate between bin centers, and
         /// divide that slow trend out. A median over half a day barely feels a
         /// few-hour transit (small duty inside the window) but tracks starspot
-        /// rotation (4+ day periods, see StellarActivity) faithfully -- so the
+        /// rotation (4+ day periods, see StellarActivity) faithfully; so the
         /// astrophysical trend comes out while the transits stay in. Public so
         /// the transit-timing analysis can run on the same cleaned series (a
         /// local spot slope across a transit window biases the measured
-        /// mid-time coherently at the rotation period -- a textbook TTV false
+        /// mid-time coherently at the rotation period, a textbook TTV false
         /// positive).
         /// </summary>
         public static List<FluxSample> DetrendSamples(List<FluxSample> samples, double binSeconds = 43200.0)
@@ -291,7 +291,7 @@ namespace ExoInstruments.Core
             double span = samples[samples.Count - 1].Ut - t0;
             int binCount = Math.Max(1, (int)Math.Ceiling(span / binSeconds));
             // Fewer than 3 usable bins: the "trend" would be indistinguishable
-            // from the signal itself -- leave the data alone.
+            // from the signal itself; leave the data alone.
             if (binCount < 3) return samples;
 
             var binValues = new List<double>[binCount];
@@ -303,7 +303,7 @@ namespace ExoInstruments.Core
                 binValues[b].Add(samples[i].Flux);
             }
 
-            // Median per populated bin (day/night gaps leave empty bins -- skipped).
+            // Median per populated bin (day/night gaps leave empty bins, skipped).
             var binCenters = new List<double>();
             var binMedians = new List<double>();
             for (int b = 0; b < binCount; b++)

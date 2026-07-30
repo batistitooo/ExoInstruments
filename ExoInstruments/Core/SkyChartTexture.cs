@@ -26,7 +26,7 @@ namespace ExoInstruments.Visualization
         public bool IsBody;
         public float BodyMarkerRadiusPx;
         public Color BodyColor;
-        /// <summary>True only for the body currently selected as the photography target -- the sole condition that draws its ring, so bodies don't look "search-highlighted" by default.</summary>
+        /// <summary>True only for the body currently selected as the photography target, the sole condition that draws its ring, so bodies don't look "search-highlighted" by default.</summary>
         public bool IsSelectedTarget;
 
         // --- Deep-sky points ----------------------------------------------
@@ -38,7 +38,7 @@ namespace ExoInstruments.Visualization
 
     /// <summary>
     /// Camera state for the sky chart. Pan is expressed in the *raw* (unzoomed)
-    /// dome-projection pixel space -- the raw-space point that should sit at the
+    /// dome-projection pixel space, the raw-space point that should sit at the
     /// center of the viewport. Zoom 1 = whole sky fits the texture (the old
     /// fixed behavior); higher values zoom in, panning around at that scale.
     /// </summary>
@@ -66,7 +66,7 @@ namespace ExoInstruments.Visualization
         private static readonly Color GridColor = new Color(0.2f, 0.2f, 0.24f, 0.5f);
 
         // Fallback tint for the rare star with no effective temperature on
-        // record at all (neither catalog star_teff nor a BSC B-V color) --
+        // record at all (neither catalog star_teff nor a BSC B-V color),
         // neutral blue-white rather than a color that implies a spectral class.
         private static readonly Color UnknownTeffTint = new Color(0.85f, 0.85f, 0.92f, 1f);
 
@@ -93,7 +93,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Marker radius in screen pixels -- grows with zoom so stars are visibly
+        /// Marker radius in screen pixels; grows with zoom so stars are visibly
         /// bigger (not just further apart) at higher zoom. Capped so it never
         /// becomes a blob.
         /// </summary>
@@ -189,14 +189,14 @@ namespace ExoInstruments.Visualization
 
         // Deep-sky markers: a cross rather than a disc, because a nebula is not a point source and
         // a disc among the star discs would read as another star. Line emitters and reflection
-        // nebulae are tinted apart -- one shows in a narrowband filter and the other cannot.
+        // nebulae are tinted apart; one shows in a narrowband filter and the other cannot.
         private static readonly Color EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
         private static readonly Color ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
         private static readonly Color GalaxyMarkerColor = new Color(0.95f, 0.86f, 0.55f, 1f);
 
         /// <summary>
         /// Cross sized to the object's own apparent extent, so the chart says how much sky it
-        /// covers as well as where it is -- the difference between the 2 degree North America and
+        /// covers as well as where it is, the difference between the 2 degree North America and
         /// the 25 arcsec Cat's Eye is the difference between a wide-field target and one that needs
         /// the CDK. Floored so the small ones stay clickable, capped so the big ones stay a marker.
         /// </summary>
@@ -328,7 +328,7 @@ namespace ExoInstruments.Visualization
             return (float)(MinBrightnessFraction + (1.0 - MinBrightnessFraction) * t);
         }
 
-        /// <summary>Thin flat outline just outside the star's fill -- the interactivity cue now that fill color is the star's real hue, not a flat highlight color. Fully opaque (no alpha blend), matching a real finder chart's plain ink circle rather than a glowing HUD marker.</summary>
+        /// <summary>Thin flat outline just outside the star's fill, the interactivity cue now that fill color is the star's real hue, not a flat highlight color. Fully opaque (no alpha blend), matching a real finder chart's plain ink circle rather than a glowing HUD marker.</summary>
         private static void DrawHighlightRing(Color[] pixels, int width, int height, float cx, float cy, float innerRadius, float zoom)
         {
             float thickness = Mathf.Max(1f, 0.6f + (zoom - 1f) * 0.12f);

@@ -11,7 +11,7 @@ namespace ExoInstruments.Core
     /// catalogue and the render.
     ///
     /// PIXEL INTEGRATION, and why the centre needs it. A Sersic profile of index n has an infinite
-    /// central slope -- for n = 4 the surface brightness rises as R^(-3/4) all the way in -- so the
+    /// central slope; for n = 4 the surface brightness rises as R^(-3/4) all the way in, so the
     /// value at a pixel's centre is not its average over the pixel, and point sampling a galaxy's
     /// nucleus overstates or understates it by an unbounded factor depending only on where the
     /// pixel grid happens to fall. Pixels near the centre are therefore integrated by subdivision,
@@ -43,8 +43,8 @@ namespace ExoInstruments.Core
         /// hardest case a real catalogue contains: an n = 4 spheroid whose half-light radius is
         /// three pixels and whose minor axis is a quarter of that. There the variation across the
         /// central pixel asks for nearly 300 subdivisions and the cap bound hard, losing 2.6e-3 of
-        /// the total. Only a handful of pixels ever reach the ceiling -- the requirement falls as
-        /// 1/R -- so raising it costs a bounded number of extra samples per galaxy, not a factor.
+        /// the total. Only a handful of pixels ever reach the ceiling; the requirement falls as
+        /// 1/R, so raising it costs a bounded number of extra samples per galaxy, not a factor.
         /// </summary>
         private const int MaxSubdivision = 128;
 
@@ -140,7 +140,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Radius, in effective radii, at which the profile's surface brightness falls to
-        /// floorElectronsPerPixel -- the point past which the galaxy cannot register on this
+        /// floorElectronsPerPixel, the point past which the galaxy cannot register on this
         /// detector at all.
         ///
         /// This is the truncation criterion that makes the cut physical rather than arbitrary: a

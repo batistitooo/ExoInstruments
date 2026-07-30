@@ -11,7 +11,7 @@ namespace ExoInstruments.Core
     /// Alongside it, DetectorTemperatureCelsius was carried through to the FITS CCD-TEMP keyword
     /// and otherwise did nothing: two numbers that are physically one relationship, with the
     /// relationship missing. Dark current is the single most temperature-sensitive quantity in the
-    /// whole sensor chain -- it roughly doubles every 6 or 7 degrees -- so a detector temperature
+    /// whole sensor chain; it roughly doubles every 6 or 7 degrees, so a detector temperature
     /// that changes nothing is the most misleading kind of unmodelled parameter.
     ///
     /// THE PUBLISHED MODEL. Thermal generation in the depletion region, as given by Janesick
@@ -59,7 +59,7 @@ namespace ExoInstruments.Core
         /// <summary>Varshni beta for silicon, K.</summary>
         public const double VarshniBetaKelvin = 1108.0;
 
-        /// <summary>Boltzmann constant in eV/K -- the unit this equation is written in (CODATA 2018 exact value 1.380649e-23 J/K over the exact elementary charge).</summary>
+        /// <summary>Boltzmann constant in eV/K, the unit this equation is written in (CODATA 2018 exact value 1.380649e-23 J/K over the exact elementary charge).</summary>
         public const double BoltzmannEvPerKelvin = 8.617333262e-5;
 
         /// <summary>
@@ -88,7 +88,7 @@ namespace ExoInstruments.Core
         /// D(T)/D(T_ref): the factor the published dark current at the reference temperature must
         /// be multiplied by to give the rate at another temperature.
         ///
-        /// Returns 0 at or below absolute zero, and 1 when the two temperatures agree -- which is
+        /// Returns 0 at or below absolute zero, and 1 when the two temperatures agree, which is
         /// the case for every instrument today, since none yet exposes a cooler setpoint, so this
         /// changes no existing behaviour until one does.
         /// </summary>
@@ -127,7 +127,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Temperature change, in degrees, over which dark current doubles at the given
-        /// temperature. Not used by the pipeline -- it exists because it is the number detector
+        /// temperature. Not used by the pipeline; it exists because it is the number detector
         /// engineers quote and remember ("dark doubles every 6 to 7 degrees"), so it is the
         /// cheapest way to check this model against common knowledge rather than only against
         /// itself.
@@ -147,7 +147,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// What a hot pixel is: a pixel whose depletion-region generation rate is anomalously high
         /// because of a bulk lattice defect, so its dark current is a MULTIPLE of the array's
-        /// median. Widenhorn et al. (2002) establish this directly -- the depletion component that
+        /// median. Widenhorn et al. (2002) establish this directly; the depletion component that
         /// dominates at cooled temperatures is the one that varies from pixel to pixel, while the
         /// diffusion component that dominates when warm is uniform across the array.
         ///
@@ -160,8 +160,8 @@ namespace ExoInstruments.Core
         ///
         /// The multiplier is a DEFINITION rather than a measurement, and is stated as one: it is
         /// set so that a hot pixel just reaches the converter's top code in the instrument's own
-        /// longest supported exposure. That ties it to two real published instrument parameters --
-        /// the maximum exposure and the ADC range -- instead of to a free constant, and it
+        /// longest supported exposure. That ties it to two real published instrument parameters (
+        /// the maximum exposure and the ADC range) instead of to a free constant, and it
         /// reproduces the operational definition a sensor characterisation uses ("a pixel that
         /// saturates in a nominal long dark"). Per-device hot-pixel dark rates are not published
         /// for any camera in this roster.

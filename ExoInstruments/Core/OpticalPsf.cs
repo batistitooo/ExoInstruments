@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     ///
     /// Two exact ingredients, convolved:
     ///
-    /// 1. DIFFRACTION -- the Fraunhofer pattern of the telescope's own ANNULAR pupil (circular
+    /// 1. DIFFRACTION: the Fraunhofer pattern of the telescope's own ANNULAR pupil (circular
     ///    aperture with the real central obstruction of its secondary mirror). This is
     ///    |FT(pupil)|^2 in closed form (Born &amp; Wolf, "Principles of Optics", the obstructed-
     ///    aperture case): with x = pi*D*theta/lambda and obstruction ratio eps,
@@ -19,7 +19,7 @@ namespace ExoInstruments.Core
     ///    Real Airy rings, and the real effect of the obstruction on them (a larger secondary
     ///    pushes energy out of the core and into the first ring). No profile is assumed.
     ///
-    /// 2. ATMOSPHERE -- the exact long-exposure Kolmogorov term, not a fitted Gaussian or
+    /// 2. ATMOSPHERE: the exact long-exposure Kolmogorov term, not a fitted Gaussian or
     ///    Moffat profile. Fried (1966) gives the long-exposure atmospheric transfer function
     ///
     ///        T_atm(f) = exp[ -3.44 * (lambda*f/r0)^(5/3) ]
@@ -32,13 +32,13 @@ namespace ExoInstruments.Core
     ///
     /// Why this matters, and why the box blur it replaces was wrong: a box kernel's transfer
     /// function is a sinc, which has ZEROS and NEGATIVE LOBES. It doesn't merely soften an
-    /// image -- at some spatial frequencies it annihilates detail outright and at others it
+    /// image; at some spatial frequencies it annihilates detail outright and at others it
     /// inverts contrast. Mid-scale structure (crater-sized features on a resolved planetary
     /// disk) sits squarely in that range, so a box blur destroyed far more real detail than its
     /// nominal width implied, and did so unphysically. Every profile here has a monotonically
     /// decreasing transfer function with no zeros inside the passband.
     ///
-    /// Pure C# with no Unity dependency, like the rest of Core -- so it can be exercised by a
+    /// Pure C# with no Unity dependency, like the rest of Core; so it can be exercised by a
     /// standalone harness against published reference values.
     /// </summary>
     public static class OpticalPsf
@@ -56,17 +56,17 @@ namespace ExoInstruments.Core
         /// Raised from 48 to 128 because 48 was not a faint place to stop. At the RC20's 0.0688
         /// arcsec pixels it fell 1.32 seeing-FWHM out, where the Kolmogorov profile is still
         /// 1.8e-2 of its peak, and the renormalisation that follows conserves the flux but not
-        /// that step -- so a bright star showed a square edge at 1.8% of its own core brightness.
+        /// that step; so a bright star showed a square edge at 1.8% of its own core brightness.
         /// 128 reaches 3.5 FWHM and 4.3e-4 there, 42 times fainter, for about 1.5x the transform
         /// work (a wider kernel needs a larger tile, but proportionally fewer of them). The
         /// residuals per instrument are measured in tools/psf-truncation.
         ///
-        /// A wide, heavy-tailed component cannot be handled by raising this further -- see
+        /// A wide, heavy-tailed component cannot be handled by raising this further; see
         /// FourierConvolution.RadialKernelSpectrum, which carries one across the whole frame.
         /// </summary>
         private const int MaxKernelRadiusPx = 128;
 
-        /// <summary>Kernel half-width is this many times the relevant FWHM before the ceiling above applies -- far enough out to carry the first several Airy rings.</summary>
+        /// <summary>Kernel half-width is this many times the relevant FWHM before the ceiling above applies, far enough out to carry the first several Airy rings.</summary>
         private const double KernelRadiusInFwhm = 3.0;
 
         /// <summary>
@@ -83,7 +83,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// J0, via the standard polynomial approximations of Abramowitz &amp; Stegun 9.4.1/9.4.3
         /// (absolute error &lt; 5e-8 and &lt; 1.6e-8 respectively). A numerical method for a
-        /// well-defined special function -- not a physical approximation.
+        /// well-defined special function, not a physical approximation.
         /// </summary>
         public static double BesselJ0(double x)
         {
@@ -151,7 +151,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// FWHM (arcsec) of that diffraction pattern's core, found by bisection on the exact
-        /// profile rather than quoted from the usual 1.028*lambda/D rule of thumb -- the rule
+        /// profile rather than quoted from the usual 1.028*lambda/D rule of thumb; the rule
         /// only holds for an UNOBSTRUCTED aperture, and every telescope modelled here has a
         /// secondary mirror that narrows the core and redistributes energy into the rings.
         /// </summary>
@@ -160,7 +160,7 @@ namespace ExoInstruments.Core
             if (apertureMeters <= 0.0 || wavelengthMeters <= 0.0) return 0.0;
 
             // The half-power point always lies inside the first null, which itself is at or
-            // within 1.22*lambda/D for any obstruction -- a safe bracket.
+            // within 1.22*lambda/D for any obstruction, a safe bracket.
             double hi = 1.22 * wavelengthMeters / apertureMeters;
             double lo = 0.0;
             for (int i = 0; i < 60; i++)
@@ -212,7 +212,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Kernel half-width the atmospheric term needs, in units of its own FWHM, to fall to
-        /// AtmosphericTailFraction of its peak -- measured from the profile rather than assumed,
+        /// AtmosphericTailFraction of its peak, measured from the profile rather than assumed,
         /// in the same reduced variable and by the same bisection as SeeingFwhmOverLambdaR0. The
         /// profile has one shape, so this is a constant of it and not of any instrument.
         ///
@@ -238,7 +238,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Fried parameter r0 (metres) corresponding to a seeing FWHM, via the long-exposure
-        /// relation FWHM = k * lambda / r0 with k measured from the profile itself -- see
+        /// relation FWHM = k * lambda / r0 with k measured from the profile itself; see
         /// SeeingFwhmOverLambdaR0 for why the constant is measured rather than quoted.
         /// </summary>
         public static double FriedParameterMeters(double seeingFwhmArcsec, double wavelengthMeters)
@@ -250,7 +250,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Factor turning AtmosphericIntensity's output into the fraction of a source's TOTAL flux
-        /// landing in one pixel -- the normalisation, in closed form, with nothing summed.
+        /// landing in one pixel, the normalisation, in closed form, with nothing summed.
         ///
         /// AtmosphericIntensity evaluates PSF(rho) = Int_0^inf T(u) J0(rho u) u du, which is the
         /// order-zero Hankel transform of Fried's OTF. That transform is self-reciprocal, so
@@ -261,7 +261,7 @@ namespace ExoInstruments.Core
         /// Why it matters that this is analytic: the alternative is to divide a finite kernel by
         /// its own sum, which quietly hands the flux that fell outside the kernel back to the
         /// pixels inside it. For a compact PSF that is a rounding error. For a seeing halo whose
-        /// wings genuinely run off the edge of the sensor, it is an invention -- that light left,
+        /// wings genuinely run off the edge of the sensor, it is an invention; that light left,
         /// and a detector never saw it.
         /// </summary>
         public static double AtmosphericPerPixelScale(double friedParameterMeters, double wavelengthMeters, double plateScaleArcsecPerPixel)
@@ -316,12 +316,12 @@ namespace ExoInstruments.Core
         /// Evaluates the zeroth-order Hankel transform of Fried's OTF,
         ///     PSF(r) proportional to  Integral[ exp(-3.44 u^(5/3)) * J0(rho*u) * u , {u,0,inf} ],
         /// after substituting u = lambda*f/r0, which leaves rho = 2*pi*r0*theta/lambda as the
-        /// only argument. The integrand is killed by its own exponential -- at u = 4,
-        /// exp(-3.44*u^(5/3)) is below 1e-15 -- so the upper limit is finite in practice.
+        /// only argument. The integrand is killed by its own exponential: at u = 4,
+        /// exp(-3.44*u^(5/3)) is below 1e-15, so the upper limit is finite in practice.
         ///
         /// THE STEP COUNT HAS TO FOLLOW RHO, and a fixed one is where this used to be wrong. The
         /// integrand oscillates with J0(rho*u), whose period in u is 2*pi/rho, so the number of
-        /// oscillations across the range grows linearly with rho -- which is to say, with how far
+        /// oscillations across the range grows linearly with rho, which is to say, with how far
         /// into the wings the profile is being asked about. At a fixed 512 steps the quadrature was
         /// accurate to 0.3% out to 5 lambda/r0 and then failed progressively: it returned 4.5% high
         /// at 8 lambda/r0, 46% high at 12, and a factor of 10.2 high at 20, turning the true
@@ -390,7 +390,7 @@ namespace ExoInstruments.Core
         /// convolved, which is the definition of what the light actually undergoes (the two
         /// effects act in series) rather than a blend or a quadrature-summed single profile.
         ///
-        /// atmosphericFwhmArcsec == 0 gives a purely diffraction-limited kernel -- correct for a
+        /// atmosphericFwhmArcsec == 0 gives a purely diffraction-limited kernel, correct for a
         /// space telescope, and the right limiting behaviour for an instrument whose atmospheric
         /// residual has been driven below its own diffraction limit.
         /// </summary>
@@ -407,7 +407,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// As above, but for a pupil whose secondary sits on a spider. With vanes the diffraction
-        /// term stops being radially symmetric -- it grows the spikes every real reflector shows --
+        /// term stops being radially symmetric; it grows the spikes every real reflector shows,
         /// so it is sampled in two dimensions from PupilDiffraction instead of from the radial
         /// closed form. The atmospheric and defocus terms are unaffected and stay radial.
         ///
@@ -433,7 +433,7 @@ namespace ExoInstruments.Core
             if (plateScaleArcsecPerPixel <= 0.0 || apertureMeters <= 0.0 || wavelengthMeters <= 0.0)
                 return null;
 
-            // Component 1: diffraction. Always present -- it is the instrument's hard limit.
+            // Component 1: diffraction. Always present; it is the instrument's hard limit.
             double airyFwhm = AiryFwhmArcsec(apertureMeters, obstructionRatio, wavelengthMeters);
             int accR = RadiusFor(airyFwhm, plateScaleArcsecPerPixel);
             double[] acc;
@@ -454,7 +454,7 @@ namespace ExoInstruments.Core
             }
 
             // Component 2: atmosphere. The effects act in series along the light path, so they
-            // compose by convolution -- not by blending profiles or summing widths in quadrature.
+            // compose by convolution, not by blending profiles or summing widths in quadrature.
             double atmFwhm = Math.Max(0.0, atmosphericFwhmArcsec);
             if (atmFwhm > 0.0)
             {
@@ -475,7 +475,7 @@ namespace ExoInstruments.Core
 
             // Component 3: defocus, when the observer has taken manual focus off its optimum.
             // Geometrical optics gives a uniformly illuminated blur disc of the defocused
-            // cone's radius -- so this one really is a flat-topped kernel, unlike the box blur
+            // cone's radius; so this one really is a flat-topped kernel, unlike the box blur
             // that used to stand in for the whole PSF. Its transfer function has genuine zeros,
             // which is a real property of defocus (they are why a defocused image can show
             // contrast reversals), not a numerical artefact.
@@ -518,8 +518,8 @@ namespace ExoInstruments.Core
         /// zenith distance, both the same for every source in a field arcminutes across, so the smear
         /// is genuinely common and belongs in the kernel. The WEIGHTS depend on the source's own
         /// spectrum, and a red star's smear is shorter than a blue one's. That second-order
-        /// difference is not in this kernel; the first-order part of it -- the shift of a source's
-        /// own centroid with its colour -- is applied per source where the source is deposited.
+        /// difference is not in this kernel; the first-order part of it, the shift of a source's
+        /// own centroid with its colour, is applied per source where the source is deposited.
         /// </summary>
         /// <param name="subBands">Wavelength (m), photon weight, and dispersion offset (pixels) per sub-band. Weights need not be normalised.</param>
         public static float[] BuildChromaticKernel(
@@ -623,7 +623,7 @@ namespace ExoInstruments.Core
         /// Kolmogorov profile at the site's own median seeing, normalised to unit sum.
         ///
         /// FALLBACK PATH. A halo this wide cannot be truncated anywhere a kernel can afford to
-        /// stop -- see FourierConvolution.RadialKernelSpectrum, which the caller in
+        /// stop; see FourierConvolution.RadialKernelSpectrum, which the caller in
         /// SolarSystemCameraTexture.ApplyPsf uses instead, reaching this only on a frame too large
         /// to pad for one.
         ///
@@ -631,7 +631,7 @@ namespace ExoInstruments.Core
         /// does. At the scales involved the omission is quantified and negligible: an 8.2m
         /// aperture's 18 mas core broadens a 650 mas halo to sqrt(650^2 + 18^2) = 650.2 mas,
         /// a 0.04% change in width, in exchange for a convolution of two very large kernels.
-        /// The halo is carried at a coarser radius budget than the core for the same reason --
+        /// The halo is carried at a coarser radius budget than the core for the same reason;
         /// it has no fine structure to preserve, only total width and enclosed flux.
         /// </summary>
         public static float[] BuildSeeingHaloKernel(
@@ -685,7 +685,7 @@ namespace ExoInstruments.Core
         ///
         /// Solved by bisection on the real kernel rather than by subtracting the diffraction
         /// term in quadrature. Quadrature is only exact for Gaussians, and neither an Airy
-        /// pattern nor a Kolmogorov profile is one -- both carry far heavier wings, so the naive
+        /// pattern nor a Kolmogorov profile is one; both carry far heavier wings, so the naive
         /// subtraction leaves a PSF measurably wider than the instrument's published figure
         /// (about 29 mas against SPHERE/SAXO's quoted 25). Inverting numerically makes the
         /// published number the thing the finished frame actually delivers, which is the whole
@@ -773,7 +773,7 @@ namespace ExoInstruments.Core
         /// The profile is evaluated on a fine 1D radial lookup table and interpolated onto the
         /// grid, rather than evaluated once per pixel. This is not a shortcut for its own sake:
         /// the atmospheric profile costs a 512-step quadrature with a Bessel evaluation per step,
-        /// so a halo kernel of radius 256 would otherwise mean 263,169 quadratures -- of order
+        /// so a halo kernel of radius 256 would otherwise mean 263,169 quadratures, of order
         /// 10^8 special-function evaluations for a single capture. Both profiles here depend on
         /// radius alone and are smooth on the scale of a quarter pixel, so tabulating and
         /// interpolating is ~180x cheaper for a difference far below the kernel's own truncation.
@@ -840,19 +840,19 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Clips a kernel to a CIRCULAR support -- when that costs nothing real -- and scales it to
+        /// Clips a kernel to a CIRCULAR support, when that costs nothing real, and scales it to
         /// unit sum.
         ///
         /// Circular because the array is square and a real PSF is not. Sampled into its corners, a
         /// square kernel of half-width R carries the profile out to R at the mid-edges and to
-        /// R*sqrt(2) at the corners, so where it ends depends on azimuth -- and where a kernel ends
+        /// R*sqrt(2) at the corners, so where it ends depends on azimuth, and where a kernel ends
         /// is where the surface brightness steps to zero. That step is what draws a square around a
         /// bright star. Clipping to the inscribed circle makes the step isotropic, which is the
         /// shape the physics has.
         ///
         /// BUT ONLY WHEN THE RING IT DISCARDS IS EMPTY. On a wide seeing kernel the annulus between
         /// the inscribed circle and the corners holds ~1e-4 of the energy and the clip is free. On a
-        /// compact kernel -- the RedCat's whole PSF spans two pixels -- that annulus holds several
+        /// compact kernel (the RedCat's whole PSF spans two pixels), that annulus holds several
         /// percent of REAL profile, and clipping it re-concentrated the energy enough to shift the
         /// encircled-energy curve 17% against GalSim. So the decision is measured, not assumed: the
         /// clip applies only when the annulus carries less than CircularClipBudget of the total,
@@ -897,8 +897,8 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Largest fraction of a kernel's energy the circular clip may discard. 1e-3 sits an order
-        /// of magnitude above the 1e-4 the wide seeing kernels actually carry in their corners --
-        /// so they keep their isotropic edge -- and two orders below the several percent a compact
+        /// of magnitude above the 1e-4 the wide seeing kernels actually carry in their corners;
+        /// so they keep their isotropic edge, and two orders below the several percent a compact
         /// kernel carries there, so nothing measurable is ever thrown away.
         /// </summary>
         private const double CircularClipBudget = 1e-3;

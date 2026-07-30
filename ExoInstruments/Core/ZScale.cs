@@ -13,7 +13,7 @@ namespace ExoInstruments.Core
     /// and bias. Mapping the converter's full range to the display puts the entire subject inside
     /// the bottom few percent of it, and no curve applied afterwards can recover contrast that was
     /// never allocated. That is the difference between a grey fog and a nebula, and it is why every
-    /// real display tool -- DS9, IRAF, Siril, PixInsight -- sets its limits from the data.
+    /// real display tool (DS9, IRAF, Siril, PixInsight) sets its limits from the data.
     ///
     /// HOW IT WORKS, and why it is not just a percentile clip. The samples are SORTED and a line is
     /// fitted to them against their rank, with iterative rejection. On an astronomical frame most
@@ -21,7 +21,7 @@ namespace ExoInstruments.Core
     /// measures the noise; the sources are the steep tail at the top, and the rejection throws them
     /// out of the fit. Extrapolating the sky's own slope across the full pixel count, divided by a
     /// contrast factor, gives limits set by the noise the frame actually has rather than by its
-    /// extremes -- so one saturated star cannot flatten the whole image, which is exactly what a
+    /// extremes; so one saturated star cannot flatten the whole image, which is exactly what a
     /// max-based or high-percentile clip does.
     ///
     /// This is a faithful transcription of the IRAF algorithm, the same one astropy's
@@ -46,7 +46,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Black and white points for a frame. Returns false and the plain extremes when the frame
-        /// carries too little structure for the fit to mean anything -- a flat field, or one whose
+        /// carries too little structure for the fit to mean anything, a flat field, or one whose
         /// samples are nearly all identical.
         /// </summary>
         public static bool TryLimits(float[] image, out double blackPoint, out double whitePoint,
@@ -149,7 +149,7 @@ namespace ExoInstruments.Core
         /// the assumption that sources are a small minority of pixels. A nebula filling a third of
         /// the frame breaks that assumption outright: on a 40 s exposure of M42 the emission spans
         /// 34 to 5116 rayleighs while zscale's limits stop at 329, so an eighth of the frame clips
-        /// to flat white and the nebula becomes a featureless polygon -- the shape of an iso-contour
+        /// to flat white and the nebula becomes a featureless polygon, the shape of an iso-contour
         /// rather than of a nebula.
         ///
         /// The two halves of the question have different answers, so they are answered separately.
@@ -158,7 +158,7 @@ namespace ExoInstruments.Core
         /// frame: averaging over a block dilutes anything that covers a few pixels by the block's
         /// area while leaving anything extended untouched, so the white point ends up set by the
         /// brightest extended structure and not by a star. That is the right answer on physical
-        /// grounds -- a stretch exists to show structure, and a point source has none -- and it is
+        /// grounds; a stretch exists to show structure, and a point source has none; and it is
         /// also what every real astrophotograph does, clipping its stars to white.
         /// </summary>
         public static bool TryExtendedSourceLimits(float[] image, int width, int height,

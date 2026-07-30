@@ -7,7 +7,7 @@ namespace ExoInstruments.Core
     /// evaluator needs it: where it is on its orbit (which fixes its position in
     /// the mod's fictional sky frame, same convention as the Sun in
     /// ImagingObservingConditions), how big it looks, and how reflective it is.
-    /// Filled from FlightGlobals by the GUI layer -- pure C# here.
+    /// Filled from FlightGlobals by the GUI layer, pure C# here.
     /// </summary>
     public struct MoonContext
     {
@@ -32,7 +32,7 @@ namespace ExoInstruments.Core
         /// <summary>Reference flux for a full Mün at zenith (albedo 0.12, 200 km at 12,000 km).</summary>
         private const double ReferenceMoonFlux = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
 
-        /// <summary>Separation at which a full Mün yields MoonSkyFactor = 1 -- i.e. doubles the variance of an observation at the instrument's reference magnitude.</summary>
+        /// <summary>Separation at which a full Mün yields MoonSkyFactor = 1, i.e. doubles the variance of an observation at the instrument's reference magnitude.</summary>
         private const double ReferenceSeparationDeg = 30.0;
 
         /// <summary>Moon contribution ramps in as it clears the horizon (scattering path shortens); fully counted above this altitude.</summary>

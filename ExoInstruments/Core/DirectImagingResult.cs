@@ -1,7 +1,7 @@
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// Static feasibility of imaging one target with one instrument -- everything
+    /// Static feasibility of imaging one target with one instrument, everything
     /// that doesn't depend on integration time. Computed once at observation start
     /// (or for the pre-observation info card) by DirectImagingSimulator.Assess.
     /// </summary>
@@ -11,7 +11,7 @@ namespace ExoInstruments.Core
         public bool HasRequiredData { get; set; }
         public string MissingDataReason { get; set; }
 
-        /// <summary>False for retracted entries: the campaign runs, but no planet exists to image -- same teaching case as the transit path.</summary>
+        /// <summary>False for retracted entries: the campaign runs, but no planet exists to image, same teaching case as the transit path.</summary>
         public bool SignalPresent { get; set; }
 
         public double SeparationArcsec { get; set; }
@@ -25,7 +25,7 @@ namespace ExoInstruments.Core
         /// <summary>5-sigma contrast floor at the planet's separation after 1 hour, for this star's magnitude.</summary>
         public double SpeckleFloor5Sigma1Hr { get; set; }
 
-        /// <summary>Base floor at 1 lambda/D after 1 hour (magnitude-scaled) -- the texture renderer scales it across the field.</summary>
+        /// <summary>Base floor at 1 lambda/D after 1 hour (magnitude-scaled), the texture renderer scales it across the field.</summary>
         public double BaseFloor5Sigma1Hr { get; set; }
     }
 
@@ -33,7 +33,7 @@ namespace ExoInstruments.Core
     public class DirectImagingResult
     {
         public DirectImagingAssessment Assessment { get; set; }
-        /// <summary>Effective on-sky integration (zenith-equivalent, airmass-weighted) -- see ImagingObservationSession.</summary>
+        /// <summary>Effective on-sky integration (zenith-equivalent, airmass-weighted); see ImagingObservationSession.</summary>
         public double ExposureSeconds { get; set; }
         public double Snr { get; set; }
         public bool Detected { get; set; }

@@ -5,7 +5,7 @@ using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
-    /// <summary>Velocity range (already padded) a render call used -- lets the GUI layer place axis tick labels that line up with the plotted data.</summary>
+    /// <summary>Velocity range (already padded) a render call used, lets the GUI layer place axis tick labels that line up with the plotted data.</summary>
     public struct RvPlotRange
     {
         public double MinVelocityMps;
@@ -24,18 +24,18 @@ namespace ExoInstruments.Visualization
         private static readonly Color ErrorBarColor = new Color(1f, 0.65f, 0.3f, 0.45f);
         private static readonly Color BaselineColor = new Color(0.5f, 0.9f, 0.5f, 0.6f);
 
-        /// <summary>Phase bins for the folded view -- same rationale as LightCurveTexture's: RV baselines that cover many cadence epochs pile up hundreds of raw error bars per plot otherwise.</summary>
+        /// <summary>Phase bins for the folded view, same rationale as LightCurveTexture's: RV baselines that cover many cadence epochs pile up hundreds of raw error bars per plot otherwise.</summary>
         private const int MaxPhaseFoldBinCount = 100;
 
         /// <summary>Floor on bin count so short-baseline RV sessions (a few dozen points, typical given hours-long cadences) still get *some* folding rather than one bin per point.</summary>
         private const int MinPhaseFoldBinCount = 8;
 
-        /// <summary>Bins under this count are dropped rather than drawn -- matches LightCurveTexture's MinBinSampleCount cutoff.</summary>
+        /// <summary>Bins under this count are dropped rather than drawn, matches LightCurveTexture's MinBinSampleCount cutoff.</summary>
         private const int MinBinSampleCount = 3;
 
         /// <summary>
         /// Fixed 100 bins assumes hundreds-to-thousands of points, true for transit's
-        /// 30s-600s cadences but not for RV's 6-8h cadences -- a real session might only
+        /// 30s-600s cadences but not for RV's 6-8h cadences; a real session might only
         /// have a few dozen samples, which spread ~0.3/bin at a fixed 100 and get filtered
         /// out almost entirely by MinBinSampleCount, leaving the plot blank. Scale bin
         /// count down so the average bin actually clears the threshold.
@@ -114,7 +114,7 @@ namespace ExoInstruments.Visualization
 
             // Even the adaptive floor can come up empty for a handful of points spread
             // thin by phase aliasing (short period relative to a coarse cadence). Rather
-            // than hand back a blank texture, fall back to the raw per-sample scatter --
+            // than hand back a blank texture, fall back to the raw per-sample scatter,
             // less tidy, but at least the player sees the data they collected.
             if (!anyBinPopulated)
             {
@@ -180,7 +180,7 @@ namespace ExoInstruments.Visualization
         /// Bins raw samples by orbital phase and reduces each bin to a mean velocity plus
         /// the standard error of that mean: sigma_bin = sqrt(sum(sigma_i^2)) / n, formal
         /// propagation of each sample's own instrument precision rather than empirical
-        /// scatter -- mirrors LightCurveTexture.BinByPhase.
+        /// scatter, mirrors LightCurveTexture.BinByPhase.
         /// </summary>
         private static PhaseBin[] BinByPhase(List<RvSample> samples, double periodSeconds, int binCount)
         {

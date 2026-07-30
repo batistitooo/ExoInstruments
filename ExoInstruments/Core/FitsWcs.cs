@@ -26,7 +26,7 @@ namespace ExoInstruments.Core
     ///                                         plane, in degrees
     ///
     /// HOW THE MATRIX IS OBTAINED. Not by re-deriving the plate scale and a position angle from
-    /// the instrument's focal length and the observatory's latitude -- that would be a second,
+    /// the instrument's focal length and the observatory's latitude; that would be a second,
     /// independent implementation of the geometry, free to disagree with the one that actually
     /// placed the stars, and a WCS that disagrees with its own image is worse than none. Instead
     /// the CD matrix is measured FROM the projection the frame was built with: step a small
@@ -56,7 +56,7 @@ namespace ExoInstruments.Core
         public bool IsValid;
 
         /// <summary>
-        /// Plate scale along each axis, arcsec/pixel, from the CD matrix itself -- the column
+        /// Plate scale along each axis, arcsec/pixel, from the CD matrix itself, the column
         /// norms. Reported for the header's own SECPIX-style bookkeeping and as a sanity check
         /// against the instrument's independently computed plate scale; the two agreeing is a
         /// real check that the WCS describes this frame and not a different one.
@@ -67,8 +67,8 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Angular offset used to measure the Jacobian, in degrees.
         ///
-        /// The usual tension over a finite-difference step -- small enough to be linear, large
-        /// enough to beat rounding -- does not apply here, because the map being differentiated is
+        /// The usual tension over a finite-difference step (small enough to be linear, large
+        /// enough to beat rounding) does not apply here, because the map being differentiated is
         /// EXACTLY linear: GnomonicProjection turns a direction into a pixel through
         /// xi = (d.right)/(d.boresight) and then an affine scaling, so a central difference at any
         /// step returns the same Jacobian up to rounding. That makes a LARGER step strictly better,
@@ -77,7 +77,7 @@ namespace ExoInstruments.Core
         /// Near the celestial pole, recovering a declination from a direction vector goes through
         /// asin(z) with z within 1e-14 of 1, where the derivative is of order 1e7 and double
         /// precision buys only about 3e-8 degrees. Against a 1e-5 degree step that is a 0.3% error
-        /// in the measured scale -- and it showed up exactly there: a field centred on the pole
+        /// in the measured scale, and it showed up exactly there: a field centred on the pole
         /// came back with its plate scale 0.44% wrong while every other pointing was right to
         /// 3e-6. At 1e-3 degrees the same absolute error is a part in 1e5 of the step, so the pole
         /// is as accurate as anywhere else. Verified in tools/bandpass-wcs-tests.
@@ -107,8 +107,8 @@ namespace ExoInstruments.Core
             // The reference pixel is taken by projecting the boresight DIRECTLY, not by sending it
             // out through the equatorial frame and back. The round trip is exact away from the
             // pole, but EquatorialToHorizontal carries a tan(dec) that diverges at dec = +/-90, so
-            // a field centred on the celestial pole -- Polaris, a circumpolar target, an
-            // instrument parked on the pole -- came back with its plate scale off by 0.4%. The
+            // a field centred on the celestial pole (Polaris, a circumpolar target, an
+            // instrument parked on the pole), came back with its plate scale off by 0.4%. The
             // boresight is already a direction in the frame the projection works in, so nothing
             // needs converting to place it.
             if (!projection.TryProject(boresight, out double x0, out double y0))

@@ -7,7 +7,7 @@ namespace ExoInstruments.Core
     /// altitude into a tiny spectrum.
     ///
     /// WHY THIS MATTERS AND WHY IT IS NOT COSMETIC. Air has a refractive index a few parts in ten
-    /// thousand above one, and that index is a function of wavelength -- the same dispersion that
+    /// thousand above one, and that index is a function of wavelength, the same dispersion that
     /// makes a prism work. So the atmosphere lifts a star toward the zenith by an angle that depends
     /// on colour: blue light is bent more than red. Between 400 and 700 nm at 45 degrees from the
     /// zenith the difference is about an arcsecond, which at the RC20's 0.069 arcsec pixels is
@@ -25,7 +25,7 @@ namespace ExoInstruments.Core
     ///
     /// THE REFRACTION ANGLE is R = (n-1) tan z, the plane-parallel result. That form is exact in the
     /// limit of a thin atmosphere and drifts about a percent by 60 degrees from the zenith, growing
-    /// beyond -- but what this class exists to compute is the DIFFERENCE between two wavelengths, and
+    /// beyond, but what this class exists to compute is the DIFFERENCE between two wavelengths, and
     /// the higher-order terms it omits scale every wavelength almost identically, so they cancel in
     /// the difference to far better than that. The absolute refraction is reported for completeness;
     /// the differential is the quantity used.
@@ -89,7 +89,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Refraction angle in arcseconds: how much higher than its true position a source appears.
-        /// R = (n - 1) tan z, the plane-parallel result -- see the class summary for its validity and
+        /// R = (n - 1) tan z, the plane-parallel result; see the class summary for its validity and
         /// for why the differential is far more accurate than the absolute.
         /// </summary>
         public static double RefractionArcsec(double refractivity, double zenithDistanceDeg)
@@ -143,7 +143,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Saturation vapour pressure of water over liquid, millibars, from the Buck (1981, J. Appl.
-        /// Meteorol. 20, 1527) equation -- the form meteorology uses, accurate to 0.1% from -20 to
+        /// Meteorol. 20, 1527) equation, the form meteorology uses, accurate to 0.1% from -20 to
         /// +50 C, rather than the Magnus form usually quoted.
         /// </summary>
         public static double SaturationVapourPressureMillibar(double temperatureCelsius)
@@ -174,7 +174,7 @@ namespace ExoInstruments.Core
         /// The weight of a sub-band is how many PHOTONS arrive in it: the source's spectrum times
         /// the system's throughput, integrated across the sub-band. That is the weighting the sum of
         /// monochromatic images actually has, and it is why a red star's dispersion smear is shorter
-        /// than a blue star's -- most of its photons are at the long end, where refraction is weaker.
+        /// than a blue star's; most of its photons are at the long end, where refraction is weaker.
         ///
         /// The offset is along the direction toward the zenith, which the caller supplies as a unit
         /// vector in pixel space, since that direction depends on the projection and on the mount.

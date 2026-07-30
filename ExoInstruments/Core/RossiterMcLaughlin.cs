@@ -58,7 +58,7 @@ namespace ExoInstruments.Core
             return -dip * blockedVelocity;
         }
 
-        /// <summary>Sum of RM anomalies over a system's transiting planets -- added onto the Keplerian reflex signal by RvSimulator.</summary>
+        /// <summary>Sum of RM anomalies over a system's transiting planets, added onto the Keplerian reflex signal by RvSimulator.</summary>
         public static double SystemAnomalyMps(IList<StarTarget> systemPlanets, double ut)
         {
             double total = 0.0;

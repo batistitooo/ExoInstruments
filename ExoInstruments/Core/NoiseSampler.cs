@@ -12,7 +12,7 @@ namespace ExoInstruments.Core
     /// be checked against a reference implementation: every electron count, every noise figure and
     /// every signal-to-noise ratio the mod reports rests on these being exactly the distributions
     /// they claim to be, and nothing verified that they were. Moving them into Core changes no
-    /// behaviour (the call sites delegate here) and makes them testable -- see
+    /// behaviour (the call sites delegate here) and makes them testable; see
     /// tools/photometry-roundtrip, which compares them against SciPy.
     ///
     /// Both take System.Random so that Pcg32 can be passed in unchanged; see Pcg32 for why the
@@ -30,7 +30,7 @@ namespace ExoInstruments.Core
         ///
         /// Photon arrival IS a counting process, and a Gaussian of matching width only agrees with
         /// it once the count is large. At the few electrons per pixel a faint sky or a short dark
-        /// reaches, a Gaussian goes negative and is measurably the wrong distribution -- the same
+        /// reaches, a Gaussian goes negative and is measurably the wrong distribution, the same
         /// reason GalSim and Pyxel both draw real Poisson deviates here.
         /// </summary>
         public static double Poisson(Random rng, double lambda)
@@ -39,7 +39,7 @@ namespace ExoInstruments.Core
 
             // Knuth's product method: exact, and the cheapest thing available while the mean is
             // small. It is O(lambda) and needs exp(-lambda), so it is confined to the range
-            // where both are harmless -- at a mean of 150,000 electrons it would run 150,000
+            // where both are harmless; at a mean of 150,000 electrons it would run 150,000
             // iterations per pixel against an exp() that has already underflowed to zero, and
             // never terminate.
             if (lambda < PtrsThreshold)
@@ -87,7 +87,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// A zero-mean Gaussian deviate of the given standard deviation, by the Box-Muller
         /// transform. This is what the readout amplifier adds, in electrons, ahead of the
-        /// converter -- which is where it physically enters.
+        /// converter, which is where it physically enters.
         /// </summary>
         public static double Gaussian(Random rng, double sigma)
         {

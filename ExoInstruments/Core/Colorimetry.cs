@@ -12,7 +12,7 @@ namespace ExoInstruments.Core
     /// measurement of human vision (CIE 1931, still the basis of every colour standard), followed by
     /// a transform into whatever primaries the display has. Both steps are defined exactly. The
     /// piecewise power law this file replaces was a fit to somebody's plot of that chain, valid over
-    /// a limited temperature range and applicable to nothing but blackbodies -- which excludes every
+    /// a limited temperature range and applicable to nothing but blackbodies, which excludes every
     /// emission-line source in the mod, since a nebula's colour comes from three narrow lines and has
     /// no temperature at all.
     ///
@@ -24,7 +24,7 @@ namespace ExoInstruments.Core
     ///
     /// Y is luminance by construction: ybar IS the CIE luminous efficiency function V(lambda).
     ///
-    /// GAMUT. Astronomical colours routinely fall outside what a display can show -- a pure emission
+    /// GAMUT. Astronomical colours routinely fall outside what a display can show; a pure emission
     /// line is a monochromatic stimulus, which lies ON the spectral locus and so outside every real
     /// set of primaries. Clipping the negative components would shift the hue; instead the colour is
     /// desaturated toward the white point, along the line joining it in chromaticity space, by the
@@ -32,7 +32,7 @@ namespace ExoInstruments.Core
     /// saturation, which is the one attribute the display genuinely cannot reproduce, and it is the
     /// standard treatment.
     ///
-    /// The table this uses is generated rather than typed -- see tools/generate_cie_table.py -- and
+    /// The table this uses is generated rather than typed; see tools/generate_cie_table.py, and
     /// tools/colour-tests compares the whole chain against the colour-science package.
     ///
     /// Pure C#, no Unity dependency.
@@ -139,7 +139,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Tristimulus values of a single emission line of the given total power. A line is a delta
         /// function in wavelength, so its contribution is the power times the colour matching
-        /// functions AT the line -- no width and no integral.
+        /// functions AT the line, no width and no integral.
         /// </summary>
         public static void LineToXyz(double wavelengthNm, double power,
                                      out double x, out double y, out double z)
@@ -184,7 +184,7 @@ namespace ExoInstruments.Core
         /// point, which is the only operation that preserves both hue and LUMINANCE.
         ///
         /// TWO WAYS OUT OF THE GAMUT, and both have to be handled. A colour can need more of a
-        /// primary than exists -- a negative component -- which is what a monochromatic line does. It
+        /// primary than exists (a negative component), which is what a monochromatic line does. It
         /// can equally need MORE of a primary than the display can emit at that luminance: a
         /// saturated red at Y = 0.3 asks for a linear R of 1.4, because a saturated colour puts far
         /// more than its luminance into one channel. Handling only the first and letting the second
@@ -207,7 +207,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// As above, with the option to fix only the NEGATIVE side.
         ///
-        /// A caller after a source's TINT -- the star chart's markers, say -- has no meaningful
+        /// A caller after a source's TINT (the star chart's markers, say) has no meaningful
         /// luminance yet: it will normalise the triple by its own peak afterwards. For it the upper
         /// constraint is not merely unnecessary but wrong, since a saturated colour normalised to
         /// unit luminance always has a component above one, and honouring that constraint would
@@ -235,7 +235,7 @@ namespace ExoInstruments.Core
         /// How far toward the luminance a component has to move to land inside [0, 1].
         ///
         /// Below zero it has to rise to zero; above one it has to fall to one. Both are the same
-        /// lerp, and the second is only solvable while the luminance itself is at most one -- above
+        /// lerp, and the second is only solvable while the luminance itself is at most one; above
         /// that the colour is simply brighter than the display and clips.
         /// </summary>
         private static double NeededDesaturation(double component, double luminance, bool limitHighlights = true)
@@ -257,7 +257,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The sRGB transfer function (IEC 61966-2-1): a linear segment near black joined to a
-        /// 1/2.4 power law. NOT a plain gamma of 2.2, which is the usual shortcut -- the standard's
+        /// 1/2.4 power law. NOT a plain gamma of 2.2, which is the usual shortcut; the standard's
         /// own piecewise form is what a display implements.
         /// </summary>
         public static double LinearToSrgbTransfer(double linear)

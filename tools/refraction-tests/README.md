@@ -1,7 +1,7 @@
 # Atmospheric dispersion, and the chromatic PSF
 
 Air has a refractive index a few parts in ten thousand above one, and that index depends on
-wavelength -- the same dispersion that makes a prism work. So the atmosphere lifts a star toward the
+wavelength, the same dispersion that makes a prism work. So the atmosphere lifts a star toward the
 zenith by an angle that depends on colour, drawing it out into a short spectrum. Every professional
 survey pipeline models this; it is a first-order astrometric and photometric systematic, and it is why
 high-resolution instruments carry atmospheric dispersion correctors.
@@ -20,7 +20,7 @@ high-resolution instruments carry atmospheric dispersion correctors.
 
 Three hundred pixels on an instrument that delivers a 25 mas core. SPHERE cannot exist without a
 corrector and has one (Beuzit et al. 2019, A&A 631, A155), so `HasAtmosphericDispersionCorrector` is
-set for it and the residual is scaled to 5% rather than to zero -- a real prism pair cancels the
+set for it and the residual is scaled to 5% rather than to zero; a real prism pair cancels the
 dispersion of a model atmosphere at a design zenith distance, not the night's actual air.
 
 ## One kernel for both effects, and why that is exact

@@ -9,7 +9,7 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class SexagesimalCoordinates
     {
-        /// <summary>"05h35m17.3s -05d23'28"" -- the form a target list is written in.</summary>
+        /// <summary>"05h35m17.3s -05d23'28"", the form a target list is written in.</summary>
         public static string Format(double raDeg, double decDeg)
         {
             double raHours = Normalize360(raDeg) / 15.0;

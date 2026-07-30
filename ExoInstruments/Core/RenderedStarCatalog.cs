@@ -11,7 +11,7 @@ namespace ExoInstruments.Core
         public double DecDeg;
         /// <summary>Johnson V apparent magnitude.</summary>
         public double VMag;
-        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star. OBSERVED, so it carries the star's reddening -- see ReddeningEBv.</summary>
+        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star. OBSERVED, so it carries the star's reddening; see ReddeningEBv.</summary>
         public double ColorIndexBV;
 
         /// <summary>

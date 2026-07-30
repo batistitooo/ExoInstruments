@@ -7,7 +7,7 @@ using ExoInstruments.Visualization;
 
 /// <summary>
 /// Dumps what the airglow model delivers, for the Python side to compare against ESO's SkyCalc
-/// queried independently -- and the two headline numbers the whole construction stands on: the
+/// queried independently, and the two headline numbers the whole construction stands on: the
 /// V surface brightness must come out at the measured Paranal dark sky, and an H-alpha filter must
 /// see a far darker sky than a broadband one, because that asymmetry is what the table exists to
 /// express.

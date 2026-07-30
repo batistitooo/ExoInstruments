@@ -11,12 +11,12 @@ namespace ExoInstruments.Core
         public int Loaded { get; set; }
         public int SkippedNoStarData { get; set; }
         public int SkippedNoMagnitude { get; set; }
-        public int NoCoordinates { get; set; } // loaded fine, but ra/dec missing -- won't appear on the sky chart
+        public int NoCoordinates { get; set; } // loaded fine, but ra/dec missing, won't appear on the sky chart
     }
 
     /// <summary>
     /// Parses a CSV/TSV export from exoplanet.eu's catalog into StarTarget entries.
-    /// Pure C# -- no file I/O, no Unity/KSP dependency. The KSP glue layer reads
+    /// Pure C#, no file I/O, no Unity/KSP dependency. The KSP glue layer reads
     /// the file from disk, passes the raw text in, and handles logging on its own.
     /// Delimiter (comma or tab) is auto-detected from the header row.
     /// </summary>

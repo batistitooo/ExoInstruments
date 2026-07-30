@@ -7,7 +7,7 @@ namespace ExoInstruments
     /// Per-save state for the career progression loop: fog-of-war (which stars
     /// have been scanned/rewarded) and the instrument unlock economy (which
     /// telescopes have been purchased, and cumulative Science earned toward the
-    /// next one). Standard KSP scenario persistence -- OnSave/OnLoad ride the
+    /// next one). Standard KSP scenario persistence; OnSave/OnLoad ride the
     /// save-file ConfigNode, so all of it survives game restarts and stays
     /// separate between saves.
     ///
@@ -41,7 +41,7 @@ namespace ExoInstruments
         // Instrument unlock economy (see Core.InstrumentSpec/Observatories):
         // purchased instruments beyond each one's UnlockedByDefault, keyed by
         // InstrumentSpec.Name. TotalScienceEarned is *this mod's own* running
-        // total awarded via RegisterScanCompleted -- deliberately independent of
+        // total awarded via RegisterScanCompleted, deliberately independent of
         // ResearchAndDevelopment.Instance.Science (the player's spendable R&D
         // balance), which drops every time they buy a stock tech-tree node. Using
         // the stock balance as the unlock gate would let spending Science on

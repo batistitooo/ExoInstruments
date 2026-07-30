@@ -12,7 +12,7 @@ namespace ExoInstruments.Core
         /// Not an exoplanet-detection method at all: a ground telescope pointed
         /// at a solar-system body for its own sake (see SolarSystemCameraTexture).
         /// Every InstrumentSpec field the star-catalog session types read
-        /// (ReferencePrecision, CadenceSeconds, etc.) is meaningless here --
+        /// (ReferencePrecision, CadenceSeconds, etc.) is meaningless here;
         /// only the unlock economy fields (UnlockCostFunds, ScanCostFunds, ...)
         /// and the presentation fields apply.
         /// </summary>
@@ -24,7 +24,7 @@ namespace ExoInstruments.Core
     /// observatory. Measurement noise is photon-noise-limited: sigma scales as
     /// 10^(exponent*(mag-refMag)), the same relation regardless of instrument
     /// (aperture/optics/detector differences live in ReferencePrecision, not the
-    /// exponent) -- fainter star, fewer photons, same magnitude-flux relation.
+    /// exponent), fainter star, fewer photons, same magnitude-flux relation.
     /// </summary>
     public class InstrumentSpec
     {
@@ -75,11 +75,11 @@ namespace ExoInstruments.Core
         public VisualTelescopeSpec VisualTelescope { get; set; }
 
         // --- Career progression: unlock economy -----------------------------
-        // PLACEHOLDER values (see Observatories.cs) -- balance à valider avec
+        // PLACEHOLDER values (see Observatories.cs), balance à valider avec
         // Baptiste. Sandbox/science-sandbox games ignore all of this, same gate
         // as the fog-of-war reveal (ExoInstrumentsGUI.CareerFogActive).
 
-        /// <summary>Available from the start of any career game, no purchase needed -- the player's first, cheapest instrument.</summary>
+        /// <summary>Available from the start of any career game, no purchase needed, the player's first, cheapest instrument.</summary>
         public bool UnlockedByDefault { get; set; }
 
         /// <summary>One-time Funds cost to unlock this instrument in career mode.</summary>

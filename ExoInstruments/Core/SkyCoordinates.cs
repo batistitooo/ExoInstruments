@@ -15,17 +15,17 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Pure C# equatorial-to-horizontal transform -- no Unity/KSP dependency.
+    /// Pure C# equatorial-to-horizontal transform, no Unity/KSP dependency.
     ///
-    /// Nothing here is tied to a particular home world. Every input that could be
-    /// -- the observer's latitude and longitude, the body's rotation period and
-    /// initial rotation -- is passed in by the caller, which reads them from the
+    /// Nothing here is tied to a particular home world. Every input that could be (
+    /// the observer's latitude and longitude, the body's rotation period and
+    /// initial rotation) is passed in by the caller, which reads them from the
     /// running game (see ObservatorySite and BuildImagingObserverContext). The
     /// transform itself is the standard one and is equally valid on Kerbin, on a
     /// Real Solar System Earth, or on anything else a planet pack installs.
     ///
     /// On the RA zero point: on stock KSP the real star catalog has no physical
-    /// relationship to Kerbin's rotation, so the convention is arbitrary -- at
+    /// relationship to Kerbin's rotation, so the convention is arbitrary; at
     /// UT=0 the observer's meridian is defined to sit at RA=0h, and Kerbin's spin
     /// sweeps it around the sky from there, one lap per sidereal day, four times
     /// faster than Earth's. On a pack that models the real solar system, the same
@@ -34,7 +34,7 @@ namespace ExoInstruments.Core
     /// frame to be the real one (that is how they place bodies on real orbital
     /// elements), the angle this returns tracks genuine local sidereal time.
     /// Whether it also matches a given skybox's own orientation is that skybox's
-    /// business -- see SkyAlignmentOffsetHours, which exists for exactly that.
+    /// business; see SkyAlignmentOffsetHours, which exists for exactly that.
     ///
     /// Rotation is computed from UT and the body's rotation period/initial
     /// rotation, not read live from CelestialBody.rotationAngle, so this works
@@ -60,7 +60,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Standard equatorial -> horizontal transform (Meeus' atan2 form --
+        /// Standard equatorial -> horizontal transform (Meeus' atan2 form,
         /// robust near the zenith and poles, no naive-division blowups).
         /// Azimuth returned from North, clockwise.
         /// </summary>
@@ -137,7 +137,7 @@ namespace ExoInstruments.Core
             return d < 0 ? d + 360.0 : d;
         }
 
-        /// <summary>Wraps to (-180, 180] -- keeps the hour angle small near the meridian.</summary>
+        /// <summary>Wraps to (-180, 180]; keeps the hour angle small near the meridian.</summary>
         private static double NormalizeSigned(double deg)
         {
             double d = NormalizeDegrees(deg);

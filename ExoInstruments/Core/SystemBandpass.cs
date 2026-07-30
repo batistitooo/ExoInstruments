@@ -3,7 +3,7 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// The instrument's total spectral response, integrated over the passband -- what turns an
+    /// The instrument's total spectral response, integrated over the passband, what turns an
     /// apparent magnitude into a real electron count.
     ///
     /// WHAT THIS REPLACES. The photometry used to be a product of scalars:
@@ -96,21 +96,21 @@ namespace ExoInstruments.Core
         private readonly double[] tableWidthAngstromNoExtinction;
 
         /// <summary>
-        /// Effective photometric width (Angstrom) for a source with a FLAT photon spectrum --
+        /// Effective photometric width (Angstrom) for a source with a FLAT photon spectrum,
         /// i.e. one whose colour is unknown and therefore not assumed. Includes the atmosphere.
         /// </summary>
         public double EffectiveWidthAngstromFlat { get; private set; }
 
         /// <summary>
         /// The same, with the atmosphere left out. For callers that already hold their own
-        /// transmission factor and must apply it themselves -- the sky background, where each
+        /// transmission factor and must apply it themselves, the sky background, where each
         /// term (airglow inside the atmosphere, zodiacal light outside it, moonlight and
         /// twilight already measured through it) is attenuated differently and the distinction
         /// is the physics, not a detail. See SkyBrightnessModel.
         /// </summary>
         public double EffectiveWidthAngstromFlatNoExtinction { get; private set; }
 
-        /// <summary>Central wavelength of the fitted filter, in metres -- carried so callers need not hold it separately.</summary>
+        /// <summary>Central wavelength of the fitted filter, in metres: carried so callers need not hold it separately.</summary>
         public double CentralWavelengthMeters => centralWavelengthMeters;
 
         /// <summary>
@@ -123,7 +123,7 @@ namespace ExoInstruments.Core
         /// from having an opinion about which factors an instrument happens to have.
         ///
         /// quantumEfficiencyCurve may be null, in which case scalarQuantumEfficiency is used
-        /// across the band -- the honest treatment for a detector whose manufacturer publishes
+        /// across the band, the honest treatment for a detector whose manufacturer publishes
         /// only a peak figure, which is the case for this roster's amateur camera.
         /// </summary>
         /// <summary>Measured filter transmission, or null for the published-numbers-only top-hat.</summary>
@@ -184,7 +184,7 @@ namespace ExoInstruments.Core
             // performance one: the response is constructed on the main thread and then read by
             // the background pipeline for every star in the frame, so it must be fully
             // initialised before it crosses that boundary. Building it costs 48 x 64 integrand
-            // evaluations, which is under a millisecond -- the same tabulate-once trick
+            // evaluations, which is under a millisecond, the same tabulate-once trick
             // OpticalPsf uses for its radial profiles, and for the same reason: the alternative
             // is repeating a quadrature per star, hundreds of times per wide-field frame.
             tableTeffK = new double[TableEntries];
@@ -204,7 +204,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Effective photometric width (Angstrom) for a blackbody source at the given effective
-        /// temperature -- a star of known colour, or a body reflecting sunlight (see
+        /// temperature, a star of known colour, or a body reflecting sunlight (see
         /// SolarPhotosphereTemperatureK).
         ///
         /// This is where a star's colour enters the photometry. It is not a correction bolted on
@@ -262,8 +262,8 @@ namespace ExoInstruments.Core
         /// normalised at V so its observed magnitude still sets the flux.
         ///
         /// Not tabulated. The colour table is a product grid over temperature, and adding a
-        /// reddening axis to it would multiply its build cost by the number of nodes on that axis
-        /// -- 48 ms per capture on the main thread for a grid worth having, against under a
+        /// reddening axis to it would multiply its build cost by the number of nodes on that axis,
+        /// 48 ms per capture on the main thread for a grid worth having, against under a
         /// millisecond today. This runs one quadrature per call instead, which is 25 microseconds,
         /// and the caller is expected to cache across a frame (see ReddenedResponseCache). A frame
         /// covers one small solid angle, so its stars share a sight line and a handful of distinct
@@ -275,7 +275,7 @@ namespace ExoInstruments.Core
             return Integrate(Math.Max(0.0, intrinsicTeffK), true, eBv);
         }
 
-        /// <summary>EffectiveWidthAngstromForTemperature with the atmosphere left out -- see EffectiveWidthAngstromFlatNoExtinction.</summary>
+        /// <summary>EffectiveWidthAngstromForTemperature with the atmosphere left out; see EffectiveWidthAngstromFlatNoExtinction.</summary>
         public double EffectiveWidthAngstromForTemperatureNoExtinction(double teffK)
         {
             return LookUp(teffK, tableWidthAngstromNoExtinction, EffectiveWidthAngstromFlatNoExtinction);
@@ -310,8 +310,8 @@ namespace ExoInstruments.Core
             if (filterTransmissionCurve != null)
             {
                 // Integrate over the measured curve's own support. More nodes than the top-hat
-                // path uses, because a real curve has structure -- shoulders, and a red leak far
-                // from the passband -- that a rectangle does not, and the support is wider.
+                // path uses, because a real curve has structure (shoulders, and a red leak far
+                // from the passband) that a rectangle does not, and the support is wider.
                 start = filterTransmissionCurve.MinWavelengthMeters;
                 end = filterTransmissionCurve.MaxWavelengthMeters;
             }
@@ -370,7 +370,7 @@ namespace ExoInstruments.Core
             double filter = filterTransmissionCurve != null ? filterTransmissionCurve.At(lambda) : 1.0;
 
             // Interstellar reddening enters as a SHAPE, normalised at V so the observed
-            // magnitude stays the anchor -- see ReddenedStarSpectrum for why that is not double
+            // magnitude stays the anchor; see ReddenedStarSpectrum for why that is not double
             // counting. Exactly 1 when the caller has no reddening estimate.
             double reddening = eBv > 0.0
                 ? ReddenedStarSpectrum.NormalisedTransmission(lambda, eBv, InterstellarExtinction.MilkyWayRv)
@@ -384,7 +384,7 @@ namespace ExoInstruments.Core
     public static class SourceSpectra
     {
         /// <summary>
-        /// The Sun's effective temperature, 5772 K -- the nominal value fixed by IAU 2015
+        /// The Sun's effective temperature, 5772 K: the nominal value fixed by IAU 2015
         /// Resolution B3 (Prsa et al. 2016, AJ 152, 41, "Nominal values for selected solar and
         /// planetary quantities").
         ///

@@ -10,21 +10,21 @@ namespace ExoInstruments.Core
     /// WHY THIS LAYER EXISTS. The all-sky H-alpha composite has a 6 arcmin beam, and every structure
     /// that makes a nebula recognisable is finer than that: the Horsehead spans 1.3 beams, M42's
     /// Trapezium 0.8, the filaments in IC 1396A 0.3. No processing recovers them, because the
-    /// information is not in the file. A finer survey does exist over part of the sky -- SHASSA
-    /// (Gaustad et al. 2001, PASP 113, 1326) images everything south of +15 degrees at 0.8 arcmin --
+    /// information is not in the file. A finer survey does exist over part of the sky; SHASSA
+    /// (Gaustad et al. 2001, PASP 113, 1326) images everything south of +15 degrees at 0.8 arcmin,
     /// and at that beam the Horsehead spans 10 elements instead of 1.3.
     ///
     /// WHY PATCHES AND NOT A FINER ALL-SKY MAP. Resolution is only worth storing where there is
     /// something to resolve. The whole sky at 0.86 arcmin is 201 million cells, 403 MB, of which the
     /// overwhelming majority carries diffuse background that 6 arcmin already describes perfectly
     /// well. Four degrees around each catalogued object is 78 thousand cells apiece, about 5 MB for
-    /// the entire catalogue -- eighty times smaller for the same result on every target anyone
+    /// the entire catalogue, eighty times smaller for the same result on every target anyone
     /// points at. Outside a patch the base map answers, which is the same layered arrangement every
     /// real survey archive uses.
     ///
     /// STORAGE is run-length by HEALPix ring. In RING ordering a disc on the sky cuts each ring in
     /// one contiguous stretch of pixels, so a patch is a few hundred runs rather than a pixel index
-    /// per value -- which would otherwise cost three times as much as the values themselves.
+    /// per value, which would otherwise cost three times as much as the values themselves.
     ///
     /// The patch carries TOTAL surface brightness, not a correction: the packer folds the composite
     /// in and apodises the fine structure to zero across the patch's outer margin, so a patch joins
@@ -202,7 +202,7 @@ namespace ExoInstruments.Core
         /// change across a frame.
         ///
         /// OVERLAP, NOT CONTAINMENT. This used to demand that the whole field fit inside the patch,
-        /// so a wide-field instrument fell back to the base map entirely -- the RedCat's 2.7 degree
+        /// so a wide-field instrument fell back to the base map entirely; the RedCat's 2.7 degree
         /// half-diagonal against M42's 1.13 degree patch meant the one shot that shows the whole
         /// nebula got none of the resolution. Containment was over-cautious: the per-pixel lookup
         /// already falls through to the base map wherever the patch has no cell, and the packer
@@ -248,7 +248,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Per-caller lookup state, so a background frame fill keeps its own run cursor -- one per
+        /// Per-caller lookup state, so a background frame fill keeps its own run cursor, one per
         /// patch, since a frame may draw from several and they have unrelated run tables.
         /// </summary>
         public struct Cursor
@@ -260,7 +260,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Surface brightness from a patch toward a Galactic direction, bilinearly interpolated over
-        /// the same four surrounding pixels the base map uses -- see Healpix.InterpolationWeights.
+        /// the same four surrounding pixels the base map uses; see Healpix.InterpolationWeights.
         /// False when any of the four lies outside the patch, which keeps the interpolation from
         /// silently reweighting itself at the boundary.
         /// </summary>

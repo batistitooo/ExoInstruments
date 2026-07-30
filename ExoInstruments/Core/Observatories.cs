@@ -44,7 +44,7 @@ namespace ExoInstruments.Core
             // Every figure below is from Murray et al. 2020 (MNRAS 495, 2446, "Photometry and
             // performance of SPECULOOS-South") Table 1, except where noted. With this block
             // present, SPECULOOS's photometry runs on the CCD equation instead of the fitted
-            // scaling above -- see TransitPhotometry.
+            // scaling above; see TransitPhotometry.
             Detector = new PhotometricDetector
             {
                 ApertureMeters = 1.0,                      // "1 m diameter primary"
@@ -52,7 +52,7 @@ namespace ExoInstruments.Core
 
                 // Two aluminium mirrors (f/8 Ritchey-Chretien) at the mid-recoating-cycle 87%
                 // this codebase already uses everywhere, from Ma & Cai (arXiv:1708.01257) Sect.
-                // 4.2 -- see VisualTelescopeSpec.MirrorReflectivity for the full sourcing --
+                // 4.2 (see VisualTelescopeSpec.MirrorReflectivity for the full sourcing)
                 // times the I+z' filter's own published ">90 per cent" transmittance.
                 //   0.87^2 * 0.90 = 0.681
                 OpticsTransmission = 0.87 * 0.87 * 0.90,
@@ -73,14 +73,14 @@ namespace ExoInstruments.Core
 
                 // KNOWN UPPER BOUND, and the one soft number in this block. The published figures
                 // are a 94% peak at 740 nm (Murray et al. 2020 Table 1) and ">90% at 750 nm" for
-                // the Andor BEX2-DD sensor -- both at the BLUE EDGE of the band above, where this
+                // the Andor BEX2-DD sensor, both at the BLUE EDGE of the band above, where this
                 // detector is at its best. The real curve falls away toward 950 nm, so holding
                 // 0.90 flat across 750-950 nm overstates the collected electrons and makes the
                 // resulting precision optimistic; the error is signed and bounded, unlike the
                 // empirical relation this replaces, but it is real.
                 //
                 // Removing it needs the measured BEX2-DD curve digitised into a SpectralCurve and
-                // assigned to QuantumEfficiencyCurve below -- exactly what FilterCurves.cs already
+                // assigned to QuantumEfficiencyCurve below, exactly what FilterCurves.cs already
                 // does for FORS2, and exactly the error SystemBandpass.cs was written to fix
                 // (using QE_peak there overstated FORS2's b_HIGH band by 1.33x). Until then this
                 // is deliberately the band's blue edge rather than its 94% peak.
@@ -101,7 +101,7 @@ namespace ExoInstruments.Core
                          + "read noise, dark current, gain, QE range, I+z' filter); Ma & Cai arXiv:1708.01257 "
                          + "Sect. 4.2 (aluminium coating 87%/surface); Butterley et al. 2024, MNRAS 529, 320 "
                          + "(Paranal 2016-DIMM median seeing 0.69 arcsec). QE held at the band's blue-edge "
-                         + "figure -- see the comment above, it is an upper bound.",
+                         + "figure; see the comment above, it is an upper bound.",
             },
         };
 
@@ -111,7 +111,7 @@ namespace ExoInstruments.Core
             DisplayName = "WASP (Transit)",
             Method = DetectionMethod.Transit,
             ReferenceMagnitude = 9.5,
-            ReferencePrecision = 1000.0,  // ppm (~1 mmag) -- small 200mm-lens apertures, wide field
+            ReferencePrecision = 1000.0,  // ppm (~1 mmag), small 200mm-lens apertures, wide field
             PrecisionExponent = 0.2,
             CadenceSeconds = 600.0,       // ~10 min imaging cadence per field
             Citation = "Pollacco et al. 2006. SuperWASP: wide-field survey with 200mm camera lenses, bright-star hot-Jupiter hunting.",
@@ -120,7 +120,7 @@ namespace ExoInstruments.Core
                           "Individually noisy, but it discovered nearly two hundred hot Jupiters by sheer persistence. " +
                           "The cheapest telescope time available: ideal for burning through easy bright targets on a budget.",
             IsSpaceBased = false,
-            ApertureMeters = 0.111,        // Canon 200mm f/1.8 lens: 111mm entrance pupil -- scintillation-limited on bright stars, WASP's real noise regime
+            ApertureMeters = 0.111,        // Canon 200mm f/1.8 lens: 111mm entrance pupil, scintillation-limited on bright stars, WASP's real noise regime
             SiteAltitudeMeters = 2400.0,   // Roque de los Muchachos, La Palma (SuperWASP-North)
             UnlockCostFunds = 10_000.0,
             UnlockScienceThreshold = 0.0,
@@ -141,7 +141,7 @@ namespace ExoInstruments.Core
             //
             // WHAT BLOCKS IT: at 13.7 arcsec/pixel against sub-arcsecond seeing this instrument is
             // drastically undersampled, so CcdEquation's seeing-derived optimal aperture is
-            // meaningless -- the aperture is set by the pixel grid and by the survey's own
+            // meaningless; the aperture is set by the pixel grid and by the survey's own
             // reduction. It needs PhotometricApertureRadiusPixels and a delivered PSF FWHM, and
             // neither is in Pollacco et al. 2006. Optics transmission for the Canon lens is not
             // published either, and a camera lens is not a mirror train the 0.87^N rule covers.
@@ -184,7 +184,7 @@ namespace ExoInstruments.Core
             // QE is treated separately, but give no figure for it; the only QE number found is 40%
             // at 1 um, which is the extreme red edge and not a band average. The mission publishes
             // a full spectral response function instead, and digitising that into a SpectralCurve
-            // is the right fix -- it would also make the 786.5 nm effective wavelength fall out of
+            // is the right fix; it would also make the 786.5 nm effective wavelength fall out of
             // the integral rather than being asserted.
             //
             // Secondly, TESS is deliberately undersampled: its PSF is quoted as a "50%
@@ -221,7 +221,7 @@ namespace ExoInstruments.Core
             DisplayName = "ESPRESSO (Radial Velocity)",
             Method = DetectionMethod.RadialVelocity,
             ReferenceMagnitude = 8.0,
-            ReferencePrecision = 0.15,    // m/s -- near the instrument's best-case sub-10cm/s spec on bright quiet stars
+            ReferencePrecision = 0.15,    // m/s, near the instrument's best-case sub-10cm/s spec on bright quiet stars
             PrecisionExponent = 0.2,
             CadenceSeconds = 8.0 * 3600.0,
             Citation = "Pepe et al. 2021. ESPRESSO: VLT, sub-10cm/s precision under ideal conditions.",
@@ -244,7 +244,7 @@ namespace ExoInstruments.Core
             DisplayName = "SOPHIE (Radial Velocity)",
             Method = DetectionMethod.RadialVelocity,
             ReferenceMagnitude = 8.0,
-            ReferencePrecision = 2.0,     // m/s -- smaller 1.93m aperture than HARPS, needs brighter targets for similar S/N
+            ReferencePrecision = 2.0,     // m/s, smaller 1.93m aperture than HARPS, needs brighter targets for similar S/N
             PrecisionExponent = 0.2,
             CadenceSeconds = 6.0 * 3600.0,
             Citation = "Perruchot et al. 2008; Bouchy et al. 2009. SOPHIE: Observatoire de Haute-Provence 1.93m spectrograph.",
@@ -268,7 +268,7 @@ namespace ExoInstruments.Core
             Method = DetectionMethod.DirectImaging,
             ReferenceMagnitude = 6.0,
             // For imaging, "precision" is the 5-sigma contrast floor at 1 lambda/D
-            // after 1 hour of integration -- order-of-magnitude for next-generation
+            // after 1 hour of integration, order-of-magnitude for next-generation
             // extreme-AO on a 39m aperture (raw ~1e-4 at small separations, deep
             // post-processed limits approaching 1e-8; Kasper et al. 2021, PCS/ELT).
             // Magnitude scaling reuses the shared photon-noise relation: fainter AO
@@ -305,7 +305,7 @@ namespace ExoInstruments.Core
                        "objective, flat corrected field over a 45 mm image circle (williamoptics.com). Sited at the Observatoire de " +
                        "Haute-Provence (650 m), median seeing 2.5 arcsec per Schmitt et al. 2024, A&A 687, A198.",
             Description = "Fifty-one millimeters of glass, and the most useful telescope in this catalog for one specific job. Every other " +
-                          "instrument here is built to resolve -- long focus, narrow field, a planet filling the frame. This one is built to " +
+                          "instrument here is built to resolve: long focus, narrow field, a planet filling the frame. This one is built to " +
                           "COVER: 250 mm of focal length opens a 4.4 x 3.0 degree field, forty times wider than the RC20's, and roughly eight " +
                           "hundred real catalog stars land in every exposure instead of four. Point it at a planet and you get a bright dot. " +
                           "Point it at anything at all and you get a sky.",
@@ -313,14 +313,14 @@ namespace ExoInstruments.Core
             ApertureMeters = VisualTelescopeCatalog.RedCat51.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.RedCat51.SiteAltitudeMeters, // Observatoire de Haute-Provence
             VisualTelescope = VisualTelescopeCatalog.RedCat51,
-            // Placeholders -- balance à valider avec Baptiste. Priced below the RC20 and unlocked
+            // Placeholders, balance à valider avec Baptiste. Priced below the RC20 and unlocked
             // by default: it is the cheapest real instrument here, and it is what a player should
             // have in hand before deciding whether resolution or coverage is what they want next.
             UnlockedByDefault = true,
             UnlockCostFunds = 0.0,
             UnlockScienceThreshold = 0.0,
             ScanCostFunds = 20.0,
-            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
         public static readonly InstrumentSpec Rc20 = new InstrumentSpec
@@ -336,8 +336,8 @@ namespace ExoInstruments.Core
             Citation = "PlaneWave Instruments RC20: 20-inch (0.51 m) Ritchey-Chretien astrograph, the class of telescope used at university " +
                        "observatories for hands-on amateur/semi-pro imaging. Sited at the Observatoire de Haute-Provence (650 m), whose " +
                        "median seeing of 2.5 arcsec is published in Schmitt et al. 2024, A&A 687, A198.",
-            Description = "A 20-inch Ritchey-Chretien astrograph -- the kind of telescope a university observatory or a serious amateur actually " +
-                          "owns, not a billion-Fund flagship. Point it at anything in the neighborhood -- Duna, Jool, the Mun -- and it takes a " +
+            Description = "A 20-inch Ritchey-Chretien astrograph, the kind of telescope a university observatory or a serious amateur actually " +
+                          "owns, not a billion-Fund flagship. Point it at anything in the neighborhood (Duna, Jool, the Mun) and it takes a " +
                           "real photograph: true position, phase, and relative brightness, straight off the sensor. No spectra, no light curves, " +
                           "just a picture, monochrome and grainy the way a real long-exposure frame off an amateur CCD looks before anyone " +
                           "stacks and processes it.",
@@ -345,12 +345,12 @@ namespace ExoInstruments.Core
             ApertureMeters = VisualTelescopeCatalog.Rc20.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Rc20.SiteAltitudeMeters, // Observatoire de Haute-Provence
             VisualTelescope = VisualTelescopeCatalog.Rc20,
-            // Placeholders -- balance à valider avec Baptiste.
+            // Placeholders, balance à valider avec Baptiste.
             UnlockedByDefault = false,
             UnlockCostFunds = 15_000.0,
             UnlockScienceThreshold = 5.0,
             ScanCostFunds = 50.0,
-            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
         public static readonly InstrumentSpec Cdk1000 = new InstrumentSpec
@@ -366,23 +366,23 @@ namespace ExoInstruments.Core
             Citation = "PlaneWave Instruments CDK1000: 1-meter (39.4 in) Corrected Dall-Kirkham astrograph, f/6, 47% central obstruction " +
                        "(planewave.com). A real unit was installed at Palomar Observatory in 2024 to support MIT's WINTER project and " +
                        "Caltech research.",
-            Description = "A full meter of aperture -- research-observatory class, the same telescope PlaneWave installed at Palomar in 2024. " +
+            Description = "A full meter of aperture, research-observatory class, the same telescope PlaneWave installed at Palomar in 2024. " +
                           "Nearly four times the RC20's light-collecting area and close to double its resolving power, with a corrected " +
                           "Dall-Kirkham design that cancels off-axis coma AND astigmatism (an RC only cancels coma), so the field stays flat " +
                           "corner to corner. That reach is what it takes to frame the small, faint, or distant bodies the RC20 can't " +
-                          "usefully resolve -- at real research-instrument cost.",
+                          "usefully resolve, at real research-instrument cost.",
             IsSpaceBased = false,
             ApertureMeters = VisualTelescopeCatalog.Cdk1000.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Cdk1000.SiteAltitudeMeters, // Palomar Observatory
             VisualTelescope = VisualTelescopeCatalog.Cdk1000,
-            // Placeholders -- balance à valider avec Baptiste. Strictly better than the RC20 in
+            // Placeholders, balance à valider avec Baptiste. Strictly better than the RC20 in
             // every optical respect, so priced and gated above it per this file's own "bigger
             // investment -> bigger payoff" ordering rule.
             UnlockedByDefault = false,
             UnlockCostFunds = 60_000.0,
             UnlockScienceThreshold = 20.0,
             ScanCostFunds = 120.0,
-            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
         public static readonly InstrumentSpec Fors2Vlt = new InstrumentSpec
@@ -399,22 +399,22 @@ namespace ExoInstruments.Core
                        "CCID20 CCDs, 15um pixels, 0.126\"/pixel (eso.org FORS2 User Manual and Standard Filters page). Same Paranal site " +
                        "(2635m) already used for ESPRESSO in this mod.",
             Description = "Not a hobbyist instrument at all: one of the four 8.2m Unit Telescopes of the actual Very Large Telescope, " +
-                          "carrying its real optical imager/spectrograph, FORS2. Every number driving this camera -- aperture, plate scale, " +
-                          "the real MIT CCID20 detector, its real filters -- is FORS2's own published spec, not a reskinned amateur camera. " +
+                          "carrying its real optical imager/spectrograph, FORS2. Every number driving this camera (aperture, plate scale, " +
+                          "the real MIT CCID20 detector, its real filters) is FORS2's own published spec, not a reskinned amateur camera. " +
                           "Sixteen times the RC20's raw aperture area puts the faintest, smallest, most distant bodies in the system within " +
-                          "reach at last. The gain dial is gone, too: a real research CCD doesn't have one -- what you get is what the " +
+                          "reach at last. The gain dial is gone, too: a real research CCD doesn't have one; what you get is what the " +
                           "hardware's own fixed readout mode gives you.",
             IsSpaceBased = false,
             ApertureMeters = VisualTelescopeCatalog.Fors2Vlt.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Fors2Vlt.SiteAltitudeMeters, // Paranal Observatory
             VisualTelescope = VisualTelescopeCatalog.Fors2Vlt,
-            // Placeholders -- balance à valider avec Baptiste. The biggest jump yet over the
+            // Placeholders, balance à valider avec Baptiste. The biggest jump yet over the
             // CDK1000, priced and gated accordingly per this file's own ordering rule.
             UnlockedByDefault = false,
             UnlockCostFunds = 250_000.0,
             UnlockScienceThreshold = 80.0,
             ScanCostFunds = 400.0,
-            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
         public static readonly InstrumentSpec Sphere = new InstrumentSpec
@@ -430,24 +430,24 @@ namespace ExoInstruments.Core
             Citation = "ESO Very Large Telescope, Unit Telescope 3 (Melipal), 8.2m, fitted with the real SPHERE/ZIMPOL extreme-AO imaging " +
                        "polarimeter: SAXO adaptive optics, ~25 mas achieved FWHM, real CCD (640,000 e- full well) (Schmid et al. 2018, " +
                        "A&A 619, A9). Same Paranal site (2635m) as FORS2, different Unit Telescope.",
-            Description = "The same VLT, a different real instrument, solving a different real problem: FORS2 is seeing-limited -- " +
+            Description = "The same VLT, a different real instrument, solving a different real problem: FORS2 is seeing-limited; " +
                           "Paranal's own atmosphere blurs it to about an arcsecond no matter the mirror size. SPHERE instead corrects " +
                           "that turbulence in real time with its SAXO adaptive-optics system, reaching about 25 milliarcseconds of real " +
-                          "resolution -- some 24 to 40 times finer. That's what it takes to actually resolve the system's smallest, most " +
+                          "resolution, some 24 to 40 times finer. That's what it takes to actually resolve the system's smallest, most " +
                           "marginal bodies, not just collect more of their light. The tradeoff is real too: ZIMPOL's true field of view " +
-                          "is barely 3.6 arcseconds wide, and it has no blue filter at all -- a specialist's instrument, not a generalist's.",
+                          "is barely 3.6 arcseconds wide, and it has no blue filter at all, a specialist's instrument, not a generalist's.",
             IsSpaceBased = false,
             ApertureMeters = VisualTelescopeCatalog.Sphere.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Sphere.SiteAltitudeMeters, // Paranal Observatory
             VisualTelescope = VisualTelescopeCatalog.Sphere,
-            // Placeholders -- balance à valider avec Baptiste. A specialist upgrade rather than a
+            // Placeholders, balance à valider avec Baptiste. A specialist upgrade rather than a
             // strict step up from the CDK1000/FORS2 (tiny FOV, no blue channel), so priced
             // similarly to FORS2 rather than automatically higher.
             UnlockedByDefault = false,
             UnlockCostFunds = 300_000.0,
             UnlockScienceThreshold = 100.0,
             ScanCostFunds = 450.0,
-            ScienceRewardMultiplier = 0.0, // no detections to reward -- this instrument doesn't feed the science-reward economy
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
         public static readonly InstrumentSpec[] All =

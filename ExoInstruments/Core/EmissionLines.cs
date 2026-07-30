@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
     /// filters are specified, from NIST ASD and reproduced throughout Osterbrock &amp; Ferland (2006,
     /// "Astrophysics of Gaseous Nebulae and Active Galactic Nuclei", 2nd ed.). Air rather than
     /// vacuum because that is the convention every filter manufacturer and every narrowband
-    /// observer works in, and mixing the two is a 1.7 Angstrom error -- half a nanometre-class
+    /// observer works in, and mixing the two is a 1.7 Angstrom error, half a nanometre-class
     /// filter's own tolerance.
     ///
     /// Pure C#, no Unity dependency.
@@ -27,7 +27,7 @@ namespace ExoInstruments.Core
     {
         /// <summary>
         /// One catalogued line: its air wavelength, its name, and whether it is a recombination or
-        /// a collisionally excited (forbidden) transition. The distinction is not decoration -- the
+        /// a collisionally excited (forbidden) transition. The distinction is not decoration; the
         /// forbidden lines are the density and temperature diagnostics, and their ratios to the
         /// recombination lines are what a nebular analysis is made of.
         /// </summary>
@@ -92,8 +92,8 @@ namespace ExoInstruments.Core
         /// The rayleigh is defined as a column emission rate of 10^6 photons cm^-2 s^-1 into 4 pi
         /// steradians (Hunten, Roach &amp; Chamberlain 1956, JATP 8, 345; Baker &amp; Romick 1976,
         /// Appl. Opt. 15, 1966), so as a surface brightness it is 10^6/(4 pi) per steradian. It is
-        /// the unit every wide-field H-alpha survey publishes in -- WHAM, VTSS, SHASSA and the
-        /// Finkbeiner (2003) composite -- which is why the conversion lives here rather than being
+        /// the unit every wide-field H-alpha survey publishes in: WHAM, VTSS, SHASSA and the
+        /// Finkbeiner (2003) composite, which is why the conversion lives here rather than being
         /// done at each call site.
         /// </summary>
         public const double PhotonsPerCm2PerSecondPerSteradianPerRayleigh = 1.0e6 / (4.0 * Math.PI);
@@ -107,7 +107,7 @@ namespace ExoInstruments.Core
         ///
         ///     N_e = I [R] * 10^6/(4 pi) * Omega_pixel [sr] * A [cm^2] * T_system(lambda)
         ///
-        /// with T_system the dimensionless throughput at the LINE's wavelength -- filter, optics,
+        /// with T_system the dimensionless throughput at the LINE's wavelength: filter, optics,
         /// detector and atmosphere, all sampled at one wavelength rather than integrated, because
         /// the line has no width worth integrating over. Multiply by exposure for electrons.
         ///

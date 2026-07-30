@@ -20,7 +20,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Effective temperature derived from the BSC B-V color index
         /// (Ballesteros 2012). Also used by the merger to backfill exoplanet.eu
-        /// hosts whose export lacks star_teff (HR 8799 in the current export) --
+        /// hosts whose export lacks star_teff (HR 8799 in the current export),
         /// the consumed BSC entry knows the star's color even when the planet
         /// catalog forgot its temperature.
         /// </summary>
@@ -31,14 +31,14 @@ namespace ExoInstruments.Core
     {
         public List<BackgroundStarEntry> Entries { get; set; }
         public int Loaded { get; set; }
-        public int SkippedNoPosition { get; set; }   // novae/clusters -- V/50 carries 14 non-stellar rows
+        public int SkippedNoPosition { get; set; }   // novae/clusters, V/50 carries 14 non-stellar rows
         public int SkippedNoMagnitude { get; set; }
     }
 
     /// <summary>
     /// Parses a VizieR TSV export of the Yale Bright Star Catalogue (V/50,
     /// Hoffleit &amp; Warren 1991, ~9110 stars to V~6.5) into decoy StarTargets:
-    /// HasPlanet = false, no planetary data of any kind. Pure C# -- no file I/O,
+    /// HasPlanet = false, no planetary data of any kind. Pure C#, no file I/O,
     /// no Unity/KSP dependency, same division of labor as ExoplanetCsvLoader.
     ///
     /// Expected export (regenerate with the same query if the file is lost):
@@ -109,7 +109,7 @@ namespace ExoInstruments.Core
 
                     // No planet, and no invented planetary or stellar bulk data:
                     // BSC5 carries neither mass nor radius, and its distances are
-                    // pre-Hipparcos -- 0 means "unknown", which every downstream
+                    // pre-Hipparcos; 0 means "unknown", which every downstream
                     // consumer (transit geometry, RV mass function, imaging
                     // separation) already treats as "cannot compute".
                     HasPlanet = false,
@@ -124,7 +124,7 @@ namespace ExoInstruments.Core
                     ApparentMagnitude = vmag.Value,
 
                     // Derived from the BSC B-V color index (Ballesteros 2012), not a
-                    // spectroscopic measurement -- good to a few percent on the main
+                    // spectroscopic measurement, good to a few percent on the main
                     // sequence, which covers the display tint and characterization
                     // uses. Null when the row carries no color.
                     EffectiveTempK = teffK,
@@ -205,7 +205,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// A handful of visual-binary components share one Bayer/Flamsteed name in
-        /// BSC (e.g. HR 8085/8086 are both "61 Cyg") -- append the HR number so
+        /// BSC (e.g. HR 8085/8086 are both "61 Cyg"); append the HR number so
         /// the player-facing list never shows two identical entries.
         /// </summary>
         private static void DisambiguateDuplicateNames(List<BackgroundStarEntry> entries)

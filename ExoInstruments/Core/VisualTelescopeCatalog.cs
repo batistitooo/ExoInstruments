@@ -5,7 +5,7 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Physical identity of one visual (solar-system photography) telescope+camera setup:
     /// optics, sensor, and capture range. This is everything SolarSystemCameraTexture's
-    /// rendering pipeline needs to know about which instrument it's simulating -- kept out of
+    /// rendering pipeline needs to know about which instrument it's simulating, kept out of
     /// the pipeline itself so a new visual telescope (e.g. a cheap beginner scope for the Mun,
     /// or a larger instrument that can reach the small/distant planets the RC20 can't) is a new
     /// entry in VisualTelescopeCatalog below, not a change to the rendering code.
@@ -19,7 +19,7 @@ namespace ExoInstruments.Core
         public CameraFilter Position;
         public double CentralWavelengthNm;
         public double BandwidthAngstrom;
-        /// <summary>1.0 means NOT PUBLISHED for this filter, not a perfect one -- the same convention the broadband fields use.</summary>
+        /// <summary>1.0 means NOT PUBLISHED for this filter, not a perfect one, the same convention the broadband fields use.</summary>
         public double PeakTransmission;
     }
 
@@ -38,7 +38,7 @@ namespace ExoInstruments.Core
         /// <summary>The observatory this instrument stands at, for the FITS OBSERVAT keyword. The same site the altitude and seeing figures below are measured at, named rather than implied.</summary>
         public string SiteName;
 
-        /// <summary>Detector operating temperature in Celsius -- the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
+        /// <summary>Detector operating temperature in Celsius, the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
         public double DetectorTemperatureCelsius = double.NaN;
 
         /// <summary>
@@ -50,8 +50,8 @@ namespace ExoInstruments.Core
         /// the read-noise distribution is clipped away, which for a pixel holding no charge biases
         /// the result upward by sigma/sqrt(2*pi) = 0.40 sigma (the ADC's own downward truncation
         /// then gives back half a count, leaving about +0.21 sigma net at 1.2 e- read noise), makes
-        /// the noise non-Gaussian exactly at the floor where faint detail lives, and -- the real
-        /// cost -- leaves the read noise unmeasurable from the exported data and dark subtraction
+        /// the noise non-Gaussian exactly at the floor where faint detail lives, and, the real
+        /// cost, leaves the read noise unmeasurable from the exported data and dark subtraction
         /// wrong. Every real camera has a pedestal for precisely this reason.
         ///
         /// The bias is SIGNAL-DEPENDENT, which is what makes it pernicious rather than merely
@@ -72,7 +72,7 @@ namespace ExoInstruments.Core
         /// The pedestal to use when none is quoted for the device: five times the read noise,
         /// rounded up to a whole count.
         ///
-        /// Five sigma is a design rule, not a measurement, and is labelled as one -- it is the
+        /// Five sigma is a design rule, not a measurement, and is labelled as one; it is the
         /// margin at which clipping stops mattering (the probability of a read-noise excursion
         /// below the pedestal is 2.9e-7 per pixel, so a 17-megapixel frame clips about five pixels
         /// rather than eight million). Since the pedestal cancels in calibration, no measurable
@@ -98,7 +98,7 @@ namespace ExoInstruments.Core
         /// fixed cryogenic temperature, and no observer at a VLT unit telescope is offered a dial.
         ///
         /// A TEC figure is published as a DELTA rather than an absolute temperature because that is
-        /// what the device can actually do -- it pumps heat, so where it lands depends on where it
+        /// what the device can actually do; it pumps heat, so where it lands depends on where it
         /// starts. That is also the caveat on it: ZWO measure their delta at 30 C ambient and state
         /// that it falls as ambient does, so at a cold mountain site the true reachable minimum is
         /// warmer than SiteAmbientTemperatureCelsius minus this. The cold end of the range below is
@@ -107,7 +107,7 @@ namespace ExoInstruments.Core
         public double CoolerDeltaBelowAmbientC;
 
         /// <summary>
-        /// Ambient air temperature at the site, Celsius -- the temperature the cooler works against.
+        /// Ambient air temperature at the site, Celsius: the temperature the cooler works against.
         ///
         /// An annual mean from published climate records for the site's own location, NOT a
         /// night-time or observatory-logged figure: a real observer cools against the air at 3 a.m.
@@ -167,7 +167,7 @@ namespace ExoInstruments.Core
         public double SiteAltitudeMeters;
 
         /// <summary>
-        /// The site's own median seeing FWHM (arcsec) AT ZENITH, referred to 500nm -- the
+        /// The site's own median seeing FWHM (arcsec) AT ZENITH, referred to 500nm, the
         /// convention every published DIMM figure uses. This is the dominant term in the
         /// delivered image quality of any ground-based telescope without adaptive optics: a
         /// 0.5m and an 8m telescope at the same site resolve a planet equally well, because
@@ -190,7 +190,7 @@ namespace ExoInstruments.Core
         /// Number of reflecting surfaces in the light path. This is a property of where the
         /// instrument sits on the telescope, not of the telescope alone: FORS2 is at UT1's
         /// CASSEGRAIN focus and sees M1+M2 only, while SPHERE is on UT3's NASMYTH platform and
-        /// picks up the M3 flat as well -- so the same 8.2m telescope delivers measurably
+        /// picks up the M3 flat as well; so the same 8.2m telescope delivers measurably
         /// different throughput to the two instruments. Zero for a refractor, which has no
         /// mirrors at all.
         /// </summary>
@@ -199,7 +199,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Reflectivity of one mirror surface, band-averaged over the optical range.
         ///
-        /// The throughput of a mirror train is r^N times the obstruction factor (1 - eps^2) --
+        /// The throughput of a mirror train is r^N times the obstruction factor (1 - eps^2),
         /// Ma &amp; Cai, "Scientific performance analysis of the SYZ telescope design vs. the RC
         /// telescope design" (MNRAS; arXiv:1708.01257), Sect. 4.2, whose Eq. 3 is exactly the form
         /// used here and whose obstruction term this pipeline already applied. That paper also
@@ -227,13 +227,13 @@ namespace ExoInstruments.Core
         /// splitters, Barlow glass, dewar windows.
         ///
         /// 1.0 means NOT MODELLED, not lossless, and it is the honest value wherever no figure is
-        /// published -- see each entry's own comment for which case it is in. The one instrument
+        /// published; see each entry's own comment for which case it is in. The one instrument
         /// with a real number here is SPHERE, whose grey beam splitter's 79% transmission to
         /// ZIMPOL is published (Schmid et al. 2018).
         /// </summary>
         public double RelayOpticsTransmission;
 
-        /// <summary>Reflection and relay losses combined: r^N times the relay factor. The aperture obstruction is NOT here -- it is already in EffectiveApertureAreaM2, which is where the collecting area belongs.</summary>
+        /// <summary>Reflection and relay losses combined: r^N times the relay factor. The aperture obstruction is NOT here; it is already in EffectiveApertureAreaM2, which is where the collecting area belongs.</summary>
         public double OpticsTransmission
         {
             get
@@ -259,14 +259,14 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The detector's published QE curve, when one exists. Null means only a peak figure is
-        /// published and the peak is used flat across the band -- which overstates every filter
+        /// published and the peak is used flat across the band, which overstates every filter
         /// away from the peak, and is recorded as such rather than papered over with a borrowed
         /// curve from a different sensor.
         /// </summary>
         public SpectralCurve QuantumEfficiencyCurve;
         public double FullWellElectrons;
         public double ReadNoiseElectrons;
-        /// <summary>Dark current at this sensor's own real cooled operating temperature (see each entry's comment for the actual temperature -- it varies by instrument, so it doesn't belong in the field name).</summary>
+        /// <summary>Dark current at this sensor's own real cooled operating temperature (see each entry's comment for the actual temperature; it varies by instrument, so it doesn't belong in the field name).</summary>
         public double DarkCurrentElectronsPerSecond;
 
         /// <summary>
@@ -282,7 +282,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Real conversion factor K in electrons per ADU, at gain multiplier 1. This is the
         /// number that turns a simulated charge into a digital count, and the same number a real
-        /// observer needs to turn the counts back into electrons -- it is written to the FITS
+        /// observer needs to turn the counts back into electrons; it is written to the FITS
         /// EGAIN keyword, which is what makes the exported frame genuinely calibratable rather
         /// than a picture of one.
         /// </summary>
@@ -298,13 +298,13 @@ namespace ExoInstruments.Core
         // Capture range
         public float MinExposureSeconds;
         public float MaxExposureSeconds;
-        /// <summary>Continuously-variable electronic gain range. Set MinGain == MaxGain for a real instrument whose gain is fixed by its readout electronics rather than player-adjustable (e.g. a professional CCD with no ISO-like control) -- see VisualTelescopeCatalog.Fors2Vlt.</summary>
+        /// <summary>Continuously-variable electronic gain range. Set MinGain == MaxGain for a real instrument whose gain is fixed by its readout electronics rather than player-adjustable (e.g. a professional CCD with no ISO-like control); see VisualTelescopeCatalog.Fors2Vlt.</summary>
         public float MinGain;
         public float MaxGain;
 
         // Filters: real bandwidth (FWHM, Angstrom) per filter-wheel position. Luminance is the
         // wide/clear reference; R/G/B and HAlpha are each their own real filter on instruments
-        // that have one (not assumed fractions of Luminance) -- see each entry's comment.
+        // that have one (not assumed fractions of Luminance); see each entry's comment.
         public double LuminanceBandwidthAngstrom;
         public double RedBandwidthAngstrom;
         public double GreenBandwidthAngstrom;
@@ -314,7 +314,7 @@ namespace ExoInstruments.Core
         // Real CENTRAL wavelength (nm) per filter-wheel position. Separate from the bandwidths
         // above because diffraction cares about where the passband sits, not how wide it is:
         // the whole PSF scales as lambda/D (see OpticalPsf), so the same telescope genuinely
-        // resolves finer through a blue filter than a red one -- a real, measurable effect that
+        // resolves finer through a blue filter than a red one, a real, measurable effect that
         // a single instrument-wide wavelength would erase. Each entry's own comment sources its
         // filter set; a position the instrument doesn't physically have is left at 0 and is
         // unreachable (see AvailableFilters).
@@ -328,7 +328,7 @@ namespace ExoInstruments.Core
         // passband is, not how much light it lets through at the top of it, and a real interference
         // filter is well short of 1: ESO publishes 0.70 for FORS2's own H_Alpha+83 in its standard
         // collimator. 1.0 here means the figure is NOT PUBLISHED for that filter and the loss is
-        // therefore unmodelled -- it is not a claim of a perfect filter. Combined with the top-hat
+        // therefore unmodelled; it is not a claim of a perfect filter. Combined with the top-hat
         // of the published FWHM, peak transmission fixes the filter's equivalent width, which is
         // the quantity the photometry integral actually needs (see SystemBandpass).
         public double LuminanceFilterPeakTransmission;
@@ -338,9 +338,9 @@ namespace ExoInstruments.Core
         public double HAlphaFilterPeakTransmission;
 
         /// <summary>
-        /// Which CameraFilter positions actually exist as a real filter on this instrument --
+        /// Which CameraFilter positions actually exist as a real filter on this instrument;
         /// the GUI's filter wheel only offers these. Most instruments carry all five; an
-        /// instrument with a real gap (e.g. ZIMPOL has no broadband blue filter -- its filter
+        /// instrument with a real gap (e.g. ZIMPOL has no broadband blue filter; its filter
         /// set targets red/near-IR reflected-light and circumstellar science, not true-color
         /// RGB) simply omits that entry rather than a made-up bandwidth standing in for a
         /// filter that doesn't exist.
@@ -369,7 +369,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Real AO-corrected resolution (FWHM, arcsec) this instrument achieves under good
-        /// conditions, for an instrument with genuine adaptive optics -- see
+        /// conditions, for an instrument with genuine adaptive optics; see
         /// SolarSystemCameraTexture.ComputeGroundSeeingFwhmArcsec, which uses this INSTEAD OF the plain
         /// airmass-based seeing model when it's nonzero. 0 (default) means no adaptive optics:
         /// the plain ground-based seeing model applies, same as every telescope before SPHERE.
@@ -377,7 +377,7 @@ namespace ExoInstruments.Core
         public double AdaptiveOpticsFwhmArcsec;
 
         /// <summary>
-        /// Strehl ratio this AO system really achieves -- the fraction of the light it actually
+        /// Strehl ratio this AO system really achieves, the fraction of the light it actually
         /// concentrates into the diffraction-limited core. Only meaningful alongside
         /// AdaptiveOpticsFwhmArcsec.
         ///
@@ -386,17 +386,17 @@ namespace ExoInstruments.Core
         /// the rest (see AdaptiveOpticsHaloSeeingFwhmArcsec, and OpticalPsf.BuildAdaptiveOptics
         /// Kernel). Collapsing the two into a single profile of the right total FWHM gets the
         /// width right but puts far too much light at intermediate scales, which is exactly
-        /// where a resolved planetary disk's surface detail lives -- it smears features that a
+        /// where a resolved planetary disk's surface detail lives; it smears features that a
         /// real AO frame keeps sharp on top of a diffuse background.
         /// </summary>
         public double AdaptiveOpticsStrehlRatio;
 
-        /// <summary>Seeing FWHM (arcsec) of the uncorrected halo the AO leaves behind -- the site's own real median seeing, since the halo is simply the light the correction failed to gather.</summary>
+        /// <summary>Seeing FWHM (arcsec) of the uncorrected halo the AO leaves behind, the site's own real median seeing, since the halo is simply the light the correction failed to gather.</summary>
         public double AdaptiveOpticsHaloSeeingFwhmArcsec;
 
         /// <summary>
         /// True for an instrument that always has precision active tracking, with no real bare/
-        /// unguided operating mode -- a professional research telescope like the VLT is never
+        /// unguided operating mode; a professional research telescope like the VLT is never
         /// pointed without one, unlike an amateur astrograph a player might genuinely run
         /// without an autoguider attached. When true, SolarSystemCameraTexture forces its
         /// Autoguiding property on and locks the GUI toggle, instead of leaving drift/trailing
@@ -406,7 +406,7 @@ namespace ExoInstruments.Core
 
         // Off-axis aberration: peak astigmatism blur (pixels) at the sensor's corner. The
         // radial-quadratic FALLOFF this drives is the same optical physics for any two-mirror
-        // astrograph (Seidel aberration theory -- see SolarSystemCameraTexture's own comment on
+        // astrograph (Seidel aberration theory; see SolarSystemCameraTexture's own comment on
         // ApplyAstigmatismBlur), but the PEAK amplitude depends on how completely THIS
         // telescope's own design cancels off-axis aberrations, so it lives per-instrument here
         // rather than as one pipeline-wide constant.
@@ -419,7 +419,7 @@ namespace ExoInstruments.Core
         ///
         /// This is not a detail for a high-resolution instrument. At 45 degrees from the zenith the
         /// atmosphere spreads 400 to 700 nm over 1.1 arcsec at Paranal, which on ZIMPOL's 3.6 mas
-        /// pixels is THREE HUNDRED pixels of smear -- an instrument delivering a 25 mas core cannot
+        /// pixels is THREE HUNDRED pixels of smear; an instrument delivering a 25 mas core cannot
         /// exist without one, and SPHERE has one (Beuzit et al. 2019, A&amp;A 631, A155, sect. 3.2:
         /// the common path carries an ADC for the visible arm). FORS2 does not: it is a
         /// low-resolution imager and spectrograph on 0.126 arcsec pixels, where the residual matters
@@ -427,7 +427,7 @@ namespace ExoInstruments.Core
         /// it. Amateur instruments do not.
         ///
         /// A real corrector leaves a residual rather than nothing, so this scales the dispersion
-        /// rather than switching it off -- see AtmosphericDispersionResidual.
+        /// rather than switching it off; see AtmosphericDispersionResidual.
         /// </summary>
         public bool HasAtmosphericDispersionCorrector;
 
@@ -439,7 +439,7 @@ namespace ExoInstruments.Core
         /// real air, and its own glasses' departure from the exact inverse dispersion curve. Published
         /// residuals for visible-arm ADCs of this class are at the few-percent level, so 0.05 is the
         /// figure used and it is labelled as an order rather than a measurement for a specific
-        /// instrument -- the alternative, cancelling the dispersion exactly, is the one value that is
+        /// instrument; the alternative, cancelling the dispersion exactly, is the one value that is
         /// certainly wrong.
         /// </summary>
         public const double AtmosphericDispersionResidual = 0.05;
@@ -448,9 +448,9 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Catalog of visual telescopes selectable in-game. Each one that should appear in the
     /// Observatory dropdown needs a matching InstrumentSpec in Observatories.cs (Method =
-    /// SolarSystemPhotography, VisualTelescope = the entry below) -- picking that row calls
-    /// SolarSystemCameraTexture.SetActiveTelescope. Add another VisualTelescopeSpec here -- e.g.
-    /// a beginner Mun-class refractor -- add it to All, and give it an Observatories.cs entry to
+    /// SolarSystemPhotography, VisualTelescope = the entry below); picking that row calls
+    /// SolarSystemCameraTexture.SetActiveTelescope. Add another VisualTelescopeSpec here (e.g.
+    /// a beginner Mun-class refractor), add it to All, and give it an Observatories.cs entry to
     /// ship a third instrument; the rendering pipeline needs no further changes.
     /// </summary>
     public static class VisualTelescopeCatalog
@@ -467,7 +467,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the
         /// three positions an amateur narrowband wheel is actually sold with. [N II], [O II] and
-        /// [O I] are deliberately absent -- [N II] at a width that separates it from H-alpha is a
+        /// [O I] are deliberately absent; [N II] at a width that separates it from H-alpha is a
         /// specialist item, [O II] at 372 nm is below where a CMOS sensor has usable quantum
         /// efficiency, and neither is a filter these telescopes would have.
         /// </summary>
@@ -481,7 +481,7 @@ namespace ExoInstruments.Core
         /// The amateur narrowband set, at the same 7 nm the H-alpha position already carries.
         /// Peak transmission is left at 1.0, which by this file's convention means the figure is
         /// NOT PUBLISHED for these and the loss is unmodelled rather than a claim of a perfect
-        /// filter -- the same treatment the H-alpha position already gets.
+        /// filter; the same treatment the H-alpha position already gets.
         /// </summary>
         private static readonly NarrowbandFilterSpec[] AmateurNarrowbandSet =
         {
@@ -511,7 +511,7 @@ namespace ExoInstruments.Core
         /// career-economy side of this same instrument.)
         ///
         /// Site is the Observatoire de Haute-Provence, 650m. Previously this was left as a
-        /// generic "university observatory, e.g. ETH Zurich" -- a site named only by example,
+        /// generic "university observatory, e.g. ETH Zurich", a site named only by example,
         /// which is fine for an altitude but not for seeing: seeing is a MEASURED property of a
         /// specific mountain, so an unnamed site simply has no value that can be cited. OHP is a
         /// real observatory of exactly this instrument's tier (a working national facility
@@ -519,16 +519,16 @@ namespace ExoInstruments.Core
         ///
         /// Filters: a real LRGB astro filter wheel has no single published per-channel bandwidth
         /// the way a research instrument's named filters do, so R/G/B keep the even-third-of-L
-        /// split (modern "1:1:1 balanced" CMOS LRGB design -- see FilterThroughput's own comment)
+        /// split (modern "1:1:1 balanced" CMOS LRGB design; see FilterThroughput's own comment)
         /// and HAlpha keeps the real ~7nm narrowband figure.
         ///
         /// Astigmatism: for a true Ritchey-Chretien, third-order coma is corrected to zero by
-        /// the RC hyperbolic-mirror design itself -- that is the entire reason the RC form
+        /// the RC hyperbolic-mirror design itself; that is the entire reason the RC form
         /// exists (Ritchey &amp; Chretien 1922). The dominant remaining off-axis third-order
         /// (Seidel) aberration for this telescope class is astigmatism. Its absolute amplitude
         /// depends on the telescope's actual optical prescription (focal ratio, field curvature
         /// radius), which no published PlaneWave RC20 datasheet specifies to the precision an
-        /// aberration coefficient would need -- 3.0px at the frame corner is a display
+        /// aberration coefficient would need; 3.0px at the frame corner is a display
         /// calibration, not a measured quantity.
         /// </summary>
         public static readonly VisualTelescopeSpec Rc20 = new VisualTelescopeSpec
@@ -538,7 +538,7 @@ namespace ExoInstruments.Core
             SiteName = "Observatoire de Haute-Provence",
             DetectorTemperatureCelsius = -20.0,
             // Two-stage TEC, "more than 35 degrees Celsius below ambient" (zwoastro.com ASI294 Pro
-            // series), which ZWO measure at 30 C ambient and state falls as ambient does -- so the
+            // series), which ZWO measure at 30 C ambient and state falls as ambient does; so the
             // cold end this implies at a mountain site is optimistic, as CoolerDeltaBelowAmbientC
             // records. Ambient is the annual mean air temperature at Saint-Michel-l'Observatoire,
             // 11.8 C (climate-data.org), the commune OHP stands in.
@@ -581,7 +581,7 @@ namespace ExoInstruments.Core
             // own published numbers; ZWO does not tabulate K itself for this camera.
             ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
-            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
             // this is a floor rather than a measurement; unlike FORS2 no rate is published for
             // this camera at its site.
@@ -599,7 +599,7 @@ namespace ExoInstruments.Core
             HAlphaBandwidthAngstrom = 70.0,
 
             // Amateur LRGB set: L is the real ~420-685nm visible band this filter class covers
-            // (centre 552.5nm), and R/G/B are its even thirds -- the same 1:1:1 balanced split
+            // (centre 552.5nm), and R/G/B are its even thirds, the same 1:1:1 balanced split
             // the bandwidths above already assume, so the centres fall at the midpoint of each
             // third (B 420-508.3, G 508.3-596.7, R 596.7-685nm). H-alpha is the real line.
             LuminanceCentralWavelengthNm = 552.5,
@@ -633,7 +633,7 @@ namespace ExoInstruments.Core
         /// exploring one of them. Every other entry is a long-focus astrograph built to resolve:
         /// the RC20's 3468mm gives a 0.32x0.22 degree field, and with its 4x Barlow, 0.08x0.05
         /// degrees. At Tycho-2's 62 stars/deg^2 that is 4 stars in a frame, and 0.26 with the
-        /// Barlow in -- so three planetary frames in four contain no catalogue star at all, and
+        /// Barlow in; so three planetary frames in four contain no catalogue star at all, and
         /// the star field the pipeline can draw is invisible for want of anything to draw.
         /// 250mm of focal length through the same sensor gives 4.40x2.99 degrees, 13.2 deg^2,
         /// and about 800 stars in every single exposure at that same density, far more with a
@@ -641,18 +641,18 @@ namespace ExoInstruments.Core
         /// changed; the instrument was simply pointed at the wrong end of the problem.
         ///
         /// Sampling: 3.82"/px unbinned, against 2.5" seeing at OHP. That is genuinely
-        /// UNDERSAMPLED -- a star lands on about one pixel and the PSF is narrower than the
-        /// pixel grid -- which is not a defect but the defining trade of every wide-field
+        /// UNDERSAMPLED; a star lands on about one pixel and the PSF is narrower than the
+        /// pixel grid, which is not a defect but the defining trade of every wide-field
         /// astrograph: sky coverage bought with resolution. Do not "fix" it.
         ///
-        /// Optics: a refractor, so SecondaryObstructionFraction is 0 -- there is no secondary
+        /// Optics: a refractor, so SecondaryObstructionFraction is 0; there is no secondary
         /// mirror in the light path, and the pupil is a filled circle rather than an annulus.
         /// No Barlow (BarlowFactor 1): a wide-field astrograph has one field, and bolting a
         /// Barlow onto it would simply undo the only reason to own it.
         ///
         /// Camera: the same ZWO ASI294MM Pro as the RC20, with every figure carried over
-        /// unchanged. This is not a shortcut but how amateur astrophotography actually works --
-        /// one camera, swapped between tubes -- and it isolates this entry's difference to the
+        /// unchanged. This is not a shortcut but how amateur astrophotography actually works (
+        /// one camera, swapped between tubes), and it isolates this entry's difference to the
         /// optics alone.
         ///
         /// Filters: the same amateur LRGB + H-alpha wheel as the RC20, for the same reason.
@@ -669,7 +669,7 @@ namespace ExoInstruments.Core
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Observatoire de Haute-Provence",
             DetectorTemperatureCelsius = -20.0,
-            CoolerDeltaBelowAmbientC = 35.0,        // same camera and same site as the RC20 -- see its comment
+            CoolerDeltaBelowAmbientC = 35.0,        // same camera and same site as the RC20; see its comment
             SiteAmbientTemperatureCelsius = 11.8,
 
             ApertureMeters = 0.051,
@@ -682,7 +682,7 @@ namespace ExoInstruments.Core
             SecondaryObstructionFraction = 0.0,
             // A refractor has no mirrors, so there is no reflection loss to apply. What it does
             // have is eight air-glass surfaces (a Petzval quadruplet) and the camera window, and
-            // William Optics publishes no transmission figure for the objective -- so this
+            // William Optics publishes no transmission figure for the objective; so this
             // instrument's glass path is the roster's one wholly unmodelled optical loss, and it
             // is flagged rather than filled with a plausible-looking coating assumption.
             MirrorCount = 0,
@@ -707,7 +707,7 @@ namespace ExoInstruments.Core
             // own published numbers; ZWO does not tabulate K itself for this camera.
             ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
-            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
             // this is a floor rather than a measurement; unlike FORS2 no rate is published for
             // this camera at its site.
@@ -730,7 +730,7 @@ namespace ExoInstruments.Core
             BlueCentralWavelengthNm = 464.2,
             HAlphaCentralWavelengthNm = 656.3,
 
-            // Same unpublished amateur filter set as the RC20 -- see that entry.
+            // Same unpublished amateur filter set as the RC20; see that entry.
             LuminanceFilterPeakTransmission = 1.0,
             RedFilterPeakTransmission = 1.0,
             GreenFilterPeakTransmission = 1.0,
@@ -745,14 +745,14 @@ namespace ExoInstruments.Core
         /// <summary>
         /// PlaneWave CDK1000: 1.0m (1000mm / 39.37") Corrected Dall-Kirkham astrograph at f/6,
         /// 6000mm focal length, 47% central obstruction of the primary mirror diameter (all
-        /// planewave.com official CDK1000 product page specs -- the same optical tube PlaneWave
+        /// planewave.com official CDK1000 product page specs, the same optical tube PlaneWave
         /// also sells as part of the "PW1000" 1-meter observatory system). A real one of these
         /// was installed at Palomar Observatory, California (1712m altitude, per its Wikipedia
-        /// entry) in 2024 to support MIT's WINTER project and Caltech research -- used here as
+        /// entry) in 2024 to support MIT's WINTER project and Caltech research, used here as
         /// the site altitude, since PlaneWave's own product page doesn't specify a site. Paired
         /// with a real 4x Barlow for the "high power" end of the zoom range, same accessory
         /// class as the RC20 (see VisualTelescopeCatalog.Rc20). Camera is the same real ZWO
-        /// ASI294MM Pro mono CCD as the RC20 (zwoastro.com/product/asi294) -- a genuine, common
+        /// ASI294MM Pro mono CCD as the RC20 (zwoastro.com/product/asi294), a genuine, common
         /// prosumer pairing on CDK-class instruments, not invented for this entry; see Rc20's own
         /// comment for the sensor's full datasheet sourcing (4144x2822 native resolution, 4.63um
         /// pixel pitch, 90% peak QE, 66,000 e- full well, 1.2 e- read noise, 0.0022 e-/s/pixel
@@ -761,17 +761,17 @@ namespace ExoInstruments.Core
         /// Net result vs. the RC20, both through the same sensor/Barlow: aperture diameter ratio
         /// 1000mm/510mm = 1.961, so despite the larger 47%-vs-39% obstruction, raw-area-ratio
         /// (1.961^2=3.845) * obstruction-factor-ratio ((1-0.47^2)/(1-0.39^2)=0.919) = ~3.53x the
-        /// RC20's effective light-collecting area -- plus a Dawes-limit resolving power
+        /// RC20's effective light-collecting area, plus a Dawes-limit resolving power
         /// (116/D(mm) arcsec: 0.116" vs the RC20's 0.227") that's nearly DOUBLE, not a marginal
         /// gain. At the same 4x Barlow, native (unbinned) plate scale is 0.0398"/px vs the RC20's
-        /// 0.0688"/px -- landing almost exactly at this telescope's own Dawes/3 critical-sampling
+        /// 0.0688"/px, landing almost exactly at this telescope's own Dawes/3 critical-sampling
         /// point (0.0387"/px), so the extra magnification is fully backed by its finer diffraction
         /// limit, not empty magnification. That finer plate scale gives MinFovDeg ~0.0458 deg
-        /// (~2.75') against the RC20's ~0.0792 deg (~4.75') -- a real, visible 42% narrower frame
+        /// (~2.75') against the RC20's ~0.0792 deg (~4.75'), a real, visible 42% narrower frame
         /// for tightly resolving small, faint, or distant bodies the RC20 can't usefully reach.
         ///
         /// Astigmatism: unlike the plain-RC RC20, PlaneWave's own CDK1000 page states the design
-        /// is "free of off-axis coma, astigmatism, and field curvature" -- the CDK form adds a
+        /// is "free of off-axis coma, astigmatism, and field curvature"; the CDK form adds a
         /// corrector near the focal plane specifically to cancel both third-order aberrations a
         /// bare Dall-Kirkham would otherwise have, not just coma the way an RC does. Taking the
         /// manufacturer's own flat-field claim at face value (no published CDK1000 datasheet
@@ -800,7 +800,7 @@ namespace ExoInstruments.Core
             SecondaryObstructionFraction = 0.47,
             // Two mirrors, same aluminium figure as the RC20. The CDK's defining third element is
             // a refractive corrector near the focal plane, not a third mirror, so it costs
-            // transmission rather than reflection -- and PlaneWave publishes no figure for it, so
+            // transmission rather than reflection, and PlaneWave publishes no figure for it, so
             // that loss sits in the unmodelled RelayOpticsTransmission below alongside the Barlow.
             MirrorCount = 2,
             MirrorReflectivity = 0.87,
@@ -811,7 +811,7 @@ namespace ExoInstruments.Core
             // R-band". Two things that figure is NOT, and which the number below accounts for:
             //
             //   * It is not a 500nm figure. It is quoted in R, and seeing goes as lambda^(-1/5)
-            //     (r0 ~ lambda^(6/5), FWHM = 0.98*lambda/r0 -- the same relation
+            //     (r0 ~ lambda^(6/5), FWHM = 0.98*lambda/r0, the same relation
             //     SolarSystemCameraTexture applies per-filter). Referred to 500nm through
             //     Cousins R at 641nm (Bessell 1990, PASP 102, 1181), 1.1" becomes 1.16".
             //   * It is not an annual median. The same paper gives ~1.6" in winter. The summer
@@ -819,7 +819,7 @@ namespace ExoInstruments.Core
             //     therefore the site's GOOD season, not its year-round typical.
             //
             // The paper also notes the P60 runs "~0.2" worse than the values reported at the
-            // 200" Hale" -- not applied, since that would be arithmetic on a second quoted
+            // 200" Hale", not applied, since that would be arithmetic on a second quoted
             // figure to reach a number the paper never states.
             ZenithSeeingFwhmArcsec = 1.16,
 
@@ -837,7 +837,7 @@ namespace ExoInstruments.Core
             // own published numbers; ZWO does not tabulate K itself for this camera.
             ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
-            // detector -- the standard figure (Particle Data Group, Cosmic Rays review). This
+            // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
             // this is a floor rather than a measurement; unlike FORS2 no rate is published for
             // this camera at its site.
@@ -854,15 +854,15 @@ namespace ExoInstruments.Core
             BlueBandwidthAngstrom = 2650.0 / 3.0,
             HAlphaBandwidthAngstrom = 70.0,
 
-            // Same real amateur LRGB filter set as the RC20 (same camera, same accessory class)
-            // -- see Rc20's own comment for how these centres follow from the band's even thirds.
+            // Same real amateur LRGB filter set as the RC20 (same camera, same accessory class);
+            // see Rc20's own comment for how these centres follow from the band's even thirds.
             LuminanceCentralWavelengthNm = 552.5,
             RedCentralWavelengthNm = 640.8,
             GreenCentralWavelengthNm = 552.5,
             BlueCentralWavelengthNm = 464.2,
             HAlphaCentralWavelengthNm = 656.3,
 
-            // Same unpublished amateur filter set as the RC20 -- see that entry.
+            // Same unpublished amateur filter set as the RC20; see that entry.
             LuminanceFilterPeakTransmission = 1.0,
             RedFilterPeakTransmission = 1.0,
             GreenFilterPeakTransmission = 1.0,
@@ -875,9 +875,9 @@ namespace ExoInstruments.Core
         };
 
         /// <summary>
-        /// The VLT (Very Large Telescope), Unit Telescope 1 "Antu", Paranal Observatory --
+        /// The VLT (Very Large Telescope), Unit Telescope 1 "Antu", Paranal Observatory,
         /// fitted with its real FORS2 (FOcal Reducer/low dispersion Spectrograph 2) imager.
-        /// Every number below is FORS2's own real, published spec -- no ZWO/amateur hardware
+        /// Every number below is FORS2's own real, published spec; no ZWO/amateur hardware
         /// substituted in, per Baptiste's explicit call: this is meant to double as a real
         /// scientific reference, not a reskinned consumer camera.
         ///
@@ -885,61 +885,61 @@ namespace ExoInstruments.Core
         /// page, eso.org/sci/facilities/paranal/telescopes/ut/m2unit.html) -> obstruction
         /// fraction 1.116/8.2 = 0.1361. FORS2's own collimator+camera relay reduces the VLT's
         /// natural f/15 Cassegrain beam to a real measured/published plate scale of 0.126"/pixel
-        /// (unbinned) in its Standard-Resolution (SR) mode -- rather than simulate the multi-
+        /// (unbinned) in its Standard-Resolution (SR) mode; rather than simulate the multi-
         /// element relay, the equivalent single focal length that reproduces that REAL plate
         /// scale with the REAL 15um pixel is used: FL = pixelSize / (0.126"/206265) = 24.556m.
         /// FORS2 also has a real High-Resolution (HR) collimator, independently confirmed via its
-        /// own published focal length (1233mm SR vs 616mm HR, ratio 2.001) -- used here as the
+        /// own published focal length (1233mm SR vs 616mm HR, ratio 2.001), used here as the
         /// real "Barlow" for the zoom range's tight end, in place of an invented amateur
         /// accessory. Site altitude 2635m, Paranal (same value already used for ESPRESSO in
-        /// Observatories.cs -- one physical site, one number).
+        /// Observatories.cs, one physical site, one number).
         ///
         /// Sensor: real mosaic of two MIT/Lincoln-Lab CCID20 CCDs (eso.org FORS2 User Manual;
         /// chip identity cross-confirmed via Wittman et al. 1998 SPIE 3355, 598 and the CFH12K
         /// technical notes, which used the same part), each 4096x2048px at 15x15um, stacked
         /// vertically with a real 32px/480um gap -> combined mosaic 4096x4128px. QE: real
-        /// measured curve (eso.org/sci/php/optdet/instruments/fors2/Fors2old/qe.html) -- 400nm
+        /// measured curve (eso.org/sci/php/optdet/instruments/fors2/Fors2old/qe.html): 400nm
         /// 58%, 500nm 74%, 600nm 86% (peak), 700nm 83%, 800nm 66%, 900nm 39%; 86% (peak) is used
         /// as this pipeline's single QE scalar, the same "headline/peak" convention the RC20/
         /// CDK1000 entries use for their ZWO datasheet's 90%. Full well: 150,000 e-, the CCID20
-        /// chip's own real spec (Cuillandre et al., CFH12K/ESO CCD workshop 1999 technical note --
+        /// chip's own real spec (Cuillandre et al., CFH12K/ESO CCD workshop 1999 technical note;
         /// FORS2's own manual doesn't restate a full-well number for the shared chip). Gain and
         /// read noise are FORS2's own directly-published values for its real "100kHz,2x2,high"
         /// readout mode: 0.7 e-/ADU, RON 2.7 ADU (Chip1) = 1.89 e-. Dark current: FORS2's own
         /// published 3 e-/pixel/hour at its real -120C operating temperature (0.000833 e-/s).
         /// As of this codebase's current date, the FORS-Up detector replacement project (arXiv
         /// 2012.09227, progress report arXiv:2407.02979) is still in ground testing and not
-        /// expected on-sky before 2027 -- so this CCID20-based spec IS the currently operating
+        /// expected on-sky before 2027; so this CCID20-based spec IS the currently operating
         /// real instrument, not an outdated one.
         ///
         /// Gain control: unlike the RC20/CDK1000's ZWO CMOS cameras, a real scientific CCD like
-        /// FORS2 has no continuously-variable ISO-like gain -- its gain is fixed by the readout
+        /// FORS2 has no continuously-variable ISO-like gain; its gain is fixed by the readout
         /// electronics at whichever mode is configured (0.7 e-/ADU above). MinGain == MaxGain
         /// here for that reason: it's a real, documented instrument limitation, not a shortcut.
         ///
         /// Exposure range: 0.25s minimum is FORS2's own published shortest full-frame imaging
-        /// exposure. There is no real published maximum -- a professional CCD isn't electronically
+        /// exposure. There is no real published maximum; a professional CCD isn't electronically
         /// capped the way a consumer camera is, only practically limited by sky background/cosmic-
         /// ray accumulation. 3600s (1 hour) is used as a deliberate, coherent design choice
         /// matching standard real observatory practice of capping a single sub around that length
         /// and reaching longer total integration by stacking (this mod's own AstroImageStack
-        /// already does exactly that) -- not a fabricated hardware spec.
+        /// already does exactly that), not a fabricated hardware spec.
         ///
         /// Filters: FORS2's own real broadband filter set, each with its own real bandwidth (ESO
-        /// FORS2 Standard Filters page) -- b_HIGH (429nm/88nm FWHM) as Blue, v_HIGH (554nm/111nm
+        /// FORS2 Standard Filters page): b_HIGH (429nm/88nm FWHM) as Blue, v_HIGH (554nm/111nm
         /// FWHM) as Green, R_SPECIAL (655nm/165nm FWHM) as Red. HAlpha uses the real Halpha+83
         /// narrowband filter (656.3nm center, 61 Angstrom FWHM). Luminance represents a genuine
         /// unfiltered/clear exposure across the CCD's real full quoted sensitivity range
-        /// (330-1100nm = 7700 Angstrom) -- FORS2 has no dedicated amateur-style "L" filter, so
+        /// (330-1100nm = 7700 Angstrom); FORS2 has no dedicated amateur-style "L" filter, so
         /// this is the real clear-aperture equivalent, not an invented one.
         ///
         /// Astigmatism: FORS2/the VLT Cassegrain focus is a real, well-corrected two-mirror
         /// system, but no published VLT optical prescription gives a field-dependent astigmatism
         /// coefficient to the precision this pipeline's display model would need (same honesty
-        /// standard as the RC20's own 3.0px figure) -- rather than invent one for an instrument
+        /// standard as the RC20's own 3.0px figure), rather than invent one for an instrument
         /// this well-documented everywhere else, astigmatism is left at 0px here.
         ///
-        /// Tracking: a real 8.2m Unit Telescope always has precision active guiding -- there is
+        /// Tracking: a real 8.2m Unit Telescope always has precision active guiding; there is
         /// no real "bare, unguided VLT" the way a hobbyist's RC20 might genuinely lack an
         /// autoguider. AlwaysAutoguided forces this in the pipeline, since without it the same
         /// diurnal-drift trailing the RC20/CDK1000 can show at high zoom (correctly, for those
@@ -978,7 +978,7 @@ namespace ExoInstruments.Core
             // FORS2 sits at UT1's CASSEGRAIN focus (ESO's own caption for image eso9857a reads
             // "FORS at VLT UT1 Cassegrain focus"), and the VLT's Cassegrain path is M1 -> M2 ->
             // focus. Two aluminium surfaces, therefore, against SPHERE's three at the Nasmyth
-            // focus of UT3 -- the same telescope delivering measurably different throughput to
+            // focus of UT3, the same telescope delivering measurably different throughput to
             // the two instruments purely because of where they are bolted on.
             MirrorCount = 2,
             MirrorReflectivity = 0.87,
@@ -990,7 +990,7 @@ namespace ExoInstruments.Core
             SiteAltitudeMeters = 2635.0,
             // Paranal's published median seeing, from ESO's own astroclimate page for the site
             // (eso.org/sci/facilities/paranal/astroclimate): "The 50% percentile is 0.72" FWHM".
-            // This, not the 8.2m mirror, is what sets FORS2's delivered resolution -- the whole
+            // This, not the 8.2m mirror, is what sets FORS2's delivered resolution, the whole
             // reason the instrument is described as seeing-limited.
             ZenithSeeingFwhmArcsec = 0.72,
 
@@ -1023,8 +1023,8 @@ namespace ExoInstruments.Core
             AdcBits = 16,
             ElectronsPerAduAtUnityGain = 1.25,              // Table 2.8, K for MIT chip 1, 200 kHz
             // Table 2.9, measured on the MIT mosaic at Paranal (2635m). Nearly eight times the
-            // sea-level muon flux, which is what 2.6 km of altitude does to the cosmic-ray rate
-            // -- and a good illustration of why this belongs per instrument rather than as one
+            // sea-level muon flux, which is what 2.6 km of altitude does to the cosmic-ray rate,
+            // and a good illustration of why this belongs per instrument rather than as one
             // global constant.
             CosmicRayEventsPerMinutePerCm2 = 7.7,
 
@@ -1037,7 +1037,7 @@ namespace ExoInstruments.Core
             // page: b_HIGH+113 at 440nm/103.5nm FWHM, v_HIGH+114 at 557nm/123.5nm, R_SPECIAL+76
             // at 655nm/165.0nm, and the narrowband H_Alpha+83 at 656.3nm/6.1nm in the standard
             // collimator. Luminance is FORS2's own full sensitivity range (~330-1100nm, i.e. 7700
-            // Angstrom), centre 715nm -- a genuine unfiltered exposure, since FORS2 has no
+            // Angstrom), centre 715nm, a genuine unfiltered exposure, since FORS2 has no
             // amateur-style clear "L" filter.
             //
             // Two of these CORRECT earlier values in this file, which were the standard Bessell B
@@ -1058,7 +1058,7 @@ namespace ExoInstruments.Core
 
             // The one published peak transmission anywhere in this roster: ESO's FORS filter page
             // tabulates H_Alpha+83 at 0.70 in the standard-resolution collimator (0.76 in the HR
-            // collimator, which this pipeline models as the tight end of the zoom range -- 0.70 is
+            // collimator, which this pipeline models as the tight end of the zoom range; 0.70 is
             // used as the value for the default configuration rather than switching between them,
             // since the pipeline applies one filter transmission per exposure). The broadband
             // filters have no published peak transmission and are therefore unmodelled.
@@ -1073,11 +1073,11 @@ namespace ExoInstruments.Core
         };
 
         /// <summary>
-        /// The VLT, Unit Telescope 3 "Melipal", Paranal -- fitted with its real SPHERE/ZIMPOL
+        /// The VLT, Unit Telescope 3 "Melipal", Paranal, fitted with its real SPHERE/ZIMPOL
         /// extreme-adaptive-optics imaging polarimeter. Same 8.2m aperture and Paranal site
         /// (2635m) as FORS2/UT1, but a different, dedicated UT (Schmid et al. 2018, A&amp;A 619,
         /// A9, "SPHERE/ZIMPOL high resolution polarimetric imager. I."). Every number below is
-        /// that paper's own published spec (its Table 4 gives the detector figures directly) --
+        /// that paper's own published spec (its Table 4 gives the detector figures directly);
         /// nothing here is estimated or invented.
         ///
         /// The whole point of this instrument: FORS2 is SEEING-limited (atmospheric turbulence
@@ -1087,22 +1087,22 @@ namespace ExoInstruments.Core
         /// instead. See AdaptiveOpticsFwhmArcsec below.
         ///
         /// Optics: real f/221 system feeding ZIMPOL, giving a real published plate scale of
-        /// 3.6 mas/pixel at the detector's standard 2x2-on-chip-binned mode -- the equivalent
+        /// 3.6 mas/pixel at the detector's standard 2x2-on-chip-binned mode, the equivalent
         /// focal length that reproduces this with the real 15um native (unbinned) pixel is used
         /// (FL = 30um / (3.6mas/206265) = 1718.7m), so this pipeline's own BinningFactor=1 gives
         /// ZIMPOL's real unbinned 1.8 mas/pixel mode and BinningFactor=2 reproduces its real
-        /// documented "standard imaging" 3.6 mas/pixel mode exactly -- no separate Barlow exists
+        /// documented "standard imaging" 3.6 mas/pixel mode exactly; no separate Barlow exists
         /// for this instrument (BarlowFactor=1). Cross-check: at native pixel count (2048px),
         /// this gives a computed FOV of ~3.49", matching ZIMPOL's own real published 3.6"x3.6"
         /// field to within rounding of the two independently-quoted source numbers. Obstruction
-        /// reuses the VLT UT's own real M2/M1 ratio (see Fors2Vlt) -- the same shared telescope
+        /// reuses the VLT UT's own real M2/M1 ratio (see Fors2Vlt), the same shared telescope
         /// hardware, not a SPHERE-internal figure (none published to the precision needed).
         ///
         /// Sensor: real ZIMPOL CCD, 15um native pixels, back-illuminated frame-transfer, 2k x 2k
         /// raw format. QE 95% (peak, at 600nm; the paper also gives 90% at 700nm and 65% at
         /// 800nm). Imaging-mode figures straight from the paper's Table 4: full well 640,000 e-
         /// /pixel, read noise 20 e-/pixel, dark current 0.2 e-/s/pixel, minimum integration time
-        /// 1.1s. No published maximum -- same 3600s (1 hour) coherent design choice as Fors2Vlt,
+        /// 1.1s. No published maximum, same 3600s (1 hour) coherent design choice as Fors2Vlt,
         /// for the same reasoning (real observatory practice, not a fabricated hardware limit).
         /// Gain is FORS2-style fixed (10.5 e-/ADU is the real hardware conversion factor, not a
         /// player-adjustable ISO), so MinGain == MaxGain == 1.0 here too.
@@ -1110,32 +1110,32 @@ namespace ExoInstruments.Core
         /// Adaptive optics: SAXO achieves a real, published resolution of about 25 mas FWHM in
         /// good conditions (Strehl ~40% in I-band) per the ZIMPOL system paper itself; a second,
         /// independent paper (Milli et al., search results for ZIMPOL H-alpha imaging) states
-        /// SPHERE/ZIMPOL "routinely" reaches 22-28 mas FWHM across V/R/I -- 25 mas sits at the
+        /// SPHERE/ZIMPOL "routinely" reaches 22-28 mas FWHM across V/R/I; 25 mas sits at the
         /// middle of that independently-confirmed range. Used as AdaptiveOpticsFwhmArcsec, this
         /// REPLACES the plain ground-based seeing model (see ComputeGroundSeeingFwhmArcsec) with this
-        /// real, roughly airmass-independent achieved resolution -- about 24-40x finer than
+        /// real, roughly airmass-independent achieved resolution, about 24-40x finer than
         /// FORS2's typical seeing-limited blur, which is the entire reason this instrument can
         /// resolve targets FORS2 can only show as a barely-resolved smudge.
         ///
         /// Filters: real ZIMPOL broadband filters, each with its own real published bandwidth
-        /// (search results citing the paper's filter table) -- V (554nm/80.6nm FWHM) as Green,
+        /// (search results citing the paper's filter table): V (554nm/80.6nm FWHM) as Green,
         /// N_R (646nm/57nm FWHM) as Red, B_Ha (655.6nm/5.5nm FWHM; the broader of ZIMPOL's two
         /// real Halpha filters, N_Ha at 0.97nm FWHM being too narrow for a simple broadband-style
         /// single exposure) as HAlpha. Luminance uses ZIMPOL's own quoted working spectral
-        /// regime, 500-900nm (4000 Angstrom), as the real clear/broadband-equivalent range --
+        /// regime, 500-900nm (4000 Angstrom), as the real clear/broadband-equivalent range,
         /// same "genuine full-sensitivity range, not an amateur L filter" approach as Fors2Vlt.
         /// ZIMPOL genuinely has NO real blue broadband filter (its filter set targets red/near-IR
-        /// reflected-light and circumstellar-disk science, not true-color RGB) -- rather than
+        /// reflected-light and circumstellar-disk science, not true-color RGB); rather than
         /// invent one, AvailableFilters simply omits Blue, and the GUI's filter wheel doesn't
         /// offer it for this instrument. BlueBandwidthAngstrom is left at 0 and is unreachable.
         ///
-        /// Astigmatism: ZIMPOL's real field of view is only 3.6"x3.6" -- far too narrow for
+        /// Astigmatism: ZIMPOL's real field of view is only 3.6"x3.6", far too narrow for
         /// off-axis Seidel astigmatism to grow to any meaningful amplitude regardless of the
         /// telescope's prescription, so 0px here is well-justified by the field size alone, not
         /// just the usual "no published coefficient" reasoning.
         ///
         /// Tracking: an extreme-AO system inherently requires continuous, high-precision guiding
-        /// on a reference star to work at all -- if anything a harder requirement than FORS2's,
+        /// on a reference star to work at all, if anything a harder requirement than FORS2's,
         /// so this is AlwaysAutoguided too.
         /// </summary>
         public static readonly VisualTelescopeSpec Sphere = new VisualTelescopeSpec
@@ -1157,17 +1157,17 @@ namespace ExoInstruments.Core
             // SPHERE is on UT3's NASMYTH platform, so its path is M1 -> M2 -> M3 flat -> focus:
             // three aluminium surfaces where Cassegrain-mounted FORS2 has two. At 0.87 per surface
             // that is 0.659 against FORS2's 0.757, i.e. the extra relay mirror alone costs 13% of
-            // the light -- the same "an extra mirror yields 13% extra light loss with Al coating"
+            // the light, the same "an extra mirror yields 13% extra light loss with Al coating"
             // that Ma & Cai (arXiv:1708.01257) state explicitly.
             MirrorCount = 3,
             MirrorReflectivity = 0.87,
             // Real, published, and the largest single throughput term on this instrument: the grey
             // zonal beam splitter (zw.BS) transmits "about 79% of the light to ZIMPOL and 21% to
-            // the WFS" (Schmid et al. 2018, Sect. 2) -- an extreme-AO system must spend a fifth of
+            // the WFS" (Schmid et al. 2018, Sect. 2); an extreme-AO system must spend a fifth of
             // its light on sensing the wavefront it is correcting, which is a real cost of the
             // correction, not an inefficiency. SPHERE's other internal optics are not separately
             // published, so only this factor is modelled. Polarimetric mode, which the same paper
-            // says costs a further factor 0.85, is not simulated here -- this pipeline images.
+            // says costs a further factor 0.85, is not simulated here; this pipeline images.
             RelayOpticsTransmission = 0.79,
             SiteAltitudeMeters = 2635.0,
             AlwaysAutoguided = true,
@@ -1182,7 +1182,7 @@ namespace ExoInstruments.Core
             QuantumEfficiency = 0.95,
             // Schmid et al. 2018: "The quantum efficiencies of the (bare) CCDs are about 0.95,
             // 0.90 and 0.65 at lambda = 600 nm, 700 nm and 800 nm respectively." Three points is
-            // all the paper gives, and flat extrapolation below 600nm is the honest reading -- but
+            // all the paper gives, and flat extrapolation below 600nm is the honest reading, but
             // it is enough to matter, since ZIMPOL's own Luminance regime runs to 900nm where the
             // detector has clearly fallen away from its peak.
             QuantumEfficiencyCurve = new SpectralCurve(
@@ -1210,13 +1210,13 @@ namespace ExoInstruments.Core
             LuminanceBandwidthAngstrom = 4000.0,
             RedBandwidthAngstrom = 570.0,
             GreenBandwidthAngstrom = 806.0,
-            BlueBandwidthAngstrom = 0.0, // no real ZIMPOL blue filter -- see AvailableFilters
+            BlueBandwidthAngstrom = 0.0, // no real ZIMPOL blue filter; see AvailableFilters
             HAlphaBandwidthAngstrom = 55.0,
 
             // Real ZIMPOL filter centres, the same ones the bandwidths above come from (Schmid
             // et al. 2018): V 554nm as Green, N_R 646nm as Red, B_Ha 655.6nm as HAlpha.
             // Luminance is ZIMPOL's own quoted 500-900nm working regime, centre 700nm. Blue
-            // stays 0 -- there is no real ZIMPOL broadband blue filter and the position is
+            // stays 0; there is no real ZIMPOL broadband blue filter and the position is
             // unreachable (see AvailableFilters immediately below).
             LuminanceCentralWavelengthNm = 700.0,
             RedCentralWavelengthNm = 646.0,
@@ -1232,7 +1232,7 @@ namespace ExoInstruments.Core
             LuminanceFilterPeakTransmission = 1.0,
             RedFilterPeakTransmission = 1.0,
             GreenFilterPeakTransmission = 1.0,
-            BlueFilterPeakTransmission = 1.0, // no real ZIMPOL blue filter -- unreachable, see AvailableFilters
+            BlueFilterPeakTransmission = 1.0, // no real ZIMPOL blue filter, unreachable, see AvailableFilters
             HAlphaFilterPeakTransmission = 1.0,
 
             AvailableFilters = new[] { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.HAlpha },
@@ -1240,7 +1240,7 @@ namespace ExoInstruments.Core
             AdaptiveOpticsFwhmArcsec = 0.025,
             // Strehl ~40% in I band, the ZIMPOL system paper's own quoted performance alongside
             // the 25 mas figure above. The halo is Paranal's real median seeing, since the halo
-            // is by definition the fraction SAXO did not correct -- so it must be, and now is,
+            // is by definition the fraction SAXO did not correct; so it must be, and now is,
             // the identical figure ZenithSeeingFwhmArcsec carries above: ESO's own published
             // 50% percentile of 0.72" (eso.org/sci/facilities/paranal/astroclimate). This field
             // previously read 0.65" while citing ESO, which is not the number ESO publishes.
@@ -1253,7 +1253,7 @@ namespace ExoInstruments.Core
             HasAtmosphericDispersionCorrector = true,
         };
 
-        /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI -- see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
+        /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI; see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
         public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere };
     }
 }

@@ -25,7 +25,7 @@ static class DumpMapIndex
     /// <summary>
     /// The four surrounding pixels and their weights, which is how a beam-smoothed map has to be
     /// sampled. Compared against healpy's get_interp_weights, the reference implementation of the
-    /// same scheme -- pixel identity as well as weight, since a plausible weight on the wrong
+    /// same scheme, pixel identity as well as weight, since a plausible weight on the wrong
     /// pixel is the failure mode that still produces a sky.
     /// </summary>
     static void DumpInterpolation()
@@ -103,8 +103,8 @@ static class DumpMapIndex
     }
 
     /// <summary>
-    /// Queries a REAL packed map, if one has been built next door, so the whole chain -- packer,
-    /// format, HEALPix, Galactic transform -- can be compared against dustmaps on the real sky
+    /// Queries a REAL packed map, if one has been built next door, so the whole chain (packer,
+    /// format, HEALPix, Galactic transform) can be compared against dustmaps on the real sky
     /// rather than against a pattern this project wrote itself.
     /// </summary>
     static void DumpRealMapQueries()

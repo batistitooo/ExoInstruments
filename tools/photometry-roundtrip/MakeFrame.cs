@@ -10,8 +10,8 @@ using ExoInstruments.Core;
 /// WHAT THIS IS FOR. Every other harness in tools/ checks one mechanism against a reference. This
 /// one checks that the mechanisms COMPOSE: stars of known magnitude go in, a frame comes out, and an
 /// independent photometry package has to get the magnitudes back. It is the only test here that can
-/// catch an error of assembly -- a zero point that disagrees with the electron counts, a PSF that
-/// does not conserve flux, a gain applied twice -- because each of those is invisible to a test that
+/// catch an error of assembly (a zero point that disagrees with the electron counts, a PSF that
+/// does not conserve flux, a gain applied twice), because each of those is invisible to a test that
 /// looks at one stage alone.
 ///
 /// It also settles a disagreement the codebase names itself. CcdEquation.cs states that the transit
@@ -23,7 +23,7 @@ using ExoInstruments.Core;
 ///
 /// WHAT IS REAL AND WHAT IS REPLICATED. The photon flux, the bandpass, the sky, the PSF kernel, the
 /// RNG and both noise deviates are the shipped Core, called unmodified. The detector chain's last
-/// four lines -- bias, divide by K, floor, clip -- are replicated here rather than called, because
+/// four lines (bias, divide by K, floor, clip) are replicated here rather than called, because
 /// RunDetectorChain lives in the Unity layer; they are four lines of arithmetic and they are
 /// written out in full below so a divergence would be visible. Everything the replication depends
 /// on (K, the pedestal, the ADC ceiling) comes from VisualTelescopeSpec.
@@ -44,7 +44,7 @@ static class MakeFrame
     /// <summary>
     /// Border kept clear, and the spacing that follows from it. Not cosmetic: at 4 columns across
     /// 512 pixels the nearest neighbour sits 130 px away, its PSF reaches 30 px (the kernel radius),
-    /// and the sky annulus below runs to 90 px -- so no star's wings fall in another's background
+    /// and the sky annulus below runs to 90 px; so no star's wings fall in another's background
     /// region. A tighter field measures neighbour contamination instead of photometry.
     /// </summary>
     const int Margin = 60;
@@ -270,7 +270,7 @@ static class MakeFrame
     /// with bilinear weights over the four pixels the fractional position straddles.
     ///
     /// The kernel is already normalised to unit sum, and bilinear weights also sum to one, so the
-    /// deposit conserves flux exactly except where the kernel runs off the frame -- which the
+    /// deposit conserves flux exactly except where the kernel runs off the frame, which the
     /// caller reports as deposited_flux_fraction rather than hiding.
     /// </summary>
     static void DepositStar(double[] plane, double x, double y, double electrons, float[] kernel, int radius)
@@ -307,7 +307,7 @@ static class MakeFrame
     }
 
     /// <summary>
-    /// Raw little-endian unsigned 16-bit, row-major -- the same width the ADC's counts occupy and
+    /// Raw little-endian unsigned 16-bit, row-major: the same width the ADC's counts occupy and
     /// the same width a FITS BITPIX 16 frame carries them in. Text would be 128 frames of 512x512
     /// decimal numbers for no gain.
     /// </summary>

@@ -2226,7 +2226,7 @@ namespace ExoInstruments.Core
         ///
         /// Clamps in R_V rather than extrapolating: outside 2.0 to 6.0 there is no observed
         /// Galactic sight line to extrapolate toward. Returns 0 outside the wavelength grid, which
-        /// InterstellarExtinction reads as "not modelled" -- see the range discussion there.
+        /// InterstellarExtinction reads as "not modelled"; see the range discussion there.
         /// </summary>
         internal static double Evaluate(double wavelengthMeters, double rv)
         {

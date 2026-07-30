@@ -27,7 +27,7 @@ namespace ExoInstruments
         private static MemberInfo physicsMember;  // TimeWarpRates.Physics : bool
 
         // Pending restore of the rate table that was active before this
-        // integration last swapped it in for a long warp -- see PollRestore.
+        // integration last swapped it in for a long warp; see PollRestore.
         private static float[] pendingRestoreRates;
         private static bool warpObservedActive;
 
@@ -61,7 +61,7 @@ namespace ExoInstruments
                 warpObservedActive = true;
                 return;
             }
-            if (!warpObservedActive) return; // hasn't ramped up yet -- not finished, never started
+            if (!warpObservedActive) return; // hasn't ramped up yet, not finished, never started
 
             TimeWarp.fetch.warpRates = pendingRestoreRates;
             pendingRestoreRates = null;
@@ -132,7 +132,7 @@ namespace ExoInstruments
             }
             if (btwType == null)
             {
-                Debug.Log("[ExoInstruments] BetterTimeWarpContinued not detected -- scheduled warps stay at the stock 100,000x ceiling.");
+                Debug.Log("[ExoInstruments] BetterTimeWarpContinued not detected; scheduled warps stay at the stock 100,000x ceiling.");
                 return;
             }
 
@@ -141,7 +141,7 @@ namespace ExoInstruments
             setWarpRatesMethod = btwType.GetMethod("SetWarpRates", BindingFlags.Public | BindingFlags.Instance);
             if (instanceField == null || customWarpsField == null || setWarpRatesMethod == null)
             {
-                Debug.LogWarning("[ExoInstruments] BetterTimeWarp found but its API surface changed -- integration disabled.");
+                Debug.LogWarning("[ExoInstruments] BetterTimeWarp found but its API surface changed, integration disabled.");
                 return;
             }
 
@@ -150,12 +150,12 @@ namespace ExoInstruments
             physicsMember = FieldOrProperty(ratesType, "Physics");
             if (ratesMember == null || physicsMember == null)
             {
-                Debug.LogWarning("[ExoInstruments] BetterTimeWarp found but TimeWarpRates layout changed -- integration disabled.");
+                Debug.LogWarning("[ExoInstruments] BetterTimeWarp found but TimeWarpRates layout changed, integration disabled.");
                 return;
             }
 
             available = true;
-            Debug.Log("[ExoInstruments] BetterTimeWarpContinued detected -- scheduled warps may exceed the stock rate ceiling.");
+            Debug.Log("[ExoInstruments] BetterTimeWarpContinued detected; scheduled warps may exceed the stock rate ceiling.");
         }
 
         private static MemberInfo FieldOrProperty(Type type, string name)

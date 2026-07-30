@@ -17,7 +17,7 @@ namespace ExoInstruments.Core
         Galaxy,
         /// <summary>
         /// A dark nebula: a dust cloud seen in SILHOUETTE against emission behind it. An emission
-        /// map cannot show one at all -- what defines it is the absence of light, and the map holds
+        /// map cannot show one at all; what defines it is the absence of light, and the map holds
         /// only what is emitted. Listed so the chart can say so rather than promise a target the
         /// installed data cannot render.
         /// </summary>
@@ -60,13 +60,13 @@ namespace ExoInstruments.Core
     ///
     /// WHY A CATALOGUE AND NOT THE MAP. The packed H-alpha map knows the surface brightness of
     /// every direction, but it does not know that a particular patch is called the Rosette, and it
-    /// resolves nothing smaller than its 6 arcmin beam -- every planetary nebula in this list is
+    /// resolves nothing smaller than its 6 arcmin beam; every planetary nebula in this list is
     /// below that. Finding a target and rendering it are different jobs.
     ///
     /// POSITIONS are J2000 catalogue centres, rounded to the arcminute, which is the precision that
     /// matters for pointing an instrument whose narrowest field is 3.7 arcsec only after the chart
     /// has got it into the right degree. Sizes are the usual quoted apparent extents. Both come
-    /// from the standard catalogues these objects are designated in -- Messier, the New General
+    /// from the standard catalogues these objects are designated in: Messier, the New General
     /// Catalogue and Index Catalogue (Dreyer 1888, 1895, 1908), and Sharpless (1959, ApJS 4, 257)
     /// for the H II regions that have no NGC number.
     ///

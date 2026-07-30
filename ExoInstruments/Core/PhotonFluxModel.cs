@@ -5,7 +5,7 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Real apparent magnitude of a sunlit reflecting body, and real electron counts
     /// collected from it through a real telescope+filter+detector chain. Pure C#, no
-    /// Unity/KSP dependency -- callers pass in plain doubles (radius, albedo, distances,
+    /// Unity/KSP dependency; callers pass in plain doubles (radius, albedo, distances,
     /// phase angle) already extracted from a live CelestialBody.
     /// </summary>
     public static class PhotonFluxModel
@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Real V-band zero-magnitude photon flux density (Vega calibration), 948
-        /// photons/cm^2/s/Angstrom at the V effective wavelength (5556 Angstrom) -- the
+        /// photons/cm^2/s/Angstrom at the V effective wavelength (5556 Angstrom), the
         /// standard reference value used across observational photometry and exposure-time
         /// calculators.
         ///
@@ -37,7 +37,7 @@ namespace ExoInstruments.Core
         /// Lambertian-sphere phase integral (Russell 1916): the fraction of a diffusely
         /// reflecting sphere's full-phase brightness visible at phase angle alpha. 1.0 at
         /// alpha=0 (full phase), 0 at alpha=pi (new/unlit). More rigorous than a raw cosine
-        /// half-phase approximation -- this is the textbook phase law for a Lambertian sphere.
+        /// half-phase approximation; this is the textbook phase law for a Lambertian sphere.
         /// </summary>
         public static double LambertianPhaseFunction(double phaseAngleRad)
         {

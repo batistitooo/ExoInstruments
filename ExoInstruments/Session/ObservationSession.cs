@@ -29,7 +29,7 @@ namespace ExoInstruments.Session
         private readonly ImagingObserverContext observer;
         private readonly Random _rng;
 
-        // Per-planet transit-timing variations, parallel to SystemPlanets --
+        // Per-planet transit-timing variations, parallel to SystemPlanets,
         // deterministic in the catalog, so computed once at session start.
         private readonly TransitTimingVariations.TtvSignal[] ttvSignals;
 

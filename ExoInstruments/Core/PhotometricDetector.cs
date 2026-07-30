@@ -14,7 +14,7 @@ namespace ExoInstruments.Core
     /// is a measured property of a specific piece of hardware. A missing entry cannot be filled in
     /// with something plausible: an invented throughput or read noise does not degrade the result
     /// gracefully, it produces a precision that looks physical, carries units, and is wrong by an
-    /// unknown factor -- which is strictly worse than the honest empirical relation, because it
+    /// unknown factor, which is strictly worse than the honest empirical relation, because it
     /// cannot be recognised as an estimate.
     ///
     /// So a field left null means UNSOURCED, not zero. IsComplete is false while any required
@@ -172,7 +172,7 @@ namespace ExoInstruments.Core
             RequirePositive(missing, ReadNoiseElectrons, nameof(ReadNoiseElectrons));
 
             // Dark current may legitimately be sourced AS zero (a cold space detector), so only
-            // null -- never 0 -- counts as unsourced here.
+            // null, never 0, counts as unsourced here.
             if (!DarkCurrentElectronsPerSecond.HasValue || DarkCurrentElectronsPerSecond.Value < 0.0)
                 missing.Add(nameof(DarkCurrentElectronsPerSecond));
 

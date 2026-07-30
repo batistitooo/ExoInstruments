@@ -27,7 +27,7 @@ namespace ExoInstruments.Core
     /// <summary>
     /// One pass of the iterative multi-planet transit search
     /// (TransitDetector.DetectMultiple): the detection plus the masked series it
-    /// was searched in -- the original data with every previously found planet's
+    /// was searched in, the original data with every previously found planet's
     /// in-transit points removed, which is exactly what this stage's
     /// phase-folded plot should display. Mirrors RvDetectionStage.
     /// </summary>

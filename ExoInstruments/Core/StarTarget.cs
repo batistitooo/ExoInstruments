@@ -11,10 +11,10 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Pure data -- no KSP/Unity dependency.
+    /// Pure data, no KSP/Unity dependency.
     /// Populated from a real exoplanet.eu export via ExoplanetCsvLoader.
     /// Many fields are nullable because real catalog entries are often
-    /// incomplete -- that incompleteness is itself meaningful (see
+    /// incomplete; that incompleteness is itself meaningful (see
     /// IsTransiting) and should not be papered over with invented defaults.
     /// </summary>
     public class StarTarget
@@ -43,7 +43,7 @@ namespace ExoInstruments.Core
         public double DistanceParsec { get; set; }
 
         // Equatorial coordinates of the host star, degrees. Null if the catalog
-        // entry didn't carry them -- a target without coordinates still works
+        // entry didn't carry them; a target without coordinates still works
         // for name search and detection, it just can't be placed on the sky chart.
         public double? RaDeg { get; set; }    // right ascension, 0-360
         public double? DecDeg { get; set; }   // declination, -90 to 90
@@ -51,12 +51,12 @@ namespace ExoInstruments.Core
         public double ApparentMagnitude { get; set; }
 
         // Stellar effective temperature (K), from the catalog's star_teff column.
-        // Null when the entry doesn't carry one -- required by the habitable-zone
+        // Null when the entry doesn't carry one; required by the habitable-zone
         // and direct-imaging estimates, which must say "unknown" rather than guess.
         public double? EffectiveTempK { get; set; }
 
         // True when EffectiveTempK is a photometric estimate from the star's
-        // B-V color (Ballesteros 2012 -- BSC decoys, and hosts backfilled by the
+        // B-V color (Ballesteros 2012; BSC decoys, and hosts backfilled by the
         // catalog merger) rather than the planet catalog's own spectroscopic
         // value. Reported to the player: a color temperature and a measured
         // spectrum are not the same grade of evidence.
@@ -68,16 +68,16 @@ namespace ExoInstruments.Core
         public double PlanetPeriodDays { get; set; }
         public double? SemiMajorAxisAU { get; set; }       // measured value, when the catalog has one
         public double Eccentricity { get; set; }
-        public double PlanetPhaseOffset01 { get; set; }    // 0-1, arbitrary -- no real epoch to align with KSP's clock
-        public double? TransitDurationHours { get; set; }  // measured, rare -- see EstimatedTransitDurationHours
+        public double PlanetPhaseOffset01 { get; set; }    // 0-1, arbitrary, no real epoch to align with KSP's clock
+        public double? TransitDurationHours { get; set; }  // measured, rare; see EstimatedTransitDurationHours
         public double? InclinationDeg { get; set; }         // null = unmeasured geometry (common for RV-only)
         public double? MeasuredImpactParameter { get; set; } // direct from catalog, preferred over derived when present
 
-        public double? ArgumentOfPeriastronDeg { get; set; } // omega -- null defaults to 0 (periastron at ascending node)
+        public double? ArgumentOfPeriastronDeg { get; set; } // omega, null defaults to 0 (periastron at ascending node)
 
         // Planet temperature (K): catalog temp_measured preferred, else temp_calculated.
         // For directly-imaged young giants this is the real driver of near-IR brightness
-        // (internal heat, not irradiation) -- an irradiation-equilibrium estimate would
+        // (internal heat, not irradiation), an irradiation-equilibrium estimate would
         // wrongly render them undetectable, so the catalog value matters when present.
         public double? PlanetTempK { get; set; }
 
@@ -103,7 +103,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Semi-major axis in AU -- measured value if the catalog has one, else derived via Kepler's third law.</summary>
+        /// <summary>Semi-major axis in AU, measured value if the catalog has one, else derived via Kepler's third law.</summary>
         public double EstimatedSemiMajorAxisAU
         {
             get
@@ -115,7 +115,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Orbit scale a/R_star -- the ratio driving transit geometry. 0 when the orbit or the star is unconstrained.</summary>
+        /// <summary>Orbit scale a/R_star, the ratio driving transit geometry. 0 when the orbit or the star is unconstrained.</summary>
         public double ScaledSemiMajorAxis
         {
             get
@@ -128,7 +128,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Impact parameter b = (a/R_star)*cos(i). Null means we genuinely don't
-        /// know the geometry -- a real, common state for RV-discovered planets,
+        /// know the geometry, a real, common state for RV-discovered planets,
         /// not a bug to work around.
         /// </summary>
         public double? ImpactParameter
@@ -147,7 +147,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Approximate total transit duration (T14), derived from period, geometry,
-        /// and impact parameter for a circular orbit -- the standard textbook
+        /// and impact parameter for a circular orbit, the standard textbook
         /// approximation. Used because exoplanet.eu doesn't export a duration
         /// column at all.
         /// </summary>
@@ -218,8 +218,8 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// RV semi-amplitude K from the standard mass-function formula. Depends only
-        /// on Mp*sin(i) -- which is exactly what PlanetMassJupiter already stores when
-        /// the true mass is unknown -- so unlike the transit geometry above, no
+        /// on Mp*sin(i), which is exactly what PlanetMassJupiter already stores when
+        /// the true mass is unknown; so unlike the transit geometry above, no
         /// inclination measurement is needed here.
         /// K = 28.4329 m/s * (Mp*sini/Mjup) * ((Ms+Mp)/Msun)^(-2/3) * (P/yr)^(-1/3) * (1-e^2)^(-1/2)
         /// </summary>

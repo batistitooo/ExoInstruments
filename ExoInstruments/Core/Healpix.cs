@@ -113,7 +113,7 @@ namespace ExoInstruments.Core
         ///
         /// WHY A MAP MUST BE READ THIS WAY AND NOT PIXEL BY PIXEL. Every all-sky map this project
         /// reads has been smoothed to a beam: the Finkbeiner H-alpha composite to 6 arcmin, SFD98
-        /// to 6.1. The field it tabulates therefore has no structure below that scale -- it is
+        /// to 6.1. The field it tabulates therefore has no structure below that scale; it is
         /// band-limited, and the pixel values are samples of a function already known to be smooth
         /// between them. Returning the containing pixel's value instead makes the map piecewise
         /// constant, which introduces discontinuities at cell edges that the data does not have.
@@ -189,7 +189,7 @@ namespace ExoInstruments.Core
             => InterpolationWeights(nside, (90.0 - latitudeDeg) * Math.PI / 180.0,
                                     longitudeDeg * Math.PI / 180.0, pixels, weights);
 
-        /// <summary>Converts one RING index on a known ring into NESTED, by way of the pixel centre -- which lies strictly inside the pixel, so the containing-pixel lookup returns the pixel itself.</summary>
+        /// <summary>Converts one RING index on a known ring into NESTED, by way of the pixel centre, which lies strictly inside the pixel, so the containing-pixel lookup returns the pixel itself.</summary>
         public static long RingToNested(int nside, long ringPixel)
         {
             CheckNside(nside);

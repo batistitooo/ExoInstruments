@@ -5,7 +5,7 @@ using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
-    /// <summary>Flux range (already padded) a render call used -- lets the GUI layer place axis tick labels that line up with the plotted data.</summary>
+    /// <summary>Flux range (already padded) a render call used, lets the GUI layer place axis tick labels that line up with the plotted data.</summary>
     public struct LightCurvePlotRange
     {
         public double MinFlux;

@@ -77,7 +77,7 @@ namespace ExoInstruments.Core
         /// always was, because it is still the right tool for a display tint and for the harness
         /// check that the integral reduces to it on a narrow band.
         ///
-        /// extraTransmission carries anything the response was not built with -- currently the
+        /// extraTransmission carries anything the response was not built with, currently the
         /// per-exposure scintillation draw, which is a real modulation of the incoming intensity
         /// and has no wavelength dependence in Young's formula.
         ///
@@ -99,7 +99,7 @@ namespace ExoInstruments.Core
         /// cool one arrive here indistinguishable, and the overload above models both as the cool
         /// one. Given E(B-V) they separate: the colour deredden to the star's real temperature, and
         /// the extinction curve goes into the integrand as a shape normalised at V. The observed
-        /// magnitude still sets the flux, so nothing is attenuated twice -- see ReddenedStarSpectrum.
+        /// magnitude still sets the flux, so nothing is attenuated twice; see ReddenedStarSpectrum.
         ///
         /// eBv NaN or non-positive is the no-estimate case and reproduces the overload above
         /// exactly, which is what a catalogue carrying no reddening column gets.

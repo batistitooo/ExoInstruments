@@ -61,7 +61,7 @@ static class DumpColour
 
     /// <summary>
     /// Single emission lines, which is what a nebula is. These sit ON the spectral locus, outside
-    /// every display gamut, so they exercise the gamut mapping at its limit -- and the lines the
+    /// every display gamut, so they exercise the gamut mapping at its limit, and the lines the
     /// mod actually renders are in the list.
     /// </summary>
     static void DumpMonochromatic()
@@ -74,8 +74,8 @@ static class DumpColour
             double l = i < lines.Length ? lines[i] : 400.0 + (i - lines.Length) * 6.0;
 
             // Normalised to a mid-grey LUMINANCE first. Otherwise the chain's final clip at display
-            // white is mixed into the measurement, and the gamut mapping -- which is about negative
-            // components, not about brightness -- gets blamed for it.
+            // white is mixed into the measurement, and the gamut mapping, which is about negative
+            // components, not about brightness, gets blamed for it.
             Colorimetry.LineToXyz(l, 1.0, out double y0, out double yy, out double y2);
             double power = yy > 1e-12 ? 0.3 / yy : 0.0;
             Colorimetry.LineToXyz(l, power, out double X, out double Y, out double Z);
@@ -121,7 +121,7 @@ static class DumpColour
         Console.WriteLine();
 
         // THE FITTER ITSELF, separated from the filter sets. Three bands proportional to the colour
-        // matching functions ARE a colorimeter, so the fit against them must be essentially exact --
+        // matching functions ARE a colorimeter, so the fit against them must be essentially exact;
         // if it is not, the machinery is broken rather than the instrument limited.
         var ideal = new System.Collections.Generic.List<Func<double, double>>
         {
@@ -150,7 +150,7 @@ static class DumpColour
             }
             if (!complete)
             {
-                Console.WriteLine($"  {spec.CameraName,-22} no R/G/B set -- cannot make true colour");
+                Console.WriteLine($"  {spec.CameraName,-22} no R/G/B set, cannot make true colour");
                 continue;
             }
 
@@ -182,7 +182,7 @@ static class DumpColour
         // DIVIDED BY WAVELENGTH, and that is the whole point of this control. Tristimulus values are
         // integrals of ENERGY against the colour matching functions; a detector counts PHOTONS, and
         // the two differ by hc/lambda inside the integral. So a photon-counting instrument whose
-        // filters are shaped like x-bar is NOT a colorimeter -- it needs filters shaped like
+        // filters are shaped like x-bar is NOT a colorimeter; it needs filters shaped like
         // x-bar/lambda. Getting this wrong left the control at 2.4% rms and made every real
         // instrument's residual uninterpretable.
         double scale = nm > 0.0 ? 1.0 / nm : 0.0;

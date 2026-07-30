@@ -13,14 +13,14 @@ namespace ExoInstruments
     /// that trails an unguided exposure. All of it was previously hardcoded to stock KSP's Kerbal
     /// Space Center at latitude -0.0972 deg, which is correct only for stock.
     ///
-    /// A planet pack that relocates the space centre -- Real Solar System puts it at Cape
-    /// Canaveral, 28.6 deg N -- changes every one of those answers. At the equator the whole
+    /// A planet pack that relocates the space centre (Real Solar System puts it at Cape
+    /// Canaveral, 28.6 deg N) changes every one of those answers. At the equator the whole
     /// celestial sphere is reachable and everything rises perpendicular to the horizon; at 28.6 deg
     /// N the south celestial pole is permanently invisible, circumpolar northern targets never set,
     /// and airmass at a given hour angle is different for every declination. Hardcoding one
     /// latitude silently produced the wrong sky for anyone not running stock.
     ///
-    /// This resolves the real position instead, from KSP's own SpaceCenter object -- whose
+    /// This resolves the real position instead, from KSP's own SpaceCenter object, whose
     /// latitude/longitude are derived from the actual space-centre transform on the actual host
     /// body (verified by decompiling Assembly-CSharp: SpaceCenter.Start() reads
     /// cb.GetLatitudeAndLongitude(transform.position)). That makes this correct for stock, for
@@ -53,7 +53,7 @@ namespace ExoInstruments
         /// <summary>
         /// Resolves the site once and remembers it. KSP's SpaceCenter object only populates its
         /// coordinates in scenes where it exists, so a value obtained once is kept rather than
-        /// re-queried -- the space centre does not move during a game, and falling back to stock
+        /// re-queried; the space centre does not move during a game, and falling back to stock
         /// coordinates mid-session on a modded install would be worse than a stale-but-correct one.
         /// </summary>
         private static void Resolve()
@@ -106,7 +106,7 @@ namespace ExoInstruments
         {
             CelestialBody home = FlightGlobals.GetHomeBody();
             string body = home != null ? home.bodyName : "the home world";
-            string source = ResolvedFromGame ? "" : " (stock default -- space centre position unavailable)";
+            string source = ResolvedFromGame ? "" : " (stock default, space centre position unavailable)";
             return $"{FormatLatitude(LatitudeDeg)} {FormatLongitude(LongitudeDeg)} on {body}{source}";
         }
 

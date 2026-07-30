@@ -253,7 +253,7 @@ namespace ExoInstruments.Core
             // A floor well above the radial branch's: the midpoint rule converges only as the
             // square of the spacing, and this is the region where the intensity varies most
             // steeply across a pixel. It is affordable precisely because it covers three pixels of
-            // a table hundreds of pixels long -- of order 10^5 evaluations for a whole frame.
+            // a table hundreds of pixels long, of order 10^5 evaluations for a whole frame.
             int n = Math.Max(MinTwoDimensionalNodes, NodeCount(pixelScaleRad, ringPeriodRad));
             double step = pixelScaleRad / n;
             double sum = 0.0;

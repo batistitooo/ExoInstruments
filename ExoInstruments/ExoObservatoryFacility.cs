@@ -13,7 +13,7 @@ namespace ExoInstruments
     ///
     /// 1. At PSystemSpawn (once per game session, before any scene renders), clone
     ///    an existing real Upgradeables.UpgradeableFacility (Research &amp; Development's)
-    ///    rather than raw-AddComponent one -- the clone already has a non-null
+    ///    rather than raw-AddComponent one; the clone already has a non-null
     ///    UpgradeLevels array by the time its own Awake() runs, so we sidestep
     ///    whatever null-array assumptions the stock Awake() makes and only replace
     ///    UpgradeLevels afterwards, once the clone is already alive. This makes the
@@ -23,11 +23,11 @@ namespace ExoInstruments
     ///    borrow a tooltip prefab from), attach a SpaceCenterBuilding-derived
     ///    component. That base class is what stock KSC buildings (VAB, R&amp;D, ...)
     ///    use for hover highlight (HighLightBuilding), the info tooltip, and click
-    ///    routing -- all for free, not re-implemented here.
+    ///    routing, all for free, not re-implemented here.
     ///
     /// Skipped relative to ResearchBodies' pipeline: registering a
     /// PSystemSetup.SpaceCenterFacility entry (their building-picker/camera-fly-to
-    /// integration -- not required for glow/tooltip/click/upgrade, which come from
+    /// integration, not required for glow/tooltip/click/upgrade, which come from
     /// UpgradeableFacility + SpaceCenterBuilding directly) and DestructibleBuilding
     /// wreck/collapse wiring (keyed to child-object names baked into their .mu
     /// export, which ours doesn't share).
@@ -36,7 +36,7 @@ namespace ExoInstruments
     public class ExoObservatoryFacility : MonoBehaviour
     {
         // Shared by _facility.name, the SpaceCenterBuilding's facilityName, and
-        // the PSystemSetup.SpaceCenterFacility registry entry below -- all three
+        // the PSystemSetup.SpaceCenterFacility registry entry below; all three
         // must match, since SpaceCenterBuilding resolves its facility by looking
         // this name up in PSystemSetup, not just by walking up its parent chain.
         private const string FacilityName = "ExoObservatory";
@@ -51,7 +51,7 @@ namespace ExoInstruments
         private static readonly Vector3 LocalOffset = new Vector3(-246.6104f, 24.34455f, -216.4676f);
 
         // Detailed trace logging requested for diagnosing the click/highlight
-        // issue -- deliberately a different prefix from the mod's normal
+        // issue, deliberately a different prefix from the mod's normal
         // "[ExoInstruments]" warnings, so `grep "[Exoplanets]"` isolates just
         // this trace from the rest of KSP.log.
         private const string DebugPrefix = "[Exoplanets]";
@@ -79,7 +79,7 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Injects a PSystemSetup.SpaceCenterFacility entry named FacilityName --
+        /// Injects a PSystemSetup.SpaceCenterFacility entry named FacilityName;
         /// SpaceCenterBuilding.SetupFacility() looks a building's facility up by
         /// this name via PSystemSetup.GetSpaceCenterFacility() and aborts its
         /// whole setup coroutine (colliders, renderers, highlight) if it's
@@ -156,7 +156,7 @@ namespace ExoInstruments
                 // Setup(pqsArray) resolves facilityTransformName ("KSC/SpaceCenter/
                 // ExoObservatory") by walking the actual PQS hierarchy, so it has to
                 // run AFTER _facility (named "ExoObservatory", nested under
-                // SpaceCenter above) exists -- calling it any earlier logged
+                // SpaceCenter above) exists; calling it any earlier logged
                 // "Cannot find facility named 'KSC/SpaceCenter/ExoObservatory' on
                 // pqs 'Kerbin'" and left facilityTransform/facilityPQS/hostBody null.
                 _facilityEntry?.Setup(Resources.FindObjectsOfTypeAll<PQS>());
@@ -166,15 +166,15 @@ namespace ExoInstruments
                 }
 
                 // Instantiate() already ran Awake() synchronously on the clone, which
-                // spawned R&D's own facilityPrefab for whatever level it was cloned at
-                // -- that's the ghost "second R&D building" that showed up at our
+                // spawned R&D's own facilityPrefab for whatever level it was cloned at;
+                // that's the ghost "second R&D building" that showed up at our
                 // position. Get rid of it before swapping in our own levels, then
                 // force a respawn so our level 0 model actually appears (replacing
                 // UpgradeLevels alone doesn't trigger one).
                 _facility.CurrentLevel?.Despawn();
 
                 // ResearchBodies keeps its level prefab templates activeSelf=true (so
-                // Spawn()'s Instantiate() clone comes out already active -- Spawn()
+                // Spawn()'s Instantiate() clone comes out already active; Spawn()
                 // itself never calls SetActive on it) but parks them under a GameObject
                 // it then sets inactive, so the templates themselves don't render as
                 // stray duplicates before anything spawns them. Same trick here.
@@ -190,7 +190,7 @@ namespace ExoInstruments
                 DontDestroyOnLoad(_facility.gameObject);
 
                 // SetLevel()/Spawn() reads each UpgradeLevel's private p0/s0/r0/host
-                // fields, which only get populated by Setup(host) -- normally called
+                // fields, which only get populated by Setup(host), normally called
                 // internally the first time the ORIGINAL (R&D) array was set up.
                 // Our replacement levels never went through that, so without this
                 // call Spawn() NREs on a null host.
@@ -205,7 +205,7 @@ namespace ExoInstruments
                 var spawned = _facility.CurrentLevel?.facilityInstance;
                 LogDebug(spawned != null
                     ? $"BuildFacility() done. Spawned instance: '{spawned.name}', activeSelf={spawned.activeSelf}, activeInHierarchy={spawned.activeInHierarchy}, worldPosition={spawned.transform.position}."
-                    : "BuildFacility() done, but CurrentLevel.facilityInstance is NULL -- SetLevel()/Spawn() did not produce a visible instance.");
+                    : "BuildFacility() done, but CurrentLevel.facilityInstance is NULL; SetLevel()/Spawn() did not produce a visible instance.");
             }
             catch (Exception ex)
             {
@@ -218,12 +218,12 @@ namespace ExoInstruments
         {
             var prefab = Instantiate(model, hostTransform.position, hostTransform.rotation);
             prefab.name = "ExoObservatory_" + label.Replace(" ", "");
-            prefab.transform.SetParent(templateHolder, true); // worldPositionStays -- keep the pose we just instantiated it at.
+            prefab.transform.SetParent(templateHolder, true); // worldPositionStays; keep the pose we just instantiated it at.
             prefab.SetActive(true);
             DontDestroyOnLoad(prefab);
 
             var levelText = ScriptableObject.CreateInstance<KSCUpgradeableLevelText>();
-            levelText.facility = SpaceCenterFacility.TrackingStation; // stock enum can't be extended -- ResearchBodies uses the same filler value.
+            levelText.facility = SpaceCenterFacility.TrackingStation; // stock enum can't be extended; ResearchBodies uses the same filler value.
             levelText.textBase = label;
             levelText.linePrefix = "* ";
 
@@ -242,7 +242,7 @@ namespace ExoInstruments
         }
 
         // Local offset for the cloned ground patch, relative to the facility's
-        // own transform -- unknown good value yet, needs tuning against the
+        // own transform, unknown good value yet, needs tuning against the
         // observatory's actual footprint once it's visible in-game. ResearchBodies'
         // own equivalent (groundBaseOffset) is (15, -9, -10), tuned for their
         // building; that's just a starting-point guess here, not measured for ours.
@@ -251,7 +251,7 @@ namespace ExoInstruments
         /// <summary>
         /// Clones the ground patch mesh every stock KSC facility sits on (a flat,
         /// terrain-blending base) from Mission Control's own prefab, since it
-        /// isn't a separate asset on disk anywhere -- it's baked into the
+        /// isn't a separate asset on disk anywhere; it's baked into the
         /// compiled KSC scene. Same technique ResearchBodies uses for its own
         /// Observatory: find Mission Control's UpgradeableFacility in memory,
         /// grab the child tagged "KSC_Mission_Control_Grounds" off its level-0
@@ -263,14 +263,14 @@ namespace ExoInstruments
                 .FirstOrDefault(f => f.name == "MissionControl");
             if (missionControl == null || missionControl.UpgradeLevels == null || missionControl.UpgradeLevels.Length == 0)
             {
-                LogDebug("WARNING: AddGroundBase: MissionControl facility/levels not found -- no ground base added.");
+                LogDebug("WARNING: AddGroundBase: MissionControl facility/levels not found, no ground base added.");
                 return;
             }
 
             var mcPrefab = missionControl.UpgradeLevels[0].facilityPrefab;
             if (mcPrefab == null)
             {
-                LogDebug("WARNING: AddGroundBase: MissionControl level-0 facilityPrefab is null -- no ground base added.");
+                LogDebug("WARNING: AddGroundBase: MissionControl level-0 facilityPrefab is null, no ground base added.");
                 return;
             }
 
@@ -285,7 +285,7 @@ namespace ExoInstruments
             }
             if (groundSource == null)
             {
-                LogDebug("WARNING: AddGroundBase: no child tagged 'KSC_Mission_Control_Grounds' found under MissionControl's level-0 prefab -- no ground base added.");
+                LogDebug("WARNING: AddGroundBase: no child tagged 'KSC_Mission_Control_Grounds' found under MissionControl's level-0 prefab, no ground base added.");
                 return;
             }
 
@@ -296,13 +296,13 @@ namespace ExoInstruments
             LogDebug($"AddGroundBase: cloned '{groundSource.name}' from MissionControl, parented under '{targetPrefab.name}' at localPosition={GroundBaseOffset}.");
         }
 
-        /// <summary>Once real stock buildings exist in the scene (so we have a tooltip prefab to borrow), attach the clickable/hoverable component. Idempotent -- runs at most once.</summary>
+        /// <summary>Once real stock buildings exist in the scene (so we have a tooltip prefab to borrow), attach the clickable/hoverable component. Idempotent; runs at most once.</summary>
         private void HandleLevelWasLoaded(GameScenes scene)
         {
             if (scene != GameScenes.SPACECENTER) return;
             if (_facility == null || _building != null) return;
 
-            LogDebug("HandleLevelWasLoaded(SPACECENTER) starting -- attaching ExoObservatoryBuilding.");
+            LogDebug("HandleLevelWasLoaded(SPACECENTER) starting, attaching ExoObservatoryBuilding.");
 
             try
             {
@@ -310,7 +310,7 @@ namespace ExoInstruments
                 buildingGo.transform.SetParent(_facility.transform, false);
 
                 // Real KSC scenery (terrain, stock buildings) sits on the
-                // "Local Scenery" layer, not "Default" -- our diagnostic probe's
+                // "Local Scenery" layer, not "Default"; our diagnostic probe's
                 // own raycast (all layers) was hitting our collider fine on every
                 // click, yet SpaceCenterBuilding's OnClicked()/OnContextMenuSpawn()
                 // never fired, which points at its internal picking being
@@ -323,11 +323,11 @@ namespace ExoInstruments
                 }
                 else
                 {
-                    LogDebug("WARNING: layer 'Local Scenery' not found by LayerMask.NameToLayer -- leaving buildingGo on its default layer.");
+                    LogDebug("WARNING: layer 'Local Scenery' not found by LayerMask.NameToLayer, leaving buildingGo on its default layer.");
                 }
 
                 _building = buildingGo.AddComponent<ExoObservatoryBuilding>();
-                // Must match _facility.name -- SpaceCenterBuilding looks up its
+                // Must match _facility.name; SpaceCenterBuilding looks up its
                 // facility by this string, not just by walking up the parent chain
                 // ("Cannot find a facility of name 'Observatory'" was logged when
                 // these two didn't match).
@@ -336,7 +336,7 @@ namespace ExoInstruments
                 _building.buildingDescription = "Select an instrument and start observing exoplanet hosts.";
                 LogDebug($"ExoObservatoryBuilding component added to '{buildingGo.name}' (layer={LayerMask.LayerToName(buildingGo.layer)}), facilityName='{_building.facilityName}'.");
 
-                // buildingRenderers is a plain public field with no auto-discovery --
+                // buildingRenderers is a plain public field with no auto-discovery;
                 // stock buildings have it wired up by hand in the Unity Editor,
                 // pointing at their own mesh renderers. Ours has to be populated in
                 // code: without it SetupColliders()/hover-highlight have nothing to
@@ -375,13 +375,13 @@ namespace ExoInstruments
                     }
                     else
                     {
-                        LogDebug("WARNING: no renderer bounds found -- manual BoxCollider NOT added.");
+                        LogDebug("WARNING: no renderer bounds found, manual BoxCollider NOT added.");
                     }
                 }
                 else
                 {
                     Debug.LogWarning("[ExoInstruments] Observatory facilityInstance not found; building will have no collider/renderers wired up.");
-                    LogDebug("ERROR: _facility.CurrentLevel.facilityInstance is NULL -- no renderers/collider can be wired up.");
+                    LogDebug("ERROR: _facility.CurrentLevel.facilityInstance is NULL; no renderers/collider can be wired up.");
                 }
 
                 var existing = Resources.FindObjectsOfTypeAll<SpaceCenterBuilding>()
@@ -402,7 +402,7 @@ namespace ExoInstruments
 
                 // Full collider inventory under the whole facility, regardless of
                 // where it came from (ours, or SpaceCenterBuilding's own
-                // SetupColliders()) -- this is the ground truth for whether
+                // SetupColliders()); this is the ground truth for whether
                 // anything is actually raycastable at the observatory's location.
                 var allColliders = _facility.GetComponentsInChildren<Collider>(true);
                 LogDebug($"Collider inventory under '{_facility.name}': {allColliders.Length} found.");
@@ -411,7 +411,7 @@ namespace ExoInstruments
                     LogDebug($"  - {c.GetType().Name} on '{GetPath(c.transform)}' layer={LayerMask.LayerToName(c.gameObject.layer)} enabled={c.enabled} isTrigger={c.isTrigger} bounds.center={c.bounds.center} bounds.size={c.bounds.size}");
                 }
 
-                // Drives glow/click/right-click -- see ExoObservatoryInputRelay for why
+                // Drives glow/click/right-click; see ExoObservatoryInputRelay for why
                 // this doesn't just rely on SpaceCenterBuilding's own click routing.
                 var inputRelay = buildingGo.AddComponent<ExoObservatoryInputRelay>();
                 inputRelay.Init(_building);
@@ -431,7 +431,7 @@ namespace ExoInstruments
         // dome/Telescope both spin in azimuth around CenterVerticalAxis together;
         // altitude_sensitive (nested inside Telescope) additionally tips in altitude
         // around CenterHorizontalAxis. lever/concrete_base_telescope/base/doorleft/
-        // doorright aren't touched here -- they either move with the whole facility
+        // doorright aren't touched here; they either move with the whole facility
         // or (the doors) get their own open/close animation later.
         private const string DomeName = "dome";
         private const string TelescopeName = "Telescope";
@@ -447,7 +447,7 @@ namespace ExoInstruments
         /// ExoObservatoryTelescopeTracker.TrackedBody (set from ExoInstrumentsGUI
         /// whenever the RC20 photography target changes). Degrades gracefully: azimuth
         /// tracking needs dome+Telescope+CenterVerticalAxis; altitude tracking
-        /// additionally needs altitude_sensitive+CenterHorizontalAxis -- missing pieces
+        /// additionally needs altitude_sensitive+CenterHorizontalAxis; missing pieces
         /// just get skipped (logged), not a hard failure.
         /// </summary>
         private void SetupTelescopeTracking()
@@ -471,7 +471,7 @@ namespace ExoInstruments
                      $"altitude_sensitive={(altitudeSensitive != null ? "found" : "MISSING")}, CenterVerticalAxis={(centerVertical != null ? "found" : "MISSING")}, " +
                      $"CenterHorizontalAxis={(centerHorizontal != null ? "found" : "MISSING")}, LocalAnimation={(localAnimation != null ? "found" : "MISSING")}.");
 
-            // Don't require the Animation component to sit exactly on LocalAnimation --
+            // Don't require the Animation component to sit exactly on LocalAnimation;
             // search the whole model for any Animation component carrying the
             // "domeOpen" clip, so a differently-placed component (e.g. directly on
             // doorright, or on the model root) still gets found instead of silently
@@ -488,7 +488,7 @@ namespace ExoInstruments
             }
             if (domeAnimation == null)
             {
-                LogDebug($"WARNING: no Animation component anywhere in the model has a clip named '{DomeOpenClipName}' -- door animation won't play. " +
+                LogDebug($"WARNING: no Animation component anywhere in the model has a clip named '{DomeOpenClipName}'; door animation won't play. " +
                          "Check in Unity that the Animation component's Animations list actually includes this clip, and that the model was re-exported after adding it.");
             }
             else
@@ -498,7 +498,7 @@ namespace ExoInstruments
 
             if (dome == null || telescope == null || centerVertical == null)
             {
-                LogDebug($"WARNING: SetupTelescopeTracking: missing dome/Telescope/CenterVerticalAxis -- no tracking set up. Children present: [{string.Join(", ", root.GetComponentsInChildren<Transform>(true).Select(t => t.name))}]");
+                LogDebug($"WARNING: SetupTelescopeTracking: missing dome/Telescope/CenterVerticalAxis, no tracking set up. Children present: [{string.Join(", ", root.GetComponentsInChildren<Transform>(true).Select(t => t.name))}]");
                 return;
             }
 
@@ -519,7 +519,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// The stock "[BuildingPicker]: Facility Name Mismatch" error means
-        /// BuildingPicker.faciltyInfos has no entry for our facility name --
+        /// BuildingPicker.faciltyInfos has no entry for our facility name;
         /// clone the ResearchAndDevelopment entry's sprite set rather than
         /// requiring our own 4-quadrant icon art, and append it.
         /// </summary>
@@ -539,7 +539,7 @@ namespace ExoInstruments
                 return;
             }
 
-            // Exact name doesn't matter -- any existing entry's sprite set is a
+            // Exact name doesn't matter; any existing entry's sprite set is a
             // valid placeholder icon, we just need SOME non-null ButtonSprites.
             var template = picker.faciltyInfos?.FirstOrDefault(f => f != null && f.spriteSet != null);
             if (template == null)
@@ -567,7 +567,7 @@ namespace ExoInstruments
         /// Live scale/rotation tuning via the debug console (Alt+F12 -> Console,
         /// or backtick), so scale/orientation can be dialed in with a rebuild+
         /// restart-free feedback loop instead of re-exporting the .mu each time.
-        /// Neither persists -- re-run after each KSP restart until the numbers
+        /// Neither persists; re-run after each KSP restart until the numbers
         /// are baked back into the .mu's own transform.
         /// </summary>
         private void RegisterTuningConsoleCommands()
@@ -588,7 +588,7 @@ namespace ExoInstruments
                         LogDebug($"exoobs_scale: current localScale={inst.transform.localScale}. Usage: exoobs_scale <factor>");
                     }
                 },
-                "ExoInstruments: exoobs_scale <factor> -- live-rescale the observatory model.");
+                "ExoInstruments: exoobs_scale <factor>: live-rescale the observatory model.");
 
             DebugScreenConsole.AddConsoleCommand(
                 "exoobs_rotate",
@@ -606,7 +606,7 @@ namespace ExoInstruments
                         LogDebug($"exoobs_rotate: current rotation.eulerAngles={inst.transform.rotation.eulerAngles}. Usage: exoobs_rotate <degreesY>");
                     }
                 },
-                "ExoInstruments: exoobs_rotate <degreesY> -- live-rotate the observatory model around Y.");
+                "ExoInstruments: exoobs_rotate <degreesY>: live-rotate the observatory model around Y.");
 
             LogDebug("Registered tuning console commands: exoobs_scale <factor>, exoobs_rotate <degreesY>.");
         }
@@ -623,7 +623,7 @@ namespace ExoInstruments
             return sb.ToString();
         }
 
-        /// <summary>Same lookup ResearchBodies uses: scan every PQSCity in the scene for one that has a "SpaceCenter" child -- only the KSC's does.</summary>
+        /// <summary>Same lookup ResearchBodies uses: scan every PQSCity in the scene for one that has a "SpaceCenter" child; only the KSC's does.</summary>
         private static Transform FindKscSpaceCenterTransform()
         {
             var pqsCities = Resources.FindObjectsOfTypeAll<PQSCity>();
@@ -641,7 +641,7 @@ namespace ExoInstruments
     /// The observatory's clickable KSC building. Inheriting SpaceCenterBuilding
     /// (the same base class every stock facility building uses) is what gives us
     /// the real hover glow (HighLightBuilding), the info tooltip, and click
-    /// routing for free -- see ExoObservatoryFacility for how this gets wired to
+    /// routing for free; see ExoObservatoryFacility for how this gets wired to
     /// a real Upgradeables.UpgradeableFacility parent.
     /// </summary>
     public class ExoObservatoryBuilding : SpaceCenterBuilding
@@ -673,14 +673,14 @@ namespace ExoInstruments
         // on the same GameObject) can invoke these protected members directly.
         // Confirmed via [Exoplanets] logs: Unity's native OnMouseDown/Up/Enter/
         // Exit fire reliably on this object (many times, every session), but
-        // SpaceCenterBuilding's own private OnMouseDown/OnMouseUp -- which
-        // *also* receive those same messages -- never end up calling OnClicked()
+        // SpaceCenterBuilding's own private OnMouseDown/OnMouseUp, which
+        // *also* receive those same messages, never end up calling OnClicked()
         // or OnContextMenuSpawn(). Whatever internal gate/tap-gesture check is
         // stopping that isn't visible from outside the compiled assembly, so
         // rather than keep guessing at its private logic, the probe drives
         // these real stock methods itself from the native messages we know work.
         // OnLeftClick()/OnRightClick() are SpaceCenterBuilding's own public
-        // entry points -- calling these instead of the raw OnClicked()/
+        // entry points, calling these instead of the raw OnClicked()/
         // OnContextMenuSpawn() overrides directly lets the base class set up
         // whatever supporting state (dismiss-safety, position tracking) it
         // normally does before invoking them itself. Calling OnContextMenuSpawn()
@@ -691,12 +691,12 @@ namespace ExoInstruments
 
     /// <summary>
     /// Drives the observatory's click/hover behaviour from Unity's native mouse
-    /// messages (OnMouseEnter/Exit/Down/Up/Over), which -- confirmed by extensive
-    /// testing -- fire reliably here even though SpaceCenterBuilding's own private
+    /// messages (OnMouseEnter/Exit/Down/Up/Over), which, confirmed by extensive
+    /// testing, fire reliably here even though SpaceCenterBuilding's own private
     /// OnMouseDown/OnMouseUp (which receive the exact same messages) never end up
     /// calling OnClicked()/OnContextMenuSpawn() on their own. Rather than rely on
     /// that private logic, this drives the real stock methods (HighLightBuilding,
-    /// TriggerClick/TriggerContextMenu) directly -- still the authentic stock
+    /// TriggerClick/TriggerContextMenu) directly, still the authentic stock
     /// glow/dialog, just triggered from a path proven to work.
     /// </summary>
     public class ExoObservatoryInputRelay : MonoBehaviour
@@ -709,13 +709,13 @@ namespace ExoInstruments
             _target = target;
         }
 
-        // Unity's OWN native mouse-picking -- confirmed reliable (fires every
+        // Unity's OWN native mouse-picking, confirmed reliable (fires every
         // session, many times) even though SpaceCenterBuilding's own private
         // OnMouseDown/OnMouseUp (which receive the exact same messages) never
         // end up calling OnClicked()/OnContextMenuSpawn(). Rather than keep
         // guessing at that private logic, drive the real stock methods
         // (HighLightBuilding, TriggerClick/TriggerContextMenu) directly from
-        // here -- still the authentic stock glow/dialog, just triggered from a
+        // here, still the authentic stock glow/dialog, just triggered from a
         // path we've proven works instead of SpaceCenterBuilding's own.
         private void OnMouseEnter() => _target?.HighLightBuilding(true);
 
@@ -730,8 +730,8 @@ namespace ExoInstruments
         {
             Debug.Log($"{Prefix} [native Unity] OnMouseUp() fired on '{name}'.");
             // Confirmed via [Exoplanets] logs: on this (old, KSP1-era) Unity
-            // version OnMouseDown/OnMouseUp only ever fire for the LEFT button
-            // -- several right-clicks (seen via this probe's own manual
+            // version OnMouseDown/OnMouseUp only ever fire for the LEFT button;
+            // several right-clicks (seen via this probe's own manual
             // Input.GetMouseButtonDown(1) polling in Update()) produced zero
             // native OnMouseUp calls. Left click is handled here; right click
             // is handled below via OnMouseOver(), which fires every frame
@@ -748,11 +748,11 @@ namespace ExoInstruments
             // Left click (GetMouseButtonUp(0) above, on release) opens a
             // persistent window fine. Right click triggered on the PRESS
             // (GetMouseButtonDown) closed itself the instant the button came
-            // up -- matching it to the same release-triggered pattern as left
+            // up, matching it to the same release-triggered pattern as left
             // click fixes that.
             if (Input.GetMouseButtonUp(1))
             {
-                Debug.Log($"{Prefix} [native Unity] OnMouseOver() saw a right-click release on '{name}' -- driving TriggerContextMenu() directly.");
+                Debug.Log($"{Prefix} [native Unity] OnMouseOver() saw a right-click release on '{name}', driving TriggerContextMenu() directly.");
                 _target?.TriggerContextMenu();
             }
         }
@@ -760,14 +760,14 @@ namespace ExoInstruments
 
     /// <summary>
     /// Sanity-check spin for the dome, independent of the rest of the model.
-    /// Placeholder for real sky-tracking (see SkyCoordinates.EquatorialToHorizontal)
-    /// -- once that's wired up this constant-speed spin gets replaced by a
+    /// Placeholder for real sky-tracking (see SkyCoordinates.EquatorialToHorizontal);
+    /// once that's wired up this constant-speed spin gets replaced by a
     /// Quaternion.LookRotation towards the current target's computed direction.
     /// </summary>
     /// <summary>
     /// Points the telescope model at ExoObservatoryTelescopeTracker.TrackedBody (set
     /// from ExoInstrumentsGUI whenever the RC20 photography target changes; null when
-    /// idle -- the rig just sits at its authored rest pose then).
+    /// idle; the rig just sits at its authored rest pose then).
     ///
     /// Two-axis gimbal, matching the .mu's own hierarchy (Parts/ExoObservatoryLVL1.mu):
     /// dome and Telescope both spin in azimuth together around CenterVerticalAxis;
@@ -794,26 +794,26 @@ namespace ExoInstruments
         // No azimuth/altitude calibration constants: aiming is measured against the
         // tube's own current orientation each frame (see Update), so the rig's rest
         // pose and axis signs cancel out on their own. Earlier versions carried an
-        // AzimuthOffsetDeg and an AltitudeOffsetDeg here, plus an axis sign flag --
+        // AzimuthOffsetDeg and an AltitudeOffsetDeg here, plus an axis sign flag;
         // each was fitted to one observed symptom and broke another.
 
         /// <summary>
         /// The tube's optical (pointing) axis expressed in altitude_sensitive's own
-        /// local frame. Model-specific to ExoObservatoryLVL1.mu -- re-measure if the
+        /// local frame. Model-specific to ExoObservatoryLVL1.mu; re-measure if the
         /// tube is re-exported.
         ///
         /// Identified from logged altitudes of all three local axes while the tilt
         /// was driven by a known angle: forward stayed pinned at altitude 0 (that's
         /// the trunnion), right tracked the applied angle 1:1, and up tracked
-        /// 90-minus-that. Azimuth cannot tell right from up here -- every axis in the
-        /// tilt plane shares the same azimuth -- which is why an earlier reading of
+        /// 90-minus-that. Azimuth cannot tell right from up here; every axis in the
+        /// tilt plane shares the same azimuth, which is why an earlier reading of
         /// "-right, because its azimuth matches" was wrong. Altitude discriminates:
         /// aiming -right at a target at the zenith left the visible barrel on the
         /// horizon (90 - 90), so the barrel lies in the up direction.
         ///
         /// It is not exactly up, though: logged at rest, up sits dead on the local
         /// vertical (dot 1.000), which would put the barrel at the zenith when
-        /// parked -- but the barrel is modelled at 54 deg above the horizon (measured
+        /// parked, but the barrel is modelled at 54 deg above the horizon (measured
         /// in Blender), i.e. mounted TubeOpticalTiltFromUpDeg away from up inside the
         /// tilt plane, toward the side the scope looks out of. Aiming up itself
         /// therefore left a constant pointing error of about that size across the
@@ -843,8 +843,8 @@ namespace ExoInstruments
         /// definition of an alt-az mount's altitude axis.
         ///
         /// Computed rather than picked from the dome's own local axes: the earlier
-        /// "whichever local axis is most perpendicular to vertical" rule is ambiguous
-        /// -- two of the dome's three axes satisfy it equally, so the tie-break was
+        /// "whichever local axis is most perpendicular to vertical" rule is ambiguous;
+        /// two of the dome's three axes satisfy it equally, so the tie-break was
         /// arbitrary. It happened to pick the pointing axis itself, leaving the
         /// optical axis exactly parallel to the supposed hinge (logged dot = -1.000),
         /// which made the altitude projection degenerate and froze the tube at rest.
@@ -883,7 +883,7 @@ namespace ExoInstruments
                 _altRestLocalRot = altitudeSensitive.localRotation;
             }
             // LocalAnimation (the doors) isn't a child of dome in the current .mu, so it
-            // doesn't automatically inherit dome's azimuth spin -- rotate it explicitly,
+            // doesn't automatically inherit dome's azimuth spin; rotate it explicitly,
             // same pivot/axis, right alongside dome and Telescope every Update.
             if (localAnimation != null)
             {
@@ -898,27 +898,7 @@ namespace ExoInstruments
                 Vector3d verticalD = (Vector3d)centerVertical.position - home.position;
                 worldVertical = ((Vector3)verticalD).normalized;
             }
-            _verticalAxisWorld = ChooseClosestAxis(centerVertical, worldVertical, out string vAxisName);
-            Debug.Log($"[Exoplanets] TelescopeTracker: vertical axis = CenterVerticalAxis.{vAxisName} (auto-detected, world dir={_verticalAxisWorld}).");
-
-            // Sanity-check the rig's geometry and report how the computed trunnion
-            // (see CurrentAltitudeAxisWorld) lines up with the dome's own authored
-            // axes -- they should coincide on a well-built model.
-            if (altitudeSensitive != null)
-            {
-                Vector3 optical = altitudeSensitive.TransformDirection(TubeOpticalAxisLocal);
-                Vector3 trunnion = Vector3.Cross(_verticalAxisWorld, optical).normalized;
-                Debug.Log($"[Exoplanets] TelescopeTracker: tube optical axis at rest (local {TubeOpticalAxisLocal}) = world {optical}, " +
-                          $"dot with vertical={Vector3.Dot(optical, _verticalAxisWorld):F3} (0 = tube horizontal at rest).");
-                Debug.Log($"[Exoplanets] TelescopeTracker: computed trunnion = {trunnion}; agreement with dome's own axes -- " +
-                          $"|dot right|={Mathf.Abs(Vector3.Dot(trunnion, dome.right)):F3}, |dot up|={Mathf.Abs(Vector3.Dot(trunnion, dome.up)):F3}, " +
-                          $"|dot forward|={Mathf.Abs(Vector3.Dot(trunnion, dome.forward)):F3} (one of these near 1.0 means it matches a real hinge in the model).");
-            }
-
-            if (altitudeSensitive == null)
-            {
-                Debug.Log("[Exoplanets] TelescopeTracker: no altitude_sensitive -- azimuth-only tracking (dome+Telescope spin, tube doesn't tip).");
-            }
+            _verticalAxisWorld = ChooseClosestAxis(centerVertical, worldVertical, out _);
         }
 
         /// <summary>Picks whichever of t's own local axes is closest to targetWorldDir, sign-matched so positive RotateAround angles go the expected way.</summary>
@@ -932,8 +912,6 @@ namespace ExoInstruments
             if (absForward >= absUp && absForward >= absRight) { axisName = "forward"; return t.forward * Mathf.Sign(dotForward == 0f ? 1f : dotForward); }
             axisName = "up"; return t.up * Mathf.Sign(dotUp == 0f ? 1f : dotUp);
         }
-
-        private float _nextDiagLogTime;
 
         private void Update()
         {
@@ -1000,35 +978,6 @@ namespace ExoInstruments
             }
 
             SetDoorsOpen(haveTarget);
-
-            // Diagnostic: log the target's real az/alt side by side with the tube's
-            // OWN actual pointing direction's az/alt (same conversion, just fed the
-            // tube's world-space forward vector instead of a body position) -- gives
-            // exact numbers to compare instead of guessing from visual descriptions.
-            if (haveTarget && Time.unscaledTime >= _nextDiagLogTime)
-            {
-                _nextDiagLogTime = Time.unscaledTime + 2f;
-                if (TryGetLocalFrame(out Vector3d obsPos, out Vector3d up, out Vector3d north, out Vector3d east))
-                {
-                    Transform tube = _altitudeSensitive != null ? _altitudeSensitive : _telescope;
-                    // Log all three local axes, not just the one being aimed: aiming
-                    // an axis and then measuring that same axis is circular and always
-                    // reads ~0 error. Only the other two carry independent information
-                    // about which one the visible barrel actually lies along.
-                    DirectionToAltAz(tube.up, up, north, east, out double uAlt, out double uAz);
-                    DirectionToAltAz(tube.right, up, north, east, out double rAlt, out double rAz);
-                    DirectionToAltAz(tube.forward, up, north, east, out double fAlt, out double fAz);
-                    Debug.Log($"[Exoplanets] TRACK DIAG: target az={azDeg:F1} alt={altDeg:F1} | applied az={azimuth:F1} alt={altitude:F1} | " +
-                              $"up az={uAz:F1} alt={uAlt:F1} (err {AngleDelta(uAz, azDeg):F1}/{uAlt - altDeg:F1}) | " +
-                              $"right az={rAz:F1} alt={rAlt:F1} | forward az={fAz:F1} alt={fAlt:F1}");
-                }
-            }
-        }
-
-        private static double AngleDelta(double a, double b)
-        {
-            double d = (a - b + 540.0) % 360.0 - 180.0;
-            return d;
         }
 
         /// <summary>The tube's optical (pointing) axis in world space right now.</summary>
@@ -1040,7 +989,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// The rotation about <paramref name="axis"/> that best takes <paramref name="from"/>
-        /// onto <paramref name="to"/> -- both projected onto the plane the axis is normal
+        /// onto <paramref name="to"/>, both projected onto the plane the axis is normal
         /// to, since only that component is reachable by rotating about it. 0 when either
         /// projection degenerates (direction parallel to the axis).
         /// </summary>
@@ -1086,7 +1035,7 @@ namespace ExoInstruments
 
         /// <summary>
         /// Plays the "domeOpen" legacy Animation clip forward to open, or the same
-        /// clip in reverse (negative speed, starting from its end) to close -- same
+        /// clip in reverse (negative speed, starting from its end) to close, same
         /// trick real KSP facility door animations use, no separate "close" clip
         /// needed. Only actually calls Play() on a state change, not every frame.
         /// </summary>
@@ -1099,7 +1048,7 @@ namespace ExoInstruments
             var state = _domeAnimation[_domeOpenClipName];
             if (state == null)
             {
-                Debug.LogWarning($"[Exoplanets] TelescopeTracker: Animation clip '{_domeOpenClipName}' not found -- can't {(open ? "open" : "close")} the doors.");
+                Debug.LogWarning($"[Exoplanets] TelescopeTracker: Animation clip '{_domeOpenClipName}' not found, can't {(open ? "open" : "close")} the doors.");
                 return;
             }
 
@@ -1109,7 +1058,7 @@ namespace ExoInstruments
             Debug.Log($"[Exoplanets] TelescopeTracker: playing '{_domeOpenClipName}' {(open ? "forward (opening)" : "in reverse (closing)")}.");
         }
 
-        /// <summary>Same alt/az convention as ExoInstrumentsGUI.TryComputeBodyAltAz -- azimuth from North, clockwise through East; altitude negative below the horizon.</summary>
+        /// <summary>Same alt/az convention as ExoInstrumentsGUI.TryComputeBodyAltAz: azimuth from North, clockwise through East; altitude negative below the horizon.</summary>
         private static bool TryComputeAltAz(CelestialBody body, out double altDeg, out double azDeg)
         {
             altDeg = 0.0; azDeg = 0.0;

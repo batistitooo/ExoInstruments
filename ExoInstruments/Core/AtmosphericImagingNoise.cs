@@ -120,7 +120,7 @@ namespace ExoInstruments.Core
         /// Intensity Scintillation of Stars I", PASP 109, 173). Modeled here by projecting
         /// the source's angular size to a linear size at the turbulent layer's height and
         /// combining it with the real aperture (root-sum-square, i.e. as an equivalent
-        /// larger averaging aperture) before applying Young's formula -- so a resolved
+        /// larger averaging aperture) before applying Young's formula; so a resolved
         /// planet scintillates far less than a point star through the same telescope,
         /// while angularDiameterRad=0 leaves star photometry exactly as before.
         /// </summary>
@@ -138,7 +138,7 @@ namespace ExoInstruments.Core
         // counts rather than fractions of full well, so shot noise is drawn as a genuine Poisson
         // deviate on the electron count itself (SolarSystemCameraTexture.SamplePoisson, PTRS per
         // Hormann 1993) and dark current is simply a rate times an exposure. Both of the helpers
-        // that used to approximate those in normalised units -- ShotNoiseSigma and DarkCurrent --
+        // that used to approximate those in normalised units, ShotNoiseSigma and DarkCurrent,
         // are gone with the normalisation that made them necessary: sqrt(N) is only the width of
         // the Poisson distribution, not the distribution, and at the few electrons a faint sky
         // reaches the difference is measurable and the Gaussian goes negative.

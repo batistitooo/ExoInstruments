@@ -8,7 +8,7 @@ using ExoInstruments.Visualization;
 /// <summary>
 /// Dumps what reddening does to a star's photometry, three ways:
 ///
-///   error.csv       how wrong the old model is -- a reddened star integrated as an intrinsically
+///   error.csv       how wrong the old model is, a reddened star integrated as an intrinsically
 ///                   cool blackbody, against the same star integrated as what it really is.
 ///   anchor.csv      that the V normalisation is untouched, which is the statement that nothing is
 ///                   double counted.
@@ -73,7 +73,7 @@ static class DumpReddening
         }
         File.WriteAllText($"exo_reddening_error_{tag}.csv", sb.ToString());
 
-        // The anchor. The effective width DOES change for a flat source -- a reddened flat
+        // The anchor. The effective width DOES change for a flat source; a reddened flat
         // spectrum is not flat, and the band extends redward of V where the extinction is lower.
         // What must not change is the factor AT V, which is exactly 1 by construction and is the
         // no-double-counting proof: the observed magnitude still sets the flux.

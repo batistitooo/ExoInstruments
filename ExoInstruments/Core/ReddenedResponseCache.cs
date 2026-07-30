@@ -13,7 +13,7 @@ namespace ExoInstruments.Core
     /// fall into a few dozen bins. In practice a handful of quadratures serve the whole field.
     ///
     /// Quantisation is what makes that sharing possible, so both bin widths are set by measured
-    /// interpolation error rather than by taste -- see the harness in tools/reddening-tests.
+    /// interpolation error rather than by taste; see the harness in tools/reddening-tests.
     ///
     /// NOT THREAD SAFE, and not meant to be: one cache belongs to one frame's gather pass.
     /// </summary>

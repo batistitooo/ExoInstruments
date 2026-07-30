@@ -11,7 +11,7 @@ namespace ExoInstruments.Core
     /// COLLISIONALLY EXCITED: an electron has to be knocked into a level about 2 eV up, so their
     /// emissivity carries exp(-E/kT) and rises steeply with temperature. The ratio between them is
     /// therefore a thermometer, not a free parameter, and that is exactly how it is used
-    /// observationally -- Madsen, Reynolds &amp; Haffner (2006, ApJ 652, 401) measure the warm ionised
+    /// observationally; Madsen, Reynolds &amp; Haffner (2006, ApJ 652, 401) measure the warm ionised
     /// medium's temperature by inverting these very expressions.
     ///
     /// The emissivity ratios are Haffner, Reynolds &amp; Tufte (1999, ApJ 523, 223), eq. 1 and 2:
@@ -22,13 +22,13 @@ namespace ExoInstruments.Core
     /// with T4 the electron temperature in units of 10^4 K. Nitrogen needs no ionisation
     /// correction: charge exchange with hydrogen is fast enough that N+/N tracks H+/H closely
     /// (Butler &amp; Dalgarno 1980), which is the reason [N II]/H-alpha is the cleaner thermometer of
-    /// the two. Sulphur has no such lock -- S++ is a significant stage -- so S+/S stays an explicit
+    /// the two. Sulphur has no such lock; S++ is a significant stage, so S+/S stays an explicit
     /// input.
     ///
     /// WHAT IS NOT SYNTHESISED, and why that is the scientific answer. [O III] 5007 needs O++,
     /// which needs photons above 35 eV; the diffuse ionised gas is lit by Lyman continuum that
     /// leaked out of H II regions and is far too soft to make much of it, so [O III] does not track
-    /// H-alpha at all -- it is strong in planetary nebulae, supernova remnants and the hot cores of
+    /// H-alpha at all; it is strong in planetary nebulae, supernova remnants and the hot cores of
     /// a few H II regions, and weak everywhere in between. [O I] 6300 traces the neutral boundary
     /// rather than the ionised gas, and is also the brightest terrestrial airglow line. Deriving
     /// either from an H-alpha map would be inventing a sky. They stay empty until a survey of their
@@ -60,8 +60,8 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Fraction of sulphur in S+.
         ///
-        /// Unlike nitrogen, sulphur is not locked to hydrogen by charge exchange -- S++ is a
-        /// significant stage -- so this cannot be set from atomic physics and is the one free
+        /// Unlike nitrogen, sulphur is not locked to hydrogen by charge exchange; S++ is a
+        /// significant stage, so this cannot be set from atomic physics and is the one free
         /// parameter in the pair. It is not guessed either: [S II]/[N II] is nearly INDEPENDENT of
         /// temperature, because the two lines have almost the same excitation energy (2.14 against
         /// 2.18 in units of 10^4 K), so the observed ratio measures this fraction directly. That is
@@ -69,7 +69,7 @@ namespace ExoInstruments.Core
         /// [S II]/[N II] near 0.44 that they measure across the warm ionised medium.
         ///
         /// The insensitivity is also why that ratio is nearly constant across the sky while both
-        /// ratios to H-alpha vary by a factor of five -- the observational statement that what
+        /// ratios to H-alpha vary by a factor of five, the observational statement that what
         /// changes from place to place is the temperature, not the abundances.
         /// </summary>
         public const double SulphurSinglyIonisedFraction = 0.35;
@@ -97,7 +97,7 @@ namespace ExoInstruments.Core
         ///
         /// Interpolated logarithmically in intensity between those two measured anchors and clamped
         /// outside them. It is a two-point model of a measured trend, not a fit to data this project
-        /// holds, and it is the one modelled step between the H-alpha map and the other lines --
+        /// holds, and it is the one modelled step between the H-alpha map and the other lines,
         /// which is why the temperature it used is reported alongside the frame.
         /// </summary>
         public static double ElectronTemperatureK(double halphaRayleighs)
@@ -136,7 +136,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Surface brightness of one line relative to H-alpha, given the H-alpha brightness itself.
-        /// Returns NaN for a line this cannot derive -- see the class summary for which and why.
+        /// Returns NaN for a line this cannot derive; see the class summary for which and why.
         /// </summary>
         public static double RatioToHalpha(EmissionLines.Line line, double halphaRayleighs)
         {

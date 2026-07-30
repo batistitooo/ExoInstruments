@@ -8,7 +8,7 @@ namespace ExoInstruments.Core
     ///
     /// WHY IT EXISTS. Filling a frame from an all-sky map means asking, for every pixel, which
     /// Galactic direction it looks at. Done literally that is a deprojection, an altitude and
-    /// azimuth, an equatorial transform and a Galactic transform per pixel -- six trigonometric
+    /// azimuth, an equatorial transform and a Galactic transform per pixel, six trigonometric
     /// calls on eleven million pixels at the largest sensor's native resolution.
     ///
     /// But the whole chain from (north, east, up) to Galactic is a rotation, and it does not change

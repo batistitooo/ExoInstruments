@@ -8,7 +8,7 @@ namespace ExoInstruments.Core
     /// Every all-sky dust, H-alpha and CO map is tabulated in Galactic coordinates, because that is
     /// the frame the emitting material is organised in. A map lookup from a catalogue position
     /// therefore has to cross this boundary, and crossing it wrongly puts the Galactic plane at the
-    /// wrong angle across the sky -- visible, but only if you know what it should look like.
+    /// wrong angle across the sky, visible, but only if you know what it should look like.
     ///
     /// The pole is the ICRS realisation of the IAU 1958 Galactic frame, from the Hipparcos
     /// catalogue documentation (ESA 1997, SP-1200, Vol. 1, Sect. 1.5.3):

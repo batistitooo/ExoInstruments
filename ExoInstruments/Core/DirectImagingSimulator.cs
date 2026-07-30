@@ -45,7 +45,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int SpiderVaneCount = 6;
         public const double SpiderVaneWidthMeters = 0.50;
-        public const double AssumedBondAlbedo = 0.3;     // assumption, not measurement -- no catalog column
+        public const double AssumedBondAlbedo = 0.3;     // assumption, not measurement, no catalog column
         public const double DeepContrastLimit = 1.0e-8;  // post-processing floor far from the star
         public const double DetectionSnrThreshold = 5.0; // standard imaging detection criterion
         private const double RadiansToArcsec = 206264.806;
@@ -139,7 +139,7 @@ namespace ExoInstruments.Core
             if (planetTempK <= 0 || starTempK <= 0) return 0.0;
             double xStar = PlanckHcOverK / starTempK;
             double xPlanet = PlanckHcOverK / planetTempK;
-            // exp(xPlanet) overflows for very cold planets -- the ratio is effectively
+            // exp(xPlanet) overflows for very cold planets; the ratio is effectively
             // zero there anyway, so short-circuit rather than risk Infinity/Infinity.
             if (xPlanet > 700.0) return 0.0;
             return (Math.Exp(xStar) - 1.0) / (Math.Exp(xPlanet) - 1.0);

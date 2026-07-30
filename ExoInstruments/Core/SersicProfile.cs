@@ -15,8 +15,8 @@ namespace ExoInstruments.Core
     /// WHY b_n IS SOLVED AND NOT QUOTED. Every textbook carries the series b_n = 2n - 1/3 +
     /// 4/(405n) + ... (Ciotti &amp; Bertin 1999). It is an asymptotic expansion, good to about 1e-5
     /// at n = 4 and progressively worse below n = 1, and its error goes straight into the total
-    /// flux through the e^(b_n) factor. b_n has an exact definition -- the regularised incomplete
-    /// gamma P(2n, b_n) = 1/2 -- so it is inverted numerically here instead, the same discipline
+    /// flux through the e^(b_n) factor. b_n has an exact definition: the regularised incomplete
+    /// gamma P(2n, b_n) = 1/2, so it is inverted numerically here instead, the same discipline
     /// OpticalPsf uses for its own FWHM constants. tools/galaxy-tests checks it against SciPy's
     /// gammaincinv.
     ///
@@ -55,7 +55,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Total flux of the profile divided by I_e R_e^2 -- the dimensionless factor of
+        /// Total flux of the profile divided by I_e R_e^2, the dimensionless factor of
         /// Graham &amp; Driver (2005) eq. 4. Multiply by I_e R_e^2 for the flux itself.
         /// </summary>
         public static double TotalFluxFactor(double n)
@@ -104,7 +104,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The half-light radius that makes a profile of the catalogued total magnitude reach the
-        /// catalogued ISOPHOTAL radius at the catalogued surface brightness -- i.e. the R_e for
+        /// catalogued ISOPHOTAL radius at the catalogued surface brightness, i.e. the R_e for
         /// which mu(isophotalRadius) = isophotalMag.
         ///
         /// This is how a galaxy's size gets into the render without inventing anything: RC3 and
@@ -118,7 +118,7 @@ namespace ExoInstruments.Core
         /// the half-light radius would lie outside the isophote that defines the galaxy's edge.
         ///
         /// Returns NaN when the maximum itself is fainter than the isophote, which is not a
-        /// numerical failure but a real statement about the catalogue entry -- a galaxy whose
+        /// numerical failure but a real statement about the catalogue entry, a galaxy whose
         /// total magnitude is too faint to reach 25 mag/arcsec^2 anywhere at its quoted size.
         /// Callers fall back to a shape-based ratio and say so.
         /// </summary>

@@ -1,7 +1,7 @@
 # Galaxies: the profile, the size solve, and the renderer
 
-A galaxy is drawn from four catalogued numbers -- total B magnitude, D25, axis ratio, position
-angle -- plus one profile. Every step between the catalogue and the frame fails quietly:
+A galaxy is drawn from four catalogued numbers: total B magnitude, D25, axis ratio, position
+angle, plus one profile. Every step between the catalogue and the frame fails quietly:
 
 * **b_n slightly wrong** scales every galaxy's flux, through the `e^(b_n)` factor in the total.
 * **the total-flux factor wrong** scales them all uniformly, which looks like a calibration choice.

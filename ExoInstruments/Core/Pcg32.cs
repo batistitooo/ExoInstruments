@@ -8,8 +8,8 @@ namespace ExoInstruments.Core
     /// Statistically Good Algorithms for Random Number Generation"), transcribed from the author's
     /// own reference implementation at pcg-random.org.
     ///
-    /// WHY THE PIPELINE NEEDED ITS OWN GENERATOR. Every stochastic step in this mod -- shot noise,
-    /// read noise, cosmic rays, the defect map, scintillation -- ran on System.Random. That is a
+    /// WHY THE PIPELINE NEEDED ITS OWN GENERATOR. Every stochastic step in this mod (shot noise,
+    /// read noise, cosmic rays, the defect map, scintillation) ran on System.Random. That is a
     /// subtractive lagged-Fibonacci generator whose statistical weaknesses are well known, but the
     /// disqualifying problem is a different one: ITS OUTPUT IS NOT PART OF .NET'S CONTRACT. The
     /// sequence produced for a given seed is not guaranteed across runtime versions, and it in
@@ -25,7 +25,7 @@ namespace ExoInstruments.Core
     /// DELIBERATELY A System.Random SUBCLASS. Every method the pipeline uses (Next, Next(int),
     /// NextDouble, NextBytes, and the protected Sample the base class routes through) is virtual,
     /// so overriding them makes this a drop-in replacement at every existing call site without
-    /// changing a single signature -- and without a second RNG interface for callers to get wrong.
+    /// changing a single signature, and without a second RNG interface for callers to get wrong.
     ///
     /// The stream ("sequence") parameter selects one of 2^63 distinct sequences from the same seed.
     /// That is what lets the capture pipeline draw its shot noise, its defect map and its cosmic
@@ -78,7 +78,7 @@ namespace ExoInstruments.Core
             int rotation = (int)(old >> 59);
 
             // Rotate right by `rotation`. The (32 - rotation) & 31 form gives a shift of 0 when
-            // rotation is 0, where the OR then returns xorshifted unchanged -- which is the
+            // rotation is 0, where the OR then returns xorshifted unchanged, which is the
             // correct result, rather than relying on C#'s shift-count masking to produce it.
             return (xorshifted >> rotation) | (xorshifted << ((32 - rotation) & 31));
         }
@@ -92,7 +92,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// A double in [0,1), built from 53 random bits -- one for every bit of a double's
+        /// A double in [0,1), built from 53 random bits, one for every bit of a double's
         /// significand, so every representable value in the interval is reachable with the right
         /// probability. System.Random's own Sample resolves only about 2^31 values.
         /// </summary>
