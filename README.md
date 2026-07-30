@@ -577,6 +577,21 @@ next step. And even at 0.8′ these are survey images: M42's Trapezium spans 6 e
 0.8, which is a nebula rather than a smudge, but it is not a two-arcsecond astrophotograph and will
 not look like one.
 
+### Looking at a field without the game
+
+`tools/preview_field.py` projects an installed map through an instrument's exact geometry and
+writes a PNG of nothing but the map -- no PSF, no noise, no detector:
+
+```
+./env/bin/python preview_field.py --ra 05:41:00 --dec="-02:12:17" --instrument redcat --binning 1 --zoom
+```
+
+It exists to split one question in two. When a frame shows something odd, it either comes from the
+DATA the survey holds toward that direction or from the pipeline that turns it into electrons.
+Anything visible in the preview is in the survey; anything visible in the game but not in the
+preview is in the pipeline. It also prints how many frame pixels one map cell spans, which is the
+number that identifies a cell-scale artefact.
+
 ## Optional: the galaxy catalogue
 
 **Nothing ships.** Galaxies are rendered from their own measured shape, so the catalogue supplies
