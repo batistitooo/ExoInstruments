@@ -40,7 +40,7 @@ rather than preserved and then decorated with fine structure.
 
 Run:
     cd tools
-    python3 -m venv env && ./env/bin/pip install numpy scipy astropy healpy requests
+    python3 -m venv env && ./env/bin/pip install numpy scipy astropy astropy-healpix requests
     ./env/bin/python pack_shassa_patches.py \
         --composite ../HalphaMap.emission \
         --out HalphaPatches.patchset
@@ -199,20 +199,26 @@ def main():
     args = p.parse_args()
 
     import numpy as np
-    import healpy as hp
+    import astropy.units as u
     from astropy.io import fits
     from astropy.wcs import WCS
+    from astropy_healpix import nside_to_pixel_resolution
     from scipy.ndimage import gaussian_filter
+
+    # astropy-healpix rather than healpy, for the reason given in pack_halpha_map.py: healpy has no
+    # Windows wheel, and everything used here is indexing arithmetic that astropy-healpix does.
+    def resol_arcmin(nside):
+        return nside_to_pixel_resolution(nside).to_value(u.arcmin)
 
     if args.nside <= 0 or args.nside & (args.nside - 1):
         raise SystemExit("nside must be a power of two")
 
     composite, comp_nside = read_packed(args.composite, np)
     print(f"composite: nside {comp_nside} "
-          f"({hp.nside2resol(comp_nside, arcmin=True):.2f} arcmin sampling), "
+          f"({resol_arcmin(comp_nside):.2f} arcmin sampling), "
           f"{len(composite)} cells")
     print(f"patches at nside {args.nside} "
-          f"({hp.nside2resol(args.nside, arcmin=True):.2f} arcmin sampling)\n")
+          f"({resol_arcmin(args.nside):.2f} arcmin sampling)\n")
 
     os.makedirs(args.cache, exist_ok=True)
     patches = []
@@ -250,8 +256,9 @@ def main():
         yy, xx = np.mgrid[0:ny, 0:nx]
         sky = wcs.pixel_to_world(xx.ravel(), yy.ravel())
         gal = sky.galactic
-        comp_here = hp.get_interp_val(composite, gal.l.deg, gal.b.deg,
-                                      nest=False, lonlat=True).reshape(ny, nx)
+        from astropy_healpix import interpolate_bilinear_lonlat
+        comp_here = interpolate_bilinear_lonlat(gal.l, gal.b, composite,
+                                                order="ring").reshape(ny, nx)
 
         # Smooth the cutout to the composite's beam, in cutout pixels.
         scale_arcmin = abs(wcs.wcs.cdelt[0]) * 60.0
@@ -326,8 +333,18 @@ def main():
 
         rim = r > 0.97
         if np.any(rim):
-            seam = float(np.max(np.abs((total - comp_here)[rim])))
+            # A rim pixel where the patch stores NaN is one SHASSA declined to answer for, and the
+            # reader falls through to the composite there -- so the joint is exact by construction,
+            # not unknown. Scoring those as zero disagreement is what makes this check mean
+            # anything: taper is 0 at the rim and 0 * NaN is NaN, so a plain max over the rim came
+            # back NaN for every patch and the check silently measured nothing.
+            seam_map = np.abs((total - comp_here)[rim])
+            fell_through = int(np.count_nonzero(~np.isfinite(seam_map)))
+            seam = float(np.max(np.where(np.isfinite(seam_map), seam_map, 0.0)))
             rel = seam / max(1.0, float(np.median(comp_here[rim])))
+            if fell_through:
+                print(f"    {fell_through} of {rim.sum()} rim pixels carry no SHASSA value and "
+                      f"fall through to the base map")
             print(f"    rim agreement with the base map: {seam:.1f} R worst "
                   f"({rel * 100:.1f}% of the composite there)")
 
@@ -336,12 +353,21 @@ def main():
         # somewhere else entirely -- which returns cells that the cutout does not cover, and an
         # empty patch.
         from astropy.coordinates import SkyCoord
-        import astropy.units as u
+        from astropy_healpix import HEALPix, healpix_to_lonlat
         centre_gal = SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame="icrs").galactic
-        vec = hp.ang2vec(centre_gal.l.deg, centre_gal.b.deg, lonlat=True)
-        cells = hp.query_disc(args.nside, vec, np.deg2rad(radius))
-        cl, cb = hp.pix2ang(args.nside, cells, nest=False, lonlat=True)
-        eq = SkyCoord(l=cl * u.deg, b=cb * u.deg, frame="galactic").icrs
+        cells = HEALPix(nside=args.nside, order="ring").cone_search_lonlat(
+            centre_gal.l, centre_gal.b, radius * u.deg)
+        cl, cb = healpix_to_lonlat(cells, args.nside, order="ring")
+
+        # cone_search_lonlat returns every cell the disc TOUCHES; healpy's query_disc, as it was
+        # called here, returned only those whose centre falls inside it. Keeping the centre test
+        # explicit means the patch covers exactly the radius it records, rather than a ring of
+        # half-covered cells wider than the crossfade taper expects.
+        keep = SkyCoord(l=centre_gal.l, b=centre_gal.b, frame="galactic").separation(
+            SkyCoord(l=cl, b=cb, frame="galactic")) <= radius * u.deg
+        cells, cl, cb = cells[keep], cl[keep], cb[keep]
+
+        eq = SkyCoord(l=cl, b=cb, frame="galactic").icrs
         cx, cy = wcs.world_to_pixel(eq)
         ix = np.clip(np.round(cx).astype(int), 0, nx - 1)
         iy = np.clip(np.round(cy).astype(int), 0, ny - 1)
