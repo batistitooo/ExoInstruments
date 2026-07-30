@@ -315,7 +315,11 @@ frame to divide by.
       the CDK1000 in `Ha`. The frame must show the ridge with structure and the dark cloud beside it,
       not a smooth gradient. The readout must say
       `from the IC 434 Horsehead high-resolution patch at 0.86' sampling`.
-- [ ] **15.3** **M42 at the RedCat.** Same check. The patch covers 1.1 degrees, the RedCat's field is
+- [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it --
+      31% of one cutout row, a bright horizontal spike -- and its patch rim disagrees with the base
+      map by 392%. The packer warns about it. Use the Lagoon (rim 10%), the Horsehead (8%), the Flame
+      (7%) or the Eagle (7%) instead.
+- [ ] **15.3b** **M42 at the RedCat.** Same check. The patch covers 1.1 degrees, the RedCat's field is
       4.4 x 3.0, so the frame does NOT fit inside the patch and must fall back to the all-sky map --
       the readout should say so. Use the RC20 or CDK1000 to get inside the patch.
 - [ ] **15.4** **A target with no patch** -- IC 1396 at +57 degrees is outside SHASSA -- must report

@@ -17,17 +17,26 @@ whole catalogue.
 
 HOW THE CALIBRATION WORKS, and why it is not a unit guess. SHASSA's own pixel units are not taken on
 trust. Each cutout is smoothed to the composite's 6 arcmin beam and regressed against the composite
-over the same area, which MEASURES the scale between them; the script prints that scale so a wrong
-one is visible rather than silent. The patch then stores
+over the same area -- robustly, with sigma clipping, so a local artefact in either cannot drag the
+fit -- which MEASURES the linear relation between them. The patch then stores a CROSSFADE:
 
-    composite  +  scale * (cutout - smoothed cutout)
+    patch = taper * (scale * cutout + offset)  +  (1 - taper) * composite
 
-so the large-scale calibration remains exactly the composite's and SHASSA contributes only structure
-finer than 6 arcmin -- which is the only thing it is being used for. Smoothing the patch back to
-6 arcmin returns the composite identically, which the script checks.
+pure calibrated SHASSA through the middle, the composite at the rim, blended across the outer
+quarter of the radius so a patch joins the base map with no step.
 
-The fine-structure term is apodised to zero across the patch's outer margin, so a patch joins the
-base map continuously instead of leaving a step at its edge.
+WHY NOT AN ADDITIVE HIGH-PASS. The first version of this stored
+composite + scale*(cutout - smoothed), the standard way to graft fine structure onto a calibrated
+low-resolution map. It is only valid where the two datasets AGREE at the low resolution, and around
+M42 -- the brightest H-alpha source in the sky -- they do not: the composite carries a saturation
+artefact from the survey images it mosaics, a ridge 10 arcmin wide and 1.5 degrees long, that SHASSA
+does not have. The high-pass term then went strongly negative beside the bright core, clipped at
+zero, and put black lobes either side of it: 255 cells of the M42 patch were zeroed where the
+composite reads 87 to 1671 rayleighs.
+
+The crossfade cannot do that. Both terms are positive, neither is a difference, and the middle of
+the patch is SHASSA's own image -- which also means the composite's artefact is simply absent there,
+rather than preserved and then decorated with fine structure.
 
 Run:
     cd tools
@@ -64,6 +73,11 @@ SHASSA_DEC_LIMIT = 15.0
 # The composite's beam, which is what the fine-structure term is defined relative to.
 COMPOSITE_BEAM_ARCMIN = 6.0
 
+# Fraction of the patch radius the crossfade back to the all-sky map is spread over. Wide, because
+# the crossfade's job is to be invisible: a sharp handover shows as a ring wherever the two datasets
+# differ at all, and they always differ a little.
+CrossfadeFraction = 0.40
+
 # Objects worth a patch: the emitting entries of Core/DeepSkyCatalog.cs, kept in step with it by
 # name. Sizes are the catalogue's, and the patch radius is set from them below.
 CATALOGUE = [
@@ -97,12 +111,49 @@ CATALOGUE = [
 ]
 
 
-def patch_radius_deg(size_arcmin, margin=1.6, floor=1.0, ceiling=2.5):
-    """Half-width of the patch: the object plus room to see it against its surroundings.
+def bleed_fraction(image, np):
+    """Fraction of the cutout occupied by a detector bleed streak.
 
-    Capped, because a patch's cost grows as the square of its radius and the point is the object,
-    not the sky around it. Floored, so a small object still gets enough context to look like an
-    object rather than a cutout.
+    Survey images of the brightest H II regions carry charge trails: a bright core saturates a CCD
+    column and spills along a ROW, leaving a narrow horizontal spike orders of magnitude above its
+    immediate neighbours. It is real in the data and no processing removes it, so the only useful
+    thing is to say which patches have one.
+
+    Detected by contrast against the VERTICAL neighbourhood rather than by row statistics. A row
+    percentile does not work: a bleed is one or two rows out of hundreds, and a row that already
+    contains a bright nebula has a high percentile anyway -- which is why the first version of this
+    scored M42, whose streak is plainly visible, as clean. Comparing each pixel against the median of
+    the pixels a few rows above and below it in the same column isolates exactly the feature that is
+    narrow in y and extended in x.
+    """
+    d = np.where(np.isfinite(image), image, np.nan)
+    ny, nx = d.shape
+    offsets = [-8, -7, -6, -5, 5, 6, 7, 8]
+    stack = np.full((len(offsets), ny, nx), np.nan)
+    for k, o in enumerate(offsets):
+        lo, hi = max(0, o), min(ny, ny + o)
+        stack[k, lo - min(0, o) if o < 0 else 0: (hi - o) if o > 0 else ny] = d[lo:hi]
+    neighbour = np.nanmedian(stack, axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        contrast = d / np.where(np.abs(neighbour) > 1e-9, neighbour, np.nan)
+    hot = np.nan_to_num(contrast) > 3.0
+    # A bleed row is hot across a large part of its width; a star is hot in one column.
+    row_fraction = hot.mean(axis=1)
+    return float(row_fraction.max()), float(hot[row_fraction > 0.10].sum() / d.size)
+
+
+def patch_radius_deg(size_arcmin, margin=2.4, floor=1.3, ceiling=2.6):
+    """Half-width of the patch: the object, plus room for the crossfade to land on agreement.
+
+    The margin is not cosmetic. The patch hands back to the all-sky composite across its outer
+    annulus, so that annulus has to sit where the two datasets AGREE -- otherwise the crossfade
+    reintroduces whatever the composite gets wrong, as a gradient fading in toward the rim. Around
+    M42 the composite's saturation artefact is a ridge 1.5 degrees long, so a 1.13 degree patch put
+    its own rim inside the artefact and handed back 247 rayleighs of disagreement. Wider rims land
+    outside it.
+
+    Capped, because a patch's cost grows as the square of its radius; floored, so a small object
+    still gets enough sky around it to read as an object rather than a cutout.
     """
     return max(floor, min(ceiling, margin * size_arcmin / 60.0 / 2.0))
 
@@ -214,24 +265,59 @@ def main():
             skipped.append((name, "no overlap with the composite"))
             continue
         # A scale AND an offset: SHASSA's continuum subtraction can leave a residual pedestal, and
-        # forcing the fit through the origin would absorb it into the scale. The offset itself is
-        # then discarded, because the fine-structure term below is a difference and a constant
-        # cancels out of it -- what the fit is for is the slope.
+        # forcing the fit through the origin would absorb it into the scale. Both are kept, because
+        # the patch now stores the calibrated image itself rather than a difference.
+        #
+        # ROBUSTLY, by sigma clipping. Around a bright object the two datasets can disagree over a
+        # localised region -- the composite's M42 artefact is the case that forced this -- and a
+        # plain least squares lets that region set the calibration for the whole patch.
         a = smoothed[ok]
         b = comp_here[ok]
-        design = np.vstack([a, np.ones_like(a)]).T
-        (scale, offset), *_ = np.linalg.lstsq(design, b, rcond=None)
+        keep = np.ones(a.shape, dtype=bool)
+        scale = offset = 0.0
+        for _ in range(5):
+            design = np.vstack([a[keep], np.ones(keep.sum())]).T
+            (scale, offset), *_ = np.linalg.lstsq(design, b[keep], rcond=None)
+            r = b - (scale * a + offset)
+            sigma = 1.4826 * np.median(np.abs(r[keep] - np.median(r[keep])))
+            if not (sigma > 0):
+                break
+            new_keep = np.abs(r - np.median(r[keep])) < 3.0 * sigma
+            if new_keep.sum() < 100 or np.array_equal(new_keep, keep):
+                break
+            keep = new_keep
         scale = float(scale)
-        resid = float(np.std(scale * a + offset - b) / max(1e-9, np.mean(b)))
+        offset = float(offset)
+        resid = float(np.std((scale * a + offset - b)[keep]) / max(1e-9, np.mean(b[keep])))
         print(f"  {name:<24} scale {scale:9.4f} R per unit, offset {offset:8.2f} R, "
-              f"residual {resid*100:5.1f}% after matching at 6'")
+              f"residual {resid*100:5.1f}% at 6' over {keep.mean()*100:.0f}% of the area kept")
 
-        # composite + scale * (cutout - smoothed), apodised so the fine term vanishes at the rim.
-        fine = scale * (filled - smoothed)
+        # The crossfade. Calibrated SHASSA through the middle, the composite at the rim.
+        calibrated = scale * filled + offset
+        clipped = int(np.count_nonzero(calibrated < 0.0))
+        calibrated = np.maximum(0.0, calibrated)
         r = np.hypot(xx - (nx - 1) / 2.0, yy - (ny - 1) / 2.0) / (min(nx, ny) / 2.0)
-        taper = np.clip((1.0 - r) / 0.25, 0.0, 1.0)
-        total = np.maximum(0.0, comp_here + fine * taper)
+        taper = np.clip((1.0 - r) / CrossfadeFraction, 0.0, 1.0)
+        total = taper * calibrated + (1.0 - taper) * comp_here
         total = np.where(good, total, comp_here)
+
+        # Both terms are positive, so the result must be. Reported anyway: a negative would mean the
+        # fitted offset had overwhelmed the signal, which is worth knowing rather than hiding.
+        if clipped:
+            print(f"    {clipped} cutout pixels ({clipped / calibrated.size * 100:.2f}%) sat below "
+                  f"the fitted offset and were floored at zero")
+        worst_row, bleed_area = bleed_fraction(image, np)
+        if worst_row > 0.15:
+            print(f"    WARNING: a detector bleed streak crosses {worst_row * 100:.0f}% of one row "
+                  f"({bleed_area * 100:.2f}% of the cutout). It is in the survey data and nothing "
+                  f"here can remove it -- this object will render with a bright horizontal spike.")
+
+        rim = r > 0.97
+        if np.any(rim):
+            seam = float(np.max(np.abs((total - comp_here)[rim])))
+            rel = seam / max(1.0, float(np.median(comp_here[rim])))
+            print(f"    rim agreement with the base map: {seam:.1f} R worst "
+                  f"({rel * 100:.1f}% of the composite there)")
 
         # Onto the HEALPix grid. THE DISC CENTRE HAS TO BE GALACTIC: the map is tabulated in
         # Galactic coordinates, so handing query_disc an equatorial direction asks for a disc
