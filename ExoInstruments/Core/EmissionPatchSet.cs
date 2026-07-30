@@ -260,19 +260,25 @@ namespace ExoInstruments.Core
         /// <summary>
         /// Per-caller lookup state, so a background frame fill keeps its own run cursor, one per
         /// patch, since a frame may draw from several and they have unrelated run tables.
+        ///
+        /// FOUR CURSORS PER PATCH, one per ring of the interpolation stencil. A run IS a ring here,
+        /// so a stencil spanning four rings walks four runs, and a single cursor would miss on
+        /// every one of them and pay a binary search per tap. Keeping the cursor a ring holds
+        /// between one frame pixel and the next, which is where the locality actually is.
         /// </summary>
         public struct Cursor
         {
+            internal const int RingsPerLookup = 4;
             internal int[] Runs;
             public static Cursor New(int patchCount = 1)
-                => new Cursor { Runs = new int[Math.Max(1, patchCount)] };
+                => new Cursor { Runs = new int[Math.Max(1, patchCount) * RingsPerLookup] };
         }
 
         /// <summary>
-        /// Surface brightness from a patch toward a Galactic direction, bilinearly interpolated over
-        /// the same four surrounding pixels the base map uses; see Healpix.InterpolationWeights.
-        /// False when any of the four lies outside the patch, which keeps the interpolation from
-        /// silently reweighting itself at the boundary.
+        /// Surface brightness from a patch toward a Galactic direction, interpolated by the same
+        /// scheme the base map uses; see Healpix.CubicInterpolationWeights. False when a surrounding
+        /// cell lies outside the patch, which keeps the interpolation from silently reweighting
+        /// itself at the boundary.
         /// </summary>
         public bool TryRayleighsAtGalactic(Patch patch, double lDeg, double bDeg,
                                            long[] pixelScratch, double[] weightScratch,
@@ -647,7 +653,43 @@ namespace ExoInstruments.Core
             rayleighs = double.NaN;
             if (patch == null || patch.Values == null) return false;
             if (cursor.Runs == null) cursor = Cursor.New(patchIndex + 1);
-            if (patchIndex < 0 || patchIndex >= cursor.Runs.Length) patchIndex = 0;
+            int cursorBase = patchIndex * Cursor.RingsPerLookup;
+            if (patchIndex < 0 || cursorBase + Cursor.RingsPerLookup > cursor.Runs.Length)
+            {
+                patchIndex = 0;
+                cursorBase = 0;
+            }
+
+            // THE C1 RECONSTRUCTION FIRST, over the sixteen cells of the cubic stencil, and only
+            // when every one of them is a measurement inside this patch. See
+            // Healpix.CubicInterpolationWeights: bilinear interpolation leaves a crease at every
+            // cell edge, and at 0.86 arcmin per cell those edges rule a mesh across the frame every
+            // nine pixels. The cubic scheme's outer taps are negative, so the reweighting the
+            // bilinear path performs below -- dropping a subtraction residual and renormalising
+            // over the neighbours that do carry a measurement -- has no sound cubic equivalent;
+            // those cells, and the patch's outer rim where the stencil leaves the patch, fall
+            // through to the bilinear path unchanged.
+            if (Healpix.CubicInterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch)
+                == Healpix.CubicTaps)
+            {
+                double cubic = 0.0;
+                bool complete = true;
+                for (int i = 0; i < Healpix.CubicTaps; i++)
+                {
+                    if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 2)], out double v)
+                        || !(v > 0.0))
+                    {
+                        complete = false;
+                        break;
+                    }
+                    cubic += weightScratch[i] * v;
+                }
+                if (complete && cubic > 0.0)
+                {
+                    rayleighs = cubic;
+                    return true;
+                }
+            }
 
             Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
 
@@ -670,7 +712,7 @@ namespace ExoInstruments.Core
             double sum = 0.0, weight = 0.0;
             for (int i = 0; i < 4; i++)
             {
-                if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[patchIndex], out double v))
+                if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 1)], out double v))
                     return false;                       // outside the patch: that IS the base map's job
                 if (!(v > 0.0)) continue;               // a subtraction residual: no measurement here
                 sum += weightScratch[i] * v;

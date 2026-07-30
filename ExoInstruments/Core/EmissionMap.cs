@@ -139,9 +139,9 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Line surface brightness toward a Galactic direction, rayleighs, bilinearly interpolated
-        /// between the four surrounding pixels; see Healpix.InterpolationWeights for why a
-        /// beam-smoothed map has to be read that way. NaN where the map has no value.
+        /// Line surface brightness toward a Galactic direction, rayleighs, interpolated between the
+        /// surrounding pixels; see Healpix.CubicInterpolationWeights for why the reconstruction has
+        /// to be C1 and not merely continuous. NaN where the map has no value.
         ///
         /// Not thread-safe: a per-call scratch pair would allocate once per frame pixel. Callers
         /// filling a frame use RayleighsAtGalactic(l, b, scratch) with their own buffers.
@@ -149,20 +149,44 @@ namespace ExoInstruments.Core
         public double RayleighsAtGalactic(double lDeg, double bDeg)
             => RayleighsAtGalactic(lDeg, bDeg, sharedPixels, sharedWeights);
 
-        private readonly long[] sharedPixels = new long[4];
-        private readonly double[] sharedWeights = new double[4];
+        private readonly long[] sharedPixels = new long[Healpix.CubicTaps];
+        private readonly double[] sharedWeights = new double[Healpix.CubicTaps];
 
         /// <summary>Scratch buffers a caller can allocate once and reuse across a whole frame.</summary>
         public static void AllocateScratch(out long[] pixelScratch, out double[] weightScratch)
         {
-            pixelScratch = new long[4];
-            weightScratch = new double[4];
+            pixelScratch = new long[Healpix.CubicTaps];
+            weightScratch = new double[Healpix.CubicTaps];
         }
 
         /// <summary>As above, using caller-supplied scratch so a frame-filling loop allocates nothing.</summary>
         public double RayleighsAtGalactic(double lDeg, double bDeg, long[] pixelScratch, double[] weightScratch)
         {
             if (pixels == null) return double.NaN;
+
+            // THE C1 RECONSTRUCTION FIRST, and only where the whole stencil carries data. Its outer
+            // taps are negative, so dropping some of them and renormalising over the rest is not a
+            // weighted mean any more: it can put more than the total weight on the survivors and
+            // amplify whatever is left. A gap therefore falls through to the bilinear scheme below,
+            // whose weights are all positive, so reweighting it IS still a mean. The seam that
+            // leaves is a crease along the edge of a gap, where the map already has an edge.
+            int taps = Healpix.CubicInterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
+            if (taps == Healpix.CubicTaps)
+            {
+                double cubic = 0.0;
+                bool complete = true;
+                for (int i = 0; i < taps; i++)
+                {
+                    long p = pixelScratch[i];
+                    if (p < 0 || p >= pixels.Length) { complete = false; break; }
+                    if (nested) p = Healpix.RingToNested(nside, p);
+                    double v = Float16.ToDouble(pixels[p]);
+                    if (double.IsNaN(v)) { complete = false; break; }
+                    cubic += weightScratch[i] * v;
+                }
+                if (complete) return cubic;
+            }
+
             Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
 
             // A pixel with no value must not be treated as zero: that would eat into its

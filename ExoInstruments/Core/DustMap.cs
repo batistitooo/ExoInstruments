@@ -80,17 +80,38 @@ namespace ExoInstruments.Core
         /// Total Galactic E(B-V) toward an equatorial position, magnitudes. NaN when no map is
         /// loaded or the map has no value there.
         ///
-        /// Bilinearly interpolated between the four surrounding pixels, which is what a map
-        /// smoothed to a beam (SFD98's is 6.1 arcmin) is a sampling of; see
-        /// Healpix.InterpolationWeights. Taking the containing pixel instead would make the
-        /// reddening jump discontinuously between two stars a few arcmin apart, structure the
-        /// survey does not contain.
+        /// Interpolated between the surrounding pixels, which is what a map smoothed to a beam
+        /// (SFD98's is 6.1 arcmin) is a sampling of; see Healpix.CubicInterpolationWeights, whose
+        /// reconstruction is C1 rather than merely continuous. Taking the containing pixel instead
+        /// would make the reddening jump discontinuously between two stars a few arcmin apart,
+        /// structure the survey does not contain.
         /// </summary>
         public double ReddeningAt(double raDeg, double decDeg)
         {
             if (pixels == null) return double.NaN;
 
             GalacticCoordinates.EquatorialToGalactic(raDeg, decDeg, out double l, out double b);
+
+            // The C1 scheme where the whole stencil carries data; the bilinear one otherwise,
+            // because only its all-positive weights can be renormalised over a gap and still be a
+            // weighted mean. Same arrangement as EmissionMap.RayleighsAtGalactic.
+            int taps = Healpix.CubicInterpolationWeightsDegrees(nside, l, b, scratchPixels, scratchWeights);
+            if (taps == Healpix.CubicTaps)
+            {
+                double cubic = 0.0;
+                bool complete = true;
+                for (int i = 0; i < taps; i++)
+                {
+                    long p = scratchPixels[i];
+                    if (p < 0 || p >= pixels.Length) { complete = false; break; }
+                    if (nested) p = Healpix.RingToNested(nside, p);
+                    double v = Float16.ToDouble(pixels[p]);
+                    if (double.IsNaN(v)) { complete = false; break; }
+                    cubic += scratchWeights[i] * v;
+                }
+                if (complete) return cubic;
+            }
+
             Healpix.InterpolationWeightsDegrees(nside, l, b, scratchPixels, scratchWeights);
 
             // NaN in the file means the source map had no measurement there. Such a pixel is
@@ -110,8 +131,8 @@ namespace ExoInstruments.Core
             return weight > 0.0 ? sum / weight : double.NaN;
         }
 
-        private readonly long[] scratchPixels = new long[4];
-        private readonly double[] scratchWeights = new double[4];
+        private readonly long[] scratchPixels = new long[Healpix.CubicTaps];
+        private readonly double[] scratchWeights = new double[Healpix.CubicTaps];
 
         /// <summary>Total extinction at V toward a position, magnitudes: A(V) = R_V E(B-V).</summary>
         public double ExtinctionAtV(double raDeg, double decDeg, double rv = InterstellarExtinction.MilkyWayRv)

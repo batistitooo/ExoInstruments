@@ -2305,33 +2305,61 @@ namespace ExoInstruments.Visualization
             }
             else LastEmissionPatchName = null;
             LastEmissionResolutionArcmin = patchList != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
-            long patchPixels = 0;
+            double patchSubSamples = 0.0;
+
+            // ONE SAMPLE PER NATIVE PIXEL, NOT PER BINNED PIXEL. Binning here is charge-domain
+            // summing, which is what FullWellElectrons and the dark-current terms already assume:
+            // BinningFactor^2 physical pixels collect light over their own solid angles and their
+            // charge is added before readout. Reading the map once at the binned pixel's centre
+            // models something else -- a detector with one big pixel that samples the sky at a
+            // point -- and at 4x4 that point stands for 15.3 arcsec of sky whose surface brightness
+            // was measured on 0.86 arcmin cells. The average over the native sub-pixels IS the
+            // integral the sensor performs, so this costs the same number of map lookups as a 1x1
+            // frame whatever the binning, and collapses to the old single sample at 1x1.
+            int bin = Math.Max(1, BinningFactor);
+            double subStep = 1.0 / bin;
+            double subCount = bin * bin;
 
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
                 {
-                    SkyVector direction = inputs.Projection.Deproject(x + 0.5, y + 0.5);
-                    rotation.ToGalactic(direction, out double l, out double b);
+                    double rSum = 0.0;
+                    int rCount = 0;
+                    int patchSamples = 0;
 
-                    // The patch carries total surface brightness, apodised into the base map at its
-                    // own edge, so it substitutes rather than adds. Any pixel it cannot answer for
-                    // falls through to the base map.
-                    double r = double.NaN;
-                    bool fromPatch = false;
-                    if (patchList != null)
+                    for (int sy = 0; sy < bin; sy++)
+                    for (int sx = 0; sx < bin; sx++)
                     {
-                        for (int pi = 0; pi < patchList.Count; pi++)
+                        SkyVector direction = inputs.Projection.Deproject(
+                            x + (sx + 0.5) * subStep, y + (sy + 0.5) * subStep);
+                        rotation.ToGalactic(direction, out double l, out double b);
+
+                        // The patch carries total surface brightness, apodised into the base map at
+                        // its own edge, so it substitutes rather than adds. Any sample it cannot
+                        // answer for falls through to the base map.
+                        double sample = double.NaN;
+                        bool fromPatch = false;
+                        if (patchList != null)
                         {
-                            if (!patchSet.TryRayleighsAtGalactic(patchList[pi], pi, l, b,
-                                    pixelScratch, weightScratch, ref patchCursor, out r)) continue;
-                            fromPatch = true;
-                            patchPixels++;
-                            break;
+                            for (int pi = 0; pi < patchList.Count; pi++)
+                            {
+                                if (!patchSet.TryRayleighsAtGalactic(patchList[pi], pi, l, b,
+                                        pixelScratch, weightScratch, ref patchCursor, out sample)) continue;
+                                fromPatch = true;
+                                patchSamples++;
+                                break;
+                            }
                         }
+                        if (!fromPatch) sample = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
+                        if (double.IsNaN(sample)) continue;
+                        rSum += sample;
+                        rCount++;
                     }
-                    if (!fromPatch) r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
-                    if (double.IsNaN(r)) continue;
+
+                    if (rCount == 0) continue;
+                    double r = rSum / rCount;
+                    patchSubSamples += patchSamples / subCount;
                     counted++;
                     if (!(r > 0.0)) continue;
 
@@ -2362,7 +2390,7 @@ namespace ExoInstruments.Visualization
             LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
             LastEmissionPeakElectrons = counted > 0 ? brightest : double.NaN;
             LastEmissionTemperatureK = counted > 0 ? temperatureSum / counted : double.NaN;
-            LastEmissionPatchCoverage = (double)patchPixels / Math.Max(1, (long)w * h);
+            LastEmissionPatchCoverage = patchSubSamples / Math.Max(1, (long)w * h);
         }
 
         /// <summary>Dispersion across the active filter's passband before any corrector, arcseconds.</summary>
