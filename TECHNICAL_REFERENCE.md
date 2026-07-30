@@ -1099,6 +1099,52 @@ Bubble and the Cave stay at 6′; **VTSS** at 1.6′ over the northern plane is 
 is not built. And even at 0.8′ these are survey images: the result is a nebula rather than a smudge,
 but it is not a two-arcsecond astrophotograph and does not claim to be.
 
+### 12.2 Colorimetry, chromatic PSF, and the airglow spectrum
+
+Added in the carte-blanche pass; each has its own harness and README with the full numbers.
+
+**`Core/Colorimetry.cs` + `Core/CieColourMatchingTable.cs` (generated)** -- the CIE 1931 2-degree
+observer at 1 nm and the primary-derived IEC sRGB matrix, emitted by `tools/generate_cie_table.py`
+from colour-science and compared back against it (table exact to 2e-15; Planckian locus to 3.6e-6 in
+xy, which is the CIE-15-vs-SI c2 convention, documented). Gamut handling desaturates toward the white
+point in BOTH directions (negative components, and components above one at the triple's luminance);
+the harness proves luminance survives to 3e-15 and that nothing is clipped. `StellarColor.BlackbodyRgb`
+now delegates here; the old Helland fit is kept only as a measured comparison (worst 0.085 sRGB).
+
+**`Core/ColourCalibration.cs`** -- per-instrument 3x3 band-to-XYZ matrix, least squares over
+blackbodies (1500-40000 K, log-spaced, unit-luminance normalised) plus four nebular line combs,
+continuum weighted 4:1. The harness control is an ideal colorimeter: bands proportional to
+xbar/lambda -- divided by lambda because tristimulus integrates energy while detectors count photons
+-- which fits to 1.5e-8 and makes the real residuals interpretable. `Visualization/ColourComposite.cs`
+replaces ComposeLRGB: true colour through the matrix with luminance-only stretch (L channel scaled by
+median ratio when present), or labelled HOO/SHO palettes with no colorimetric claim.
+
+**`Core/AtmosphericRefraction.cs`** -- Filippenko (1982) refractivity with the site's ICAO-standard
+pressure/temperature and Buck (1981) vapour pressure; differential refraction exactly prop. tan z;
+`SplitPassband` produces photon-weighted sub-bands with per-band dispersion offsets.
+`OpticalPsf.BuildChromaticKernel` sums per-sub-band kernels (Airy at its own lambda, seeing scaled by
+lambda^(-1/5)) at their offsets with bilinear placement; one sub-band with no offset is bit-identical
+to the monochromatic kernel. The zenith direction in pixel space is obtained by projecting the zenith
+through the frame's own projection, so mount geometry and parity are inherited rather than derived.
+`VisualTelescopeSpec.HasAtmosphericDispersionCorrector` (SPHERE only; Beuzit et al. 2019) scales the
+offsets by a stated 5% residual. The kernel cache keys on zenith distance and direction.
+
+**`Core/Airglow.cs` + `Core/AirglowTable.cs` (generated)** -- ESO SkyCalc airglow (lines and residual
+continuum separately) bin-integrated to 0.1 nm by `tools/generate_airglow_table.py`; van Rhijn shell
+factors with the [O I] red doublet on a 250 km layer; Bessell (1990) V transcription (identical to
+speclite to 1e-16) for the V surface brightness, which lands on Patat's measured dark sky. The flat
+airglow term and its scalar van Rhijn factor are retired from the visual-camera path
+(`GatherSkyBackground`); the transit instruments still use the old scalar model.
+
+**`OpticalPsf.Normalise`** -- the circular support clip is now gated on the measured energy in the
+square-minus-circle annulus (budget 1e-3): wide seeing kernels keep the isotropic edge, compact
+kernels keep the full square that GalSim validated. This fixed a 17% encircled-energy regression the
+unconditional clip had introduced on the RedCat.
+
+**Generated-file discipline**, learned the hard way: generators write to a file via `--out`, never to
+stdout -- the skycalc client prints an informational note on stdout, and shell redirection silently
+made it the first line of a .cs file.
+
 ## 13. Bibliography (papers/formulas actually cited in-source)
 
 - Ballesteros, F. J. (2012). "New insights into black bodies." *EPL* 97, 34008. — B-V→Teff relation.

@@ -324,3 +324,44 @@ frame to divide by.
       just inside, then just outside. The two frames should differ in detail, never show a step.
 - [ ] **15.6** **Cost.** Time a capture inside a patch against one outside at the same binning. The
       patch lookup keeps a run cursor, so it should be within a few percent, not multiples.
+
+## 16. Colour as colorimetry
+
+- [ ] **16.1** **Star tints changed subtly.** The chart's and the frames' star colours now come from
+      Planck's law through the CIE 1931 standard observer instead of a curve fit. Cool stars are the
+      visible difference: a 1500 K point is now a deeper orange-red, not the old pure red.
+- [ ] **16.2** **The composite selector.** The stacking box now offers True colour / HOO / SHO
+      instead of the "Ha blend strength" slider. Capture R, G and B series of a bright star field
+      and compose in True colour: star colours should look like star colours, and the report line
+      must state the fitted transform's residuals.
+- [ ] **16.3** **A nebula core must hold its colour.** Stack Ha+OIII on M8's core (SHASSA patch
+      installed) in HOO. As total integration grows, the core must stay salmon-red rather than
+      washing to white -- the stretch now applies to luminance only.
+- [ ] **16.4** **SPHERE cannot do true colour** (no blue filter exists) and the composite must say
+      so rather than produce something.
+
+## 17. Atmospheric dispersion
+
+- [ ] **17.1** **The readout.** Any capture shows `Atmospheric dispersion: X" across this filter at
+      z = N deg = M px toward the zenith`. At the zenith it reads ~0; it grows as tan z.
+- [ ] **17.2** **Stars at low altitude are tiny spectra.** RC20, `Luminance`, a bright star below
+      30 degrees altitude: the PSF should be visibly elongated (~20 px at z = 60), and the same shot
+      in `Ha` (7 nm) should be nearly round -- the smear scales with the passband width.
+- [ ] **17.3** **SPHERE stays sharp.** The same low-altitude shot on SPHERE must show almost no
+      elongation, and the readout must say "after the instrument's dispersion corrector".
+- [ ] **17.4** **Direction check.** The elongation must point along the line from the target toward
+      the zenith in the frame -- on an alt-az frame that is "up", rotated by the field rotation.
+
+## 18. The sky's own emission lines
+
+- [ ] **18.1** **The readout.** Any capture shows `Airglow in this band: X R (Y% sky emission
+      lines...)`. Luminance at the zenith reads a few R-per-band with ~36% lines.
+- [ ] **18.2** **[O I] 6300 is hopeless and now says why.** Select the OI filter: the airglow
+      readout should show ~10x the [S II] figure, nearly all lines -- the sky glowing in the very
+      line the filter isolates.
+- [ ] **18.3** **The sky brightens toward the horizon** more slowly than sec z (van Rhijn): compare
+      the airglow readout at the zenith and at 60 degrees altitude difference; the ratio should be
+      ~1.9, not 2.0.
+- [ ] **18.4** **The dark sky is still 21.7.** The `Sky` figure on a moonless night at the zenith
+      should read close to 21.7-21.8 mag/arcsec^2 -- now derived from ESO's measured spectrum plus
+      the zodiacal term rather than asserted.

@@ -612,6 +612,39 @@ has no such cut and draws whatever clears the frame's noise floor. `tools/galaxy
 profile against SciPy and astropy: b_n to 4 × 10⁻¹⁵, the surface brightness against astropy's
 `Sersic2D` to 1.2 × 10⁻¹³, the deposited flux to 4.5 × 10⁻⁴ over 81 shapes.
 
+## Colour, dispersion, and the sky's own lines
+
+Three deeper layers of realism, each validated against an independent professional reference
+(see `tools/colour-tests`, `tools/refraction-tests`, `tools/airglow-tests`):
+
+**Colour is colorimetry, not channel assignment.** A red filter is not the display's red primary, so
+composing colour by feeding band counts into R, G and B makes the colours depend on the filter set
+rather than on the sky. The mod now carries the full CIE 1931 chain -- the standard observer table
+generated from `colour-science`, the exact IEC sRGB transform, gamut mapping that desaturates instead
+of clipping so hue survives -- and fits each instrument's own 3x3 colour matrix from its real filter
+curves, the same construction as a raw converter's, with the residual measured and reported (typical
+star: 0.017 in CIE xy for the ZWO top-hats, 0.009 for FORS2's measured curves). Emission lines are an
+order of magnitude worse for any broadband set, which is *why* narrowband imaging uses stated
+palettes: HOO and SHO are labelled conventions here and skip the colorimetry. The composite stretches
+**luminance only**, carrying chromaticity through untouched, so a nebula's core keeps its measured
+colour instead of washing to white.
+
+**The atmosphere is a prism.** Air's refractive index (Filippenko 1982, checked against three
+published formulations to the literature's own spread of 6e-5) depends on wavelength, so a star at
+z = 45 deg is smeared over 1.35" between 400 and 700 nm -- twenty RC20 pixels, three hundred ZIMPOL
+pixels. The PSF is now built across the passband: each sub-band's kernel at its own wavelength
+(Airy scale, seeing's lambda^(-1/5), dispersion offset), summed with photon weights -- exactly a
+chromatic PSF, since convolution is linear. SPHERE carries its real dispersion corrector (Beuzit et
+al. 2019) at a stated 5% residual.
+
+**The night sky is mostly lines.** ESO's measured sky model (Noll et al. 2012, on the Hanuschik 2003
+Paranal spectra) replaces the flat 21.7 mag/arcsec^2: 11148 R of [O I], Na and OH-forest lines
+against 5290 R of continuum, scaled by the van Rhijn shell geometry (with the [O I] red doublet on
+its own 250 km layer). An [O I] 6300 filter now sees **11x** the sky an [S II] filter does -- the
+real reason ground-based [O I] imaging is hopeless -- and pushed through the Bessell V band and the
+mod's own zero point, the dark sky comes out **V = 21.78** against Patat's measured 21.7 +/- 0.2, a
+number that never entered the model.
+
 ## Future Roadmap
 
 Not yet implemented in the current build:
