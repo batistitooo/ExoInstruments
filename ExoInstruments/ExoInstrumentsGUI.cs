@@ -2351,15 +2351,38 @@ namespace ExoInstruments
 
             bool batchRunning = stackBatchRemaining > 0;
 
+            // THE SLIDER CANNOT ASK FOR MORE THAN WILL FIT.
+            //
+            // AstroImageStack caps each filter at what its memory budget allows AT THE CURRENT
+            // BINNING, and the number is small where it matters most: 8 subs at 1x1 on a full-frame
+            // sensor against 30 at 4x4. A slider that ran to 20 regardless let a batch of 7 be
+            // requested at 1x1, accepted, started, and then stopped partway with the rest reported
+            // only as an interruption after the sky time had already been spent. The cap belongs in
+            // front of the player before the series runs, not behind it.
+            int capPerFilter = AstroImageStack.MaxSubsPerFilter;
+            int heldThisFilter = astroStack.SubCount(solarSystemCamera.Filter);
+            int roomLeft = Mathf.Max(0, capPerFilter - heldThisFilter);
+            if (!batchRunning) stackBatchSize = Mathf.Clamp(stackBatchSize, 1, Mathf.Max(1, roomLeft));
+
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Subs per batch ({stackBatchSize})", GUILayout.Width(150));
-            GUI.enabled = !batchRunning;
-            stackBatchSize = Mathf.RoundToInt(GUILayout.HorizontalSlider(stackBatchSize, 1, 20));
+            GUI.enabled = !batchRunning && roomLeft > 1;
+            stackBatchSize = Mathf.RoundToInt(GUILayout.HorizontalSlider(stackBatchSize, 1, Mathf.Max(1, roomLeft)));
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
+            GUILayout.Label(
+                roomLeft > 0
+                    ? $"{FilterLabel(solarSystemCamera.Filter)} holds {heldThisFilter} of {capPerFilter} at "
+                      + $"{SolarSystemCameraTexture.BinningFactor}x{SolarSystemCameraTexture.BinningFactor} binning "
+                      + $"({SolarSystemCameraTexture.TextureWidth}x{SolarSystemCameraTexture.TextureHeight}); room for {roomLeft} more. "
+                      + "Bin the sensor higher for a deeper stack."
+                    : $"{FilterLabel(solarSystemCamera.Filter)} is full at {capPerFilter} subs. Compose or clear the stack, or bin the sensor higher.",
+                smallCaptionStyle);
+
             GUILayout.BeginHorizontal();
-            GUI.enabled = !batchRunning && canExpose && !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
+            GUI.enabled = !batchRunning && canExpose && roomLeft > 0
+                       && !solarSystemCamera.IsCapturing && !solarSystemCamera.IsProcessing;
             if (GUILayout.Button($"Capture series ({FilterLabel(solarSystemCamera.Filter)}, {stackBatchSize})", GUILayout.Height(26), GUILayout.Width(220)))
             {
                 stackBatchInterruptedMessage = null;

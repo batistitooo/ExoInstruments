@@ -34,7 +34,12 @@ namespace ExoInstruments.Visualization
 
     internal struct AstroSub
     {
-        public float[] Gray;
+        /// <summary>
+        /// The frame as stored: the normalised [0,1] pixels quantised onto AstroImageStack.SubScale.
+        /// Sixteen bits, not thirty-two, because sixteen is how many the converter produced; see
+        /// AstroImageStack.StoredBytesPerPixel. Decode with AstroImageStack.SubInvScale.
+        /// </summary>
+        public ushort[] Pixels;
         public float FovDeg;
         /// <summary>Where the aim point landed in this sub, pixels. NaN when the camera could not measure it.</summary>
         public double RegistrationX;
@@ -61,15 +66,36 @@ namespace ExoInstruments.Visualization
         // managed heap. Instead this targets a fixed total memory budget across all 5 filters,
         // divided evenly, so the effective cap shrinks automatically as resolution goes up.
         private const long TotalStackMemoryBudgetBytes = 1_000_000_000L; // ~1 GB across all filters
-        private const int FilterCount = 5;
+        private const int FilterCount = 5; // L R G B + one narrowband, the deepest set ColourComposite combines
         private const int MinSubsPerFilter = 3;
         private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning, diminishing returns past this many subs
+
+        /// <summary>
+        /// What one stored pixel costs, and why it is two bytes rather than four.
+        ///
+        /// The frame this class receives is SolarSystemCameraTexture's normalised display frame:
+        /// (adu - bias) / (adcMax - bias), where adu is the integer count an ADC of at most sixteen
+        /// bits produced (AdcBits is 14 on the ASI294MM instruments, 16 on FORS2 and ZIMPOL). It
+        /// therefore holds at most 65536 distinct values however it is stored, and a 32-bit float
+        /// spends twice the memory carrying none of them. Quantising back onto a 16-bit grid is
+        /// what a real acquisition chain does with its own subs: raw frames are written BITPIX=16
+        /// unsigned, and every reduction package (PixInsight, IRAF/ccdproc, ESO Reflex) reads them
+        /// at that width. SubScale (65535) is at least as fine as the widest converter's own grid,
+        /// so distinct ADU levels stay distinct and the round trip costs under half a count.
+        ///
+        /// This is what sets MaxSubsPerFilter, so it is also the difference between a batch of 4
+        /// and a batch of 8 fitting at 1x1 binning on a full-frame sensor.
+        /// </summary>
+        private const int StoredBytesPerPixel = sizeof(ushort);
+
+        private const float SubScale = 65535f;
+        private const float SubInvScale = 1f / SubScale;
 
         public static int MaxSubsPerFilter
         {
             get
             {
-                long bytesPerSub = (long)SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight * sizeof(float);
+                long bytesPerSub = (long)SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight * StoredBytesPerPixel;
                 long perFilterBudget = TotalStackMemoryBudgetBytes / FilterCount;
                 int bySize = (int)Math.Max(MinSubsPerFilter, perFilterBudget / Math.Max(1, bytesPerSub));
                 return Math.Min(MaxSubsPerFilterCeiling, bySize);
@@ -157,14 +183,39 @@ namespace ExoInstruments.Visualization
             float[] corrected = CosmeticCorrect(gray, defectPixelIndices);
             list.Add(new AstroSub
             {
-                Gray = corrected,
+                // Scored before packing, on the frame at the precision it arrived in: the sharpness
+                // metric is a variance of differences and is the one quantity here that a quantisation
+                // step could bias, so it is measured once and kept rather than recomputed from storage.
+                Quality = ComputeSharpness(corrected),
+                Pixels = Pack(corrected),
                 FovDeg = fovDeg,
                 ExposureSeconds = exposureSeconds,
-                Quality = ComputeSharpness(corrected),
                 RegistrationX = registrationX,
                 RegistrationY = registrationY,
             });
             return AstroSubResult.Added;
+        }
+
+        /// <summary>Normalised [0,1] pixels onto the 16-bit storage grid; see StoredBytesPerPixel for why that is the right width.</summary>
+        private static ushort[] Pack(float[] gray)
+        {
+            var packed = new ushort[gray.Length];
+            for (int i = 0; i < gray.Length; i++)
+            {
+                float v = gray[i];
+                if (v <= 0f) packed[i] = 0;
+                else if (v >= 1f) packed[i] = ushort.MaxValue;
+                else packed[i] = (ushort)(v * SubScale + 0.5f);
+            }
+            return packed;
+        }
+
+        /// <summary>The inverse of Pack, for the callers that hand a whole frame out (SubFrame) rather than reading it pixel by pixel.</summary>
+        private static float[] Unpack(ushort[] packed)
+        {
+            var gray = new float[packed.Length];
+            for (int i = 0; i < packed.Length; i++) gray[i] = packed[i] * SubInvScale;
+            return gray;
         }
 
         /// <summary>
@@ -285,7 +336,7 @@ namespace ExoInstruments.Visualization
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return null;
             if (index < 0 || index >= list.Count) return null;
-            return (float[])list[index].Gray.Clone();
+            return Unpack(list[index].Pixels);
         }
 
         /// <summary>That sub's own integration time, which is what its FITS header has to carry rather than the stack's total.</summary>
@@ -380,7 +431,7 @@ namespace ExoInstruments.Visualization
         /// can divide by what actually landed. Pixels the shift vacated are left untouched in BOTH
         /// arrays rather than filled with zeros, which is the whole point.
         /// </summary>
-        private static void AccumulateShifted(float[] sum, float[] coverage, float[] gray, int dx, int dy)
+        private static void AccumulateShifted(float[] sum, float[] coverage, ushort[] pixels, int dx, int dy)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             for (int y = 0; y < h; y++)
@@ -391,7 +442,10 @@ namespace ExoInstruments.Visualization
                 int xFrom = Math.Max(0, dx), xTo = Math.Min(w, w + dx);
                 for (int x = xFrom; x < xTo; x++)
                 {
-                    sum[destRow + x] += gray[sourceRow + x - dx];
+                    // Unpacked here rather than into a decoded copy of the frame: a decoded copy is
+                    // the 32-bit array this class stopped storing, and allocating one per sub during
+                    // the stack would put the memory straight back at the moment it is scarcest.
+                    sum[destRow + x] += pixels[sourceRow + x - dx] * SubInvScale;
                     coverage[destRow + x] += 1f;
                 }
             }
@@ -425,7 +479,8 @@ namespace ExoInstruments.Visualization
             {
                 foreach (AstroSub sub in subs)
                 {
-                    for (int i = 0; i < n; i++) { sum[i] += sub.Gray[i]; coverage[i] += 1f; }
+                    ushort[] pixels = sub.Pixels;
+                    for (int i = 0; i < n; i++) { sum[i] += pixels[i] * SubInvScale; coverage[i] += 1f; }
                 }
             }
             else
@@ -445,13 +500,13 @@ namespace ExoInstruments.Visualization
                 bool haveReference = HasRegistration(subs[0]);
                 (double refX, double refY) = haveReference
                     ? (subs[0].RegistrationX, subs[0].RegistrationY)
-                    : ComputeCentroid(subs[0].Gray);
+                    : ComputeCentroid(subs[0].Pixels);
                 LastAlignmentUsedPointing = haveReference;
 
                 double maxShift = 0.0;
                 for (int s = 0; s < subs.Count; s++)
                 {
-                    float[] gray = subs[s].Gray;
+                    ushort[] pixels = subs[s].Pixels;
                     double cx, cy;
                     if (haveReference && HasRegistration(subs[s]))
                     {
@@ -460,7 +515,7 @@ namespace ExoInstruments.Visualization
                     }
                     else
                     {
-                        (cx, cy) = ComputeCentroid(gray);
+                        (cx, cy) = ComputeCentroid(pixels);
                     }
 
                     int dx = Mathf.Clamp((int)Math.Round(refX - cx), -MaxAlignShiftPx, MaxAlignShiftPx);
@@ -469,10 +524,10 @@ namespace ExoInstruments.Visualization
 
                     if (dx == 0 && dy == 0)
                     {
-                        for (int i = 0; i < n; i++) { sum[i] += gray[i]; coverage[i] += 1f; }
+                        for (int i = 0; i < n; i++) { sum[i] += pixels[i] * SubInvScale; coverage[i] += 1f; }
                         continue;
                     }
-                    AccumulateShifted(sum, coverage, gray, dx, dy);
+                    AccumulateShifted(sum, coverage, pixels, dx, dy);
                 }
                 LastAlignmentShiftPx = maxShift;
             }
@@ -518,7 +573,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls back to the frame center when nothing exceeds it (target too faint/absent to detect, avoids a divide-by-zero and just skips alignment for that sub).</summary>
-        private static (double cx, double cy) ComputeCentroid(float[] gray)
+        private static (double cx, double cy) ComputeCentroid(ushort[] pixels)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             double sumW = 0, sumX = 0, sumY = 0;
@@ -527,7 +582,7 @@ namespace ExoInstruments.Visualization
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                 {
-                    float v = gray[row + x];
+                    float v = pixels[row + x] * SubInvScale;
                     if (v <= CentroidThreshold) continue;
                     sumW += v;
                     sumX += v * x;
