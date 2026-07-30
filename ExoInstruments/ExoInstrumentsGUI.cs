@@ -376,44 +376,6 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// Hands the patch set the stars that cause its continuum-subtraction residuals, so it can
-        /// remove them.
-        ///
-        /// The star list comes from the Gaia catalogue already loaded for the star field -- the
-        /// same positions the frame draws, so a residual and the star that made it cannot end up in
-        /// different places. Only the naked-eye end of it matters: the radius falls below two cells
-        /// by V = 4.5, which is why EmissionPatchSet stops there.
-        /// </summary>
-        private void RepairPatchResiduals(EmissionPatchSet set)
-        {
-            RenderedStarCatalog catalog = SolarSystemCameraTexture.StarCatalog;
-            if (catalog == null || !catalog.IsLoaded) return;
-
-            var ra = new List<double>();
-            var dec = new List<double>();
-            var mag = new List<double>();
-            var found = new List<RenderedStar>();
-
-            // One cone per patch, generously sized: a star just outside a patch still casts a
-            // residual into it.
-            foreach (var patch in set.Patches)
-            {
-                found.Clear();
-                catalog.Search(patch.CentreRaDeg, patch.CentreDecDeg,
-                               patch.RadiusDeg + 0.5, EmissionPatchSet.ResidualStarMagnitudeLimit, found);
-                foreach (RenderedStar star in found)
-                {
-                    ra.Add(star.RaDeg);
-                    dec.Add(star.DecDeg);
-                    mag.Add(star.VMag);
-                }
-            }
-
-            if (ra.Count == 0) return;
-            set.RepairSubtractionResiduals(ra, dec, mag);
-        }
-
         private void LoadEmissionPatches()
         {
             string path = KSPUtil.ApplicationRootPath
@@ -430,12 +392,19 @@ namespace ExoInstruments
                 var set = new EmissionPatchSet();
                 set.Load(path);
                 SolarSystemCameraTexture.EmissionPatches = set;
-                RepairPatchResiduals(set);
+                // Two steps, in this order. First throw out what cannot be sky -- cells
+                // inconsistent with their own neighbourhood, whatever produced them. Then enforce
+                // the contract: at the composite's own beam a patch must say exactly what the
+                // composite says, which is what leaves no seam anywhere, including at its rim.
+                set.RejectOutliers();
+                set.CalibrateAgainst(SolarSystemCameraTexture.EmissionMap);
                 Debug.Log($"[ExoInstruments] Emission patches: {set.PatchCount} regions at nside {set.Nside} "
                         + $"({set.ResolutionArcmin:F2} arcmin), {set.Source}"
-                        + (set.MaskedCellsFilled > 0
-                            ? $" | {set.MaskedCellsFilled} cells repaired: continuum-subtraction "
-                              + "residuals at bright stars, filled from their neighbours"
+                        + (set.RejectedCells > 0
+                            ? $" | {set.RejectedCells} outlier cells rejected"
+                            : "")
+                        + (set.CalibratedCells > 0
+                            ? $" | {set.CalibratedCells} cells gain-matched to the composite at its own beam"
                             : ""));
             }
             catch (Exception e)

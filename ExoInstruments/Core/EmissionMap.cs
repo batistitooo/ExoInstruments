@@ -35,6 +35,21 @@ namespace ExoInstruments.Core
 
         public bool IsLoaded => pixels != null;
         public int Nside => nside;
+
+        /// <summary>
+        /// One cell's own value, not interpolated, by RING index. NaN outside the map or where it
+        /// has no measurement.
+        ///
+        /// Interpolation is what a RENDER wants; a calibration wants the cell itself, because the
+        /// quantity being matched is the mean over that cell's own area.
+        /// </summary>
+        public double RawCellValue(long ringPixel)
+        {
+            if (pixels == null || ringPixel < 0 || ringPixel >= pixels.Length) return double.NaN;
+            long p = nested ? Healpix.RingToNested(nside, ringPixel) : ringPixel;
+            if (p < 0 || p >= pixels.Length) return double.NaN;
+            return Float16.ToDouble(pixels[p]);
+        }
         public double ResolutionArcmin => IsLoaded ? Healpix.PixelResolutionDeg(nside) * 60.0 : 0.0;
 
         /// <summary>Air wavelength of the line this map measures, metres.</summary>

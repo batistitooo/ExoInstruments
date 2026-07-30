@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>patch</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpPatch.cs" />
+    <Compile Include="$(Core)/EmissionPatchSet.cs" />
+    <Compile Include="$(Core)/EmissionMap.cs" />
+    <Compile Include="$(Core)/Healpix.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
+    <Compile Include="$(Core)/GalacticCoordinates.cs" />
+    <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
+  </ItemGroup>
+</Project>
