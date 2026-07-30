@@ -253,16 +253,7 @@ namespace ExoInstruments
             LoadEmissionMap();
             LoadEmissionPatches();
             LoadGalaxyCatalog();
-            DebugScreenConsole.AddConsoleCommand(
-                ConsoleCommand,
-                args => OpenObservatoryWindow(),
-                "ExoInstruments: opens the observatory console (stand-in for clicking the building)");
-
-            DebugScreenConsole.AddConsoleCommand(
-                DebugConsoleCommand,
-                SetInstantExposures,
-                "ExoInstruments: exposures complete instantly (the frame is unchanged). "
-                + "Usage: " + DebugConsoleCommand + " [on|off]");
+            EnsureConsoleCommands();
 
             // The building itself is a persistent (DontDestroyOnLoad) real KSC
             // facility built by ExoObservatoryFacility, not owned by this
@@ -507,6 +498,10 @@ namespace ExoInstruments
 
         void Update()
         {
+            // Before anything else: the console commands are registered in Start, and KSP can drop
+            // them while the scene finishes loading. See EnsureConsoleCommands.
+            EnsureConsoleCommands();
+
             // Apply whatever the background render Tasks finished since last
             // frame, cheap (an IsCompleted check, at most a texture upload),
             // safe to do every frame regardless of which session is active.
@@ -705,6 +700,54 @@ namespace ExoInstruments
             if (button != null) button.SetFalse();
             InputLockManager.RemoveControlLock(InputLockId);
         }
+
+        /// <summary>
+        /// Registers the console commands, and re-registers them if they go missing.
+        ///
+        /// DebugScreenConsole.consoleCommands is a STATIC list owned by a MonoBehaviour that is
+        /// created per scene, so registering from this addon's Start is a race: Start runs while
+        /// the Space Center scene is still loading, and anything that resets that list afterwards
+        /// silently drops the command. The symptom is exact and gives nothing away -- the console
+        /// echoes what you typed and does nothing, because an unknown command is not an error to it.
+        ///
+        /// Checking is a linear scan of a list of a few dozen entries, once a frame, against a
+        /// bug whose only other diagnosis is reading the log. GetCommand returns null when the
+        /// command is absent, which is the whole test.
+        /// </summary>
+        void EnsureConsoleCommands()
+        {
+            if (DebugScreenConsole.GetCommand(ConsoleCommand) == null)
+            {
+                DebugScreenConsole.AddConsoleCommand(
+                    ConsoleCommand,
+                    args => OpenObservatoryWindow(),
+                    "ExoInstruments: opens the observatory console (stand-in for clicking the building)");
+                consoleCommandsRegistered++;
+            }
+
+            if (DebugScreenConsole.GetCommand(DebugConsoleCommand) == null)
+            {
+                DebugScreenConsole.AddConsoleCommand(
+                    DebugConsoleCommand,
+                    SetInstantExposures,
+                    "ExoInstruments: exposures complete instantly (the frame is unchanged). "
+                    + "Usage: " + DebugConsoleCommand + " [on|off]");
+                consoleCommandsRegistered++;
+            }
+
+            // Logged only past the first pass, because one registration per command is the normal
+            // path and says nothing. A later one means the list really was reset underneath us,
+            // which is worth having in the log the next time this is investigated.
+            if (consoleCommandsRegistered > 2 && !reregistrationLogged)
+            {
+                reregistrationLogged = true;
+                Debug.Log("[ExoInstruments] Console commands had to be re-registered: KSP's command "
+                          + "list was reset after this addon's Start. They work from now on.");
+            }
+        }
+
+        private int consoleCommandsRegistered;
+        private bool reregistrationLogged;
 
         /// <summary>
         /// exoinstruments_debug [on|off] -- with no argument, toggles.
