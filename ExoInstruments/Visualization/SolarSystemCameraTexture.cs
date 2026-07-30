@@ -775,6 +775,23 @@ namespace ExoInstruments.Visualization
         private float captureDuration;
         private SkyTarget pendingTarget;
 
+        /// <summary>
+        /// Debug: skip the real-time wait, keeping the exposure itself. Toggled from the KSP
+        /// console with exoinstruments_debug.
+        ///
+        /// This gates ONLY captureDuration, which is the wall clock the shutter is held open
+        /// against and nothing else -- the physics reads ExposureSeconds, which is untouched. So a
+        /// 120 s frame taken with this on is the same 120 s frame: same photon count, same shot and
+        /// dark noise, same drift trailing, same saturation, and EXPTIME in the FITS still says 120.
+        /// The only thing that disappears is the two minutes of waiting, which is what makes
+        /// testing a change to the imaging pipeline practical at all.
+        ///
+        /// Static because it is a session-wide debug switch rather than a property of one camera,
+        /// and deliberately not persisted: it resets to off on every KSP start, so a saved game can
+        /// never quietly be playing with instant exposures.
+        /// </summary>
+        public static bool InstantExposures { get; set; }
+
         // --- Background processing state (the heavy per-pixel physics pipeline runs off the
         // main thread once the exposure's integration time has elapsed; see GatherFrameInputs
         // /ComputeFramePixels/PollProcessTask) ------------------------------
@@ -936,7 +953,11 @@ namespace ExoInstruments.Visualization
             isCapturing = true;
             integrationComplete = false;
             captureElapsed = 0f;
-            captureDuration = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
+            // Zero, not a small number: TickCapture completes the integration on the first tick
+            // whose deltaTime is positive, so the shutter closes next frame instead of next minute.
+            captureDuration = InstantExposures
+                ? 0f
+                : Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             HasCapturedPhoto = false;
         }
 

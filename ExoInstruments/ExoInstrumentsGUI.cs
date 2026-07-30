@@ -193,6 +193,10 @@ namespace ExoInstruments
         // Stand-in for clicking a not-yet-built observatory building: type this
         // in the KSP debug console (Alt+F12 -> Console, or backtick) to open the window.
         private const string ConsoleCommand = "exoinstruments_open";
+
+        // KSP's console takes a bare word, with no leading slash, and the argument arrives as one
+        // string rather than split -- hence the trim/lowercase in SetInstantExposures.
+        private const string DebugConsoleCommand = "exoinstruments_debug";
         private const string InputLockId = "ExoInstrumentsObservatoryLock";
 
         // R_sun / R_earth — converts a transit depth into an estimated planet radius.
@@ -253,6 +257,12 @@ namespace ExoInstruments
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
                 "ExoInstruments: opens the observatory console (stand-in for clicking the building)");
+
+            DebugScreenConsole.AddConsoleCommand(
+                DebugConsoleCommand,
+                SetInstantExposures,
+                "ExoInstruments: exposures complete instantly (the frame is unchanged). "
+                + "Usage: " + DebugConsoleCommand + " [on|off]");
 
             // The building itself is a persistent (DontDestroyOnLoad) real KSC
             // facility built by ExoObservatoryFacility, not owned by this
@@ -638,6 +648,7 @@ namespace ExoInstruments
                 ApplicationLauncher.Instance.RemoveModApplication(button);
             }
             DebugScreenConsole.RemoveConsoleCommand(ConsoleCommand);
+            DebugScreenConsole.RemoveConsoleCommand(DebugConsoleCommand);
             InputLockManager.RemoveControlLock(InputLockId);
             ExoObservatoryBuilding.Clicked -= OnObservatoryBuildingClicked;
             solarSystemCamera.Dispose();
@@ -693,6 +704,51 @@ namespace ExoInstruments
             windowVisible = false;
             if (button != null) button.SetFalse();
             InputLockManager.RemoveControlLock(InputLockId);
+        }
+
+        /// <summary>
+        /// exoinstruments_debug [on|off] -- with no argument, toggles.
+        ///
+        /// Only the real-time wait goes away. The frame is computed from ExposureSeconds exactly as
+        /// before, so a 120 s shot still collects 120 s of photons, noise and drift; see
+        /// SolarSystemCameraTexture.InstantExposures. An exposure already integrating is left to
+        /// finish on the rules it started under, because changing its duration underneath it would
+        /// either strand it or complete it early with a progress bar that lied.
+        /// </summary>
+        void SetInstantExposures(string arg)
+        {
+            string request = (arg ?? string.Empty).Trim().ToLowerInvariant();
+            bool enable;
+            switch (request)
+            {
+                case "":
+                    enable = !SolarSystemCameraTexture.InstantExposures;
+                    break;
+                case "on":
+                case "1":
+                case "true":
+                    enable = true;
+                    break;
+                case "off":
+                case "0":
+                case "false":
+                    enable = false;
+                    break;
+                default:
+                    Debug.Log($"[ExoInstruments] {DebugConsoleCommand}: unrecognised argument "
+                              + $"'{arg}'. Usage: {DebugConsoleCommand} [on|off], or no argument to "
+                              + "toggle.");
+                    return;
+            }
+
+            SolarSystemCameraTexture.InstantExposures = enable;
+            Debug.Log($"[ExoInstruments] Instant exposures {(enable ? "ON" : "OFF")}: captures "
+                      + (enable
+                          ? "complete on the next frame. The photo itself is unchanged -- exposure "
+                            + "time still drives photons, noise and trailing, and the FITS EXPTIME "
+                            + "still records it."
+                          : "again take their real exposure time.")
+                      + " Resets to OFF on restart.");
         }
 
         void EnsureStyles()
@@ -2157,7 +2213,13 @@ namespace ExoInstruments
             else
             {
                 GUI.enabled = canExpose;
-                if (GUILayout.Button($"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Height(28), GUILayout.Width(180)))
+                // Marked on the button itself, not in a corner: with the wait gone a 120 s capture
+                // returns instantly, which is indistinguishable from a broken exposure control
+                // unless the reason is where you are already looking when you press it.
+                string captureLabel = SolarSystemCameraTexture.InstantExposures
+                    ? $"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)}) [instant]"
+                    : $"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)})";
+                if (GUILayout.Button(captureLabel, GUILayout.Height(28), GUILayout.Width(180)))
                     solarSystemCamera.BeginExposure(selectedPhotographyTarget);
                 GUI.enabled = true;
             }
