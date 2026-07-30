@@ -122,3 +122,18 @@ Both transforms now run in **double precision**. The tiled path and the frame-wi
 improve: the residual against a direct convolution falls from 6e-6 to 1.2e-7 relative (which is now
 just the final cast back to float), and the frame-wide kernel's agreement with the analytic profile
 goes from 3.15e-4 to **2.96e-6**, a hundredfold. The cost is about 1.8x on the transform.
+
+## A full frame with a real star field
+
+The tiling checks above run on a 400 x 260 test image. 400 and 260 are not 4144 and 2822, and a
+defect that depends on the tile grid meeting the frame's own dimensions cannot show up on one.
+
+`RealFrame.Run` convolves a full 4144 x 2822 frame carrying a 32-electron sky and 5000 stars
+spanning five decades of brightness, and compares it against a literal convolution of the same
+data, over the 11.6 million background pixels:
+
+```
+mean deviation 4.8e-11 e-, worst 0.000 e-, and 0.0000 per tile row
+```
+
+Exact. The convolution is cleared as a source of tile-shaped artefacts.

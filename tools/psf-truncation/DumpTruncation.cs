@@ -63,6 +63,10 @@ static class DumpTruncation
         Console.WriteLine("=== Negative values in the finished kernels ===\n");
         NegativityReport();
 
+        Console.WriteLine("=== A full frame with a real star field ===\n");
+        RealFrame.Run();
+        Console.WriteLine();
+
         DumpHaloProfile();
     }
 

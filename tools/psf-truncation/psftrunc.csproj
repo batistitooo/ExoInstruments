@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DumpTruncation.cs" />
+    <Compile Include="RealFrame.cs" />
+    <Compile Include="$(Core)/Pcg32.cs" />
     <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
     <Compile Include="$(Core)/AtmosphericRefraction.cs" />
