@@ -77,3 +77,19 @@ kernel, on a smooth gradient plus one bright point:
 | 128 px | 5.5e-3 | 5.6e-6 |
 
 Float round-off, no seams. The tiling is not the cause.
+
+## Negative taps
+
+A point-spread function is an intensity and cannot be negative anywhere. The atmospheric term is
+recovered by numerically Hankel-transforming Fried's OTF, and a quadrature of an oscillating
+integrand rings: far out in the wings, where the true profile is 1e-4 of its peak or less, the
+residual oscillation could in principle exceed the value and take a sample below zero. Convolving a
+bright star with a kernel holding negative taps puts **dark patches** around it, which is the one
+artefact that cannot be mistaken for physics -- no optical system removes light from the sky.
+
+The check matters more since the kernel ceiling went from 48 px to 128: the kernel now reaches four
+times further into exactly that regime. Over all five instruments at 1x1, 2x2 and 4x4:
+
+**0 negative taps out of 66049**, worst case, and the profile itself stays positive out to
+rho = 400 (64 lambda/r0). The quadrature's step count follows rho, which is what keeps it converged
+that far; see `OpticalPsf.SamplesPerOscillation`.

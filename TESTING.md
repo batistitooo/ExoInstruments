@@ -315,8 +315,8 @@ frame to divide by.
       the CDK1000 in `Ha`. The frame must show the ridge with structure and the dark cloud beside it,
       not a smooth gradient. The readout must say
       `from the IC 434 Horsehead high-resolution patch at 0.86' sampling`.
-- [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it (
-      31% of one cutout row, a bright horizontal spike), and its patch rim disagrees with the base
+- [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it
+      (31% of one cutout row, a bright horizontal spike), and its patch rim disagrees with the base
       map by 392%. The packer warns about it. Use the Lagoon (rim 10%), the Horsehead (8%), the Flame
       (7%) or the Eagle (7%) instead.
 - [ ] **15.3b** **M42 at the RedCat.** Same check. The patch covers 1.1 degrees, the RedCat's field is
@@ -394,13 +394,13 @@ frame to divide by.
 - [ ] **20.2** **Composite** writes 2 files: the colour PNG as displayed, and a FITS of its
       luminance. The filenames carry the palette (TrueColour / HOO / SHOHubble).
 - [ ] **20.3** **One per filter.** Capture 10 x `Ha` and 10 x `SII`, compose, then export: exactly
-      **4 files** -- `..._Ha_stack.fits/.png` and `..._SII_stack.fits/.png`. Each FITS must carry its
+      **4 files**: `..._Ha_stack.fits/.png` and `..._SII_stack.fits/.png`. Each FITS must carry its
       OWN band in `FILTER`/`WAVELNTH`/`BANDWID`, the stack's total in `EXPTIME`, and `NSTACK = 10`.
-- [ ] **20.4** **Every sub.** Same stack exported this way gives **40 files** -- 20 FITS and 20 PNG,
+- [ ] **20.4** **Every sub.** Same stack exported this way gives **40 files**: 20 FITS and 20 PNG,
       numbered `_Ha_sub001` .. `_Ha_sub010`, `_SII_sub001` .. Each carries its own single exposure in
       `EXPTIME` and `NSTACK = 1`.
 - [ ] **20.5** **The subs are unregistered.** Open two `sub` FITS from an unguided series in an
-      external viewer: the field must be offset between them. That is the point -- the registration is
+      external viewer: the field must be offset between them. That is the point; the registration is
       left to the external package. The `_stack` frames are registered.
 - [ ] **20.6** **The PNGs are quick looks, the FITS are the data.** A per-sub PNG is stretched the
       same way the live preview is (zscale + the selected curve); the FITS beside it is linear ADU.

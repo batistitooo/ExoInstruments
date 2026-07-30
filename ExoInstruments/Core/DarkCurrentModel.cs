@@ -160,8 +160,8 @@ namespace ExoInstruments.Core
         ///
         /// The multiplier is a DEFINITION rather than a measurement, and is stated as one: it is
         /// set so that a hot pixel just reaches the converter's top code in the instrument's own
-        /// longest supported exposure. That ties it to two real published instrument parameters (
-        /// the maximum exposure and the ADC range) instead of to a free constant, and it
+        /// longest supported exposure. That ties it to two real published instrument parameters
+        /// (the maximum exposure and the ADC range) instead of to a free constant, and it
         /// reproduces the operational definition a sensor characterisation uses ("a pixel that
         /// saturates in a nominal long dark"). Per-device hot-pixel dark rates are not published
         /// for any camera in this roster.

@@ -77,7 +77,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The full electron budget behind one exposure's error bar, when the instrument has a
-        /// sourced detector, for a diagnostic readout, the same way the imaging pipeline exposes
+        /// sourced detector: for a diagnostic readout, the same way the imaging pipeline exposes
         /// its own last-capture figures. False when the empirical path is in use, in which case
         /// there is no budget to show.
         /// </summary>

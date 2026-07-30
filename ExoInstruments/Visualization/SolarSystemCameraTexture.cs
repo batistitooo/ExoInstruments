@@ -1514,8 +1514,8 @@ namespace ExoInstruments.Visualization
 
                 // Half-float capture, not 8-bit.
                 //
-                // The rendered scene supplies every bit of spatial structure this pipeline has (
-                // the belts, the terminator, the limb darkening, and any companion sharing the
+                // The rendered scene supplies every bit of spatial structure this pipeline has
+                // (the belts, the terminator, the limb darkening, and any companion sharing the
                 // frame), and the physics then multiplies the whole plane by a single
                 // calibration factor. Quantising it first therefore quantises the finished
                 // photograph, and 8 bits is nowhere near enough for the range a real frame holds:

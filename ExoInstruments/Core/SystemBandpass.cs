@@ -3,7 +3,7 @@ using System;
 namespace ExoInstruments.Core
 {
     /// <summary>
-    /// The instrument's total spectral response, integrated over the passband, what turns an
+    /// The instrument's total spectral response, integrated over the passband: what turns an
     /// apparent magnitude into a real electron count.
     ///
     /// WHAT THIS REPLACES. The photometry used to be a product of scalars:

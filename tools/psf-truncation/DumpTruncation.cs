@@ -57,6 +57,9 @@ static class DumpTruncation
         Console.WriteLine("=== Overlap-add tiling, against a direct convolution ===\n");
         TilingReport();
 
+        Console.WriteLine("=== Negative values in the finished kernels ===\n");
+        NegativityReport();
+
         DumpHaloProfile();
     }
 
@@ -124,6 +127,71 @@ static class DumpTruncation
         Console.WriteLine($"  kernel fallback: radius {kr} px, support ends at {kr * scale:F3}\""
                         + $", value there {k[kr * ks + ks - 1] / k[kr * ks + kr]:E3} of peak"
                         + $" (the step that draws the edge)\n");
+    }
+
+    /// <summary>
+    /// Whether any finished kernel contains NEGATIVE taps.
+    ///
+    /// A point-spread function is an intensity and cannot be negative anywhere. The atmospheric
+    /// term is recovered by numerically Hankel-transforming Fried's OTF, and a quadrature of an
+    /// oscillating integrand rings: far out in the wings, where the true profile is 1e-4 of its
+    /// peak or less, the residual oscillation can exceed the value itself and take the sample below
+    /// zero. Convolving a bright star with a kernel that has negative taps puts DARK patches around
+    /// it -- the one artefact that cannot be mistaken for physics, since no optical system removes
+    /// light from the sky.
+    ///
+    /// This matters more since the ceiling went from 48 px to 128: the kernel now reaches four
+    /// times further into exactly the regime where the quadrature's residual is comparable to the
+    /// profile.
+    /// </summary>
+    static void NegativityReport()
+    {
+        foreach (var spec in VisualTelescopeCatalog.All)
+        {
+            foreach (int binning in new[] { 1, 2, 4 })
+            {
+                double scale = PlateScale(spec, binning);
+                double lambda = spec.LuminanceCentralWavelengthNm * 1e-9;
+                double delivered = spec.AdaptiveOpticsFwhmArcsec > 0.0
+                    ? spec.AdaptiveOpticsFwhmArcsec : spec.ZenithSeeingFwhmArcsec;
+                double atm = OpticalPsf.AtmosphericFwhmForDelivered(delivered, scale,
+                    spec.ApertureMeters, spec.SecondaryObstructionFraction, lambda);
+
+                float[] k = OpticalPsf.BuildKernel(scale, spec.ApertureMeters,
+                    spec.SecondaryObstructionFraction, lambda, atm, 0.0,
+                    spec.SpiderVaneCount, spec.SpiderVaneWidthMeters, out int r);
+                if (k == null) continue;
+
+                int size = 2 * r + 1;
+                double peak = k[r * size + r];
+                double mostNegative = 0.0;
+                int negatives = 0;
+                for (int i = 0; i < k.Length; i++)
+                {
+                    if (k[i] >= 0f) continue;
+                    negatives++;
+                    if (k[i] < mostNegative) mostNegative = k[i];
+                }
+                Console.WriteLine($"  {spec.CameraName,-18} {binning}x{binning} r={r,3}: "
+                                + $"{negatives,6} negative taps of {k.Length}"
+                                + (negatives > 0
+                                    ? $", worst {mostNegative / peak:E2} of peak   <-- DARK PATCHES"
+                                    : ""));
+            }
+        }
+
+        // And the profile itself, in its own reduced variable, so the cause is visible.
+        Console.WriteLine("\n  the atmospheric profile's own sign, in reduced units:");
+        double first = 0.0;
+        for (double rho = 1.0; rho < 400.0; rho *= 1.15)
+        {
+            double v = OpticalPsf.AtmosphericIntensity(rho, 1.0, 2.0 * Math.PI);
+            if (v < 0.0 && first == 0.0) first = rho;
+        }
+        Console.WriteLine(first > 0.0
+            ? $"    first goes negative at rho = {first:F1} ({first / (2.0 * Math.PI):F1} lambda/r0)"
+            : "    stays positive to rho = 400");
+        Console.WriteLine();
     }
 
     /// <summary>Plate scale of the shipped configuration, including the binning the instrument ships at.</summary>

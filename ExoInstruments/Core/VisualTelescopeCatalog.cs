@@ -651,8 +651,8 @@ namespace ExoInstruments.Core
         /// Barlow onto it would simply undo the only reason to own it.
         ///
         /// Camera: the same ZWO ASI294MM Pro as the RC20, with every figure carried over
-        /// unchanged. This is not a shortcut but how amateur astrophotography actually works (
-        /// one camera, swapped between tubes), and it isolates this entry's difference to the
+        /// unchanged. This is not a shortcut but how amateur astrophotography actually works
+        /// (one camera, swapped between tubes), and it isolates this entry's difference to the
         /// optics alone.
         ///
         /// Filters: the same amateur LRGB + H-alpha wheel as the RC20, for the same reason.

@@ -17,8 +17,8 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Pure C# equatorial-to-horizontal transform, no Unity/KSP dependency.
     ///
-    /// Nothing here is tied to a particular home world. Every input that could be (
-    /// the observer's latitude and longitude, the body's rotation period and
+    /// Nothing here is tied to a particular home world. Every input that could be
+    /// (the observer's latitude and longitude, the body's rotation period and
     /// initial rotation) is passed in by the caller, which reads them from the
     /// running game (see ObservatorySite and BuildImagingObserverContext). The
     /// transform itself is the standard one and is equally valid on Kerbin, on a
