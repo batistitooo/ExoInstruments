@@ -57,6 +57,9 @@ static class DumpTruncation
         Console.WriteLine("=== Overlap-add tiling, against a direct convolution ===\n");
         TilingReport();
 
+        Console.WriteLine("=== Overlap-add at a REAL frame's dynamic range ===\n");
+        DynamicRangeReport();
+
         Console.WriteLine("=== Negative values in the finished kernels ===\n");
         NegativityReport();
 
@@ -127,6 +130,63 @@ static class DumpTruncation
         Console.WriteLine($"  kernel fallback: radius {kr} px, support ends at {kr * scale:F3}\""
                         + $", value there {k[kr * ks + ks - 1] / k[kr * ks + kr]:E3} of peak"
                         + $" (the step that draws the edge)\n");
+    }
+
+    /// <summary>
+    /// The same overlap-add check, but at the dynamic range a real exposure has.
+    ///
+    /// TilingReport above compares a smooth gradient of about 1000 with one point of 50000 -- a
+    /// range of 50. A 120 s narrowband sub is nothing like that: the sky sits at a few tens of
+    /// electrons and a bright star's core is millions, a range of 10^5 or more. Single-precision
+    /// arithmetic carries 24 bits of mantissa, so a transform dominated by one enormous value
+    /// leaves only a handful of bits for everything else IN THE SAME TILE, and the round-off is not
+    /// random: it is coherent across the tile, which is what turns it into a visible rectangle
+    /// exactly one tile across rather than into noise.
+    ///
+    /// This is the check that the earlier one was too gentle to make.
+    /// </summary>
+    static void DynamicRangeReport()
+    {
+        const int w = 400, h = 260;
+        int kernelRadius = 2;                       // the RedCat's own, at 1x1
+        int k = 2 * kernelRadius + 1;
+        var kernel = new float[k * k];
+        double sum = 0.0;
+        for (int dy = -kernelRadius; dy <= kernelRadius; dy++)
+            for (int dx = -kernelRadius; dx <= kernelRadius; dx++)
+            {
+                double v = Math.Exp(-(dx * dx + dy * dy) / 2.0);
+                kernel[(dy + kernelRadius) * k + dx + kernelRadius] = (float)v;
+                sum += v;
+            }
+        for (int i = 0; i < kernel.Length; i++) kernel[i] /= (float)sum;
+
+        Console.WriteLine("   sky(e-)   star(e-)     range     worst abs error   as a fraction of sky");
+        foreach (double star in new[] { 1e4, 1e5, 1e6, 1e7, 1e8 })
+        {
+            const double sky = 32.0;                // a 120 s H-alpha sub's own background
+            var image = new float[w * h];
+            for (int i = 0; i < image.Length; i++) image[i] = (float)sky;
+            image[(h / 2) * w + w / 2] = (float)star;
+
+            var direct = DirectConvolve(image, w, h, kernel, kernelRadius);
+            var viaFft = (float[])image.Clone();
+            FourierConvolution.Convolve(viaFft, w, h, kernel, kernelRadius);
+
+            double worst = 0.0;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    // Skip the star itself and its immediate neighbours: the question is what
+                    // happens to the BACKGROUND elsewhere in the tile.
+                    if (Math.Abs(x - w / 2) <= 3 && Math.Abs(y - h / 2) <= 3) continue;
+                    double e = Math.Abs(viaFft[y * w + x] - direct[y * w + x]);
+                    if (e > worst) worst = e;
+                }
+            Console.WriteLine($"   {sky,7:F0}   {star,8:E0}   {star / sky,9:E1}   {worst,15:F3}   "
+                            + $"{100.0 * worst / sky,8:F1}%{(worst > 0.05 * sky ? "   <-- VISIBLE" : "")}");
+        }
+        Console.WriteLine();
     }
 
     /// <summary>

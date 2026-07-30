@@ -406,3 +406,16 @@ frame to divide by.
       same way the live preview is (zscale + the selected curve); the FITS beside it is linear ADU.
 - [ ] **20.7** **Export with no composed image** but with subs held: `Composite` should say to compose
       first, while `One per filter` and `Every sub` must still work.
+
+## 15. Dynamic range in the convolution
+
+- [ ] **15.1** **The dark rectangles are gone.** Repeat the exposure that showed them: RedCat 1x1,
+      `Ha`, 120 s, on a field with a bright star (05h41m00s -02d12'17\" has Alnitak). Save the sub as
+      FITS and check that no region 58-64 px across sits several ADU below its surroundings.
+- [ ] **15.2** The same in `SII`, since the defect appeared in both filters at the same pixels.
+- [ ] **15.3** **Nothing else moved.** A star's measured magnitude must be unchanged: the transform
+      is more precise, not different. Photometry on the same star before and after should agree far
+      inside the noise.
+- [ ] **15.4** **Cost.** The transform now runs in double precision, about 1.8x the time. Time a
+      capture at 1x1 on the RedCat and at 4x4; if either has become unreasonable that is a real
+      finding and belongs in the README.

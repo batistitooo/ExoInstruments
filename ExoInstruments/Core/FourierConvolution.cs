@@ -47,16 +47,19 @@ namespace ExoInstruments.Core
             if (tile < 1) return;
 
             // Kernel transform, computed once and reused by every tile.
-            var kernelRe = new float[n * n];
-            var kernelIm = new float[n * n];
+            var kernelRe = new double[n * n];
+            var kernelIm = new double[n * n];
             for (int y = 0; y < k; y++)
                 for (int x = 0; x < k; x++)
                     kernelRe[y * n + x] = kernel[y * k + x];
             Transform2D(kernelRe, kernelIm, n, false);
 
-            var accum = new float[width * height];
-            var re = new float[n * n];
-            var im = new float[n * n];
+            // The ACCUMULATOR stays double as well: a frame's tiles are summed into it, and the
+            // whole point of the change is that a faint background must survive being added to
+            // beside a bright star.
+            var accum = new double[width * height];
+            var re = new double[n * n];
+            var im = new double[n * n];
 
             for (int tileY = 0; tileY < height; tileY += tile)
             {
@@ -79,7 +82,7 @@ namespace ExoInstruments.Core
                     // Pointwise complex product with the kernel spectrum.
                     for (int i = 0; i < re.Length; i++)
                     {
-                        float ar = re[i], ai = im[i], br = kernelRe[i], bi = kernelIm[i];
+                        double ar = re[i], ai = im[i], br = kernelRe[i], bi = kernelIm[i];
                         re[i] = ar * br - ai * bi;
                         im[i] = ar * bi + ai * br;
                     }
@@ -107,7 +110,7 @@ namespace ExoInstruments.Core
                 }
             }
 
-            Array.Copy(accum, image, image.Length);
+            for (int i = 0; i < image.Length; i++) image[i] = (float)accum[i];
         }
 
         /// <summary>
@@ -168,8 +171,8 @@ namespace ExoInstruments.Core
                 int ny = NextPowerOfTwoAtLeast(2 * height - 1);
                 if (nx <= 0 || ny <= 0 || (long)nx * ny > maxTransformCells) return null;
 
-                var re = new float[nx * ny];
-                var im = new float[nx * ny];
+                var re = new double[nx * ny];
+                var im = new double[nx * ny];
 
                 double sum = 0.0;
                 for (int dy = -ny / 2; dy < ny / 2; dy++)
@@ -179,13 +182,19 @@ namespace ExoInstruments.Core
                     for (int dx = -nx / 2; dx < nx / 2; dx++)
                     {
                         double v = profileAtPixelRadius(Math.Sqrt(dx * (double)dx + dy2));
-                        re[row + (dx + nx) % nx] = (float)v;
+                        re[row + (dx + nx) % nx] = v;
                         sum += v;
                     }
                 }
 
                 Transform2D(re, im, nx, ny, false);
-                return new RadialKernelSpectrum(re, im, nx, ny, sum);
+
+                // Kept single: the kernel's own spectrum spans no great range, and at 2048x2048 a
+                // double copy would be 67 MB held for the life of the cache rather than 33.
+                var reF = new float[re.Length];
+                var imF = new float[im.Length];
+                for (int i = 0; i < re.Length; i++) { reF[i] = (float)re[i]; imF[i] = (float)im[i]; }
+                return new RadialKernelSpectrum(reF, imF, nx, ny, sum);
             }
 
             /// <summary>Convolves the frame in place. width and height must match what Build was given.</summary>
@@ -194,20 +203,22 @@ namespace ExoInstruments.Core
                 if (image == null || image.Length != width * height) return;
                 if (NextPowerOfTwoAtLeast(2 * width - 1) != Nx || NextPowerOfTwoAtLeast(2 * height - 1) != Ny) return;
 
-                var re = new float[Nx * Ny];
-                var im = new float[Nx * Ny];
-                for (int y = 0; y < height; y++) Array.Copy(image, y * width, re, y * Nx, width);
+                var re = new double[Nx * Ny];
+                var im = new double[Nx * Ny];
+                for (int y = 0; y < height; y++)
+                    for (int x = 0; x < width; x++) re[y * Nx + x] = image[y * width + x];
 
                 Transform2D(re, im, Nx, Ny, false);
                 for (int i = 0; i < re.Length; i++)
                 {
-                    float ar = re[i], ai = im[i], br = _re[i], bi = _im[i];
+                    double ar = re[i], ai = im[i], br = _re[i], bi = _im[i];
                     re[i] = ar * br - ai * bi;
                     im[i] = ar * bi + ai * br;
                 }
                 Transform2D(re, im, Nx, Ny, true);
 
-                for (int y = 0; y < height; y++) Array.Copy(re, y * Nx, image, y * width, width);
+                for (int y = 0; y < height; y++)
+                    for (int x = 0; x < width; x++) image[y * width + x] = (float)re[y * Nx + x];
             }
         }
 
@@ -234,14 +245,14 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>Separable 2D transform: every row, then every column. n must be a power of two.</summary>
-        private static void Transform2D(float[] re, float[] im, int n, bool inverse)
+        private static void Transform2D(double[] re, double[] im, int n, bool inverse)
             => Transform2D(re, im, n, n, inverse);
 
         /// <summary>The rectangular form. nx and ny must each be a power of two.</summary>
-        private static void Transform2D(float[] re, float[] im, int nx, int ny, bool inverse)
+        private static void Transform2D(double[] re, double[] im, int nx, int ny, bool inverse)
         {
-            var rowRe = new float[Math.Max(nx, ny)];
-            var rowIm = new float[Math.Max(nx, ny)];
+            var rowRe = new double[Math.Max(nx, ny)];
+            var rowIm = new double[Math.Max(nx, ny)];
 
             for (int y = 0; y < ny; y++)
             {
@@ -262,7 +273,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>In-place iterative radix-2 Cooley-Tukey FFT. n must be a power of two. The inverse pass carries the 1/n normalisation.</summary>
-        private static void Transform1D(float[] re, float[] im, int n, bool inverse)
+        private static void Transform1D(double[] re, double[] im, int n, bool inverse)
         {
             // Bit-reversal permutation.
             for (int i = 1, j = 0; i < n; i++)
@@ -272,30 +283,30 @@ namespace ExoInstruments.Core
                 j ^= bit;
                 if (i < j)
                 {
-                    float tr = re[i]; re[i] = re[j]; re[j] = tr;
-                    float ti = im[i]; im[i] = im[j]; im[j] = ti;
+                    double tr = re[i]; re[i] = re[j]; re[j] = tr;
+                    double ti = im[i]; im[i] = im[j]; im[j] = ti;
                 }
             }
 
             for (int len = 2; len <= n; len <<= 1)
             {
                 double angle = 2.0 * Math.PI / len * (inverse ? 1.0 : -1.0);
-                float wRe = (float)Math.Cos(angle);
-                float wIm = (float)Math.Sin(angle);
+                double wRe = Math.Cos(angle);
+                double wIm = Math.Sin(angle);
                 for (int i = 0; i < n; i += len)
                 {
-                    float curRe = 1f, curIm = 0f;
+                    double curRe = 1.0, curIm = 0.0;
                     int half = len >> 1;
                     for (int j = 0; j < half; j++)
                     {
                         int a = i + j, b = i + j + half;
-                        float ur = re[a], ui = im[a];
-                        float vr = re[b] * curRe - im[b] * curIm;
-                        float vi = re[b] * curIm + im[b] * curRe;
+                        double ur = re[a], ui = im[a];
+                        double vr = re[b] * curRe - im[b] * curIm;
+                        double vi = re[b] * curIm + im[b] * curRe;
                         re[a] = ur + vr; im[a] = ui + vi;
                         re[b] = ur - vr; im[b] = ui - vi;
 
-                        float nextRe = curRe * wRe - curIm * wIm;
+                        double nextRe = curRe * wRe - curIm * wIm;
                         curIm = curRe * wIm + curIm * wRe;
                         curRe = nextRe;
                     }
@@ -304,7 +315,7 @@ namespace ExoInstruments.Core
 
             if (inverse)
             {
-                float inv = 1f / n;
+                double inv = 1.0 / n;
                 for (int i = 0; i < n; i++) { re[i] *= inv; im[i] *= inv; }
             }
         }

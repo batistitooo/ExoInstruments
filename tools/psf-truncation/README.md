@@ -93,3 +93,32 @@ times further into exactly that regime. Over all five instruments at 1x1, 2x2 an
 **0 negative taps out of 66049**, worst case, and the profile itself stays positive out to
 rho = 400 (64 lambda/r0). The quadrature's step count follows rho, which is what keeps it converged
 that far; see `OpticalPsf.SamplesPerOscillation`.
+
+
+## Dynamic range, and the tile you could see
+
+The overlap-add check above compares a smooth gradient of about 1000 with one point of 50000: a
+range of 50. **A real 120 s narrowband sub is nothing like that.** Its sky sits at about 32
+electrons and a bright star's core is millions, a range of 10^5 or more, and the transform was
+carried in single precision. 24 bits of mantissa dominated by one enormous value leaves very little
+for everything else *in the same tile*, and the round-off is not random: it is coherent across the
+tile, so it appears as a rectangle exactly one tile across rather than as noise.
+
+Measured on a frame with a 32-electron sky, kernel radius 2 (the RedCat's own at 1x1, tile 60 px):
+
+| star (e-) | dynamic range | worst error, single | as a fraction of sky | double |
+|---|---|---|---|---|
+| 1e4 | 3.1e2 | 0.000 | 0.0% | 0.000 |
+| 1e6 | 3.1e4 | 0.036 | 0.1% | 0.000 |
+| 1e7 | 3.1e5 | 0.379 | 1.2% | 0.000 |
+| 1e8 | 3.1e6 | 3.570 | **11.2%** | 0.000 |
+
+This was found from a real frame, not from the harness: a 4x120 s H-alpha stack of the Horsehead
+field showed dark rectangles 58 to 64 pixels tall beside the brightest stars, identical in all eight
+subs and in both filters, where a fit of `sub = sky + k x map` predicted 8 ADU and the frame held 5.
+The tile is 60.
+
+Both transforms now run in **double precision**. The tiled path and the frame-wide one both
+improve: the residual against a direct convolution falls from 6e-6 to 1.2e-7 relative (which is now
+just the final cast back to float), and the frame-wide kernel's agreement with the analytic profile
+goes from 3.15e-4 to **2.96e-6**, a hundredfold. The cost is about 1.8x on the transform.
