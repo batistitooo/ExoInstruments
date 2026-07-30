@@ -2642,6 +2642,48 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
+        /// When set, every stage of the frame's signal plane is written to disk as it is built.
+        ///
+        /// This exists because eliminating stages by reasoning has a poor record: the same artefact
+        /// has now survived six correct-but-irrelevant fixes. A stage dump does not reason. It
+        /// writes what the plane holds after each step, so the step that introduces something can
+        /// be named from one exposure instead of guessed from many.
+        ///
+        /// Off by default and written only when the diagnostic toggle is on, because it costs one
+        /// frame-sized file per stage.
+        /// </summary>
+        public static string StageDumpDirectory { get; set; }
+
+        private int stageDumpIndex;
+
+        /// <summary>Writes one stage of the plane: width, height, then the raw float electrons. Silent on any failure -- a diagnostic must never break a capture.</summary>
+        private void DumpStage(string name, float[] plane)
+        {
+            if (string.IsNullOrEmpty(StageDumpDirectory) || plane == null) return;
+            try
+            {
+                System.IO.Directory.CreateDirectory(StageDumpDirectory);
+                string path = System.IO.Path.Combine(StageDumpDirectory,
+                    string.Format("stage{0:D2}_{1}.bin", stageDumpIndex++, name));
+                using (var stream = System.IO.File.Create(path))
+                using (var writer = new System.IO.BinaryWriter(stream))
+                {
+                    writer.Write(TextureWidth);
+                    writer.Write(TextureHeight);
+                    // The mean is written first so a reader can sanity-check the file without
+                    // parsing all of it, and so a stage that zeroed the plane is obvious.
+                    double mean = 0.0;
+                    for (int i = 0; i < plane.Length; i++) mean += plane[i];
+                    writer.Write(mean / Math.Max(1, plane.Length));
+                    for (int i = 0; i < plane.Length; i++) writer.Write(plane[i]);
+                }
+            }
+            catch (Exception e) { lastStageDumpError = e.Message; }
+        }
+
+        private string lastStageDumpError;
+
+        /// <summary>
         /// Faintest signal worth drawing, as a fraction of full well.
         ///
         /// A source far below the noise in the pixel it lands on changes nothing a viewer or a
@@ -3108,14 +3150,19 @@ namespace ExoInstruments.Visualization
             // The rendered bodies first: the renderer supplied the spatial shading above, the
             // physics supplies the scale here. Identical arithmetic to before, only with the
             // rendered channel already in place and the render itself already let go.
+            stageDumpIndex = 0;
+            DumpStage("render", signal);
+
             float sceneScale = calibratedSignalPerUnit * scintJitter * cloudTransmission;
             for (int i = 0; i < n; i++) signal[i] *= sceneScale;
+            DumpStage("scene-scaled", signal);
 
             // Galaxies go in with the rendered scene rather than with the star field, because like
             // the scene they are RESOLVED: they are drawn from their own measured profile, they
             // take the extended-source scintillation instead of the point-source one, and the
             // smear below trails them as a shape rather than as a streak from a point.
             if (inputs.HaveFieldGeometry) DepositGalaxies(signal, inputs, scintJitter);
+            DumpStage("galaxies", signal);
 
             // The rendered scene is a snapshot at one instant; an unguided mount lets the sky
             // slide across the sensor during the exposure, so the whole scene draws a streak
@@ -3123,6 +3170,7 @@ namespace ExoInstruments.Visualization
             // Negated: the rendered snapshot is the END of the exposure, so the scene's streak
             // extends backwards from where it was drawn, the same way each star's does.
             ApplyLinearSmear(signal, -inputs.DriftPixelX, -inputs.DriftPixelY);
+            DumpStage("smear", signal);
 
             // Then everything unresolved. Stars are point sources, so they carry the point-source
             // scintillation rather than the resolved disk's much quieter figure.
@@ -3132,6 +3180,7 @@ namespace ExoInstruments.Visualization
                 float starScint = ScintillationMultiplier(rngScint, inputs.PointSourceScintSigma);
                 DepositSkyField(signal, inputs, starScint);
             }
+            DumpStage("skyfield", signal);
 
             // --- 2. Optics -------------------------------------------------------------
             // The instrument's real PSF: diffraction off its own annular pupil, convolved with
@@ -3141,10 +3190,12 @@ namespace ExoInstruments.Visualization
             EnsurePsfKernels(inputs, out float[] psfCore, out int psfRadius,
                              out float psfCoreWeight, out float[] psfHalo, out int psfHaloRadius);
             ApplyPsf(signal, psfCore, psfRadius, psfCoreWeight, psfHalo, psfHaloRadius);
+            DumpStage("psf", signal);
 
             // Field-dependent astigmatism, applied after the PSF so it reads as a distinct
             // off-axis smear rather than blending into the on-axis profile.
             ApplyAstigmatismBlur(signal);
+            DumpStage("astigmatism", signal);
 
             // --- 3. Sky, then 4. detector ----------------------------------------------
             // The sky is uniform, and convolving a constant field with a unit-sum kernel returns
@@ -3262,13 +3313,18 @@ namespace ExoInstruments.Visualization
             // A dead pixel is the converse: no photo response at all, so it collects no signal and
             // no sky, but its silicon still generates dark charge like any other pixel. It reads
             // near the pedestal rather than at exactly zero, and a flat frame is what identifies it.
+            DumpStage("poisson", raw);
             ApplyPixelDefects(raw, signal, skyElectrons, darkElectrons, isoGain, rng);
+            DumpStage("defects", raw);
 
             // Charge-domain effects, in the order the silicon applies them and now on real
             // electron counts against a real well, so the thresholds mean something.
             ApplyCosmicRays(raw, exposureSeconds, rngCosmic);
+            DumpStage("cosmic", raw);
             ApplyBlooming(raw, (float)FullWellElectrons);
+            DumpStage("blooming", raw);
             ApplyChargeTransferSmear(raw);
+            DumpStage("cti", raw);
 
             // Readout: the amplifier's own noise is added in electrons, ahead of the converter,
             // which is where it physically enters.

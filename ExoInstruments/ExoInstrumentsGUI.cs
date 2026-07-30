@@ -1707,6 +1707,17 @@ namespace ExoInstruments
             }
 
             // Off by default: this is for attributing a bad frame, not part of normal use.
+            // Every stage of the signal plane, written as it is built. Eliminating stages by
+            // reasoning has a poor record on this pipeline; a dump names the stage from one
+            // exposure instead.
+            bool wasDumping = SolarSystemCameraTexture.StageDumpDirectory != null;
+            bool wantDump = GUILayout.Toggle(wasDumping,
+                " Diagnostics: dump every pipeline stage to Screenshots/ExoInstruments/stages/ (one frame-sized file per stage)");
+            if (wantDump != wasDumping)
+                SolarSystemCameraTexture.StageDumpDirectory = wantDump
+                    ? KSPUtil.ApplicationRootPath + "Screenshots/ExoInstruments/stages"
+                    : null;
+
             saveDiagnosticFrames = GUILayout.Toggle(saveDiagnosticFrames,
                 " Diagnostics: also save the raw render on Save Photo (attributes a bad frame to the game's rendering vs. this mod's pipeline)");
 

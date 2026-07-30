@@ -419,3 +419,14 @@ frame to divide by.
 - [ ] **15.4** **Cost.** The transform now runs in double precision, about 1.8x the time. Time a
       capture at 1x1 on the RedCat and at 4x4; if either has become unreasonable that is a real
       finding and belongs in the README.
+
+## 16. The stage dump
+
+- [ ] **16.1** Turn on **"Diagnostics: dump every pipeline stage"** in the observing panel, take ONE
+      exposure of the field under investigation, then turn it off. It writes one frame-sized file
+      per stage to `Screenshots/ExoInstruments/stages/`, about 47 MB each at 1x1, ten stages.
+- [ ] **16.2** Read them back:
+      `./env/bin/python tools/frame-tests/read_stages.py --dir "<KSP>/Screenshots/ExoInstruments/stages" --x 2100 2150 --y 1600 1740`
+      It prints the profile down the column after every stage and flags the one whose relative
+      spread jumps, which is the stage that introduced the structure.
+- [ ] **16.3** Delete the dumps afterwards; they are not small.
