@@ -101,6 +101,16 @@ namespace ExoInstruments.Core
         public string LineName { get; private set; }
         public string Source { get; private set; }
 
+        /// <summary>The patches themselves, so a caller can cone-search a star catalogue over each.</summary>
+        public IEnumerable<Patch> Patches
+        {
+            get
+            {
+                if (patches == null) yield break;
+                foreach (Patch p in patches) yield return p;
+            }
+        }
+
         /// <summary>Names of the patches, for the load message.</summary>
         public IEnumerable<string> PatchNames
         {
@@ -178,8 +188,6 @@ namespace ExoInstruments.Core
                     patch.CosRadius = Math.Cos(patch.RadiusDeg * Math.PI / 180.0);
                     list[i] = patch;
                 }
-
-                MaskedCellsFilled = FillSubtractionResiduals(list, n);
 
                 patches = list;
                 nside = n;
@@ -273,85 +281,193 @@ namespace ExoInstruments.Core
                                       ref cursor, out rayleighs);
 
         /// <summary>As above, with the patch's index in the caller's list so each keeps its own run cursor.</summary>
-        /// <summary>How many cells were filled at load because their value was a subtraction residual rather than a measurement. Reported, never hidden.</summary>
+        /// <summary>How many cells were repaired because they are continuum-subtraction residuals rather than measurements. Reported, never hidden.</summary>
         public int MaskedCellsFilled { get; private set; }
 
-        /// <summary>
-        /// Replaces each non-positive cell by the mean of the neighbours that do carry a
-        /// measurement, iterating so that a small cluster fills from its rim inwards.
-        ///
-        /// WHY FILL RATHER THAN LEAVE A GAP. These cells are not measurements of zero emission;
-        /// they are where SHASSA's continuum subtraction over-corrected on a bright star (Gaustad
-        /// et al. 2001, PASP 113, 1326, Sect. 4). Something has to stand in for them, and there are
-        /// only three candidates: a hole, the base map, or the patch's own surroundings.
-        ///
-        /// A hole renders as a black disc. The base map is a DIFFERENT DATA SOURCE at a fifteen
-        /// times coarser beam, so handing over to it mid-nebula puts a step at the boundary --
-        /// measured at 34,409 frame pixels on the Horsehead field, in staircases 13 pixels a tread.
-        /// The surroundings are the same survey, the same calibration and the same resolution, so
-        /// the fill is continuous with what it replaces and carries no seam.
-        ///
-        /// It is interpolation and it is labelled as such: the count is reported at load, and the
-        /// affected area is 795 cells of 542,673, 0.146%, each a disc a couple of cells across.
-        /// Nothing is claimed to have been measured there.
-        /// </summary>
-        private static int FillSubtractionResiduals(Patch[] list, int nside)
-        {
-            int filled = 0;
-            double spacingDeg = Healpix.PixelResolutionDeg(nside);
+        /// <summary>Brightest star the repair considers, and the radius it masks around one of that magnitude. See RepairSubtractionResiduals.</summary>
+        public const double ResidualStarMagnitudeLimit = 4.5;
 
-            foreach (Patch patch in list)
+        /// <summary>
+        /// Removes the continuum-subtraction residuals, using the stars that CAUSE them.
+        ///
+        /// WHY BY STAR AND NOT BY VALUE. SHASSA removes stellar continuum by scaling an off-band
+        /// image and subtracting it from the H-alpha one (Gaustad et al. 2001, PASP 113, 1326).
+        /// The scaling is one number for a whole field, so it cannot be right for every stellar
+        /// colour at once, and on the brightest stars it misses -- too much subtracted leaves a
+        /// hole, too little leaves the star itself. Both signs occur and neither is emission.
+        ///
+        /// Thresholding on value cannot tell those from real structure: an H II region has genuine
+        /// knots five times its local median, and a dark globule genuinely goes to a tenth of it.
+        /// The residuals are distinguishable by their CAUSE, which is a catalogued object at a
+        /// known position. Measured on the Horsehead patch: 154 cells depart from their neighbours
+        /// by more than a factor 2.5 either way, 43 of them within 5 arcmin of Alnitak and the
+        /// nearest 0.5 arcmin from it, while sigma Ori at V = 3.8, Alnilam at V = 1.69 forty
+        /// arcmin outside the patch, and HD 37903 at V = 7.83 have none between them.
+        ///
+        /// So a cell is repaired only where BOTH hold: it departs from its own neighbours by more
+        /// than ResidualContrast, and it lies within the masking radius of a star bright enough to
+        /// produce one. Real structure fails the second test wherever it is, and a residual fails
+        /// neither.
+        ///
+        /// THE RADIUS scales as the square root of the star's flux, which is what the residual's
+        /// own extent does: the subtraction error at a given radius is a fixed FRACTION of the
+        /// stellar profile there, so the radius at which it drops below the sky's own noise grows
+        /// as the square root of the total. Anchored on the one star that produced measurable
+        /// residuals, 10 arcmin at V = 1.77, and cut off at V = 4.5 where the radius falls to
+        /// 1.8 arcmin, about two cells.
+        ///
+        /// Filled from the surviving neighbours afterwards -- same survey, same calibration, same
+        /// resolution, so no seam -- and the count is reported at load. Nothing is claimed to have
+        /// been measured there.
+        /// </summary>
+        public void RepairSubtractionResiduals(IList<double> starRaDeg, IList<double> starDecDeg,
+                                               IList<double> starVMag)
+        {
+            MaskedCellsFilled = 0;
+            if (patches == null || starRaDeg == null) return;
+
+            int marked = 0;
+            foreach (Patch patch in patches)
             {
                 if (patch.Values == null) continue;
-
-                // Which entries need filling, and where each sits on the sky.
-                var masked = new List<int>();
-                for (int i = 0; i < patch.Values.Length; i++)
-                    if (!(patch.Values[i] > 0.0)) masked.Add(i);
-                if (masked.Count == 0) continue;
-                filled += masked.Count;
-
+                var suspect = new List<int>();
                 int cursor = 0;
-                for (int pass = 0; pass < 8 && masked.Count > 0; pass++)
+
+                for (int s = 0; s < starRaDeg.Count; s++)
                 {
-                    var remaining = new List<int>();
-                    var updates = new List<KeyValuePair<int, double>>();
+                    double v = starVMag[s];
+                    if (!(v <= ResidualStarMagnitudeLimit)) continue;
 
-                    foreach (int index in masked)
-                    {
-                        long pixel = PixelForOffset(patch, index);
-                        if (pixel < 0) continue;
-                        Healpix.RingPixelCentreDegrees(nside, pixel, out double l, out double b);
+                    double radiusDeg = ResidualRadiusDeg(v);
+                    if (!WithinPatch(patch, starRaDeg[s], starDecDeg[s], radiusDeg)) continue;
 
-                        double sum = 0.0;
-                        int count = 0;
-                        double cosB = Math.Cos(b * Math.PI / 180.0);
-                        for (int dy = -1; dy <= 1; dy++)
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            if (dx == 0 && dy == 0) continue;
-                            double nb = b + dy * spacingDeg;
-                            if (nb > 90.0 || nb < -90.0) continue;
-                            double nl = l + (Math.Abs(cosB) > 1e-6 ? dx * spacingDeg / cosB : 0.0);
-                            long neighbour = Healpix.SphericalDegreesToRing(nside, nl, nb);
-                            if (!patch.TryValue(neighbour, ref cursor, out double v)) continue;
-                            if (!(v > 0.0)) continue;
-                            sum += v;
-                            count++;
-                        }
+                    GalacticCoordinates.EquatorialToGalactic(starRaDeg[s], starDecDeg[s],
+                                                             out double gl, out double gb);
+                    MarkResidualsAround(patch, gl, gb, radiusDeg, ref cursor, suspect);
+                }
 
-                        if (count > 0) updates.Add(new KeyValuePair<int, double>(index, sum / count));
-                        else remaining.Add(index);
-                    }
+                if (suspect.Count == 0) continue;
+                marked += suspect.Count;
+                foreach (int index in suspect) patch.Values[index] = NoValue;
+                FillMasked(patch, suspect);
+            }
+            MaskedCellsFilled = marked;
+        }
 
-                    // Applied after the pass, so a cell filled this pass cannot seed another in the
-                    // same one -- which would make the result depend on the iteration order.
-                    foreach (var u in updates) patch.Values[u.Key] = Float16.FromDouble(u.Value);
-                    if (updates.Count == 0) break;
-                    masked = remaining;
+        /// <summary>A half-float NaN: the map's own "no measurement here".</summary>
+        private const ushort NoValue = 0x7E00;
+
+        /// <summary>Masking radius for a star of the given V magnitude, degrees. See RepairSubtractionResiduals for the scaling and its anchor.</summary>
+        public static double ResidualRadiusDeg(double vMag)
+            => (10.0 / 60.0) * Math.Pow(10.0, -0.2 * (vMag - 1.77));
+
+        /// <summary>How far a cell must depart from its own neighbours, either way, before a star's presence is allowed to condemn it.</summary>
+        private const double ResidualContrast = 2.5;
+
+        private static bool WithinPatch(Patch patch, double raDeg, double decDeg, double marginDeg)
+        {
+            double ra = raDeg * Math.PI / 180.0, dec = decDeg * Math.PI / 180.0;
+            double x = Math.Cos(dec) * Math.Cos(ra), y = Math.Cos(dec) * Math.Sin(ra), z = Math.Sin(dec);
+            double cosSep = x * patch.Cx + y * patch.Cy + z * patch.Cz;
+            double sep = Math.Acos(Math.Max(-1.0, Math.Min(1.0, cosSep))) * 180.0 / Math.PI;
+            return sep <= patch.RadiusDeg + marginDeg;
+        }
+
+        /// <summary>Marks every cell within radiusDeg of a Galactic position whose value departs from its own neighbours by more than ResidualContrast.</summary>
+        private void MarkResidualsAround(Patch patch, double lDeg, double bDeg, double radiusDeg,
+                                         ref int cursor, List<int> suspect)
+        {
+            double step = Healpix.PixelResolutionDeg(nside);
+            int reach = (int)Math.Ceiling(radiusDeg / step);
+            double cosB = Math.Cos(bDeg * Math.PI / 180.0);
+
+            for (int dy = -reach; dy <= reach; dy++)
+            {
+                double nb = bDeg + dy * step;
+                if (nb > 90.0 || nb < -90.0) continue;
+                for (int dx = -reach; dx <= reach; dx++)
+                {
+                    if (dx * dx + dy * dy > reach * reach) continue;
+                    double nl = lDeg + (Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0);
+                    long pixel = Healpix.SphericalDegreesToRing(nside, nl, nb);
+                    if (!TryOffset(patch, pixel, ref cursor, out int index)) continue;
+
+                    double value = Float16.ToDouble(patch.Values[index]);
+                    double median = NeighbourMedian(patch, nl, nb, step, ref cursor);
+                    if (double.IsNaN(median) || !(median > 0.0)) continue;
+
+                    bool residual = !(value > 0.0)
+                                 || value > ResidualContrast * median
+                                 || value < median / ResidualContrast;
+                    if (residual && !suspect.Contains(index)) suspect.Add(index);
                 }
             }
-            return filled;
+        }
+
+        /// <summary>Median of the eight surrounding cells, which is what a single cell has to be judged against.</summary>
+        private double NeighbourMedian(Patch patch, double lDeg, double bDeg, double step, ref int cursor)
+        {
+            var around = new List<double>(8);
+            double cosB = Math.Cos(bDeg * Math.PI / 180.0);
+            for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                double nb = bDeg + dy * step;
+                if (nb > 90.0 || nb < -90.0) continue;
+                double nl = lDeg + (Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0);
+                if (!patch.TryValue(Healpix.SphericalDegreesToRing(nside, nl, nb), ref cursor, out double v)) continue;
+                if (v > 0.0) around.Add(v);
+            }
+            if (around.Count == 0) return double.NaN;
+            around.Sort();
+            return around[around.Count / 2];
+        }
+
+        /// <summary>Fills masked cells from the neighbours that survive, iterating from the rim inwards so a cluster closes.</summary>
+        private void FillMasked(Patch patch, List<int> masked)
+        {
+            int cursor = 0;
+            var remaining = new List<int>(masked);
+            double step = Healpix.PixelResolutionDeg(nside);
+
+            for (int pass = 0; pass < 8 && remaining.Count > 0; pass++)
+            {
+                var next = new List<int>();
+                var updates = new List<KeyValuePair<int, double>>();
+                foreach (int index in remaining)
+                {
+                    long pixel = PixelForOffset(patch, index);
+                    if (pixel < 0) continue;
+                    Healpix.RingPixelCentreDegrees(nside, pixel, out double l, out double b);
+                    double m = NeighbourMedian(patch, l, b, step, ref cursor);
+                    if (double.IsNaN(m)) next.Add(index);
+                    else updates.Add(new KeyValuePair<int, double>(index, m));
+                }
+                // Applied after the pass, so a cell filled this pass cannot seed another in the
+                // same one, which would make the result depend on the iteration order.
+                foreach (var u in updates) patch.Values[u.Key] = Float16.FromDouble(u.Value);
+                if (updates.Count == 0) break;
+                remaining = next;
+            }
+        }
+
+        /// <summary>Index into a patch's value array for a HEALPix pixel, or false when the patch does not cover it.</summary>
+        private static bool TryOffset(Patch patch, long pixel, ref int cursor, out int index)
+        {
+            index = -1;
+            if (patch.RunStart == null || pixel < 0 || pixel > int.MaxValue) return false;
+            int p = (int)pixel;
+            int lo = 0, hi = patch.RunStart.Length - 1, found = -1;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) / 2;
+                if (patch.RunStart[mid] <= p) { found = mid; lo = mid + 1; } else hi = mid - 1;
+            }
+            if (found < 0 || p - patch.RunStart[found] >= patch.RunLength[found]) return false;
+            cursor = found;
+            index = patch.RunOffset[found] + (p - patch.RunStart[found]);
+            return true;
         }
 
         /// <summary>The HEALPix pixel a position in a patch's packed value array belongs to.</summary>

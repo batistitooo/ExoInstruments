@@ -592,37 +592,69 @@ Anything visible in the preview is in the survey; anything visible in the game b
 preview is in the pipeline. It also prints how many frame pixels one map cell spans, which is the
 number that identifies a cell-scale artefact.
 
-### Continuum-subtraction residuals
+### Continuum-subtraction residuals, and how they are removed
 
-SHASSA is a **continuum-subtracted** survey: an off-band image is scaled and removed from the
-H-alpha one to take out stellar continuum. At a bright star that subtraction over-corrects and
-drives the residual to zero or below (Gaustad et al. 2001, PASP 113, 1326, Sect. 4). Across the
-fourteen patches, **795 cells of 542,673** come out non-positive that way, 0.146%, concentrated in
-discs on the brightest stars.
+SHASSA removes stellar continuum by scaling an off-band image and subtracting it from the H-alpha
+one (Gaustad et al. 2001, PASP 113, 1326). The scaling is one number for a whole field, so it cannot
+be right for every stellar colour at once, and on the brightest stars it misses: **too much
+subtracted leaves a hole, too little leaves the star itself**. Both signs occur and neither is
+emission.
 
-Clamped to zero -- which the packer used to do -- those become *sky brightness of zero*, and at
-0.86 arcmin a cell is 13 RedCat pixels, so a 2x2 clump is a 27-pixel black disc in the middle of a
-nebula. A 120 s frame of the Horsehead showed exactly that: seven discs, 20 to 33 px across,
-centred on the brightest stars, identical in every sub and in both filters.
+**Thresholding on value cannot tell those from real structure** -- an H II region has genuine knots
+five times its local median and a dark globule genuinely reaches a tenth of it. The residuals are
+distinguishable by their *cause*, which is a catalogued object at a known position. Measured on the
+Horsehead patch: 154 cells depart from their neighbours by more than a factor 2.5 either way, **43 of
+them within 5 arcmin of Alnitak** and the nearest 0.5 arcmin from it, while sigma Ori at V = 3.80,
+Alnilam at V = 1.69 and HD 37903 at V = 7.83 have **none between them**.
 
-A non-positive value is not a measurement of zero emission, and there are only three things that can
-stand in for one: a hole, the base map, or the patch's own surroundings.
+So a cell is repaired only where both hold: it departs from its own neighbours by more than a factor
+2.5, **and** it lies within the masking radius of a star bright enough to produce a residual. Real
+structure fails the second test wherever it is. The radius scales as the square root of the stellar
+flux -- the subtraction error at a given radius is a fixed fraction of the stellar profile there, so
+the radius at which it falls below the sky's noise grows as sqrt(flux) -- anchored at 10 arcmin for
+V = 1.77 and cut off at V = 4.5, where it is 1.8 arcmin, about two cells. The star positions are the
+Gaia catalogue's own, so a residual and the star that made it cannot end up in different places.
 
-A hole renders as a black disc. **The base map is the wrong answer too**, and measurably so: it is a
-different data source at a fifteen times coarser beam, so handing over to it mid-nebula puts a step
-at the boundary -- 34,409 frame pixels on the Horsehead field, in staircases 13 pixels a tread. That
-is trading a black disc for a grey one with a jagged edge.
+Repaired cells are then filled from the neighbours that survive: same survey, same calibration, same
+resolution, so there is no seam. The load message reports the count and nothing is claimed to have
+been measured there.
 
-So the residuals are **masked and filled from their own neighbours**, at load, in two stages. The
-interpolation reweights over whichever of its four cells carry a measurement, which covers 96% of
-the affected pixels and keeps the patch's fine structure right up to the residual's edge; and the
-remaining cores -- where all four are masked -- are filled iteratively from the rim inwards before
-the patch is ever queried. Same survey, same calibration, same resolution, so there is no seam.
+### Which H-alpha survey to install, per target
 
-It is interpolation and the load message says so, with the count. Nothing is claimed to have been
-measured there. The reader does all of it, so an already-installed patch set is repaired without
-repacking; the packer writes NaN rather than zero for the same cells so a fresh one carries the
-distinction explicitly.
+Resolution is **free at render time**. The deposit is one interpolated lookup per frame pixel
+whatever the map's resolution, measured over a full 4144 x 2822 frame:
+
+| map resolution | cell size | per lookup |
+|---|---|---|
+| nside 256 | 824 arcsec | 226 ns |
+| nside 1024 | 206 arcsec | 233 ns |
+| nside 4096 | 51.5 arcsec | 233 ns |
+| nside 8192 | 25.8 arcsec | 237 ns |
+
+A thirty-two-fold increase in resolution costs **5%**. Storage grows; time does not.
+
+What limits you is coverage, not cost. The deep narrow-band surveys are Galactic-plane surveys:
+
+| survey | resolution | coverage | continuum |
+|---|---|---|---|
+| **IPHAS** DR2 (Drew et al. 2005; Barentsen et al. 2014) | 0.33"/px | 29 < l < 215, \|b\| < 5, north | photometric r, i per star |
+| **VPHAS+** DR4 (Drew et al. 2014) | 0.21"/px | southern plane, \|b\| < 5 | photometric u, g, r, i per star |
+| **SHS** (Parker et al. 2005, MNRAS 362, 689) | 0.67"/px | dec < +2, \|b\| < 10 | film, flux-calibrated to SHASSA |
+| **SHASSA** (Gaustad et al. 2001) | 0.8'/px | dec < +15, all-sky | one scaling per field |
+| **VTSS** (Dennison et al. 1998) | 1.6'/px | dec > -15 | one scaling per field |
+
+IPHAS and VPHAS+ are the ones that **eliminate the cause**: they image r and i alongside H-alpha, so
+the continuum is removed per star with its own measured colour rather than by one scaling for a
+whole field. Where they reach, the residuals do not exist.
+
+Against the fourteen patches this project ships positions for:
+
+* **Ten are in the plane** and covered at sub-arcsecond resolution -- the Rosette by IPHAS; the
+  Seagull, Carina, Rim, Cat's Paw, Lobster, Lagoon, Trifid, Eagle and Omega by VPHAS+ and SHS. That
+  is a factor 150 to 230 finer than SHASSA, and no subtraction residuals.
+* **Four are not**: M42 at b = -19.3, the Flame at -16.3, the Horsehead at -16.8 and the Tarantula
+  at -31.7. Every deep survey stops at \|b\| < 10. For those, **SHASSA at 0.8 arcmin is the best
+  data that exists**, and its residuals have to be repaired rather than out-resolved.
 
 ## Optional: the galaxy catalogue
 

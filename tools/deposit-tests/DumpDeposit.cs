@@ -92,5 +92,28 @@ static class DumpDeposit
 
         File.WriteAllText("exo_deposit_field.csv", sb.ToString());
         Console.WriteLine("written exo_deposit_field.csv");
+
+        // Does a FINER map cost more per frame? The lookup is one interpolated read per frame
+        // pixel whatever the resolution, so the answer had better be no -- which is the number
+        // that decides whether a sub-arcsecond survey is affordable at 1x1.
+        Console.WriteLine("\nlookup cost against map resolution, over a full 4144x2822 frame:");
+        foreach (int probe in new[] { 256, 1024, 4096, 8192 })
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var pixp = new long[4]; var wtp = new double[4];
+            double acc = 0.0;
+            int n = 4144 * 2822;
+            for (int i = 0; i < n; i++)
+            {
+                double ll = 200.0 + (i % 4096) * 1e-4;
+                double bb = -17.0 + (i / 4096 % 2822) * 1e-4;
+                Healpix.InterpolationWeightsDegrees(probe, ll, bb, pixp, wtp);
+                acc += wtp[0];
+            }
+            sw.Stop();
+            Console.WriteLine($"  nside {probe,5} ({Healpix.PixelResolutionDeg(probe) * 3600.0,7:F2} arcsec cells): "
+                            + $"{sw.ElapsedMilliseconds,5} ms for {n} lookups "
+                            + $"({sw.ElapsedMilliseconds * 1e6 / n:F0} ns each)");
+        }
     }
 }
