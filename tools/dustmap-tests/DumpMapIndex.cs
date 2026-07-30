@@ -13,6 +13,7 @@ static class DumpMapIndex
 {
     static void Main()
     {
+        StressInterpolation();
         DumpInterpolation();
         DumpHealpix();
         DumpGalactic();
@@ -20,6 +21,68 @@ static class DumpMapIndex
         DumpFloat16();
         DumpRealMapQueries();
         Console.WriteLine("written exo_healpix.csv, exo_galactic.csv, exo_mapquery.csv, exo_float16.csv");
+    }
+
+    /// <summary>
+    /// Exhaustive validity scan of the interpolation, looking for the failure a random sample
+    /// misses.
+    ///
+    /// The comparison against healpy runs 3048 directions per nside. A real frame asks 11.7 MILLION
+    /// questions, and a fault rate of one in ten thousand -- which is what a real capture showed --
+    /// puts under three failures in a sample that size, i.e. inside its own noise. So this asks the
+    /// only questions that do not need a reference at all, over a dense scan: is every returned
+    /// pixel index inside the map, is every weight finite, and do the four sum to one?
+    ///
+    /// Any answer of "no" is a fault by construction, whatever healpy would have said.
+    /// </summary>
+    static void StressInterpolation()
+    {
+        Console.WriteLine("Interpolation validity scan (no reference needed):");
+        var pix = new long[4];
+        var wgt = new double[4];
+
+        foreach (int nside in new[] { 64, 256, 1024 })
+        {
+            long npix = Healpix.PixelCount(nside);
+            long outOfRange = 0, badWeight = 0, badSum = 0, negative = 0, tested = 0;
+            double worstSum = 0.0;
+            double firstBadTheta = 0.0, firstBadPhi = 0.0;
+
+            // A dense lattice rather than a random draw: a fault that lives on a ring boundary is
+            // a set of measure zero to a random sample and a guaranteed hit to a lattice.
+            const int nTheta = 1500, nPhi = 1500;
+            for (int i = 0; i <= nTheta; i++)
+            {
+                double theta = Math.PI * i / nTheta;
+                for (int j = 0; j < nPhi; j++)
+                {
+                    double phi = 2.0 * Math.PI * j / nPhi;
+                    Healpix.InterpolationWeights(nside, theta, phi, pix, wgt);
+                    tested++;
+
+                    double sum = 0.0;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (pix[k] < 0 || pix[k] >= npix)
+                        {
+                            if (outOfRange == 0) { firstBadTheta = theta; firstBadPhi = phi; }
+                            outOfRange++;
+                        }
+                        if (double.IsNaN(wgt[k]) || double.IsInfinity(wgt[k])) badWeight++;
+                        if (wgt[k] < -1e-12) negative++;
+                        sum += wgt[k];
+                    }
+                    if (Math.Abs(sum - 1.0) > 1e-9) { badSum++; if (Math.Abs(sum - 1.0) > worstSum) worstSum = Math.Abs(sum - 1.0); }
+                }
+            }
+            Console.WriteLine($"  nside {nside,5}: {tested} directions -> "
+                            + $"{outOfRange} out-of-range pixels, {badWeight} non-finite weights, "
+                            + $"{negative} negative, {badSum} whose sum != 1 (worst {worstSum:E2})");
+            if (outOfRange > 0)
+                Console.WriteLine($"     first at theta={firstBadTheta:R} phi={firstBadPhi:R} "
+                                + $"(b={90.0 - firstBadTheta * 180.0 / Math.PI:F4} l={firstBadPhi * 180.0 / Math.PI:F4})");
+        }
+        Console.WriteLine();
     }
 
     /// <summary>
