@@ -1899,8 +1899,9 @@ namespace ExoInstruments
                     {
                         GUILayout.Label(
                             solarSystemCamera.LastEmissionPatchName != null
-                                ? $"   from the {solarSystemCamera.LastEmissionPatchName} high-resolution patch "
-                                  + $"at {beam:F2}' sampling"
+                                ? $"   {solarSystemCamera.LastEmissionPatchCoverage * 100.0:F0}% of the frame from the "
+                                  + $"{solarSystemCamera.LastEmissionPatchName} patch at {beam:F2}' sampling, "
+                                  + "the rest from the all-sky map"
                                 : $"   from the all-sky map at {beam:F2}' sampling (6' beam) -- no patch covers this field",
                             smallCaptionStyle);
                     }

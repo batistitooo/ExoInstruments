@@ -1998,6 +1998,9 @@ namespace ExoInstruments.Visualization
         /// <summary>Name of the high-resolution patch the last frame was drawn from, or null when the base map answered.</summary>
         public string LastEmissionPatchName { get; private set; }
 
+        /// <summary>Fraction of the last frame the high-resolution patch answered for; the rest came from the all-sky map, joined by the patch's own apodised rim.</summary>
+        public double LastEmissionPatchCoverage { get; private set; }
+
         /// <summary>Resolution the last frame's emission actually came at, arcminutes -- the patch's when one covered the field, the base map's otherwise.</summary>
         public double LastEmissionResolutionArcmin { get; private set; }
 
@@ -2193,6 +2196,7 @@ namespace ExoInstruments.Visualization
             }
             LastEmissionPatchName = patch != null ? patch.Name : null;
             LastEmissionResolutionArcmin = patch != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
+            long patchPixels = 0;
 
             for (int y = 0; y < h; y++)
             {
@@ -2205,8 +2209,10 @@ namespace ExoInstruments.Visualization
                     // own edge, so it substitutes rather than adds. Any pixel it cannot answer for
                     // falls through to the base map.
                     double r;
-                    if (patch == null || !patchSet.TryRayleighsAtGalactic(
+                    if (patch != null && patchSet.TryRayleighsAtGalactic(
                             patch, l, b, pixelScratch, weightScratch, ref patchCursor, out r))
+                        patchPixels++;
+                    else
                         r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
                     if (double.IsNaN(r)) continue;
                     counted++;
@@ -2239,6 +2245,7 @@ namespace ExoInstruments.Visualization
             LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
             LastEmissionPeakElectrons = counted > 0 ? brightest : double.NaN;
             LastEmissionTemperatureK = counted > 0 ? temperatureSum / counted : double.NaN;
+            LastEmissionPatchCoverage = (double)patchPixels / Math.Max(1, (long)w * h);
         }
 
         /// <summary>Dispersion across the active filter's passband before any corrector, arcseconds.</summary>

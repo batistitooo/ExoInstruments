@@ -196,13 +196,19 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// The patch covering an equatorial direction with room for a field of the given radius, or
-        /// null. Resolved ONCE per frame rather than per pixel: a frame is a few arcminutes across
-        /// and cannot span two patches, so asking again for every pixel would be a hundred dot
-        /// products each for an answer that does not change.
+        /// The patch nearest an equatorial direction that OVERLAPS a field of the given radius, or
+        /// null. Resolved once per frame rather than per pixel: patch centres are degrees apart, so
+        /// asking again for every pixel would be a hundred dot products for an answer that does not
+        /// change across a frame.
         ///
-        /// The field must fit entirely inside the patch. A frame that straddles the edge falls back
-        /// to the base map for all of it, which is a visible loss of detail but never a seam.
+        /// OVERLAP, NOT CONTAINMENT. This used to demand that the whole field fit inside the patch,
+        /// so a wide-field instrument fell back to the base map entirely -- the RedCat's 2.7 degree
+        /// half-diagonal against M42's 1.13 degree patch meant the one shot that shows the whole
+        /// nebula got none of the resolution. Containment was over-cautious: the per-pixel lookup
+        /// already falls through to the base map wherever the patch has no cell, and the packer
+        /// apodises the patch's fine structure to zero across its outer margin precisely so that
+        /// the two agree there. So a frame can straddle the edge and join continuously, which is
+        /// what the taper was built for.
         /// </summary>
         public Patch FindCoveringPatch(double raDeg, double decDeg, double fieldRadiusDeg)
         {
@@ -215,8 +221,9 @@ namespace ExoInstruments.Core
             foreach (Patch p in patches)
             {
                 double cos = x * p.Cx + y * p.Cy + z * p.Cz;
-                double margin = Math.Cos(Math.Max(0.0, p.RadiusDeg - fieldRadiusDeg) * Math.PI / 180.0);
-                if (cos >= margin && cos > bestCos) { bestCos = cos; best = p; }
+                double reach = Math.Cos(Math.Min(180.0, p.RadiusDeg + Math.Max(0.0, fieldRadiusDeg))
+                                        * Math.PI / 180.0);
+                if (cos >= reach && cos > bestCos) { bestCos = cos; best = p; }
             }
             return best;
         }
