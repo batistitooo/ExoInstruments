@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace ExoInstruments.Core
 {
@@ -490,6 +491,131 @@ namespace ExoInstruments.Core
 
             radiusPx = accR;
             return Normalise(acc, accR);
+        }
+
+        /// <summary>
+        /// The instrument's PSF built ACROSS its passband rather than at one wavelength, with
+        /// atmospheric dispersion folded in.
+        ///
+        /// TWO EFFECTS, ONE KERNEL, AND WHY THAT IS EXACT. Everything in the monochromatic kernel
+        /// depends on wavelength: the Airy pattern scales as lambda/D, the seeing disc as
+        /// lambda^(-1/5) through r0, and the atmosphere lifts the source by an angle that depends on
+        /// colour, so a star at low altitude is smeared into a short spectrum pointing at the zenith.
+        /// A frame is not monochromatic, so what it records is the sum of the monochromatic images
+        /// weighted by how many photons arrive at each wavelength.
+        ///
+        /// Convolution is linear, so that sum can be taken on the KERNELS before convolving instead
+        /// of on the images afterwards:
+        ///
+        ///     sum_i w_i (image * K_i)  =  image * (sum_i w_i K_i)
+        ///
+        /// One convolution with the weighted mean kernel is therefore not an approximation of a
+        /// chromatic PSF, it IS one, and it costs nothing beyond building the kernel. Each
+        /// sub-band's kernel is laid down at its own dispersion offset, which is what makes the
+        /// smear appear.
+        ///
+        /// WHAT STAYS COMMON AND WHAT DOES NOT. The dispersion offset depends only on wavelength and
+        /// zenith distance, both the same for every source in a field arcminutes across, so the smear
+        /// is genuinely common and belongs in the kernel. The WEIGHTS depend on the source's own
+        /// spectrum, and a red star's smear is shorter than a blue one's. That second-order
+        /// difference is not in this kernel; the first-order part of it -- the shift of a source's
+        /// own centroid with its colour -- is applied per source where the source is deposited.
+        /// </summary>
+        /// <param name="subBands">Wavelength (m), photon weight, and dispersion offset (pixels) per sub-band. Weights need not be normalised.</param>
+        public static float[] BuildChromaticKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double atmosphericFwhmArcsecAtReference,
+            double referenceWavelengthMeters,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            IList<ChromaticSubBand> subBands,
+            out int radiusPx)
+        {
+            radiusPx = 0;
+            if (subBands == null || subBands.Count == 0) return null;
+            if (plateScaleArcsecPerPixel <= 0.0 || apertureMeters <= 0.0) return null;
+
+            double totalWeight = 0.0;
+            foreach (ChromaticSubBand band in subBands)
+                if (band.Weight > 0.0 && band.WavelengthMeters > 0.0) totalWeight += band.Weight;
+            if (!(totalWeight > 0.0)) return null;
+
+            // Two passes: size the output first, because the offsets push the support out and a
+            // kernel that has to be grown after the fact would have to be re-accumulated.
+            int maxRadius = 1;
+            var kernels = new List<float[]>(subBands.Count);
+            var radii = new List<int>(subBands.Count);
+            var used = new List<ChromaticSubBand>(subBands.Count);
+            foreach (ChromaticSubBand band in subBands)
+            {
+                if (!(band.Weight > 0.0) || !(band.WavelengthMeters > 0.0)) continue;
+
+                // Seeing scales as lambda^(-1/5): r0 goes as lambda^(6/5) and the FWHM as
+                // lambda/r0. Fried (1966); the same exponent every seeing-monitor paper quotes.
+                double fwhm = atmosphericFwhmArcsecAtReference > 0.0 && referenceWavelengthMeters > 0.0
+                    ? atmosphericFwhmArcsecAtReference
+                      * Math.Pow(band.WavelengthMeters / referenceWavelengthMeters, -0.2)
+                    : atmosphericFwhmArcsecAtReference;
+
+                float[] k = BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio,
+                                        band.WavelengthMeters, fwhm, defocusDiscRadiusPx,
+                                        vaneCount, vaneWidthMeters, out int r);
+                if (k == null) continue;
+                kernels.Add(k);
+                radii.Add(r);
+                used.Add(band);
+
+                int reach = r + (int)Math.Ceiling(Math.Sqrt(band.OffsetX * band.OffsetX
+                                                          + band.OffsetY * band.OffsetY));
+                if (reach > maxRadius) maxRadius = reach;
+            }
+            if (kernels.Count == 0) return null;
+            maxRadius = Math.Min(MaxKernelRadiusPx, maxRadius);
+
+            int size = 2 * maxRadius + 1;
+            var acc = new double[size * size];
+            for (int b = 0; b < kernels.Count; b++)
+            {
+                float[] k = kernels[b];
+                int r = radii[b];
+                int ks = 2 * r + 1;
+                double w = used[b].Weight / totalWeight;
+
+                // The offset is fractional, so each sub-band's kernel is laid down with bilinear
+                // weights rather than snapped to a pixel. Snapping would quantise the smear into
+                // steps and, worse, bias the centroid by up to half a pixel.
+                double ox = used[b].OffsetX, oy = used[b].OffsetY;
+                int fx = (int)Math.Floor(ox), fy = (int)Math.Floor(oy);
+                double tx = ox - fx, ty = oy - fy;
+
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        double v = k[(dy + r) * ks + dx + r];
+                        if (v <= 0.0) continue;
+                        v *= w;
+                        Accumulate(acc, size, maxRadius, dx + fx, dy + fy, v * (1.0 - tx) * (1.0 - ty));
+                        Accumulate(acc, size, maxRadius, dx + fx + 1, dy + fy, v * tx * (1.0 - ty));
+                        Accumulate(acc, size, maxRadius, dx + fx, dy + fy + 1, v * (1.0 - tx) * ty);
+                        Accumulate(acc, size, maxRadius, dx + fx + 1, dy + fy + 1, v * tx * ty);
+                    }
+                }
+            }
+
+            radiusPx = maxRadius;
+            return Normalise(acc, maxRadius);
+        }
+
+        private static void Accumulate(double[] acc, int size, int radius, int dx, int dy, double v)
+        {
+            if (v == 0.0) return;
+            int x = dx + radius, y = dy + radius;
+            if (x < 0 || x >= size || y < 0 || y >= size) return;
+            acc[y * size + x] += v;
         }
 
         /// <summary>

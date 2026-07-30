@@ -411,6 +411,38 @@ namespace ExoInstruments.Core
         // telescope's own design cancels off-axis aberrations, so it lives per-instrument here
         // rather than as one pipeline-wide constant.
         public float AstigmatismStrengthPxAtCorner;
+
+        /// <summary>
+        /// True when the instrument carries an atmospheric dispersion corrector: a pair of
+        /// counter-rotating prisms that cancels the atmosphere's own dispersion before it reaches the
+        /// detector.
+        ///
+        /// This is not a detail for a high-resolution instrument. At 45 degrees from the zenith the
+        /// atmosphere spreads 400 to 700 nm over 1.1 arcsec at Paranal, which on ZIMPOL's 3.6 mas
+        /// pixels is THREE HUNDRED pixels of smear -- an instrument delivering a 25 mas core cannot
+        /// exist without one, and SPHERE has one (Beuzit et al. 2019, A&amp;A 631, A155, sect. 3.2:
+        /// the common path carries an ADC for the visible arm). FORS2 does not: it is a
+        /// low-resolution imager and spectrograph on 0.126 arcsec pixels, where the residual matters
+        /// far less, and ESO's own manual discusses the resulting dispersion rather than correcting
+        /// it. Amateur instruments do not.
+        ///
+        /// A real corrector leaves a residual rather than nothing, so this scales the dispersion
+        /// rather than switching it off -- see AtmosphericDispersionResidual.
+        /// </summary>
+        public bool HasAtmosphericDispersionCorrector;
+
+        /// <summary>
+        /// Fraction of the atmospheric dispersion a corrector leaves behind.
+        ///
+        /// A counter-rotating prism pair cancels the dispersion of a model atmosphere at a design
+        /// zenith distance; what it cannot cancel is the difference between that model and the night's
+        /// real air, and its own glasses' departure from the exact inverse dispersion curve. Published
+        /// residuals for visible-arm ADCs of this class are at the few-percent level, so 0.05 is the
+        /// figure used and it is labelled as an order rather than a measurement for a specific
+        /// instrument -- the alternative, cancelling the dispersion exactly, is the one value that is
+        /// certainly wrong.
+        /// </summary>
+        public const double AtmosphericDispersionResidual = 0.05;
     }
 
     /// <summary>
@@ -1215,6 +1247,10 @@ namespace ExoInstruments.Core
             AdaptiveOpticsStrehlRatio = 0.40,
             AdaptiveOpticsHaloSeeingFwhmArcsec = 0.72,
             AstigmatismStrengthPxAtCorner = 0.0f,
+            // SPHERE's common path carries an ADC for the visible arm (Beuzit et al. 2019, A&A 631,
+            // A155). Without one the atmosphere would spread 400-700 nm across 307 of ZIMPOL's
+            // pixels at 45 degrees from the zenith, and a 25 mas core would be unreachable.
+            HasAtmosphericDispersionCorrector = true,
         };
 
         /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI -- see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>

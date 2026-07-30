@@ -565,6 +565,9 @@ namespace ExoInstruments.Visualization
         private double psfCachePlateScale = -1.0;
         private double psfCacheAtmosphericFwhm = -1.0;
         private double psfCacheDefocusRadius = -1.0;
+        private double psfCacheZenithDistance = double.NaN;
+        private double psfCacheZenithX = double.NaN;
+        private double psfCacheZenithY = double.NaN;
         private float[] psfCacheCore;
         private int psfCacheCoreRadius;
         private float psfCacheCoreWeight = 1f;
@@ -851,6 +854,16 @@ namespace ExoInstruments.Visualization
 
         /// <summary>The instrument's own diffraction-limited FWHM (arcsec) at the current filter's wavelength, computed from its real annular pupil -- the hard floor no observing condition can beat.</summary>
         public double LastDiffractionFwhmArcsec { get; private set; }
+
+        /// <summary>
+        /// Length of the last frame's atmospheric dispersion smear, arcseconds, across the filter's
+        /// own passband and after any corrector. The number that says whether a frame's stars are
+        /// points or short spectra.
+        /// </summary>
+        public double LastDispersionSmearArcsec { get; private set; }
+
+        /// <summary>Zenith distance the last frame was taken at, degrees.</summary>
+        public double LastZenithDistanceDeg { get; private set; }
 
         /// <summary>True when the last capture's adaptive-optics halo used a kernel spanning the whole frame, so nothing detectable was truncated, rather than the bounded fallback. See ApplyPsf.</summary>
         public bool LastHaloSpannedFrame { get; private set; }
@@ -1541,6 +1554,17 @@ namespace ExoInstruments.Visualization
             public List<Galaxy> Galaxies;
             /// <summary>Total Galactic E(B-V) toward the boresight. A galaxy sits behind the whole column, so this is the reddening that applies to it in full.</summary>
             public double FieldReddeningEBv;
+
+            // --- Atmospheric dispersion ------------------------------------------------
+            /// <summary>Zenith distance of the field, degrees. Drives the dispersion, which goes as tan z.</summary>
+            public double ZenithDistanceDeg;
+            /// <summary>Unit vector toward the zenith IN PIXEL SPACE, derived by projecting the zenith through the frame's own geometry so that field rotation and parity are already in it.</summary>
+            public double ZenithUnitX;
+            public double ZenithUnitY;
+            /// <summary>Site air, for the refractive index: from the ICAO standard atmosphere at the observatory's altitude.</summary>
+            public double AirTemperatureCelsius;
+            public double AirPressureMillibar;
+            public double WaterVapourPressureMillibar;
             /// <summary>Solar-system bodies in the field too small for the renderer to resolve, already projected and converted to signal.</summary>
             public List<PointSource> UnresolvedBodies;
             public bool HaveFieldGeometry;
@@ -1829,6 +1853,7 @@ namespace ExoInstruments.Visualization
             MeasurePointingError(target, projection, meridianRaDeg, latitudeDeg);
 
             inputs.FieldReddeningEBv = LastFieldReddeningEBv;
+            GatherDispersionGeometry(ref inputs, projection, meridianRaDeg, latitudeDeg, target);
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
             inputs.Galaxies = SearchGalaxyCatalog(inputs, latitudeDeg);
             inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
@@ -2201,6 +2226,120 @@ namespace ExoInstruments.Visualization
             LastEmissionRayleighs = counted > 0 ? sum / counted : double.NaN;
             LastEmissionPeakElectrons = counted > 0 ? brightest : double.NaN;
             LastEmissionTemperatureK = counted > 0 ? temperatureSum / counted : double.NaN;
+        }
+
+        /// <summary>Dispersion across the active filter's passband before any corrector, arcseconds.</summary>
+        private double RawDispersionSmearArcsec(FrameComputeInputs inputs)
+        {
+            double centre = FilterCentralWavelengthMeters(inputs.Filter);
+            double bandwidth = FilterBandwidthAngstrom(inputs.Filter) * 1e-10;
+            if (!(centre > 0.0) || !(bandwidth > 0.0)) return 0.0;
+            double lo = Math.Max(300e-9, centre - 0.5 * bandwidth);
+            double hi = Math.Min(1100e-9, centre + 0.5 * bandwidth);
+            double smear = AtmosphericRefraction.DifferentialRefractionArcsec(
+                lo * 1e6, hi * 1e6, inputs.ZenithDistanceDeg,
+                inputs.AirTemperatureCelsius, inputs.AirPressureMillibar,
+                inputs.WaterVapourPressureMillibar);
+            return double.IsNaN(smear) ? 0.0 : Math.Abs(smear);
+        }
+
+        /// <summary>
+        /// Splits the active filter into sub-bands with their photon weights and their dispersion
+        /// offsets, or null when there is nothing chromatic to do.
+        ///
+        /// The source spectrum used for the weights is a 6000 K blackbody: the FIELD's dispersion
+        /// smear is one kernel shared by everything in the frame, so it has to be built on one
+        /// spectrum, and a solar-type continuum is the middle of what this roster photographs. The
+        /// error that leaves is second order -- a redder source's smear is slightly shorter -- while
+        /// the first-order effect, the shift of a source's own centroid with its colour, is a
+        /// per-source scalar and belongs where the source is deposited rather than in a shared kernel.
+        /// </summary>
+        private ChromaticSubBand[] BuildSubBands(FrameComputeInputs inputs, double centralWavelength)
+        {
+            if (inputs.Response == null || !(inputs.PlateScaleArcsec > 0.0)) return null;
+            if (inputs.ZenithUnitX == 0.0 && inputs.ZenithUnitY == 0.0) return null;
+
+            double bandwidth = FilterBandwidthAngstrom(Filter) * 1e-10;
+            if (!(bandwidth > 0.0)) return null;
+
+            // A little past the nominal edges, because a real filter's transmission does not stop
+            // dead there and the roll-off carries a real share of the photons.
+            double lo = Math.Max(300e-9, centralWavelength - 0.75 * bandwidth);
+            double hi = Math.Min(1100e-9, centralWavelength + 0.75 * bandwidth);
+            if (!(hi > lo)) return null;
+
+            // A corrector cancels most of the dispersion but not all of it.
+            double residual = Spec.HasAtmosphericDispersionCorrector
+                ? VisualTelescopeSpec.AtmosphericDispersionResidual : 1.0;
+
+            var bands = AtmosphericRefraction.SplitPassband(
+                inputs.Response,
+                l => Colorimetry.PlanckSpectralRadiance(l * 1e9, SubBandReferenceTemperatureK) * l,
+                lo, hi, ChromaticSubBandCount,
+                inputs.ZenithDistanceDeg, inputs.PlateScaleArcsec,
+                inputs.ZenithUnitX * residual, inputs.ZenithUnitY * residual,
+                centralWavelength,
+                inputs.AirTemperatureCelsius, inputs.AirPressureMillibar,
+                inputs.WaterVapourPressureMillibar);
+            return bands;
+        }
+
+        /// <summary>
+        /// Sub-bands the passband is split into. Twelve, because the quantity being resolved is the
+        /// dispersion smear and its length is at most a few tens of pixels: twelve samples across it
+        /// leave steps under a pixel once the bilinear placement in BuildChromaticKernel has spread
+        /// each one, and the kernel cost is linear in this while the convolution cost is not affected
+        /// at all.
+        /// </summary>
+        private const int ChromaticSubBandCount = 12;
+
+        /// <summary>Temperature of the reference continuum the shared dispersion kernel is weighted with. Solar-type, the middle of what this roster photographs.</summary>
+        private const double SubBandReferenceTemperatureK = 6000.0;
+
+        /// <summary>
+        /// The geometry atmospheric dispersion needs: how far from the zenith the field is, and which
+        /// way the zenith lies ON THE SENSOR.
+        ///
+        /// The direction is obtained by projecting the zenith itself and differencing against the
+        /// field centre, rather than by computing a parallactic angle and rotating it in: the
+        /// projection already carries the mount's field rotation, the sensor's parity and the
+        /// gnomonic distortion, and re-deriving any of those by hand is how a dispersion smear ends
+        /// up pointing at the ground.
+        /// </summary>
+        private void GatherDispersionGeometry(ref FrameComputeInputs inputs, GnomonicProjection projection,
+                                              double meridianRaDeg, double latitudeDeg, SkyTarget target)
+        {
+            inputs.ZenithDistanceDeg = 90.0;
+            inputs.ZenithUnitX = 0.0;
+            inputs.ZenithUnitY = 0.0;
+            inputs.AirTemperatureCelsius = AtmosphericRefraction.StandardTemperatureCelsius(Spec.SiteAltitudeMeters);
+            inputs.AirPressureMillibar = AtmosphericRefraction.StandardPressureMillibar(Spec.SiteAltitudeMeters);
+            inputs.WaterVapourPressureMillibar = AtmosphericRefraction.WaterVapourPressureMillibar(
+                inputs.AirTemperatureCelsius, AtmosphericRefraction.DefaultRelativeHumidity);
+
+            // The frame centre's own horizontal coordinates, read back out of the projection rather
+            // than recomputed: deprojecting the centre pixel returns the direction in the
+            // observatory's (north, east, up) basis, from which altitude and azimuth fall straight
+            // out. Nothing about the mount or the parity has to be assumed.
+            SkyVector centre = projection.Deproject(0.5 * TextureWidth, 0.5 * TextureHeight);
+            double altDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, centre.Z))) * 180.0 / Math.PI;
+            double azDeg = Math.Atan2(centre.Y, centre.X) * 180.0 / Math.PI;
+            if (altDeg <= 0.0) return;
+            inputs.ZenithDistanceDeg = Math.Max(0.0, 90.0 - altDeg);
+
+            // A point one degree closer to the zenith at the same azimuth, projected through the
+            // same geometry: the difference is the zenith direction on the sensor.
+            if (!projection.TryProject(SkyVector.FromHorizontal(altDeg, azDeg), out double cx, out double cy))
+                return;
+            double higher = Math.Min(89.999, altDeg + 1.0);
+            if (!projection.TryProject(SkyVector.FromHorizontal(higher, azDeg), out double zx, out double zy))
+                return;
+
+            double dx = zx - cx, dy = zy - cy;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+            if (!(length > 0.0)) return;
+            inputs.ZenithUnitX = dx / length;
+            inputs.ZenithUnitY = dy / length;
         }
 
         /// <summary>
@@ -2614,15 +2753,31 @@ namespace ExoInstruments.Visualization
                          && psfCachePlateScale == inputs.PlateScaleArcsec
                          && psfCacheAtmosphericFwhm == atmosphericFwhm
                          && psfCacheDefocusRadius == inputs.DefocusDiscRadiusPx
+                         && psfCacheZenithDistance == inputs.ZenithDistanceDeg
+                         && psfCacheZenithX == inputs.ZenithUnitX
+                         && psfCacheZenithY == inputs.ZenithUnitY
                          && haloSpectrumWidth == TextureWidth
                          && haloSpectrumHeight == TextureHeight;
 
             if (!reusable)
             {
-                psfCacheCore = OpticalPsf.BuildKernel(
-                    inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
-                    wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx,
-                    Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, out psfCacheCoreRadius);
+                // The kernel is built ACROSS the passband, not at its central wavelength. Three
+                // things vary with wavelength inside one filter and all three are in here: the Airy
+                // pattern scales as lambda/D, the seeing disc as lambda^(-1/5), and the atmosphere
+                // refracts blue more than red so the source is smeared toward the zenith. Convolution
+                // is linear, so summing the monochromatic kernels with their photon weights and
+                // convolving once is not an approximation of a chromatic PSF -- it is one, at no cost
+                // beyond building the kernel. See OpticalPsf.BuildChromaticKernel.
+                ChromaticSubBand[] subBands = BuildSubBands(inputs, wavelength);
+                psfCacheCore = subBands != null
+                    ? OpticalPsf.BuildChromaticKernel(
+                        inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
+                        atmosphericFwhm, wavelength, inputs.DefocusDiscRadiusPx,
+                        Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, subBands, out psfCacheCoreRadius)
+                    : OpticalPsf.BuildKernel(
+                        inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
+                        wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx,
+                        Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, out psfCacheCoreRadius);
 
                 // A real adaptive-optics PSF is two-component: a corrected core carrying the
                 // system's Strehl ratio, plus the wide halo of everything it failed to correct.
@@ -2661,6 +2816,9 @@ namespace ExoInstruments.Visualization
                 psfCachePlateScale = inputs.PlateScaleArcsec;
                 psfCacheAtmosphericFwhm = atmosphericFwhm;
                 psfCacheDefocusRadius = inputs.DefocusDiscRadiusPx;
+                psfCacheZenithDistance = inputs.ZenithDistanceDeg;
+                psfCacheZenithX = inputs.ZenithUnitX;
+                psfCacheZenithY = inputs.ZenithUnitY;
 
                 psfCacheDiffractionFwhm = OpticalPsf.AiryFwhmArcsec(
                     Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
@@ -2673,6 +2831,10 @@ namespace ExoInstruments.Visualization
             haloRadius = psfCacheHaloRadius;
 
             // Diagnostics, read on the main thread after the task completes.
+            LastDispersionSmearArcsec = Spec.HasAtmosphericDispersionCorrector
+                ? VisualTelescopeSpec.AtmosphericDispersionResidual * RawDispersionSmearArcsec(inputs)
+                : RawDispersionSmearArcsec(inputs);
+            LastZenithDistanceDeg = inputs.ZenithDistanceDeg;
             LastHaloSpannedFrame = haloSpectrum != null;
             LastHaloEnclosedFraction = haloSpectrum != null ? haloSpectrum.EnclosedFraction : 0.0;
             LastAppliedBlurRadiusPx = psfCacheCoreRadius;

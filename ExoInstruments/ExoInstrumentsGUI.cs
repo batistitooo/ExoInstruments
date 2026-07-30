@@ -1809,6 +1809,22 @@ namespace ExoInstruments
                     + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
                     smallCaptionStyle);
 
+                // Atmospheric dispersion: the atmosphere refracts blue more than red, so a source at
+                // low altitude is drawn out into a short spectrum pointing at the zenith. This is the
+                // length of it across the active filter, which is the number that says whether the
+                // frame's stars are points.
+                double smear = solarSystemCamera.LastDispersionSmearArcsec;
+                if (smear > 0.0)
+                {
+                    double smearPx = smear / plateScale;
+                    GUILayout.Label(
+                        $"Atmospheric dispersion: {smear:F3}\" across this filter at z = "
+                        + $"{solarSystemCamera.LastZenithDistanceDeg:F0} deg = {smearPx:F1} px toward the zenith"
+                        + (SolarSystemCameraTexture.Spec.HasAtmosphericDispersionCorrector
+                            ? ", after the instrument's dispersion corrector" : ""),
+                        smallCaptionStyle);
+                }
+
                 // A single per-exposure draw applied to the whole target, so it is the reason two
                 // otherwise identical captures differ in brightness. It can never be negative --
                 // if it ever reads below zero, the running build predates that fix.
