@@ -369,3 +369,19 @@ frame to divide by.
 - [ ] **18.4** **The dark sky is still 21.7.** The `Sky` figure on a moonless night at the zenith
       should read close to 21.7-21.8 mag/arcsec^2 -- now derived from ESO's measured spectrum plus
       the zodiacal term rather than asserted.
+
+## 19. Registration and the pipelined series
+
+- [ ] **19.1** **The staircase is gone.** RedCat, `Ha`, 8 x 60 s on the Horsehead with **Align subs
+      ON**, compose in SHO. The old build registered on the brightness centroid, which on a nebula
+      filling the field moved randomly by tens of pixels and stacked the subs as offset rectangles
+      with a ragged black border. The composite must now be clean to its edges.
+- [ ] **19.2** The report line must read `Registered on the recorded pointing, worst shift N px;
+      every sub covers X% of the frame`. With autoguiding ON the shift should be ~0 px and coverage
+      100%; with it OFF the shift grows with the series length and coverage drops a few percent.
+- [ ] **19.3** **The series pipelines.** Start a series at 120 s and watch the progress line: while a
+      frame is being reduced it must say `(reducing the previous frame while this one integrates)`,
+      and the wall-clock time for N subs should be about N x 120 s rather than N x (120 s + reduction).
+- [ ] **19.4** **Nothing is dropped or double-counted.** A series of 8 must end with exactly 8 subs
+      on that filter, and the progress counter must reach 8/8.
+- [ ] **19.5** **Cancel mid-series** leaves the subs already collected and stops cleanly.

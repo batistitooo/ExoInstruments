@@ -896,6 +896,7 @@ namespace ExoInstruments.Visualization
             if (!IsAvailable || !target.HasTarget) return;
             pendingTarget = target;
             isCapturing = true;
+            integrationComplete = false;
             captureElapsed = 0f;
             captureDuration = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             HasCapturedPhoto = false;
@@ -906,6 +907,7 @@ namespace ExoInstruments.Visualization
         {
             HasCapturedPhoto = false;
             isCapturing = false;
+            integrationComplete = false;
             hasLockedAim = false;
             // Doesn't stop the background Task itself (no cancellation token), but nulling the
             // reference makes PollProcessTask ignore its result once it does finish.
@@ -923,6 +925,7 @@ namespace ExoInstruments.Visualization
         public void CancelExposure()
         {
             isCapturing = false;
+            integrationComplete = false;
         }
 
         /// <summary>
@@ -944,17 +947,45 @@ namespace ExoInstruments.Visualization
         /// </summary>
         private const int MaxTextureWaitFrames = 240;
 
+        /// <summary>
+        /// True when the shutter is free to open: nothing integrating, and nothing already waiting
+        /// its turn to be rendered.
+        ///
+        /// This is what lets a stacking series PIPELINE. An exposure is real elapsed time and the
+        /// physics pass behind it is a background task of a few seconds, so a series that waits for
+        /// each frame to finish reducing before opening the shutter again throws that time away --
+        /// on a ten-sub series at two minutes it is minutes of dead sky. The next exposure can start
+        /// the moment the previous one's INTEGRATION ends; only the render and the reduction need
+        /// exclusive use of the frame buffers, and TickCapture holds the shutter closed if the
+        /// previous reduction has not finished by the time the new integration does.
+        /// </summary>
+        public bool CanBeginExposure => !isCapturing && !integrationComplete;
+
+        /// <summary>An exposure whose integration time has elapsed but which has not been rendered yet, because the previous frame's reduction still owns the buffers.</summary>
+        private bool integrationComplete;
+
         public void TickCapture(float deltaTime)
         {
-            if (isProcessing)
+            // Poll first, always: the reduction of the PREVIOUS frame may be what is blocking this
+            // one's render, and a series only pipelines if that gets picked up in the same tick.
+            if (isProcessing) PollProcessTask();
+
+            if (isCapturing)
             {
-                PollProcessTask();
-                return;
+                captureElapsed += deltaTime;
+                if (captureElapsed >= captureDuration)
+                {
+                    isCapturing = false;
+                    integrationComplete = true;
+                }
             }
 
-            if (!isCapturing) return;
-            captureElapsed += deltaTime;
-            if (captureElapsed < captureDuration) return;
+            if (!integrationComplete) return;
+
+            // The buffers are still owned by the previous frame's reduction. The photons for this
+            // one are already counted -- the integration is over -- so nothing is lost by waiting
+            // here, and overlapping two reductions would have them share scratch arrays.
+            if (isProcessing) return;
 
             // The exposure has elapsed, but the target's scaled-space textures may not be bound.
             // Kopernicus unloads them when no camera IT knows about can see the body, and this
@@ -976,7 +1007,7 @@ namespace ExoInstruments.Visualization
             }
 
             textureWaitFrames = 0;
-            isCapturing = false;
+            integrationComplete = false;
             RenderExposure(pendingTarget);
         }
 
@@ -1997,6 +2028,17 @@ namespace ExoInstruments.Visualization
 
         /// <summary>Name of the high-resolution patch the last frame was drawn from, or null when the base map answered.</summary>
         public string LastEmissionPatchName { get; private set; }
+
+        /// <summary>
+        /// Where the aim point landed in the last frame, pixels -- the registration reference a
+        /// stack aligns on.
+        ///
+        /// Measured through the very projection that placed every source in the frame, so it
+        /// inherits the mount's field rotation, the sensor's parity and the projection's distortion
+        /// instead of having them re-derived. NaN when the target did not project into the field.
+        /// </summary>
+        public double LastRegistrationX => LastTargetPixelX;
+        public double LastRegistrationY => LastTargetPixelY;
 
         /// <summary>Fraction of the last frame the high-resolution patch answered for; the rest came from the all-sky map, joined by the patch's own apodised rim.</summary>
         public double LastEmissionPatchCoverage { get; private set; }

@@ -18,6 +18,9 @@ namespace ExoInstruments.Visualization
     {
         public float[] Gray;
         public float FovDeg;
+        /// <summary>Where the aim point landed in this sub, pixels. NaN when the camera could not measure it.</summary>
+        public double RegistrationX;
+        public double RegistrationY;
         public float ExposureSeconds;
 
         /// <summary>Variance-of-Laplacian sharpness score (see AstroImageStack.ComputeSharpness) -- the lucky-imaging selection metric for this sub.</summary>
@@ -110,6 +113,14 @@ namespace ExoInstruments.Visualization
         /// cosmetically corrected out before the sub is stored -- see CosmeticCorrect.
         /// </summary>
         public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds, int[] defectPixelIndices)
+            => AddSub(filter, gray, fovDeg, exposureSeconds, defectPixelIndices, double.NaN, double.NaN);
+
+        /// <summary>
+        /// As above, recording where the aim point landed in this sub so the stack can register on
+        /// the KNOWN offset rather than estimate one from the pixels.
+        /// </summary>
+        public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds,
+                                     int[] defectPixelIndices, double registrationX, double registrationY)
         {
             if (gray == null || gray.Length != SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight)
                 return AstroSubResult.FovMismatch; // malformed input, treat like an incompatible sub rather than silently accepting it
@@ -126,7 +137,15 @@ namespace ExoInstruments.Visualization
             if (list.Count >= MaxSubsPerFilter) return AstroSubResult.FilterFull;
 
             float[] corrected = CosmeticCorrect(gray, defectPixelIndices);
-            list.Add(new AstroSub { Gray = corrected, FovDeg = fovDeg, ExposureSeconds = exposureSeconds, Quality = ComputeSharpness(corrected) });
+            list.Add(new AstroSub
+            {
+                Gray = corrected,
+                FovDeg = fovDeg,
+                ExposureSeconds = exposureSeconds,
+                Quality = ComputeSharpness(corrected),
+                RegistrationX = registrationX,
+                RegistrationY = registrationY,
+            });
             return AstroSubResult.Added;
         }
 
@@ -288,6 +307,40 @@ namespace ExoInstruments.Visualization
                                            channels, spec, out report);
         }
 
+        /// <summary>True when the last stack registered on the recorded pointing rather than on a measured centroid.</summary>
+        public bool LastAlignmentUsedPointing { get; private set; }
+
+        /// <summary>Largest registration shift applied, pixels.</summary>
+        public double LastAlignmentShiftPx { get; private set; }
+
+        /// <summary>Fraction of the composed frame every sub contributed to. Below one means the registration shifts left a border that fewer subs reached.</summary>
+        public double LastFullCoverageFraction { get; private set; } = 1.0;
+
+        private static bool HasRegistration(AstroSub sub)
+            => !double.IsNaN(sub.RegistrationX) && !double.IsNaN(sub.RegistrationY);
+
+        /// <summary>
+        /// Adds a shifted sub into the accumulator and marks which pixels it reached, so the average
+        /// can divide by what actually landed. Pixels the shift vacated are left untouched in BOTH
+        /// arrays rather than filled with zeros, which is the whole point.
+        /// </summary>
+        private static void AccumulateShifted(float[] sum, float[] coverage, float[] gray, int dx, int dy)
+        {
+            int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            for (int y = 0; y < h; y++)
+            {
+                int sourceY = y - dy;
+                if (sourceY < 0 || sourceY >= h) continue;
+                int destRow = y * w, sourceRow = sourceY * w;
+                int xFrom = Math.Max(0, dx), xTo = Math.Min(w, w + dx);
+                for (int x = xFrom; x < xTo; x++)
+                {
+                    sum[destRow + x] += gray[sourceRow + x - dx];
+                    coverage[destRow + x] += 1f;
+                }
+            }
+        }
+
         private float[] StackFilter(CameraFilter filter, bool align, bool lucky)
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> allSubs) || allSubs.Count == 0) return null;
@@ -305,35 +358,76 @@ namespace ExoInstruments.Visualization
             int n = SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight;
             var sum = new float[n];
 
+            // COVERAGE, not the sub count. A shifted sub contributes nothing to the strip the shift
+            // vacated, so dividing every pixel by the full count darkens exactly those strips --
+            // which is what put a ragged black staircase around an aligned stack. Counting what
+            // actually landed on each pixel makes the border noisier, which is true, instead of
+            // darker, which is not.
+            var coverage = new float[n];
+
             if (!align || subs.Count == 1)
             {
                 foreach (AstroSub sub in subs)
                 {
-                    for (int i = 0; i < n; i++) sum[i] += sub.Gray[i];
+                    for (int i = 0; i < n; i++) { sum[i] += sub.Gray[i]; coverage[i] += 1f; }
                 }
             }
             else
             {
-                (double refX, double refY) = ComputeCentroid(subs[0].Gray);
+                // REGISTER ON THE RECORDED POINTING, not on a measured centroid.
+                //
+                // The centroid of a frame is only a registration reference when the frame contains
+                // one compact thing. On a nebula that fills the field it is dominated by the
+                // object's own asymmetry and moves with the noise, so consecutive subs got shifts
+                // of tens of pixels in random directions and the stack came out as a pile of
+                // offset rectangles. And it was never necessary: the camera measures where the aim
+                // point lands in every frame, through the same projection that places the sources,
+                // so the offset between two subs is KNOWN rather than estimated.
+                //
+                // What this does not correct is field rotation about the aim point, which an
+                // alt-azimuth mount also produces. A shift is a shift.
+                bool haveReference = HasRegistration(subs[0]);
+                (double refX, double refY) = haveReference
+                    ? (subs[0].RegistrationX, subs[0].RegistrationY)
+                    : ComputeCentroid(subs[0].Gray);
+                LastAlignmentUsedPointing = haveReference;
+
+                double maxShift = 0.0;
                 for (int s = 0; s < subs.Count; s++)
                 {
                     float[] gray = subs[s].Gray;
-                    if (s == 0)
+                    double cx, cy;
+                    if (haveReference && HasRegistration(subs[s]))
                     {
-                        for (int i = 0; i < n; i++) sum[i] += gray[i];
-                        continue;
+                        cx = subs[s].RegistrationX;
+                        cy = subs[s].RegistrationY;
+                    }
+                    else
+                    {
+                        (cx, cy) = ComputeCentroid(gray);
                     }
 
-                    (double cx, double cy) = ComputeCentroid(gray);
                     int dx = Mathf.Clamp((int)Math.Round(refX - cx), -MaxAlignShiftPx, MaxAlignShiftPx);
                     int dy = Mathf.Clamp((int)Math.Round(refY - cy), -MaxAlignShiftPx, MaxAlignShiftPx);
-                    float[] shifted = (dx == 0 && dy == 0) ? gray : ShiftImage(gray, dx, dy);
-                    for (int i = 0; i < n; i++) sum[i] += shifted[i];
+                    maxShift = Math.Max(maxShift, Math.Sqrt((double)dx * dx + (double)dy * dy));
+
+                    if (dx == 0 && dy == 0)
+                    {
+                        for (int i = 0; i < n; i++) { sum[i] += gray[i]; coverage[i] += 1f; }
+                        continue;
+                    }
+                    AccumulateShifted(sum, coverage, gray, dx, dy);
                 }
+                LastAlignmentShiftPx = maxShift;
             }
 
-            float inv = 1f / subs.Count;
-            for (int i = 0; i < n; i++) sum[i] *= inv;
+            int full = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (coverage[i] >= subs.Count - 0.5f) full++;
+                sum[i] = coverage[i] > 0f ? sum[i] / coverage[i] : 0f;
+            }
+            LastFullCoverageFraction = (double)full / Math.Max(1, n);
 
             // Subtract background once on the averaged stack, not per-sub — avoids uneven amplification from noisy individual estimates.
             float background = EstimateBackground(sum);

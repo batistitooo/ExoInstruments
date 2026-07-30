@@ -202,6 +202,9 @@ namespace ExoInstruments
         private readonly AstroImageStack astroStack = new AstroImageStack();
         private int stackBatchSize = 5;
         private int stackBatchRemaining = 0;
+        /// <summary>Exposures started in the current batch, and subs collected from it. Tracked separately because the series pipelines: an exposure starts while the previous frame is still being reduced.</summary>
+        private int stackBatchQueued;
+        private int stackBatchCollected;
         private bool stackAlignSubs = true;
         private bool stackLuckyImaging = false;
         private bool saveDiagnosticFrames = false;
@@ -501,12 +504,18 @@ namespace ExoInstruments
                 // added here is guaranteed to share the filter/FOV of the
                 // first one -- AddSub's FOV check is a defensive backstop,
                 // not the primary guarantee.
-                if (stackBatchRemaining > 0 && solarSystemCamera.HasCapturedPhoto && !solarSystemCamera.IsCapturing)
+                // PIPELINED. The next exposure is started as soon as the previous one's integration
+                // ends (below), not after its reduction finishes, so the several seconds of physics
+                // run inside the next two minutes of sky instead of after them. Collecting the
+                // finished sub is therefore a separate step from starting the next exposure: the
+                // two no longer happen in the same tick.
+                if (stackBatchRemaining > 0 && solarSystemCamera.HasCapturedPhoto)
                 {
                     AstroSubResult subResult = astroStack.AddSub(
                         solarSystemCamera.Filter, solarSystemCamera.GetLastCaptureGray(),
                         solarSystemCamera.FovDeg, solarSystemCamera.ExposureSeconds,
-                        solarSystemCamera.GetDefectPixelIndices());
+                        solarSystemCamera.GetDefectPixelIndices(),
+                        solarSystemCamera.LastRegistrationX, solarSystemCamera.LastRegistrationY);
                     solarSystemCamera.ConsumeCapturedPhoto();
 
                     if (subResult == AstroSubResult.FilterFull)
@@ -521,16 +530,32 @@ namespace ExoInstruments
                     }
                     else
                     {
-                        stackBatchRemaining--;
-                        if (stackBatchRemaining > 0 && CanExposePhotography())
+                        stackBatchCollected++;
+                        if (stackBatchCollected >= stackBatchRemaining)
                         {
-                            solarSystemCamera.BeginExposure(selectedPhotographyTarget);
-                        }
-                        else if (stackBatchRemaining > 0)
-                        {
-                            stackBatchInterruptedMessage = "Series stopped: it must be night and the body above the horizon.";
                             stackBatchRemaining = 0;
+                            stackBatchQueued = 0;
+                            stackBatchCollected = 0;
                         }
+                    }
+                }
+
+                // Open the shutter again the moment nothing is integrating and nothing is waiting to
+                // be rendered -- which is true while the previous frame is still being reduced.
+                if (stackBatchRemaining > 0 && stackBatchQueued < stackBatchRemaining
+                    && solarSystemCamera.CanBeginExposure)
+                {
+                    if (CanExposePhotography())
+                    {
+                        solarSystemCamera.BeginExposure(selectedPhotographyTarget);
+                        stackBatchQueued++;
+                    }
+                    else
+                    {
+                        stackBatchInterruptedMessage = "Series stopped: it must be night and the body above the horizon.";
+                        stackBatchRemaining = 0;
+                        stackBatchQueued = 0;
+                        stackBatchCollected = 0;
                     }
                 }
             }
@@ -2252,18 +2277,25 @@ namespace ExoInstruments
             {
                 stackBatchInterruptedMessage = null;
                 stackBatchRemaining = stackBatchSize;
+                stackBatchCollected = 0;
+                stackBatchQueued = 1;
                 solarSystemCamera.BeginExposure(selectedPhotographyTarget);
             }
             GUI.enabled = true;
             if (batchRunning && GUILayout.Button("Cancel series", GUILayout.Height(26), GUILayout.Width(120)))
             {
                 stackBatchRemaining = 0;
+                stackBatchQueued = 0;
+                stackBatchCollected = 0;
             }
             GUILayout.EndHorizontal();
 
             if (batchRunning)
             {
-                GUILayout.Label($"Capturing series... {stackBatchSize - stackBatchRemaining}/{stackBatchSize}", smallCaptionStyle);
+                GUILayout.Label($"Capturing series... {stackBatchCollected}/{stackBatchSize}"
+                              + (solarSystemCamera.IsProcessing && solarSystemCamera.IsCapturing
+                                  ? "  (reducing the previous frame while this one integrates)" : ""),
+                                smallCaptionStyle);
             }
             else if (!string.IsNullOrEmpty(stackBatchInterruptedMessage))
             {
@@ -2302,6 +2334,19 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
             if (!string.IsNullOrEmpty(compositeReport))
                 GUILayout.Label(compositeReport, smallCaptionStyle);
+
+            // How the subs were registered, and what it cost at the frame edge. Both matter: a
+            // centroid registration on an extended object is meaningless, and a shifted stack has a
+            // border fewer subs reached.
+            if (stackAlignSubs && astroStack.HasAnySubs && stackedCompositeTexture != null)
+            {
+                GUILayout.Label(
+                    (astroStack.LastAlignmentUsedPointing
+                        ? $"Registered on the recorded pointing, worst shift {astroStack.LastAlignmentShiftPx:F1} px"
+                        : "Registered on the brightness centroid (no pointing recorded) -- unreliable on an extended object")
+                    + $"; every sub covers {astroStack.LastFullCoverageFraction * 100.0:F1}% of the frame",
+                    smallCaptionStyle);
+            }
 
             GUILayout.Space(4);
             GUILayout.BeginHorizontal();
