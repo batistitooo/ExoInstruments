@@ -94,7 +94,32 @@ def write_png(path, gray):
         f.write(chunk(b"IEND", b""))
 
 
+def siril_autostretch(a, shadow_clip=-2.8, target_background=0.25):
+    """Siril's own screen transfer function: a midtone transfer curve anchored on the median and
+    the MAD, which is what the user is actually looking through. Far harder than a percentile log,
+    and therefore the honest stretch to hunt a faint artefact under."""
+    median = np.median(a)
+    mad = np.median(np.abs(a - median)) * 1.4826
+    lo = max(a.min(), median + shadow_clip * mad)
+    x = np.clip((a - lo) / max(1e-12, a.max() - lo), 0.0, 1.0)
+
+    def mtf(v, m):
+        return ((m - 1.0) * v) / ((2.0 * m - 1.0) * v - m)
+
+    target, lo_m, hi_m = np.median(x), 1e-6, 0.5
+    for _ in range(60):
+        mid = 0.5 * (lo_m + hi_m)
+        if mtf(target, mid) < target_background:
+            hi_m = mid
+        else:
+            lo_m = mid
+    return mtf(x, 0.5 * (lo_m + hi_m))
+
+
 def stretch(values, mode):
+    if mode == "autostretch":
+        finite = np.isfinite(values)
+        return (siril_autostretch(np.where(finite, values, np.nanmedian(values))) * 255).astype(np.uint8)
     finite = np.isfinite(values)
     v = np.where(finite, values, 0.0)
     lo, hi = np.percentile(v[finite], [0.5, 99.9]) if finite.any() else (0.0, 1.0)
@@ -114,7 +139,9 @@ def main():
     p.add_argument("--dec", required=True, help="declination, e.g. -02:12:17")
     p.add_argument("--instrument", default="redcat", choices=sorted(INSTRUMENTS))
     p.add_argument("--binning", type=int, default=1)
-    p.add_argument("--stretch", default="log", choices=["linear", "log", "asinh"])
+    p.add_argument("--stretch", default="log", choices=["linear", "log", "asinh", "autostretch"])
+    p.add_argument("--creases", action="store_true",
+                   help="also write the Laplacian, which isolates the interpolation's facet edges")
     p.add_argument("--zoom", action="store_true", help="also write a 1:1 crop of the centre")
     p.add_argument("--out", default="field")
     args = p.parse_args()
@@ -162,6 +189,19 @@ def main():
     for tag, arr in (("interp", interp), ("nearest", nearest)):
         write_png(f"{args.out}_{tag}.png", stretch(arr, args.stretch))
         print(f"wrote {args.out}_{tag}.png")
+
+    if args.creases:
+        # Bilinear interpolation is continuous but its DERIVATIVE is not, so cell boundaries leave
+        # creases. The Laplacian isolates them, and the worst step between adjacent pixels says
+        # whether any of it is visible at all against 255 display levels.
+        v = siril_autostretch(np.nan_to_num(interp))
+        lap = np.abs(4 * v[1:-1, 1:-1] - v[:-2, 1:-1] - v[2:, 1:-1] - v[1:-1, :-2] - v[1:-1, 2:])
+        step = np.percentile(np.abs(np.diff(v, axis=1)), 99.99) * 255
+        print(f"worst step between adjacent pixels under Siril's own autostretch: "
+              f"{step:.2f} of 255 display levels")
+        write_png(f"{args.out}_creases.png",
+                  (np.clip(lap / max(1e-12, np.percentile(lap, 99.9)), 0, 1) * 255).astype(np.uint8))
+        print(f"wrote {args.out}_creases.png")
 
     if args.zoom:
         cw, ch = min(1000, w), min(700, h)
