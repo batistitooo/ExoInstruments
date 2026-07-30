@@ -592,6 +592,24 @@ Anything visible in the preview is in the survey; anything visible in the game b
 preview is in the pipeline. It also prints how many frame pixels one map cell spans, which is the
 number that identifies a cell-scale artefact.
 
+### Continuum-subtraction residuals
+
+SHASSA is a **continuum-subtracted** survey: an off-band image is scaled and removed from the
+H-alpha one to take out stellar continuum. At a bright star that subtraction over-corrects and
+drives the residual to zero or below (Gaustad et al. 2001, PASP 113, 1326, Sect. 4). Across the
+fourteen patches, **795 cells of 542,673** come out non-positive that way, 0.146%, concentrated in
+discs on the brightest stars.
+
+Clamped to zero -- which the packer used to do -- those become *sky brightness of zero*, and at
+0.86 arcmin a cell is 13 RedCat pixels, so a 2x2 clump is a 27-pixel black disc in the middle of a
+nebula. A 120 s frame of the Horsehead showed exactly that: seven discs, 20 to 33 px across,
+centred on the brightest stars, identical in every sub and in both filters.
+
+A non-positive value is not a measurement of zero emission. Both the packer and the reader now treat
+it as **no value**, so the patch declines to answer and the pixel falls through to the Finkbeiner
+composite, whose 6 arcmin beam is far too coarse to carry a stellar residual. The reader's check
+means an already-installed patch set is fixed without repacking.
+
 ## Optional: the galaxy catalogue
 
 **Nothing ships.** Galaxies are rendered from their own measured shape, so the catalogue supplies

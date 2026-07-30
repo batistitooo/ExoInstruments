@@ -430,3 +430,15 @@ frame to divide by.
       It prints the profile down the column after every stage and flags the one whose relative
       spread jumps, which is the stage that introduced the structure.
 - [ ] **16.3** Delete the dumps afterwards; they are not small.
+
+## 17. Continuum-subtraction residuals in the patches
+
+- [ ] **17.1** Photograph the Horsehead field (05h41m00s -02d12'17\") on the RedCat at 1x1 in `Ha`,
+      120 s. The black discs centred on the brightest stars must be gone: 795 patch cells of 542,673
+      are non-positive SHASSA subtraction residuals, and at 0.86 arcmin a 2x2 clump of them is a
+      27-pixel disc.
+- [ ] **17.2** The nebula's fine structure must be unchanged everywhere else -- the fall-through is
+      per pixel, so only the residual cells switch to the composite.
+- [ ] **17.3** Same in `SII`, where the residuals appeared identically.
+- [ ] **17.4** The other patches carry them too: IC 2177 Seagull has 362 such cells, the worst of
+      the fourteen. Worth one frame.

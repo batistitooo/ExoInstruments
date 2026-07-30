@@ -286,6 +286,24 @@ namespace ExoInstruments.Core
             {
                 if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[patchIndex], out double v))
                     return false;
+
+                // A NON-POSITIVE VALUE IS NOT A MEASUREMENT OF ZERO EMISSION. SHASSA is a
+                // continuum-subtracted survey: an off-band image is scaled and subtracted from the
+                // H-alpha one to remove stellar continuum, and at a bright star that subtraction
+                // over-corrects and drives the residual to zero or below (Gaustad et al. 2001,
+                // PASP 113, 1326, Sect. 4). The packer clamps the negative half away, so what
+                // survives is a disc of exact zeros centred on every bright star in the field.
+                //
+                // Rendered as sky brightness those become black holes in the middle of a nebula --
+                // which is what a 120 s H-alpha frame of the Horsehead showed, discs 20 to 33
+                // pixels across centred on the brightest stars, in every sub and both filters.
+                //
+                // So the patch declines to answer here and the caller falls through to the base
+                // map, whose 6 arcmin beam is far too coarse to carry a stellar residual. That is
+                // what a fall-through is for, and it is what every user of these surveys does with
+                // the subtraction residuals.
+                if (!(v > 0.0)) return false;
+
                 sum += weightScratch[i] * v;
             }
             rayleighs = sum;

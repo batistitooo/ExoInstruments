@@ -294,8 +294,20 @@ def main():
 
         # The crossfade. Calibrated SHASSA through the middle, the composite at the rim.
         calibrated = scale * filled + offset
-        clipped = int(np.count_nonzero(calibrated < 0.0))
-        calibrated = np.maximum(0.0, calibrated)
+
+        # A NON-POSITIVE VALUE IS NOT A MEASUREMENT OF ZERO EMISSION, and clamping it to zero -- as
+        # this used to -- turns a survey artefact into sky brightness. SHASSA is continuum
+        # subtracted: an off-band image is scaled and removed from the H-alpha one, and at a bright
+        # star that subtraction over-corrects and drives the residual to zero or below (Gaustad et
+        # al. 2001, PASP 113, 1326, Sect. 4). Clamped, what survives is a disc of exact zeros
+        # centred on every bright star in the patch, which renders as a black hole in the middle of
+        # a nebula -- discs 20 to 33 pixels across on a 120 s frame of the Horsehead.
+        #
+        # NaN instead, so the reader declines to answer there and falls through to the composite,
+        # whose 6 arcmin beam is far too coarse to carry a stellar residual. Same rule the base
+        # map's own packer already applies to negative pixels.
+        clipped = int(np.count_nonzero(calibrated <= 0.0))
+        calibrated = np.where(calibrated > 0.0, calibrated, np.nan)
         r = np.hypot(xx - (nx - 1) / 2.0, yy - (ny - 1) / 2.0) / (min(nx, ny) / 2.0)
         taper = np.clip((1.0 - r) / CrossfadeFraction, 0.0, 1.0)
         total = taper * calibrated + (1.0 - taper) * comp_here
