@@ -561,7 +561,17 @@ composite. The fine term is apodised to zero across the patch's outer margin, so
 base map continuously instead of leaving a step. Measured residual after matching at 6′: about 20%,
 which is the uncertainty on the *amplitude* of the fine structure and is reported per patch.
 
-**What it does not fix.** SHASSA stops at +15°, so IC 1396 (+57°), North America (+44°), the Heart and
+**What it does not fix, and one thing it exposes.** Two of these objects are unusable at any
+resolution: both all-sky Hα surveys carry a **detector bleed streak** through M42 -- a saturated
+core spills charge along a CCD row, leaving a bright horizontal spike across 31% of one row of the
+cutout -- and Carina and the Tarantula have milder versions. It is in the published data and nothing
+here removes it, so the packer detects it (by contrast against the vertical neighbourhood, since a
+row percentile cannot separate a one-row trail from a row that merely crosses a bright nebula) and
+warns per patch. The per-patch **rim agreement** with the base map is printed too, and it is the
+number that says which targets are worth pointing at: the Horsehead, Flame and Eagle join within 8%,
+the Lagoon within 10%, the Rosette within 26% -- while M42's rim disagrees by **392%**.
+
+SHASSA stops at +15°, so IC 1396 (+57°), North America (+44°), the Heart and
 Soul, the Bubble and the Cave stay at 6′. VTSS covers the northern plane at 1.6′ and is the obvious
 next step. And even at 0.8′ these are survey images: M42's Trapezium spans 6 elements rather than
 0.8, which is a nebula rather than a smudge, but it is not a two-arcsecond astrophotograph and will
