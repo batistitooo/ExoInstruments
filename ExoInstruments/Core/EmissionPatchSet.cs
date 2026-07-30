@@ -212,27 +212,50 @@ namespace ExoInstruments.Core
         /// </summary>
         public Patch FindCoveringPatch(double raDeg, double decDeg, double fieldRadiusDeg)
         {
-            if (patches == null) return null;
+            List<Patch> all = FindOverlappingPatches(raDeg, decDeg, fieldRadiusDeg);
+            return all.Count > 0 ? all[0] : null;
+        }
+
+        /// <summary>
+        /// EVERY patch a field overlaps, nearest first.
+        ///
+        /// A wide field routinely covers more than one. The Horsehead, the Flame and M42 sit inside
+        /// three degrees of each other, so a single RedCat frame spans all three patches; returning
+        /// only the nearest would render one of them at 0.86 arcmin and the other two at the base
+        /// map's 6, in the same picture, for no reason. The per-pixel lookup already falls through
+        /// patch by patch, so a caller can simply try each in turn.
+        /// </summary>
+        public List<Patch> FindOverlappingPatches(double raDeg, double decDeg, double fieldRadiusDeg)
+        {
+            var found = new List<Patch>();
+            if (patches == null) return found;
             double ra = raDeg * Math.PI / 180.0, dec = decDeg * Math.PI / 180.0;
             double x = Math.Cos(dec) * Math.Cos(ra), y = Math.Cos(dec) * Math.Sin(ra), z = Math.Sin(dec);
 
-            Patch best = null;
-            double bestCos = -2.0;
+            var cosines = new List<double>();
             foreach (Patch p in patches)
             {
                 double cos = x * p.Cx + y * p.Cy + z * p.Cz;
                 double reach = Math.Cos(Math.Min(180.0, p.RadiusDeg + Math.Max(0.0, fieldRadiusDeg))
                                         * Math.PI / 180.0);
-                if (cos >= reach && cos > bestCos) { bestCos = cos; best = p; }
+                if (cos < reach) continue;
+                int at = cosines.Count;
+                while (at > 0 && cosines[at - 1] < cos) at--;
+                cosines.Insert(at, cos);
+                found.Insert(at, p);
             }
-            return best;
+            return found;
         }
 
-        /// <summary>Per-caller lookup state, so a background frame fill keeps its own run cursor.</summary>
+        /// <summary>
+        /// Per-caller lookup state, so a background frame fill keeps its own run cursor -- one per
+        /// patch, since a frame may draw from several and they have unrelated run tables.
+        /// </summary>
         public struct Cursor
         {
-            internal int Run;
-            public static Cursor New() => new Cursor { Run = 0 };
+            internal int[] Runs;
+            public static Cursor New(int patchCount = 1)
+                => new Cursor { Runs = new int[Math.Max(1, patchCount)] };
         }
 
         /// <summary>
@@ -244,15 +267,25 @@ namespace ExoInstruments.Core
         public bool TryRayleighsAtGalactic(Patch patch, double lDeg, double bDeg,
                                            long[] pixelScratch, double[] weightScratch,
                                            ref Cursor cursor, out double rayleighs)
+            => TryRayleighsAtGalactic(patch, 0, lDeg, bDeg, pixelScratch, weightScratch,
+                                      ref cursor, out rayleighs);
+
+        /// <summary>As above, with the patch's index in the caller's list so each keeps its own run cursor.</summary>
+        public bool TryRayleighsAtGalactic(Patch patch, int patchIndex, double lDeg, double bDeg,
+                                           long[] pixelScratch, double[] weightScratch,
+                                           ref Cursor cursor, out double rayleighs)
         {
             rayleighs = double.NaN;
             if (patch == null || patch.Values == null) return false;
+            if (cursor.Runs == null) cursor = Cursor.New(patchIndex + 1);
+            if (patchIndex < 0 || patchIndex >= cursor.Runs.Length) patchIndex = 0;
 
             Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
             double sum = 0.0;
             for (int i = 0; i < 4; i++)
             {
-                if (!patch.TryValue(pixelScratch[i], ref cursor.Run, out double v)) return false;
+                if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[patchIndex], out double v))
+                    return false;
                 sum += weightScratch[i] * v;
             }
             rayleighs = sum;

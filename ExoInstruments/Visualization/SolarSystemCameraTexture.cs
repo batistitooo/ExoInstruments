@@ -2185,17 +2185,25 @@ namespace ExoInstruments.Visualization
             // span two patches, and asking per pixel would be a hundred dot products for an answer
             // that does not change.
             EmissionPatchSet patchSet = EmissionPatches;
-            EmissionPatchSet.Patch patch = null;
-            var patchCursor = EmissionPatchSet.Cursor.New();
+            List<EmissionPatchSet.Patch> patchList = null;
             if (patchSet != null && patchSet.IsLoaded)
             {
                 double fieldRadiusDeg = 0.5 * Math.Sqrt((double)w * w + (double)h * h)
                                       * inputs.PlateScaleArcsec / 3600.0;
-                patch = patchSet.FindCoveringPatch(LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg,
-                                                   fieldRadiusDeg);
+                patchList = patchSet.FindOverlappingPatches(
+                    LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg, fieldRadiusDeg);
+                if (patchList.Count == 0) patchList = null;
             }
-            LastEmissionPatchName = patch != null ? patch.Name : null;
-            LastEmissionResolutionArcmin = patch != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
+            var patchCursor = EmissionPatchSet.Cursor.New(patchList != null ? patchList.Count : 1);
+
+            if (patchList != null)
+            {
+                var patchNames = new string[patchList.Count];
+                for (int i = 0; i < patchList.Count; i++) patchNames[i] = patchList[i].Name;
+                LastEmissionPatchName = string.Join(" + ", patchNames);
+            }
+            else LastEmissionPatchName = null;
+            LastEmissionResolutionArcmin = patchList != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
             long patchPixels = 0;
 
             for (int y = 0; y < h; y++)
@@ -2208,12 +2216,20 @@ namespace ExoInstruments.Visualization
                     // The patch carries total surface brightness, apodised into the base map at its
                     // own edge, so it substitutes rather than adds. Any pixel it cannot answer for
                     // falls through to the base map.
-                    double r;
-                    if (patch != null && patchSet.TryRayleighsAtGalactic(
-                            patch, l, b, pixelScratch, weightScratch, ref patchCursor, out r))
-                        patchPixels++;
-                    else
-                        r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
+                    double r = double.NaN;
+                    bool fromPatch = false;
+                    if (patchList != null)
+                    {
+                        for (int pi = 0; pi < patchList.Count; pi++)
+                        {
+                            if (!patchSet.TryRayleighsAtGalactic(patchList[pi], pi, l, b,
+                                    pixelScratch, weightScratch, ref patchCursor, out r)) continue;
+                            fromPatch = true;
+                            patchPixels++;
+                            break;
+                        }
+                    }
+                    if (!fromPatch) r = map.RayleighsAtGalactic(l, b, pixelScratch, weightScratch);
                     if (double.IsNaN(r)) continue;
                     counted++;
                     if (!(r > 0.0)) continue;
