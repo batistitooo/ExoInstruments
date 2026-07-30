@@ -1,0 +1,46 @@
+Metadata-Version: 2.0
+Name: skycalc-cli
+Version: 1.4
+Summary: ESO SkyCalc Command Line Interface
+Home-page: http://www.eso.org/observing/etc/bin/gen/form?INS.MODE=swspectr+INS.NAME=SKYCALC
+Author: European Southern Observatory
+Author-email: usd-help@eso.org
+License: MIT
+Keywords: sky model observatory telescope astronomy ephemeris sun moon
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Topic :: Scientific/Engineering :: Astronomy
+Requires-Python: >=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, <4
+Requires-Dist: requests
+Requires-Dist: setuptools
+
+######################################
+ SkyCalc Command Line Interface (CLI)
+######################################
+
+============
+Installation
+============
+
+The SkyCalc CLI works in Python 2.7 or Python3. Install the SkyCalc CLI
+on your computer using the command: ::
+
+    pip install --user skycalc_cli
+
+This will also install skycalc_cli's dependency, i.e. the requests package for
+making HTTP calls.
+
+=============
+Documentation
+=============
+
+Documentation can be found on the `ESO SkyCalc Web Page <https://www.eso.org/observing/etc/doc/skycalc/helpskycalccli.html>`_.
+
+

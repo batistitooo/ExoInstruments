@@ -1867,6 +1867,18 @@ namespace ExoInstruments
                                   + $"(field {fieldArcsec / 60.0:F1}' wide)", smallCaptionStyle);
                 }
 
+                // What the sky itself emits into this filter -- the number a nebula's surface
+                // brightness competes against, and the reason [O I] is not imaged from the ground.
+                double airglow = solarSystemCamera.LastAirglowRayleighsInBand;
+                if (airglow > 0.0)
+                {
+                    GUILayout.Label(
+                        $"Airglow in this band: {airglow:F1} R "
+                        + $"({solarSystemCamera.LastAirglowLineShare * 100.0:F0}% sky emission lines, "
+                        + "ESO SkyCalc / Hanuschik 2003)",
+                        smallCaptionStyle);
+                }
+
                 double emission = solarSystemCamera.LastEmissionRayleighs;
                 if (!double.IsNaN(emission))
                 {

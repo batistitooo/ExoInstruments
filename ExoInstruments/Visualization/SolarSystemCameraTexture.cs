@@ -865,6 +865,12 @@ namespace ExoInstruments.Visualization
         /// <summary>Zenith distance the last frame was taken at, degrees.</summary>
         public double LastZenithDistanceDeg { get; private set; }
 
+        /// <summary>Airglow surface brightness the active filter's passband sees, rayleighs, van Rhijn included. The number a nebula's own surface brightness competes against.</summary>
+        public double LastAirglowRayleighsInBand { get; private set; }
+
+        /// <summary>Fraction of that which is line emission rather than airglow continuum.</summary>
+        public double LastAirglowLineShare { get; private set; }
+
         /// <summary>True when the last capture's adaptive-optics halo used a kernel spanning the whole frame, so nothing detectable was truncated, rather than the bounded fallback. See ApplyPsf.</summary>
         public bool LastHaloSpannedFrame { get; private set; }
 
@@ -1721,17 +1727,17 @@ namespace ExoInstruments.Visualization
             // The sky is summed in two groups, because its terms do not share a spectrum. Three of
             // the four are sunlight scattered off something -- the zodiacal dust cloud, the Moon,
             // and the daytime atmosphere itself -- so they genuinely carry the solar spectral
-            // shape. Airglow does not: it is atmospheric line emission (the OI 557.7nm line and
-            // the OH Meinel bands), with no continuum shape this pipeline could integrate, so it
-            // is integrated flat and assumes nothing. Summing all four and integrating once would
-            // have forced one spectrum on all of them.
-
-            // Airglow is emitted inside the atmosphere: the van Rhijn path lengthening brightens
-            // it toward the horizon while extinction over the same path dims it, and the two
-            // largely cancel, which is why both are applied and neither alone.
-            double fluxFlat = Math.Pow(10.0, -0.4 * SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2)
-                            * SkyBrightnessModel.AirglowVanRhijnFactor(zenithAngleDeg, planetRadius)
-                            * transmission;
+            // shape. Airglow does not: it is atmospheric LINE emission, and it is no longer
+            // integrated flat. ESO's measured sky model supplies its real spectrum -- the [O I]
+            // lines, sodium, the OH Meinel forest and the residual continuum -- so a narrowband
+            // filter now sees the sky IT sees: an H-alpha filter sits in a window between OH
+            // bands, an [O I] 6300 filter stares straight at 150 rayleighs of the very line it is
+            // trying to image. A flat sky made those two look equally easy. See Core/Airglow.
+            //
+            // Extinction is inside ThroughputAt (the response carries the field's own airmass) and
+            // the van Rhijn factor is applied per bin inside Airglow, with the [O I] red doublet
+            // on its own 250 km layer -- so neither appears here, where applying either again
+            // would double it.
 
             // Zodiacal light originates outside the atmosphere, so it is simply attenuated by it.
             double fluxSolar = Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
@@ -1747,23 +1753,30 @@ namespace ExoInstruments.Visualization
             // multiplier on the sky that is already there, since that light is its source -- so it
             // applies to both groups alike.
             double veiling = 1.0 + cloudCoverage * CloudVeilingSkyGain;
-            fluxFlat *= veiling;
             fluxSolar *= veiling;
 
             // The response is used without extinction here and the transmission above is applied
             // per term instead, since each of the four is attenuated differently.
             double area = RealApertureAreaCm2();
             double nd = NdFilterTransmission(NdFilter);
-            double perSecond =
-                SkyBrightnessModel.ElectronsPerPixelPerSecond(
-                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat),
-                    inputs.PlateScaleArcsec, inputs.Response, area, nd, 0.0)
+            double airglowPerSecond = Airglow.ElectronsPerPixelPerSecond(
+                inputs.Response, inputs.PlateScaleArcsec, area, zenithAngleDeg) * nd * veiling;
+            double perSecond = airglowPerSecond
               + SkyBrightnessModel.ElectronsPerPixelPerSecond(
                     SkyBrightnessModel.FluxToMagPerArcsec2(fluxSolar),
                     inputs.PlateScaleArcsec, inputs.Response, area, nd,
                     SourceSpectra.SolarPhotosphereTemperatureK);
 
             inputs.SkyElectronsPerPixel = perSecond * inputs.ExposureSeconds;
+
+            // The readout: what the airglow amounts to in this band, and how much of it is lines.
+            LastAirglowRayleighsInBand = Airglow.RayleighsInBand(
+                inputs.Response, zenithAngleDeg, out double lineShare) * veiling;
+            LastAirglowLineShare = lineShare;
+
+            // For the reported V surface brightness the airglow's own V-band equivalent stands in
+            // for the retired flat term; the harness checks it reproduces the classical 21.7.
+            double fluxFlat = Math.Pow(10.0, -0.4 * Airglow.VBandMagPerArcsec2(zenithAngleDeg)) * veiling;
             LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat + fluxSolar);
         }
 

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>airglow</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DumpAirglow.cs" />
+    <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/Airglow.cs" />
+    <Compile Include="$(Core)/AirglowTable.cs" />
+    <Compile Include="$(Core)/EmissionLines.cs" />
+    <Compile Include="$(Core)/PhotonFluxModel.cs" />
+    <Compile Include="$(Core)/SystemBandpass.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
+    <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericNoise.cs" />
+    <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <Compile Include="$(Core)/DetectionResult.cs" />
+    <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/PhotometricDetector.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+  </ItemGroup>
+</Project>

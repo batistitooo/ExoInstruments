@@ -1,0 +1,3 @@
+[console_scripts]
+skycalc_cli = skycalc_cli.skycalc_cli:main
+
