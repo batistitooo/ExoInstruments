@@ -3607,6 +3607,17 @@ namespace ExoInstruments
                                  "Click a target on the sky chart, or enter coordinates.", smallCaptionStyle);
                 return;
             }
+            // The mirror of the check above, for the detection instruments: a transit or RV run is
+            // built around selectedStar, which is null until something on the chart is clicked. The
+            // photography branch had its guard and this one did not, so with no star picked the
+            // button stayed live and StartObservation dereferenced null inside GetSystemPlanets --
+            // from OnGUI, so it threw on every pass for as long as the panel was open.
+            if (!methodIsPhotography && selectedStar == null)
+            {
+                GUILayout.Label($"Observation impossible: no star selected. {SelectedInstrument.DisplayName} " +
+                                 "needs a catalogue star; click one on the sky chart.", smallCaptionStyle);
+                return;
+            }
 
             double scanCost = CareerFogActive ? SelectedInstrument.ScanCostFunds : 0.0;
             if (scanCost <= 0.0)
