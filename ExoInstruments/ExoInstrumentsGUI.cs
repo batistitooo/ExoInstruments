@@ -2226,10 +2226,9 @@ namespace ExoInstruments
         /// Real astrophotography stacking workflow: capture N subs on the
         /// current filter in one batch (see the Update() batch driver), stack
         /// each filter's subs (optionally aligned by brightness centroid),
-        /// then compose an LRGB image -- the stacked Luminance supplies detail
-        /// via chrominance-preserving scaling of the stacked RGB color (see
-        /// AstroImageStack.ComposeLRGB), and the stacked Halpha optionally
-        /// boosts the red channel (HaRGB). Separate from the single-shot
+        /// then compose a colour image through the instrument's own fitted
+        /// colour transform, or a named narrowband palette -- see
+        /// Visualization/ColourComposite. Separate from the single-shot
         /// Capture/Save above, which is unaffected.
         /// </summary>
         void DrawStackingControls(bool canExpose)

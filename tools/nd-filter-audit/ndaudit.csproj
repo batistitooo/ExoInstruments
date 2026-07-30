@@ -34,6 +34,7 @@
     <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/AtmosphericRefraction.cs" />
     <Compile Include="$(Core)/RadialPsfProfile.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
   </ItemGroup>

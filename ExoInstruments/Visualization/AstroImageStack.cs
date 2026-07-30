@@ -245,63 +245,6 @@ namespace ExoInstruments.Visualization
 
         public void ClearAll() => rawSubs.Clear();
 
-        /// <summary>
-        /// Stacks each filter (with optional centroid alignment and sky-background subtraction),
-        /// then composes LRGB via luminance transfer: R/G/B are scaled by (L stack / rgbLum),
-        /// capped at MaxLuminanceScale. The background subtraction + cap keep dark-sky pixels
-        /// neutral instead of blowing up as color noise. Halpha boosts the red channel when present.
-        /// Missing RGB falls back to black (bi-color, not a crash). Asinh-stretched for display.
-        /// When lucky is true, each filter first drops to its sharpest LuckyKeepFraction of subs
-        /// (by ComputeSharpness) and always aligns, regardless of the align flag.
-        /// Returns null with an error when nothing has been captured yet.
-        /// </summary>
-        public Color[] ComposeLRGB(bool align, bool lucky, float haBlendStrength, out string error)
-        {
-            if (!HasAnySubs)
-            {
-                error = "No subs captured yet -- capture at least one series first.";
-                return null;
-            }
-
-            float[] stackedL = StackFilter(CameraFilter.Luminance, align, lucky);
-            float[] stackedR = StackFilter(CameraFilter.Red, align, lucky);
-            float[] stackedG = StackFilter(CameraFilter.Green, align, lucky);
-            float[] stackedB = StackFilter(CameraFilter.Blue, align, lucky);
-            float[] stackedHa = StackFilter(CameraFilter.HAlpha, align, lucky);
-
-            int n = SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight;
-            var result = new Color[n];
-            for (int i = 0; i < n; i++)
-            {
-                float r = stackedR != null ? stackedR[i] : 0f;
-                float g = stackedG != null ? stackedG[i] : 0f;
-                float b = stackedB != null ? stackedB[i] : 0f;
-
-                if (stackedL != null)
-                {
-                    const float epsilon = 1e-4f;
-                    float rgbLum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                    float scale = Mathf.Min(MaxLuminanceScale, Mathf.Max(0f, stackedL[i]) / Mathf.Max(rgbLum, epsilon));
-                    r *= scale;
-                    g *= scale;
-                    b *= scale;
-                }
-
-                if (stackedHa != null && haBlendStrength > 0f)
-                {
-                    r += haBlendStrength * stackedHa[i];
-                }
-
-                result[i] = new Color(
-                    AsinhStretch(Mathf.Max(0f, r)),
-                    AsinhStretch(Mathf.Max(0f, g)),
-                    AsinhStretch(Mathf.Max(0f, b)),
-                    1f);
-            }
-
-            error = null;
-            return result;
-        }
 
         /// <summary>
         /// Normalized arcsinh stretch: 0 -> 0, 1 -> 1, monotonic, lifting

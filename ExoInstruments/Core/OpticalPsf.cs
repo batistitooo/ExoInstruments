@@ -840,37 +840,67 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Clips a kernel to a CIRCULAR support and scales it to unit sum.
+        /// Clips a kernel to a CIRCULAR support -- when that costs nothing real -- and scales it to
+        /// unit sum.
         ///
         /// Circular because the array is square and a real PSF is not. Sampled into its corners, a
         /// square kernel of half-width R carries the profile out to R at the mid-edges and to
         /// R*sqrt(2) at the corners, so where it ends depends on azimuth -- and where a kernel ends
         /// is where the surface brightness steps to zero. That step is what draws a square around a
-        /// bright star. Clipping to the inscribed circle does not remove the step, it makes it
-        /// isotropic, which is the shape the physics has; the amplitude is the business of the
-        /// radius, chosen in AtmosphericRadiusFor.
+        /// bright star. Clipping to the inscribed circle makes the step isotropic, which is the
+        /// shape the physics has.
         ///
-        /// Unit sum, so convolution conserves total flux despite the finite support.
+        /// BUT ONLY WHEN THE RING IT DISCARDS IS EMPTY. On a wide seeing kernel the annulus between
+        /// the inscribed circle and the corners holds ~1e-4 of the energy and the clip is free. On a
+        /// compact kernel -- the RedCat's whole PSF spans two pixels -- that annulus holds several
+        /// percent of REAL profile, and clipping it re-concentrated the energy enough to shift the
+        /// encircled-energy curve 17% against GalSim. So the decision is measured, not assumed: the
+        /// clip applies only when the annulus carries less than CircularClipBudget of the total,
+        /// which reproduces the isotropic edge exactly where it was needed and the full square
+        /// exactly where GalSim-validated physics lives.
+        ///
+        /// Unit sum either way, so convolution conserves total flux despite the finite support.
         /// </summary>
         private static float[] Normalise(double[] kernel, int radius)
         {
             int size = 2 * radius + 1;
             double limit = (double)radius * radius;
-            double sum = 0.0;
+            double inside = 0.0, annulus = 0.0;
             for (int dy = -radius; dy <= radius; dy++)
             {
                 int row = (dy + radius) * size;
                 for (int dx = -radius; dx <= radius; dx++)
                 {
-                    if ((double)dx * dx + (double)dy * dy > limit) kernel[row + dx + radius] = 0.0;
-                    else sum += kernel[row + dx + radius];
+                    double v = kernel[row + dx + radius];
+                    if ((double)dx * dx + (double)dy * dy > limit) annulus += v;
+                    else inside += v;
                 }
             }
-
+            double total = inside + annulus;
             var result = new float[size * size];
-            if (sum <= 0.0) { result[radius * size + radius] = 1f; return result; }
-            for (int i = 0; i < kernel.Length; i++) result[i] = (float)(kernel[i] / sum);
+            if (total <= 0.0) { result[radius * size + radius] = 1f; return result; }
+
+            bool clip = annulus <= CircularClipBudget * total;
+            double sum = clip ? inside : total;
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                int row = (dy + radius) * size;
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    int i = row + dx + radius;
+                    bool outside = clip && (double)dx * dx + (double)dy * dy > limit;
+                    result[i] = outside ? 0f : (float)(kernel[i] / sum);
+                }
+            }
             return result;
         }
+
+        /// <summary>
+        /// Largest fraction of a kernel's energy the circular clip may discard. 1e-3 sits an order
+        /// of magnitude above the 1e-4 the wide seeing kernels actually carry in their corners --
+        /// so they keep their isotropic edge -- and two orders below the several percent a compact
+        /// kernel carries there, so nothing measurable is ever thrown away.
+        /// </summary>
+        private const double CircularClipBudget = 1e-3;
     }
 }

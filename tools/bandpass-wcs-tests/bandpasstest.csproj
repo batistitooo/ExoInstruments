@@ -37,6 +37,7 @@
     <Compile Include="$(Core)/FluxSample.cs" />
     <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/AtmosphericRefraction.cs" />
     <Compile Include="$(Core)/RadialPsfProfile.cs" />
     <Compile Include="$(Core)/DirectImagingSimulator.cs" />
     <Compile Include="$(Core)/DirectImagingResult.cs" />

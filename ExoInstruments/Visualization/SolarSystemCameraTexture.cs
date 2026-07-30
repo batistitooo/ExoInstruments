@@ -2957,7 +2957,7 @@ namespace ExoInstruments.Visualization
             // luminance-weighted sum, matching FilterSignal's own Luminance formula -- instead
             // scales each channel by its real relative share of that luminance, so R:G:B keeps
             // the body's true color ratio through calibration and into the later luminance-
-            // transfer step in AstroImageStack.ComposeLRGB (which already assumes R/G/B carry
+            // transfer step in the colour composite (which already assumes R/G/B carry
             // real relative color, not independently-normalized ones).
             // ONE pass over the render, taking both things this needs from it: the luminance sum
             // that calibrates the frame, and this filter's own channel parked in the signal plane
