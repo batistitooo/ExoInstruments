@@ -663,15 +663,40 @@ namespace ExoInstruments.Core
             NativeSensorHeightPx = 2822,
             NativePixelSizeMeters = 4.63e-6,
             QuantumEfficiency = 0.90,
-            FullWellElectrons = 66000.0,
-            ReadNoiseElectrons = 1.2,
+            // ZWO's own ASI294 Manual (EN, V2.2, Feb 2022), section 3, mono row: "Full well 66.4k e
+            // (mono)". The product page's 66,387 e- is the same number unrounded.
+            FullWellElectrons = 66400.0,
+
+            // CORRECTED, and the correction is the point rather than the value. The figure here was
+            // 1.2 e-, which is real and published but belongs to a DIFFERENT OPERATING POINT from
+            // the full well and conversion factor beside it, so the three could not hold at once.
+            //
+            // The same manual gives the read noise as a RANGE, "1.2-8e (mono)", because this camera
+            // has two conversion-gain configurations. Its HCG mode engages at ZWO gain 120 and
+            // switches the sense node; there the read noise reaches 1.2 e- and, as the manual says,
+            // "the dynamic range can still be close to 14bit", which for a 14-bit converter puts
+            // the full well near 1.2 x 16383 = 19,700 e- and the conversion factor near 1.2 e-/ADU.
+            // The 66.4k well and the 4.05 e-/ADU derived from it are the LOW-gain point.
+            //
+            // Pairing the high-gain read noise with the low-gain well overstated this camera's
+            // dynamic range by a factor of four and made its bias frames quantisation-limited, at
+            // 1.2 e- against a converter step of 4.05 e-; tools/calibration-tests found exactly
+            // that, recovering 0.413 ADU of noise where 1.2 e- is 0.298. Taking the read noise that
+            // belongs WITH the well and the converter already here removes the inconsistency, and
+            // leaves the read noise nearly two counts wide, which is what a correctly matched chain
+            // looks like.
+            //
+            // The consequence is stated rather than hidden: this entry now models the low-gain
+            // operating point throughout, and the HCG point is a real capability of the real camera
+            // that this pipeline does not offer (section 12).
+            ReadNoiseElectrons = 8.0,               // ASI294 Manual V2.2 section 3, mono, low-gain end of "1.2-8e"
             DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
 
             AdcBits = 14,                       // ZWO's published figure for this readout mode
             // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
-            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // K = FullWell / (2^14 - 1) = 66400 / 16383 = 4.053 e-/ADU. Both inputs are ZWO's
             // own published numbers; ZWO does not tabulate K itself for this camera.
-            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            ElectronsPerAduAtUnityGain = 66400.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
             // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
@@ -826,15 +851,40 @@ namespace ExoInstruments.Core
             NativeSensorHeightPx = 2822,
             NativePixelSizeMeters = 4.63e-6,
             QuantumEfficiency = 0.90,
-            FullWellElectrons = 66000.0,
-            ReadNoiseElectrons = 1.2,
+            // ZWO's own ASI294 Manual (EN, V2.2, Feb 2022), section 3, mono row: "Full well 66.4k e
+            // (mono)". The product page's 66,387 e- is the same number unrounded.
+            FullWellElectrons = 66400.0,
+
+            // CORRECTED, and the correction is the point rather than the value. The figure here was
+            // 1.2 e-, which is real and published but belongs to a DIFFERENT OPERATING POINT from
+            // the full well and conversion factor beside it, so the three could not hold at once.
+            //
+            // The same manual gives the read noise as a RANGE, "1.2-8e (mono)", because this camera
+            // has two conversion-gain configurations. Its HCG mode engages at ZWO gain 120 and
+            // switches the sense node; there the read noise reaches 1.2 e- and, as the manual says,
+            // "the dynamic range can still be close to 14bit", which for a 14-bit converter puts
+            // the full well near 1.2 x 16383 = 19,700 e- and the conversion factor near 1.2 e-/ADU.
+            // The 66.4k well and the 4.05 e-/ADU derived from it are the LOW-gain point.
+            //
+            // Pairing the high-gain read noise with the low-gain well overstated this camera's
+            // dynamic range by a factor of four and made its bias frames quantisation-limited, at
+            // 1.2 e- against a converter step of 4.05 e-; tools/calibration-tests found exactly
+            // that, recovering 0.413 ADU of noise where 1.2 e- is 0.298. Taking the read noise that
+            // belongs WITH the well and the converter already here removes the inconsistency, and
+            // leaves the read noise nearly two counts wide, which is what a correctly matched chain
+            // looks like.
+            //
+            // The consequence is stated rather than hidden: this entry now models the low-gain
+            // operating point throughout, and the HCG point is a real capability of the real camera
+            // that this pipeline does not offer (section 12).
+            ReadNoiseElectrons = 8.0,               // ASI294 Manual V2.2 section 3, mono, low-gain end of "1.2-8e"
             DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
 
             AdcBits = 14,                       // ZWO's published figure for this readout mode
             // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
-            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // K = FullWell / (2^14 - 1) = 66400 / 16383 = 4.053 e-/ADU. Both inputs are ZWO's
             // own published numbers; ZWO does not tabulate K itself for this camera.
-            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            ElectronsPerAduAtUnityGain = 66400.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
             // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
@@ -970,15 +1020,40 @@ namespace ExoInstruments.Core
             NativeSensorHeightPx = 2822,
             NativePixelSizeMeters = 4.63e-6,
             QuantumEfficiency = 0.90,
-            FullWellElectrons = 66000.0,
-            ReadNoiseElectrons = 1.2,
+            // ZWO's own ASI294 Manual (EN, V2.2, Feb 2022), section 3, mono row: "Full well 66.4k e
+            // (mono)". The product page's 66,387 e- is the same number unrounded.
+            FullWellElectrons = 66400.0,
+
+            // CORRECTED, and the correction is the point rather than the value. The figure here was
+            // 1.2 e-, which is real and published but belongs to a DIFFERENT OPERATING POINT from
+            // the full well and conversion factor beside it, so the three could not hold at once.
+            //
+            // The same manual gives the read noise as a RANGE, "1.2-8e (mono)", because this camera
+            // has two conversion-gain configurations. Its HCG mode engages at ZWO gain 120 and
+            // switches the sense node; there the read noise reaches 1.2 e- and, as the manual says,
+            // "the dynamic range can still be close to 14bit", which for a 14-bit converter puts
+            // the full well near 1.2 x 16383 = 19,700 e- and the conversion factor near 1.2 e-/ADU.
+            // The 66.4k well and the 4.05 e-/ADU derived from it are the LOW-gain point.
+            //
+            // Pairing the high-gain read noise with the low-gain well overstated this camera's
+            // dynamic range by a factor of four and made its bias frames quantisation-limited, at
+            // 1.2 e- against a converter step of 4.05 e-; tools/calibration-tests found exactly
+            // that, recovering 0.413 ADU of noise where 1.2 e- is 0.298. Taking the read noise that
+            // belongs WITH the well and the converter already here removes the inconsistency, and
+            // leaves the read noise nearly two counts wide, which is what a correctly matched chain
+            // looks like.
+            //
+            // The consequence is stated rather than hidden: this entry now models the low-gain
+            // operating point throughout, and the HCG point is a real capability of the real camera
+            // that this pipeline does not offer (section 12).
+            ReadNoiseElectrons = 8.0,               // ASI294 Manual V2.2 section 3, mono, low-gain end of "1.2-8e"
             DarkCurrentElectronsPerSecond = 0.0022, // ZWO ASI294MM Pro, cooled to -20C
 
             AdcBits = 14,                       // ZWO's published figure for this readout mode
             // Derived, not invented: at gain 1 the full well fills the ADC range exactly, so
-            // K = FullWell / (2^14 - 1) = 66000 / 16383 = 4.029 e-/ADU. Both inputs are ZWO's
+            // K = FullWell / (2^14 - 1) = 66400 / 16383 = 4.053 e-/ADU. Both inputs are ZWO's
             // own published numbers; ZWO does not tabulate K itself for this camera.
-            ElectronsPerAduAtUnityGain = 66000.0 / 16383.0,
+            ElectronsPerAduAtUnityGain = 66400.0 / 16383.0,
             // Sea-level cosmic-ray (muon) flux, ~1 per cm^2 per minute for a horizontal
             // detector, the standard figure (Particle Data Group, Cosmic Rays review). This
             // site is at 650m/1712m rather than sea level and the flux climbs with altitude, so
@@ -1171,7 +1246,17 @@ namespace ExoInstruments.Core
             // read noise was 1.89 e- (the manual's MIT chip-1 200 kHz figure is 3.8 e-), and
             // dark current was 3.0 e-/px/h (the manual's Table 2.9 gives 2.1 +/- 0.4 e-/px/h for
             // MIT chip 1 at -120C). The old numbers appear to come from an older manual revision.
-            ReadNoiseElectrons = 3.8,                       // Table 2.8, MIT chip 1, 200 kHz
+            // CORRECTED AGAIN, and this time with both revisions in hand. Table 2.8 of the CURRENT
+            // manual (Issue 103, 30/08/18) gives 2.7 e- for MIT chip 1 at low gain / 200 kHz and
+            // 3.6 e- for chip 2. The value previously here, 3.8, is in neither revision available:
+            // Issue 82.1 (27/02/2008), which is the older FORS User Manual, gives 4.1 e- for the
+            // same chip and mode in its own Table 2.9. So the detector's measured read noise fell
+            // from 4.1 to 2.7 over the decade between the two documents, which is what a controller
+            // upgrade does and is not a contradiction between them; 3.8 sits between the two and
+            // matches neither.
+            //
+            // The current manual is the authority, so 2.7 it is.
+            ReadNoiseElectrons = 2.7,                       // Issue 103, Table 2.8, MIT chip 1, 200 kHz low gain
             DarkCurrentElectronsPerSecond = 2.1 / 3600.0,   // Table 2.9, MIT chip 1, -120C
 
             AdcBits = 16,
