@@ -1,0 +1,10 @@
+key,value
+prnu_sigma,0.0062
+quantum_efficiency,0.9
+full_well_electrons,66000
+read_noise_electrons,1.2
+electrons_per_adu,4.028566197
+bias_level_adu,2
+adc_bits,14
+fors2_linearity_deviation,0.018
+fors2_full_well_electrons,150000

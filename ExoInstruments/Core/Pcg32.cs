@@ -45,6 +45,9 @@ namespace ExoInstruments.Core
         public const ulong StreamCosmicRays = 3UL;
         public const ulong StreamDefectMap = 4UL;
         public const ulong StreamScintillation = 5UL;
+        /// <summary>The sensor's fixed photo-response and readout-offset maps. Their own streams because they are drawn from the SERIAL seed rather than the exposure's, and must not shift when an exposure's own draws change.</summary>
+        public const ulong StreamPhotoResponse = 6UL;
+        public const ulong StreamOffsetFpn = 7UL;
 
         private ulong state;
         private readonly ulong increment;

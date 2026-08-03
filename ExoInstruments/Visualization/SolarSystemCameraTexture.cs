@@ -726,6 +726,15 @@ namespace ExoInstruments.Visualization
         // Fixed hot/dead pixel map: a chip's defect pattern is persistent, so seeded
         // once from a constant, never from the target or UT.
         private int[] hotPixelIndices;
+
+        /// <summary>
+        /// The sensor's flat field and its readout offsets, as deviations packed to half precision:
+        /// 2 bytes a pixel each rather than 4, for the reason Core.SensorNonUniformity gives.
+        /// Both are properties of this instrument at this binning rather than of any exposure, so
+        /// both are built once and discarded with the resolution-sized buffers.
+        /// </summary>
+        private ushort[] flatFieldMap;
+        private ushort[] offsetFpnMap;
         private int[] deadPixelIndices;
 
         /// <summary>Real continuous gain control range; see VisualTelescopeCatalog for sourcing.</summary>
@@ -4015,15 +4024,34 @@ namespace ExoInstruments.Visualization
             var rngRead = new Pcg32(seed, Pcg32.StreamReadNoise);
             var rngCosmic = new Pcg32(seed, Pcg32.StreamCosmicRays);
 
+            EnsureFlatFieldMap();
+            EnsureOffsetFpnMap();
+
             // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
             // counting process, and the two only agree once the count is large. At the few
             // electrons per pixel a faint sky or a short dark reaches, a Gaussian goes negative
             // and is measurably the wrong distribution, the same reason GalSim and Pyxel both
             // draw real Poisson deviates here.
+            //
+            // The flat field multiplies the SCENE AND THE SKY AND NOT THE DARK, which is the whole
+            // content of the distinction between an additive and a multiplicative term. Scene light
+            // and sky light both entered the same aperture and land on the same pixel, so both are
+            // scaled by whatever fraction of the entering light that pixel converts; dark charge is
+            // generated in the silicon itself and never travelled through the optics at all. Get
+            // this wrong in either direction and dividing by a flat stops being a calibration:
+            // scale the dark too and a flat over-corrects it, leave the sky out and it under-corrects
+            // the term that dominates every deep exposure.
+            //
+            // It multiplies the MEAN, ahead of the Poisson draw, rather than the drawn sample. A
+            // pixel with 1% lower response does not collect the same photons and lose some
+            // afterwards, it collects 1% fewer, and its shot noise is the square root of what it
+            // actually collected. Scaling after the draw would leave the frame carrying the shot
+            // noise of a signal it does not have.
             for (int i = 0; i < n; i++)
             {
                 double sceneElectrons = signal != null ? signal[i] : 0.0;
-                double meanElectrons = Math.Max(0.0, sceneElectrons + skyElectrons + darkElectrons);
+                double collected = (sceneElectrons + skyElectrons) * FlatFieldAt(i);
+                double meanElectrons = Math.Max(0.0, collected + darkElectrons);
                 raw[i] = (float)SamplePoisson(rng, meanElectrons);
             }
 
@@ -4057,11 +4085,34 @@ namespace ExoInstruments.Visualization
             ApplyChargeTransferSmear(raw);
             DumpStage("cti", raw);
 
+            // The output amplifier's own departure from linearity, applied to the charge it is
+            // handed and therefore AFTER transfer and BEFORE the noise it adds. It is the one
+            // detector effect in this chain that no calibration frame in the standard set removes,
+            // because it depends on how full the well is and each calibration frame sits at its own
+            // level; see Core.DetectorLinearity.
+            double linearityDeviation = Spec.LinearityDeviationAtFullWell;
+            if (linearityDeviation > 0.0 && !double.IsNaN(linearityDeviation))
+            {
+                double fullWell = FullWellElectrons;
+                for (int i = 0; i < n; i++)
+                    raw[i] = (float)DetectorLinearity.Measured(raw[i], fullWell, linearityDeviation);
+                DumpStage("linearity", raw);
+            }
+
             // Readout: the amplifier's own noise is added in electrons, ahead of the converter,
-            // which is where it physically enters.
+            // which is where it physically enters, and alongside it the part of the readout's zero
+            // that does NOT change from frame to frame.
+            //
+            // Those two are the same electrons and opposite quantities. The Gaussian is temporal:
+            // a fresh draw every exposure, so stacking averages it down and no calibration frame can
+            // remove it. The offset is spatial and fixed: identical in every exposure this sensor
+            // ever takes, so stacking does nothing to it and subtracting a master bias removes it
+            // exactly. Adding them in the same loop is how a real readout produces them, and keeping
+            // them distinct in the model is what makes a bias frame worth taking.
             float readNoiseElectrons = (float)Spec.ReadNoiseElectrons;
             for (int i = 0; i < n; i++)
-                raw[i] += NextGaussian(rngRead, readNoiseElectrons);
+                raw[i] += NextGaussian(rngRead, readNoiseElectrons)
+                        + SensorNonUniformity.OffsetElectrons(offsetFpnMap, i);
 
             // Digitisation: charge divided by the real conversion factor K, truncated to an integer
             // count the way an ADC actually works, and clipped at the converter's own top code,
@@ -4117,7 +4168,31 @@ namespace ExoInstruments.Visualization
             Bias,
             /// <summary>A real exposure with the shutter closed: everything a bias has, plus dark current, hot pixels and cosmic rays.</summary>
             Dark,
+
+            /// <summary>
+            /// A real exposure of a uniformly illuminated screen: everything a dark has, plus the
+            /// one thing only light can reveal, which is what fraction of it each pixel converts.
+            ///
+            /// This is the frame that could not previously exist. The pipeline's photo response was
+            /// uniform to machine precision and its optics had no illumination falloff, so a flat
+            /// would have recorded a constant and dividing by it would have divided by one. It
+            /// exists now because there is finally something in the frame for it to measure: the
+            /// cosine-fourth falloff, any field stop the instrument has, and the sensor's own PRNU
+            /// where the device's is published.
+            /// </summary>
+            Flat,
         }
+
+        /// <summary>
+        /// Illumination level a flat frame is taken at, as a fraction of what the chain saturates
+        /// at. Half is the conventional operating point at both ends of the field: EMVA 1288
+        /// specifies PRNU be measured at 50% saturation, and observatory flat-field recipes aim for
+        /// between a third and a half of full scale, high enough that photon noise is negligible
+        /// against the response being measured and low enough to stay clear of the non-linear top of
+        /// the range. Against the CONVERTER's saturation rather than the well's, because on more
+        /// than one instrument here the converter is the limit that arrives first.
+        /// </summary>
+        private const double FlatFieldTargetFraction = 0.5;
 
         /// <summary>
         /// A calibration frame, in the detector's own ADU: the shutter-closed companion to a
@@ -4160,8 +4235,17 @@ namespace ExoInstruments.Visualization
             ulong seed = Pcg32.MixSeed(
                 DateTime.UtcNow.Ticks, (long)type, (long)(exposureUsedSeconds * 1000f), BinningFactor);
 
+            // A flat is a real exposure of a uniform screen, so the screen's light arrives exactly
+            // where the sky's does: as a level that is the same everywhere before the flat field
+            // scales it, and is then scaled by that field like any other light entering the
+            // aperture. Passing it as the sky term is not a trick, it is what a uniformly
+            // illuminated dome screen IS to a detector.
+            float screenElectrons = type == CalibrationFrameType.Flat
+                ? (float)(FlatFieldTargetFraction * SaturationElectrons(Gain))
+                : 0f;
+
             DetectorChainResult chain = RunDetectorChain(
-                null, 0f, darkElectrons, exposureUsedSeconds, Gain, seed, raw, null);
+                null, screenElectrons, darkElectrons, exposureUsedSeconds, Gain, seed, raw, null);
 
             biasLevelAdu = chain.BiasLevelAdu;
             lastCalibrationSeed = seed;
@@ -4211,7 +4295,10 @@ namespace ExoInstruments.Visualization
             {
                 if (idx < 0 || idx >= raw.Length) continue;
                 double sceneElectrons = signal != null ? signal[idx] : 0.0;   // null = shutter closed
-                double mean = Math.Max(0.0, sceneElectrons + skyElectrons + darkElectrons * hotMultiplier);
+                // Its photo response is the array's, through the same flat field as every other
+                // pixel: what makes it hot is its dark current, not its sensitivity to light.
+                double collected = (sceneElectrons + skyElectrons) * FlatFieldAt(idx);
+                double mean = Math.Max(0.0, collected + darkElectrons * hotMultiplier);
                 raw[idx] = (float)SamplePoisson(rng, mean);
             }
 
@@ -4959,6 +5046,101 @@ namespace ExoInstruments.Visualization
             return combined;
         }
 
+        /// <summary>
+        /// The sensor's flat field: what fraction of the light that entered the telescope each
+        /// pixel actually converts, relative to the array's mean. Built once per instrument and
+        /// binning, held as the DEVIATION FROM UNITY so that half precision costs nothing (see
+        /// Core.SensorNonUniformity for that argument in full).
+        ///
+        /// ONE MAP FOR TWO PHYSICALLY SEPARATE TERMS, and that is not a shortcut: the optics'
+        /// illumination falloff and the silicon's photo-response spread multiply, and their PRODUCT
+        /// is precisely and only what a flat frame measures. Keeping them apart in storage would
+        /// mean holding two maps to reconstruct a quantity that is never used except as one.
+        ///
+        /// Both components are properties of this instrument at this binning rather than of the
+        /// exposure, which is why the map outlives the frame and is discarded with the buffers when
+        /// the telescope or the binning changes.
+        /// </summary>
+        private void EnsureFlatFieldMap()
+        {
+            if (flatFieldMap != null) return;
+
+            int width = TextureWidth, height = TextureHeight;
+            int n = width * height;
+            if (n <= 0) return;
+
+            // The photo-response spread belongs to the sensor's own pixel, and the pixel this frame
+            // is made of may be several of them: the display binning on top of whatever the camera
+            // already sums internally (see VisualTelescopeSpec.SensorNativePixelsPerSide).
+            int nativePerSide = Math.Max(1, Spec.SensorNativePixelsPerSide) * Math.Max(1, BinningFactor);
+            double prnuSigma = SensorNonUniformity.BinnedPhotoResponseSigma(
+                Spec.PhotoResponseNonUniformity, nativePerSide);
+
+            // The same fixed serial seed the defect map uses: one piece of silicon, one set of
+            // blemishes, drawn on its own stream so neither map can shift the other.
+            ushort[] prnu = SensorNonUniformity.BuildPhotoResponseMap(
+                Pcg32.MixSeed(SensorSerialSeed), n, prnuSigma);
+
+            // Geometry for the illumination term: where each pixel sits in the focal plane, in
+            // metres from the optical axis, which is what the cosine-fourth law and any field stop
+            // are both expressed in.
+            double pixelPitchMetres = Spec.NativePixelSizeMeters * Math.Max(1, BinningFactor);
+            double focalLengthMetres = Spec.FocalLengthMeters;
+            double centreX = 0.5 * (width - 1);
+            double centreY = 0.5 * (height - 1);
+
+            var map = new ushort[n];
+            for (int y = 0; y < height; y++)
+            {
+                double dy = (y - centreY) * pixelPitchMetres;
+                int row = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    double dx = (x - centreX) * pixelPitchMetres;
+                    double illumination = FocalPlaneIllumination.Factor(
+                        dx, dy, focalLengthMetres,
+                        Spec.FieldStopSquareArcmin, Spec.ImageCircleMillimetres);
+
+                    int i = row + x;
+                    double response = illumination * SensorNonUniformity.PhotoResponse(prnu, i);
+                    map[i] = Float16.FromDouble(response - 1.0);
+                }
+            }
+
+            flatFieldMap = map;
+        }
+
+        /// <summary>The sensor's per-pixel readout offsets in electrons, built once per instrument and binning for the same reasons as the flat field above.</summary>
+        private void EnsureOffsetFpnMap()
+        {
+            if (offsetFpnMap != null) return;
+            int n = TextureWidth * TextureHeight;
+            if (n <= 0) return;
+
+            int nativePerSide = Math.Max(1, Spec.SensorNativePixelsPerSide) * Math.Max(1, BinningFactor);
+            double sigma = SensorNonUniformity.BinnedOffsetSigmaElectrons(
+                Spec.OffsetFixedPatternElectrons, nativePerSide);
+
+            offsetFpnMap = SensorNonUniformity.BuildOffsetMap(Pcg32.MixSeed(SensorSerialSeed), n, sigma);
+        }
+
+        /// <summary>
+        /// The fraction of the array's mean response this pixel has: 1 where nothing is modelled,
+        /// 0 outside a field stop, and 1 +/- a few parts in a thousand elsewhere.
+        /// </summary>
+        private float FlatFieldAt(int index)
+        {
+            if (flatFieldMap == null || index < 0 || index >= flatFieldMap.Length) return 1f;
+            return 1f + (float)Float16.ToDouble(flatFieldMap[index]);
+        }
+
+        /// <summary>
+        /// The sensor's "serial number": the constant that makes its blemishes the same silicon in
+        /// every session and on every machine. Shared by the defect map, the flat field and the
+        /// offset map, because they are features of one physical device.
+        /// </summary>
+        private const long SensorSerialSeed = 20260721L;
+
         /// <summary>Builds the hot/dead pixel index lists once from a constant seed (same defects every session).</summary>
         private void EnsureDefectMap()
         {
@@ -4968,7 +5150,6 @@ namespace ExoInstruments.Visualization
             // Pcg32 rather than System.Random, so that it is also the same on every machine and
             // every .NET runtime; a bad pixel map that moved between platforms would make any
             // reference frame unusable as a comparison.
-            const long SensorSerialSeed = 20260721L;
             var rng = new Pcg32(Pcg32.MixSeed(SensorSerialSeed), Pcg32.StreamDefectMap);
             int total = TextureWidth * TextureHeight;
             int hotCount = Mathf.Max(1, total / 3000);
@@ -5034,6 +5215,8 @@ namespace ExoInstruments.Visualization
             smearLineScratch = null;
             hotPixelIndices = null;
             deadPixelIndices = null;
+            flatFieldMap = null;
+            offsetFpnMap = null;
             lastCaptureSnapshot = null;
             hasLockedAim = false;
         }

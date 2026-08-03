@@ -1035,6 +1035,88 @@ Sourcing: FORS2's `K = 1.25 e⁻/ADU` is Table 2.8 of the ESO manual, MIT chip 1
 
 **Explicitly rejected**: GalSim's brighter-fatter effect (`SiliconSensor`) — its real formula needs per-sensor electrostatic-vertex calibration tables (e2v/ITL-specific) with no generic published values, and none of these instruments do stellar photometry (their targets are extended solar-system bodies, not point-source stars), so the effect's main visual payoff (saturated star-core broadening) barely applies to any of them.
 
+### 7.51 The calibration chain — what a flat and a bias are for (`Core/SensorNonUniformity.cs`, `Core/FocalPlaneIllumination.cs`, `Core/DetectorLinearity.cs`)
+
+Every stochastic term in §7.5 is **temporal**: draw a second frame and it is a different realisation, so stacking averages it down and no calibration frame can remove it. Real detectors also carry the opposite kind — **fixed** properties of one piece of silicon and one optical train, identical in every exposure, which stacking does *not* average down and which a calibration frame removes exactly. Until this section existed the pipeline had neither, with two consequences that made half the calibration workflow decorative:
+
+* a **bias** frame measured a pedestal that was one constant over the whole array, so subtracting it was arithmetically subtracting a number;
+* a **flat** frame could not exist at all, because the photo response was uniform to machine precision and dividing by it would have divided by 1.
+
+**Three terms, sourced separately.**
+
+| term | kind | removed by | parameter | source |
+|---|---|---|---|---|
+| Photo-response non-uniformity (PRNU) | multiplicative, fixed | flat division | 0.62 % per sensor pixel (ASI294MM Pro) | LUCID Vision Labs EMVA 1288 report, Atlas10 ATX470S-M (mono IMX492) |
+| Offset fixed-pattern noise | additive, fixed | bias subtraction | 0.97 e⁻ per sensor pixel (ASI294MM Pro) | same report's DSNU |
+| Focal-plane illumination | multiplicative, fixed | flat division | computed, no free parameter | cosine-fourth law + each instrument's published focal length and field stop |
+
+FORS2's MIT/LL CCID-20 and SPHERE/ZIMPOL publish **neither** PRNU nor DSNU — checked against the FORS2 user manual, ESO's QC1 pages, and Schmid et al. (2018), which is a detailed instrument paper with a full detector table and gives no such figure. Both are left `NaN` and the term is off, the same NOT-PUBLISHED convention the filter transmissions use, rather than borrowing another device's number. ZIMPOL loses least by it, and for a reason the same paper states: its two polarimetric beams land on the *same* pixels, so the flat-fielding factors divide out of the differential signal exactly.
+
+**Why the EMVA report and the ZWO datasheet are used for different lines of the same camera.** PRNU and DSNU are properties of the *silicon*: the spread of pixel quantum efficiency and fill factor, and the spread of the per-pixel readout offset. The IMX492 in LUCID's camera is the IMX492 in ZWO's. What is *not* transferable is anything the surrounding electronics set, and those are exactly the figures already taken from ZWO — read noise, conversion gain, cooled dark current. LUCID's 7.83 e⁻ temporal dark noise against ZWO's 1.2 e⁻ read noise is the size of that difference.
+
+**The binning law, which moves the two terms in opposite directions.** A read-out pixel that sums *n×n* sensor pixels takes the **mean** of their photo responses (so PRNU falls as 1/n) and the **sum** of their offsets (so offset FPN grows as n). Their product is invariant. This is not a refinement: the roster's amateur camera is **already a 2×2 hardware bin of its own sensor** — the ASI294MM Pro's 4144×2822 at 4.63 µm is the IMX492's 8288×5644 at 2.315 µm, confirmed at both ends (4144×2 = 8288 exactly, 4.63/2 = 2.315 exactly, and ZWO's 66,000 e⁻ well is four times the 15,655 e⁻ LUCID measure for one pixel). A figure quoted against the wrong pixel would be wrong by a factor of two, each way.
+
+**Illumination is computed, not tabulated.** Off-axis irradiance falls as cos⁴θ, θ being the field angle at the exit pupil; the exponent is four because three cosines and one inverse square coincide (Kingslake, *Optics in Photography*; Smith, *Modern Optical Engineering*). It needs no per-device measurement, only focal length and pixel position, and on this roster it separates the instruments by two orders of magnitude:
+
+| Instrument | *f* (m) | corner off-axis | cos⁴ loss at corner | detector illuminated |
+|---|---|---|---|---|
+| RC20 | 3.468 | 0.192° | 0.0022 % | 100 % |
+| RedCat 51 | 0.250 | 2.658° | **0.430 %** | 100 % |
+| CDK1000 | 6.000 | 0.111° | 0.0007 % | 100 % |
+| FORS2 | 24.556 | 0.102° | 0.0006 % | **61.95 %** |
+| SPHERE/ZIMPOL | 1718.7 | 0.0007° | 0.0000 % | 100 % |
+
+The RedCat's 0.43 % is *comparable to its sensor's own PRNU*; the RC20's is two hundred times below it. And **FORS2 is the one instrument whose detector is larger than its illuminated field**: ESO states the field of view "is restricted by the MOS unit in the focal plane of the unit telescope to about 6.8×6.8 arcminutes" while the MIT mosaic spans 8.5 arcminutes at 0.125 ″/px, so more than a third of the frame never sees the sky. The stop sits *in* the focal plane, so its shadow is geometrically sharp and is modelled as a hard edge. Published image circles are carried where they exist (RedCat 45 mm, CDK1000 100 mm) and cut nothing, every one being larger than the 23.2 mm sensor diagonal; PlaneWave publish none for the RC20.
+
+**Non-linearity** is the one detector effect no calibration frame in the standard set removes, because it depends on how full the well is and each calibration frame sits at its own level. Modelled as `measured(Q) = Q·(1 − d·Q/Q_fw)`, so *d* is exactly the relative deviation at full well and nothing else is chosen; a second-order polynomial is also the form ESO's own `QC.LIN.EFF` recipe fits. `DetectorLinearity.Correct` supplies the exact inverse, so the effect and its correction can never drift apart. FORS2 carries **1.8 %** (manual Table 2.9, MIT chip 1, low gain). *The source is ambiguous and the reading is stated rather than hidden*: the column is headed "% RMS", but read as an RMS residual about a fitted line those numbers imply ~24 % compression at full well, which no scientific CCD has and which the same manual contradicts by promising the converter saturates first; read as the signed relative deviation — which is what the QC1 parameter of that name measures — 1.8 % is ordinary. The second reading is used, the magnitude is taken, and it is applied as compression, the direction sense-node capacitance produces. ZWO publish no linearity figure, so the amateur instruments carry none.
+
+**Where each term enters the chain.** The flat field multiplies the **scene and the sky and not the dark** — scene light and sky light both entered the same aperture, dark charge never travelled through the optics — and it multiplies the **mean, ahead of the Poisson draw**, because a pixel with 1 % lower response collects 1 % fewer photons and carries the shot noise of what it actually collected, rather than collecting the same photons and losing some afterwards. Non-linearity is applied after charge transfer and before the read noise, where the output amplifier sits. The offset map is added in the same loop as the read noise, in electrons ahead of the converter.
+
+**Storage.** Both maps are drawn once per sensor from the same fixed serial seed the defect map uses (`20260721`), on their own PCG streams, and discarded with the resolution-sized buffers when the telescope or binning changes. If they were redrawn per exposure they would be temporal noise wearing a fixed pattern's name, and a flat taken on Tuesday would not correct a light taken on Wednesday. Held as the **deviation from unity**, packed to `Float16`: half precision holds a relative 4.9×10⁻⁴, which on a deviation of order 3×10⁻³ is 1.5×10⁻⁶ of absolute error, where storing the gain itself would have quantised at 16 % of the sigma being represented. Same 2 bytes a pixel, and the difference between exact and useless. The illumination term and the PRNU term share **one** map, because their product is precisely and only what a flat frame measures.
+
+**`CalibrationFrameType.Flat`** joins Bias and Dark and runs the same `RunDetectorChain`, with a uniform screen at half the converter's saturation passed as the sky term — which is what a uniformly illuminated dome screen *is* to a detector. Half is the conventional operating point at both ends of the field: EMVA 1288 specifies PRNU be measured at 50 % saturation, and observatory recipes aim for a third to a half of full scale.
+
+**Verified end to end in `tools/calibration-tests`** (see §7.511 below and that harness's README).
+
+#### 7.511 What the calibration harness establishes
+
+`tools/calibration-tests` runs the shipped Core headless and closes the loop numerically. Six sections: the maps carry the catalogue's published numbers with zero mean; binning divides one spread by *n* and multiplies the other by *n*, leaving the product invariant; the illumination table above; the linearity model inverts itself to 10⁻¹² relative; **ESO's own FORS2 bias QC1 decomposition** (RON from the pairwise difference over √2, `QC.BIAS.FPN` from the 10×10-shifted self-difference with read noise removed, `QC.BIAS.STRUCT` from the remainder) run on a simulated bias returns the numbers that went in; and a stack of 64 lights reduced with 64-frame masters lands on the photon-noise floor.
+
+That last result is the headline, and it is set up so it cannot pass vacuously. In a single frame the photon noise is 1.16 % and the PRNU 0.31 %, so a reduction that did nothing would pass; stacking is what separates them, since temporal noise falls as 1/√N and a fixed pattern does not fall at all. At 64 frames:
+
+| stage | rms |
+|---|---|
+| raw stack, pedestal removed | 0.3406 % |
+| bias and dark only, **no flat** | 0.3406 % (predicted 0.3470 % = floor and PRNU in quadrature) |
+| bias, dark **and flat** | 0.1559 % |
+| photon-noise floor | 0.1558 % |
+
+The flat removes a factor 2.18 of residual pattern and the reduced stack sits **+0.03 %** from the theoretical floor — neither above it (something left behind) nor below it (frames that were never independent).
+
+**Two findings the harness produced that are worth recording.**
+
+*The ASI294MM Pro is quantisation-limited in a bias frame.* Section 5 recovers 0.4132 ADU of read-out noise where the catalogue's 1.2 e⁻ is only 0.298 ADU, because the converter's truncation contributes 1/√12 = 0.289 ADU on top; predicted 0.4148, and the two agree. The model is right and the camera is being run at a gain where the read noise does not span a count — a real operating regime with a real remedy (more gain). Related, and separate: this catalogue entry pairs ZWO's **high-gain** read noise (1.2 e⁻) with a conversion factor derived at **unity gain** (`K = 66,000/16,383`), which are quoted at opposite ends of the camera's gain range and cannot both hold at once.
+
+*FORS2's read noise does not match the current manual.* §7.5 records a correction of 1.89 → 3.8 e⁻ citing Table 2.8, MIT chip 1, 200 kHz. The current manual (VLT-MAN-ESO-13100-1543, Issue 103, 30/08/18) gives **2.7 e⁻** for MIT chip 1 at low gain / 200 kHz and 3.6 e⁻ for chip 2. Left unchanged pending a decision on which manual revision is authoritative, and recorded here rather than silently corrected.
+
+#### 7.512 Cross-validation against ESA's Pyxel
+
+`tools/calibration-tests/compare_pyxel.py` runs this pipeline's models and Pyxel's (pyxel-sim 2.7) on the same numbers and computes the same statistic on both with the same code. Every verdict is derived from a measurement in the script; none is asserted. On the subset of effects both implement: **6 better, 1 equal, 2 worse**.
+
+| effect | verdict | why |
+|---|---|---|
+| PRNU parameterisation | **better** | ours has unit mean to 2×10⁻⁹ and its parameter is the published EMVA figure. Pyxel's parametric path builds `QE·(1 + lognormal(σ))`, whose mean is ≈ 2·QE: asking it for a 0.62 % spread and applying it **multiplies the frame by 2.00**. Its `fixed_pattern_noise_factor` is also not a relative sigma, so reaching a datasheet number means solving for it (0.013862 here). |
+| PRNU under binning | **better** | Pyxel has no binning law; a figure against the wrong pixel is wrong by 2× |
+| Offset FPN / DSNU | **better** | Pyxel's `dc_offset` adds one DC voltage to the whole array; its per-pixel patterns come from `nghxrg`, specific to HxRG infrared arrays |
+| Vignetting | **better** | Pyxel's `illumination` places a uniform/rectangular/elliptic patch; ours computes cos⁴ from each instrument's published focal length |
+| Non-linearity usability | **better** | one published deviation in, curve out, exact inverse supplied; Pyxel needs coefficients and offers no inverse |
+| Calibration closes the loop | **better** | Pyxel is a forward simulator and ships no reduction path |
+| ADC quantisation and clipping | **equal** | both clip and both truncate; identical output on 201 levels spanning the full range |
+| PRNU from a measured map | **worse** | `fixed_pattern_noise(filename=...)` loads a real per-pixel flat; nothing here can. No measured map is published for any detector on this roster, so nothing is lost today, but the capability is absent |
+| Non-linearity generality | **worse** | Pyxel fits an arbitrary polynomial and models the MCT diode mechanism; this is a single quadratic |
+
+This compares *models*, not codebases. Pyxel is a general framework covering detector families this roster has no instrument for, and most of what it offers has no counterpart here and is counted against neither side.
+
 ### 7.6 Image stacking (`Visualization/AstroImageStack.cs`)
 
 - Per-filter stacks of up to 30 subs, centroid-based alignment (brightness-weighted, falls back to frame center if nothing exceeds threshold), robust sky-background subtraction (trimmed-median of a 20px border band, trims brightest 15% first to reject limb/hot-pixel contamination).
@@ -1233,6 +1315,15 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 50. **Table 6.7's 1100 nm row is excluded as out-of-band.** It gives a delivered PSF narrower than a 2.4 m aperture's own diffraction limit, which is physically impossible, and sits one row past the detector's published 200-1000 nm range: the handbook's optical model run outside the band rather than a measurement. The pipeline correctly leaves that wavelength diffraction-limited (§13.4).
 51. **Electric-charge costs for the orbiting instrument are game balance, not a power budget.** KSP's ElectricCharge has no conversion to watts anywhere in the game, so a real spacecraft's load in watts cannot be converted into it. Labelled as balance where declared rather than dressed up with a citation (§13.6).
 52. **The downlink is KSP's antennas, not TDRSS.** The real HST stores frames on solid-state recorders and dumps them through a relay network shared with other spacecraft on a schedule; there is no counterpart in KSP and none is modelled. The frame *size* is exact arithmetic on the detector's published format (§13.6).
+53. **Modelled PRNU is white, and a real flat is not.** Thick back-illuminated CCDs show concentric **tree rings** from radial dopant variations laid down as the silicon ingot grew, and laser-annealed devices show a periodic **brick-wall** imprint of the anneal; Luo et al. (2024, AJ 168, 251) measure both on one device, the rings falling from 1.6 % peak-to-valley at 287 nm to 0.7 % at 947 nm and the brick walls from 18 % to below 0.5 %. Neither is published for any detector on this roster, and borrowing another device's rings would put a specific, visible, *wrong* structure into every frame. The white component is therefore stated as a floor rather than a full description (§7.51).
+54. **PRNU carries no wavelength dependence.** The same paper shows it is a function of wavelength, because shorter-wavelength photons are absorbed nearer the back surface. The published EMVA figure is a single broadband number, so the model has no colour term (§7.51).
+55. **PRNU and offset FPN are not published for FORS2's MIT/LL CCID-20 or for SPHERE/ZIMPOL.** Checked against the FORS2 user manual, ESO's QC1 pages and Schmid et al. (2018). Both are `NaN` and the terms are off for those two instruments, rather than borrowed from a different device (§7.51).
+56. **The FORS2 field stop is modelled as a centred square.** ESO publishes the illuminated field as "about 6.8×6.8 arcminutes" in prose and the actual pattern as a *figure* (manual Appendix G) rather than a formula, and records that the mosaic's two CCDs sit 33 arcsec off the optical axis, so the real stop is not centred on the detector. The manual's own figure is read literally (§7.51).
+57. **Dust motes and accessory vignetting are absent.** Out-of-focus shadows of dust on a filter or window are the most recognisable feature of a real amateur flat, and undersized filters, a narrow drawtube or an off-axis guider are what produce the deep corners in most of them. None is part of any instrument's published specification, and their number, size and position are a property of one night's optical surfaces rather than of the instrument. The consequence is stated plainly: **the flats this pipeline produces for the three amateur tubes are far flatter than the ones their real owners take** (§7.51).
+58. **The FORS2 shutter's illumination non-uniformity is not modelled.** The manual states the rotating half-segment shutter "guarantees uniform illumination of the CCD to the 1 % level or better for exposure times as short as 1 sec", which bounds the effect and makes it exposure-dependent — a real term that grows as the exposure shortens toward the 0.25 s minimum. The two-dimensional shutter map is not published, so only the bound is known and the shape would have to be invented (§7.51).
+59. **The converter has no differential or integral non-linearity.** Quantisation and clipping are modelled exactly (and agree with Pyxel's converter on every level tested), but a real ADC's code widths are not perfectly uniform. No DNL/INL figure is published for any converter on this roster (§7.51, §7.512).
+60. **A measured per-pixel flat cannot be loaded.** Pyxel can take a real flat-field image as its PRNU map, which is strictly better than any parametric model where one exists. Nothing here can. No measured map is published for any detector on this roster, so nothing is lost today (§7.512).
+61. **Two catalogue figures are internally inconsistent and are recorded rather than corrected.** The ASI294MM Pro pairs ZWO's high-gain read noise (1.2 e⁻) with a conversion factor derived at unity gain (`K = 66,000/16,383 = 4.029`), which are quoted at opposite ends of the camera's gain range; and FORS2's 3.8 e⁻ read noise does not match the current manual's 2.7 e⁻ for MIT chip 1 at low gain / 200 kHz. Both surfaced from the calibration harness and both await a decision on the authoritative source (§7.511).
 
 ### 12.1 The nebula-morphology limit, and the layer built for it
 

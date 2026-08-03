@@ -2464,11 +2464,16 @@ namespace ExoInstruments
                 SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType.Bias);
             if (GUILayout.Button($"Save dark ({FormatExposure(solarSystemCamera.ExposureSeconds)})", GUILayout.Height(24), GUILayout.Width(180)))
                 SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType.Dark);
+            if (GUILayout.Button("Save flat (screen)", GUILayout.Height(24), GUILayout.Width(180)))
+                SaveCalibrationFrame(SolarSystemCameraTexture.CalibrationFrameType.Flat);
             GUI.enabled = true;
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             GUILayout.Label(
                 "A dark is only valid for lights of the same exposure, gain, binning and cooler setpoint.",
+                smallCaptionStyle);
+            GUILayout.Label(
+                "A flat is only valid for lights of the same instrument, binning and filter: it measures the optics as well as the sensor.",
                 smallCaptionStyle);
             if (!string.IsNullOrEmpty(lastCalibrationFrameMessage))
                 GUILayout.Label(lastCalibrationFrameMessage, smallCaptionStyle);
@@ -2512,7 +2517,8 @@ namespace ExoInstruments
             System.IO.Directory.CreateDirectory(dir);
             string stamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
             bool isDark = type == SolarSystemCameraTexture.CalibrationFrameType.Dark;
-            string kind = isDark ? "dark" : "bias";
+            bool isFlat = type == SolarSystemCameraTexture.CalibrationFrameType.Flat;
+            string kind = isFlat ? "flat" : (isDark ? "dark" : "bias");
 
             var fitsInfo = new FitsWriter.FitsHeaderInfo
             {
@@ -2529,7 +2535,7 @@ namespace ExoInstruments
                 FilterName = FilterLabel(solarSystemCamera.Filter),
                 ObjectName = kind.ToUpperInvariant(),
                 UtcTimestamp = DateTime.UtcNow,
-                ImageType = isDark ? "Dark Frame" : "Bias Frame",
+                ImageType = isFlat ? "Flat Field" : (isDark ? "Dark Frame" : "Bias Frame"),
             };
             FillCommonFitsMetadata(ref fitsInfo);
 
@@ -2549,9 +2555,15 @@ namespace ExoInstruments
             FitsWriter.WriteGrayscale(path, adu,
                 SolarSystemCameraTexture.TextureWidth, SolarSystemCameraTexture.TextureHeight, fitsInfo);
 
-            lastCalibrationFrameMessage = isDark
-                ? $"Dark frame saved ({FormatExposure(exposureUsed)}, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}"
-                : $"Bias frame saved (0 s, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}";
+            if (isFlat)
+                lastCalibrationFrameMessage =
+                    $"Flat field saved ({FormatExposure(exposureUsed)}, {FilterLabel(solarSystemCamera.Filter)}, screen at half saturation): {System.IO.Path.GetFileName(path)}";
+            else if (isDark)
+                lastCalibrationFrameMessage =
+                    $"Dark frame saved ({FormatExposure(exposureUsed)}, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}";
+            else
+                lastCalibrationFrameMessage =
+                    $"Bias frame saved (0 s, {SolarSystemCameraTexture.DetectorTemperatureCelsius:F0} C): {System.IO.Path.GetFileName(path)}";
         }
 
         /// <summary>

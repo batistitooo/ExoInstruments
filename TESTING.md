@@ -86,6 +86,41 @@ applies.
 - [ ] **4.4** Deliberately mismatch the exposures and rerun `--subtract`. The
       script must refuse, reporting the `EXPTIME` mismatch.
 
+- [ ] **4.5** `Save flat (screen)` on the **RedCat 51**, then open it. The frame
+      must be brightest at the centre and about **0.43 % fainter at the corners**
+      — the cosine-fourth falloff of a 250 mm focal length across a 23.2 mm
+      diagonal. Repeat on the **RC20**: the same measurement must come out at
+      0.0022 %, i.e. flat to the eye. Two instruments, one camera, and the
+      difference is entirely the optics.
+
+- [ ] **4.6** `Save flat (screen)` on **FORS2**. Roughly a **third of the frame
+      must read as dark**: ESO's MOS unit stops the field at 6.8 arcmin while
+      the detector spans 8.5. The edge must be sharp, not a gradient — the stop
+      sits in the focal plane. This is the most visible single consequence of
+      the calibration work and the fastest way to see it has taken effect.
+
+- [ ] **4.7** Take a flat on the RC20, then a second one without changing
+      anything. Divide one by the other. The result must be flat to the photon
+      noise: the fixed pattern is *identical* between them, which is what makes
+      it removable. If the two flats differ by more than their shot noise, the
+      maps are being redrawn per exposure and no calibration is possible.
+
+- [ ] **4.8** Switch binning from 1x1 to 4x4 and repeat 4.7. Nothing about the
+      *procedure* changes, but the sensor's non-uniformity does: PRNU falls by
+      four and the offset spread rises by four (§7.51). The headless harness
+      checks the law numerically; this checks the game path honours it.
+
+The headless companion to all of the above needs no game running:
+
+```
+cd tools/calibration-tests
+dotnet run -p:Core=../../ExoInstruments/Core -- --out .
+./env/bin/python compare_pyxel.py
+```
+
+The first must print `ALL CHECKS PASSED`; the second prints the model-by-model
+comparison against ESA's Pyxel.
+
 ## 5. FITS header
 
 - [ ] **5.1** Export a raw sub and confirm the header carries `MAGZERO`,

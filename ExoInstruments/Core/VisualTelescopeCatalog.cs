@@ -326,6 +326,67 @@ namespace ExoInstruments.Core
         /// </summary>
         public double CosmicRayEventsPerMinutePerCm2;
 
+        /// <summary>
+        /// How many pixels of the underlying silicon, along one axis, are summed into one pixel of
+        /// the format this entry quotes above.
+        ///
+        /// Almost always 1, and NOT always: the ASI294MM Pro's 4144x2822 at 4.63um is the Sony
+        /// IMX492's 8288x5644 at 2.315um summed 2x2 inside the sensor, which is why its full well
+        /// is four times the single pixel's. That distinction cannot be ignored once per-pixel
+        /// non-uniformity is modelled, because binning moves the two components of it in OPPOSITE
+        /// directions: the photo-response spread averages down as 1/n while the additive offset
+        /// spread grows as n (see Core.SensorNonUniformity). Quoting a sensor-level figure against
+        /// the wrong pixel would therefore be wrong twice over, by a factor of two each way.
+        /// </summary>
+        public int SensorNativePixelsPerSide = 1;
+
+        /// <summary>
+        /// Photo-response non-uniformity: the spatial standard deviation of this sensor's response
+        /// to uniform illumination, as a FRACTION of the mean, quoted for one pixel of the
+        /// underlying silicon (see SensorNativePixelsPerSide).
+        ///
+        /// NaN means NOT PUBLISHED for this device, the same convention the filter transmissions
+        /// use, and it disables the term rather than substituting a plausible one. A borrowed PRNU
+        /// would be worse than none: it is a floor on the photometric precision of every
+        /// measurement made from the frame, so an invented value would set an invented floor and
+        /// the pipeline would report it as a result.
+        /// </summary>
+        public double PhotoResponseNonUniformity = double.NaN;
+
+        /// <summary>
+        /// Offset fixed-pattern noise: the spatial standard deviation of the per-pixel readout
+        /// zero, in electrons, again for one pixel of the underlying silicon.
+        ///
+        /// This is EMVA 1288's DSNU where a camera maker publishes one, and ESO's QC.BIAS.FPN where
+        /// an observatory trends one. NaN means not published. Note what it is not: it is not the
+        /// pixel-to-pixel spread of the DARK CURRENT, which grows with exposure time and with
+        /// temperature. This one is present in a zero-second exposure and independent of both,
+        /// because it is an offset rather than a rate.
+        /// </summary>
+        public double OffsetFixedPatternElectrons = double.NaN;
+
+        /// <summary>
+        /// Relative deviation from linearity at full well, as a fraction. NaN means not published.
+        /// See Core.DetectorLinearity for the form, and for what the published figure it is read
+        /// from does and does not state.
+        /// </summary>
+        public double LinearityDeviationAtFullWell = double.NaN;
+
+        /// <summary>
+        /// Side of a square field stop in the focal plane, in arcminutes, for an instrument whose
+        /// illuminated field is smaller than its detector. NaN means the whole detector is
+        /// illuminated, which is true of every instrument here except FORS2.
+        /// </summary>
+        public double FieldStopSquareArcmin = double.NaN;
+
+        /// <summary>
+        /// Diameter of the illuminated/corrected image circle at the focal plane, in millimetres,
+        /// as the manufacturer publishes it. NaN means not published. Used to cut off illumination
+        /// outside it; on this roster every published circle is larger than the sensor's diagonal,
+        /// so it cuts nothing and exists to record that fact rather than to change a frame.
+        /// </summary>
+        public double ImageCircleMillimetres = double.NaN;
+
         // Capture range
         public float MinExposureSeconds;
         public float MaxExposureSeconds;
@@ -618,6 +679,43 @@ namespace ExoInstruments.Core
             // this camera at its site.
             CosmicRayEventsPerMinutePerCm2 = 1.0,
 
+            // The ASI294MM Pro's format is the IMX492 summed 2x2 in the sensor: 4144x2822 at
+            // 4.63um against the sensor's own 8288x5644 at 2.315um. Not an inference, and it
+            // checks out arithmetically at both ends: 4144*2 = 8288 exactly, 4.63/2 = 2.315
+            // exactly, and ZWO's published 66000 e- full well is four times the 15655 e- LUCID
+            // measure for one pixel of the same silicon, as summing four wells requires.
+            SensorNativePixelsPerSide = 2,
+
+            // EMVA 1288 measurements of this sensor, from LUCID Vision Labs' published report for
+            // the Atlas10 ATX470S-M, the monochrome IMX492 camera (thinklucid.com, "EMVA 1288
+            // Data"): PRNU 0.62% and DSNU 0.97 e-.
+            //
+            // WHY A MACHINE-VISION CAMERA'S REPORT IS THE RIGHT SOURCE FOR AN ASTRONOMY CAMERA,
+            // and where it stops being one. Both quantities are properties of the SILICON: PRNU is
+            // the spread of pixel quantum efficiency and fill factor, DSNU the spread of the
+            // per-pixel readout offset, and the IMX492 in LUCID's camera is the IMX492 in ZWO's.
+            // What is NOT transferable is anything the surrounding electronics set, and those are
+            // exactly the figures this entry already takes from ZWO: read noise, conversion gain,
+            // cooled dark current. LUCID's 7.83 e- temporal dark noise against ZWO's 1.2 e- read
+            // noise is the size of that difference, and the reason the two sources are used for
+            // different lines rather than one of them for all.
+            //
+            // Both are quoted for ONE pixel of the sensor, which SensorNativePixelsPerSide above
+            // converts to the 2x2-summed pixel this catalogue's format describes: 0.31% of response
+            // spread and 1.94 e- of offset spread.
+            PhotoResponseNonUniformity = 0.0062,
+            OffsetFixedPatternElectrons = 0.97,
+
+            // Not published: ZWO quotes no linearity figure for this camera, and the EMVA report
+            // above gives linearity error as a plot rather than a number. Declared rather than
+            // guessed (section 12), so this camera's frames carry no non-linearity at all.
+            LinearityDeviationAtFullWell = double.NaN,
+
+            // PlaneWave publishes no illuminated-field diameter for the RC20, stating only that the
+            // design is for on-axis work and that "wide-field imaging is not a concern". Left
+            // unpublished rather than inferred from the back focus.
+            ImageCircleMillimetres = double.NaN,
+
             MinExposureSeconds = 0.000032f,
             MaxExposureSeconds = 2000.0f,
             MinGain = 0.7f,
@@ -743,6 +841,20 @@ namespace ExoInstruments.Core
             // this is a floor rather than a measurement; unlike FORS2 no rate is published for
             // this camera at its site.
             CosmicRayEventsPerMinutePerCm2 = 1.0,
+
+            // Same camera as the RC20, so the same sensor figures for the same reasons; see that
+            // entry for the sourcing of all four.
+            SensorNativePixelsPerSide = 2,
+            PhotoResponseNonUniformity = 0.0062,
+            OffsetFixedPatternElectrons = 0.97,
+            LinearityDeviationAtFullWell = double.NaN,
+
+            // William Optics publish a 45mm flat corrected image circle for the Gen III. The
+            // sensor's diagonal is 23.2mm, so the whole frame sits inside the inner half of it and
+            // this stop removes nothing; it is carried because a published illuminated field that
+            // is comfortably larger than the detector is a fact about the instrument worth
+            // recording, and because the same field would cut a full-frame sensor.
+            ImageCircleMillimetres = 45.0,
 
             MinExposureSeconds = 0.000032f,
             MaxExposureSeconds = 2000.0f,
@@ -873,6 +985,17 @@ namespace ExoInstruments.Core
             // this is a floor rather than a measurement; unlike FORS2 no rate is published for
             // this camera at its site.
             CosmicRayEventsPerMinutePerCm2 = 1.0,
+
+            // Same camera as the RC20, so the same sensor figures for the same reasons; see that
+            // entry for the sourcing of all four.
+            SensorNativePixelsPerSide = 2,
+            PhotoResponseNonUniformity = 0.0062,
+            OffsetFixedPatternElectrons = 0.97,
+            LinearityDeviationAtFullWell = double.NaN,
+
+            // PlaneWave publish a "perfectly flat field across a 100mm image circle" for the
+            // CDK1000, four times the sensor's 23.2mm diagonal.
+            ImageCircleMillimetres = 100.0,
 
             MinExposureSeconds = 0.000032f,
             MaxExposureSeconds = 2000.0f,
@@ -1059,6 +1182,31 @@ namespace ExoInstruments.Core
             // global constant.
             CosmicRayEventsPerMinutePerCm2 = 7.7,
 
+            // Table 2.9 again, MIT chip 1 at low gain, the 200 kHz imaging mode this entry models
+            // throughout. See Core.DetectorLinearity for why the manual's "% RMS" heading is read
+            // as a relative deviation at full well rather than as an RMS residual, and for what the
+            // manual does not state about its sign.
+            LinearityDeviationAtFullWell = 0.018,
+
+            // ESO: the field of view "is restricted by the MOS unit in the focal plane of the unit
+            // telescope to about 6.8x6.8 arcminutes" for the standard-resolution collimator
+            // (manual section 2.2). This is the one instrument on the roster whose detector is
+            // BIGGER than its illuminated field: 4096 unbinned pixels at 0.125 arcsec is 8.5
+            // arcminutes, so the stop lands well inside the chip and roughly a third of the frame's
+            // area sees no sky at all. The exact pattern is published as a figure (Appendix G)
+            // rather than as a formula, and the mosaic's two chips are mounted 33 arcsec off the
+            // optical axis, so what is modelled is the manual's own figure read literally: a square
+            // stop, centred (see Core.FocalPlaneIllumination and section 12).
+            FieldStopSquareArcmin = 6.8,
+
+            // Not published for the MIT/LL CCID-20: neither the user manual nor ESO's QC1 pages
+            // give a PRNU or a fixed-pattern figure for this mosaic, so both are left unpublished
+            // rather than borrowed from another device. FORS2's flat field is therefore the field
+            // stop and the cosine-fourth term alone, which for this instrument is where nearly all
+            // of it is anyway.
+            PhotoResponseNonUniformity = double.NaN,
+            OffsetFixedPatternElectrons = double.NaN,
+
             MinExposureSeconds = 0.25f,
             MaxExposureSeconds = 3600.0f,
             MinGain = 1.0f,
@@ -1232,6 +1380,20 @@ namespace ExoInstruments.Core
             // 172,000 e-, throwing away three quarters of the well the paper documents.
             ElectronsPerAduAtUnityGain = 10.5,
             CosmicRayEventsPerMinutePerCm2 = 7.7, // same Paranal altitude and epoch as FORS2
+
+            // Not published. Schmid et al. 2018 is a detailed instrument paper with a full detector
+            // table, and it gives no PRNU, no fixed-pattern figure and no linearity coefficient; it
+            // refers to detector non-linearity only qualitatively, as one of the effects the
+            // polarization compensator plate exists to keep out of the polarimetric signal. All
+            // three are therefore left unpublished rather than borrowed.
+            //
+            // It costs this instrument less than it would cost any other on the roster, and for a
+            // reason the same paper states: ZIMPOL's two polarimetric beams land on the SAME pixels,
+            // so the flat-fielding factors and bias levels divide out of the differential signal
+            // exactly. The instrument is built so that what is missing here matters least.
+            PhotoResponseNonUniformity = double.NaN,
+            OffsetFixedPatternElectrons = double.NaN,
+            LinearityDeviationAtFullWell = double.NaN,
 
             MinExposureSeconds = 1.1f,
             MaxExposureSeconds = 3600.0f,
