@@ -252,6 +252,218 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int ExactSumRealisationLimit = 32;
 
+        // ---------------------------------------------------------------- the field
+
+        /// <summary>
+        /// Builds a unit-mean multiplicative modulation that turns a smooth halo into a speckle
+        /// field, in place.
+        ///
+        /// WHY MULTIPLICATIVE, AND WHY THAT IS EXACT RATHER THAN CONVENIENT. The imaging pipeline
+        /// already produces the halo's MEAN intensity at every radius, because that is what
+        /// convolving with an adaptive-optics point-spread function delivers. What it does not
+        /// produce is the realisation: the mean is smooth and a real halo is grainy. Multiplying by
+        /// a field of unit mean and the right variance adds exactly what is missing and changes
+        /// nothing that was already right. The flux is preserved pixel for pixel in expectation, so
+        /// photometry of the frame is unaffected, and only the noise it carries changes, which is
+        /// the whole point.
+        ///
+        /// THE STATIC PART IS A FIELD, NOT A CONSTANT, and this is the difference between a speckle
+        /// field and speckle noise. Sample() above holds the coherent amplitude fixed at one value,
+        /// which is right for asking what one pixel does over time and wrong for building a frame:
+        /// it would give every pixel the same static pattern, that is, none. Here the coherent
+        /// amplitude is itself drawn as a spatial field, once, from a seed that does not depend on
+        /// the exposure. That is what makes the pattern the SAME in every frame this instrument
+        /// takes of this pointing, which is the property angular differential imaging exists to
+        /// exploit and the reason a longer exposure does not remove it.
+        ///
+        /// The construction, per grain:
+        ///
+        ///     A_c   drawn once, circular complex Gaussian, total power I_c   (static seed)
+        ///     A_s,k drawn per realisation, circular complex Gaussian, power I_s   (temporal seed)
+        ///     I     = mean over k of |A_c + A_s,k|^2
+        ///
+        /// whose spatial variance is I_c^2 + (I_s^2 + 2 I_c I_s)/N: the full unit variance of a
+        /// developed speckle pattern at N = 1, falling to the static floor I_c^2 = f as the
+        /// exposure lengthens, exactly as SurvivingVarianceFraction says it must.
+        ///
+        /// GRAINS ONE RESOLUTION ELEMENT ACROSS, because that is what a speckle is: the image of
+        /// one spatial frequency of the wavefront, and its size is the diffraction limit.
+        ///
+        /// HOW THE GRAINS ARE MADE, and why the obvious way is wrong. Drawing one value per grain
+        /// on a coarse grid and interpolating between them is cheap and produces something that
+        /// looks right; it is not. Bilinear reconstruction of independent samples is not
+        /// band-limited and loses a fixed fraction of the variance, exactly 4/9 in two dimensions,
+        /// so the field comes out at 44% of the power the physics says it has. That was measured
+        /// rather than reasoned about: the first version of this method did precisely that, and the
+        /// harness caught it at 0.47 of prediction.
+        ///
+        /// A speckle field is a BAND-LIMITED COMPLEX GAUSSIAN, because the pupil is finite: the
+        /// amplitude in the image plane is the transform of a bounded pupil, so its spatial
+        /// frequencies stop at D/lambda and nothing finer than one resolution element exists. That
+        /// is built here by smoothing white complex Gaussian noise at full resolution with a
+        /// separable Gaussian of that width, which is exactly a band limit and, crucially, leaves
+        /// the field Gaussian at every point: a linear filter of a Gaussian process is a Gaussian
+        /// process. The intensity is then |A|^2 with precisely the right marginal distribution and
+        /// the right correlation length, and the variance is restored analytically by the kernel's
+        /// own sum of squares rather than by a fudge factor.
+        /// </summary>
+        public static void BuildModulation(
+            float[] modulation, int width, int height,
+            double plateScaleMasPerPixel, double lambdaOverDMas,
+            double staticVarianceFraction, double realisations,
+            ulong staticSeed, ulong temporalSeed)
+        {
+            if (modulation == null || width <= 0 || height <= 0) return;
+            if (!(plateScaleMasPerPixel > 0.0) || !(lambdaOverDMas > 0.0)) return;
+            int n = width * height;
+            if (modulation.Length < n) return;
+
+            double grainPx = lambdaOverDMas / plateScaleMasPerPixel;
+            if (!(grainPx > 0.0)) return;
+
+            double coherent, random;
+            Split(1.0, staticVarianceFraction, out coherent, out random);
+            double reps = Math.Max(1.0, realisations);
+
+            // The band limit. A Gaussian of this width has an intensity autocorrelation one
+            // resolution element across, which is the defining scale of a speckle; the factor
+            // relating the two is the standard Gaussian FWHM conversion and is written out rather
+            // than folded into a constant.
+            double kernelSigma = grainPx / (2.0 * Math.Sqrt(2.0 * Math.Log(2.0)));
+
+            var staticRe = new float[n];
+            var staticIm = new float[n];
+            var tempRe = new float[n];
+            var tempIm = new float[n];
+
+            var rngStatic = new Pcg32(staticSeed, Pcg32.StreamSpeckleStatic);
+            var rngTemporal = new Pcg32(temporalSeed, Pcg32.StreamSpeckleTemporal);
+
+            // Each quadrature carries half the total power, which is what makes |A|^2 exponential
+            // rather than chi-squared with the wrong number of degrees of freedom.
+            FillBandLimited(staticRe, width, height, kernelSigma, Math.Sqrt(0.5 * coherent), rngStatic);
+            FillBandLimited(staticIm, width, height, kernelSigma, Math.Sqrt(0.5 * coherent), rngStatic);
+            FillBandLimited(tempRe, width, height, kernelSigma, Math.Sqrt(0.5 * random), rngTemporal);
+            FillBandLimited(tempIm, width, height, kernelSigma, Math.Sqrt(0.5 * random), rngTemporal);
+
+            // One realisation of the intensity, then shrunk toward its own conditional mean by
+            // 1/sqrt(N). That is the same first two moments as averaging N realisations of the
+            // temporal field, at four smoothing passes rather than four times N of them: given the
+            // static amplitude, the intensity has conditional mean |A_c|^2 + I_s and conditional
+            // variance I_s^2 + 2|A_c|^2 I_s, and averaging N of them divides only the second.
+            double shrink = 1.0 / Math.Sqrt(reps);
+            double sum = 0.0;
+            for (int i = 0; i < n; i++)
+            {
+                double cRe = staticRe[i], cIm = staticIm[i];
+                double re = cRe + tempRe[i], im = cIm + tempIm[i];
+                double one = re * re + im * im;
+                double conditionalMean = cRe * cRe + cIm * cIm + random;
+
+                double v = conditionalMean + (one - conditionalMean) * shrink;
+                if (v < 0.0) v = 0.0;
+                modulation[i] = (float)v;
+                sum += v;
+            }
+
+            // Unit mean, enforced rather than assumed: a finite draw has a sample mean near one
+            // rather than exactly one, and leaving that in would scale the whole frame's
+            // photometry by a number nobody chose.
+            double mean = sum / n;
+            if (!(mean > 0.0)) return;
+            float inv = (float)(1.0 / mean);
+            for (int i = 0; i < n; i++) modulation[i] *= inv;
+        }
+
+        /// <summary>
+        /// White Gaussian noise, band-limited by a separable Gaussian blur, renormalised to the
+        /// requested standard deviation.
+        ///
+        /// The renormalisation is analytic and not measured: smoothing white noise with a
+        /// normalised kernel w multiplies its standard deviation by the kernel's root sum of
+        /// squares, and separably in two dimensions that is (sum w^2) rather than its root. Dividing
+        /// it out restores exactly the requested width, which is what lets the caller state the
+        /// field's power as a physical quantity instead of a tuning parameter.
+        /// </summary>
+        private static void FillBandLimited(
+            float[] field, int width, int height, double kernelSigma, double targetSigma, Random rng)
+        {
+            int n = width * height;
+            if (!(targetSigma > 0.0)) { for (int i = 0; i < n; i++) field[i] = 0f; return; }
+
+            for (int i = 0; i < n; i++) field[i] = (float)NoiseSampler.Gaussian(rng, 1.0);
+
+            if (!(kernelSigma > 0.05))
+            {
+                for (int i = 0; i < n; i++) field[i] *= (float)targetSigma;
+                return;
+            }
+
+            int radius = Math.Max(1, (int)Math.Ceiling(3.0 * kernelSigma));
+            // The wrap below assumes one turn is enough, which needs the kernel to fit inside the
+            // frame. A field smaller than its own speckles is not a field, so this is a guard
+            // against a degenerate call rather than a regime anything real reaches.
+            if (radius >= width || radius >= height)
+            {
+                for (int i = 0; i < n; i++) field[i] *= (float)targetSigma;
+                return;
+            }
+            var w = new double[2 * radius + 1];
+            double norm = 0.0;
+            for (int k = -radius; k <= radius; k++)
+            {
+                double v = Math.Exp(-0.5 * (k * k) / (kernelSigma * kernelSigma));
+                w[k + radius] = v;
+                norm += v;
+            }
+            double sumSquares = 0.0;
+            for (int k = 0; k < w.Length; k++) { w[k] /= norm; sumSquares += w[k] * w[k]; }
+
+            var scratch = new float[n];
+
+            // WRAPPED AT THE EDGES, AND THAT IS NOT A DETAIL. Clamping to the border pixel is the
+            // usual choice and it is wrong here for a measurable reason: it makes the outermost
+            // taps repeat one value, so the smoothing is undone near the edge and the variance
+            // there rises several-fold. The harness caught it as a field whose variance came out at
+            // 1.92 where the physics says 1.00, and, worse, as two INDEPENDENT pointings
+            // correlating at 0.27 because both carried the same bright border.
+            //
+            // A speckle field is statistically homogeneous, so wrapping is the boundary that
+            // preserves its statistics exactly: every pixel sees a full kernel of independent
+            // samples. It buys that with a periodicity across the frame, which for a noise field
+            // costs nothing anyone can measure and is the standard treatment.
+            for (int y = 0; y < height; y++)
+            {
+                int row = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    double acc = 0.0;
+                    for (int k = -radius; k <= radius; k++)
+                    {
+                        int xx = x + k;
+                        if (xx < 0) xx += width; else if (xx >= width) xx -= width;
+                        acc += w[k + radius] * field[row + xx];
+                    }
+                    scratch[row + x] = (float)acc;
+                }
+            }
+            double scale = targetSigma / sumSquares;
+            for (int x = 0; x < width; x++)
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    double acc = 0.0;
+                    for (int k = -radius; k <= radius; k++)
+                    {
+                        int yy = y + k;
+                        if (yy < 0) yy += height; else if (yy >= height) yy -= height;
+                        acc += w[k + radius] * scratch[yy * width + x];
+                    }
+                    field[y * width + x] = (float)(acc * scale);
+                }
+            }
+        }
+
         public static double SampleAveraged(Random rng, double coherent, double random, double realisations)
         {
             if (!(realisations > 1.0)) return Sample(rng, coherent, random);

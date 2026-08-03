@@ -62,6 +62,7 @@ static class CoronagraphTests
         SectionSpeckleField();
         SectionFieldRotation();
         SectionSmallSamplePenalty();
+        SectionRenderedField();
         SectionSyntheticFrame();
 
         Console.WriteLine();
@@ -369,6 +370,166 @@ static class CoronagraphTests
         Check("t with 1 dof is Cauchy: CDF(1) = 3/4", ContrastCurve.StudentTCdf(1.0, 1), 0.75, 1e-9);
         Check("t quantile inverts the t CDF",
               ContrastCurve.StudentTCdf(ContrastCurve.StudentTQuantile(0.9, 12), 12), 0.9, 1e-9);
+    }
+
+    // ---------------------------------------------------------------- 5b
+
+    /// <summary>
+    /// The field the game pipeline actually renders, checked against the measurement it was built
+    /// from.
+    ///
+    /// THE TEST THIS SECTION EXISTS FOR is the last one: two exposures of the same target,
+    /// differing only in their exposure seed, must correlate at Milli et al.'s rho_0 = 0.713. That
+    /// is not a property this code was given; it is the property their 52-minute sequence measured,
+    /// reproduced here by construction from a static amplitude field drawn once and a temporal one
+    /// drawn per exposure. If it came out at 1 the speckles would be frozen and ADI would be
+    /// unnecessary; if it came out at 0 they would be ordinary noise and ADI would be impossible.
+    /// </summary>
+    static void SectionRenderedField()
+    {
+        Header("5b. The rendered speckle field");
+
+        double lambda = Coronagraph.IPrimWavelengthNm;
+        double d = Coronagraph.StopB1_2.ApertureMeters;      // the pupil the light really passed
+        double lod = SpeckleField.LambdaOverDMas(lambda, d);
+        double plateScale = Sphere.NativePixelSizeMeters / Sphere.FocalLengthMeters
+                          * (180.0 / Math.PI) * 3600.0 * 1000.0;
+        // Large enough that the sample variance means something. The field holds
+        // (Size/grain)^2 independent grains, and a variance estimated from N samples has a
+        // relative standard error of sqrt(2/N); at 512 pixels and a 12.2 px grain that is 1761
+        // grains and 3.4%, which is what sets the tolerances below.
+        const int Size = 512;
+
+        Console.WriteLine($"   through the Lyot stop: D = {d:F3} m, lambda/D = {lod:F2} mas = {lod / plateScale:F2} px");
+
+        // Unit mean and the predicted variance, against exposure time.
+        Console.WriteLine("   exposure   realisations   mean      variance   predicted");
+        var field = new float[Size * Size];
+        foreach (double t in new[] { 1.0, 10.0, 60.0, 600.0 })
+        {
+            double surviving = SpeckleField.SurvivingVarianceFraction(t, d, 4.0);
+            double f = SpeckleField.StaticVarianceFraction;
+            double realisations = Math.Max(1.0, (1.0 - f) / Math.Max(1e-9, surviving - f));
+
+            SpeckleField.BuildModulation(field, Size, Size, plateScale, lod, f, realisations,
+                                         staticSeed: 7777UL, temporalSeed: (ulong)(1000 + t));
+
+            double mean = 0.0;
+            for (int i = 0; i < field.Length; i++) mean += field[i];
+            mean /= field.Length;
+            double var = 0.0;
+            for (int i = 0; i < field.Length; i++) { double dv = field[i] - mean; var += dv * dv; }
+            var /= field.Length;
+
+            Console.WriteLine($"   {t,8:F0} s {realisations,13:F2}   {mean,7:F4}   {var,8:F4}   {surviving,9:F4}");
+
+            // Unit mean is enforced on the grid, so it must hold on the interpolated field to
+            // within what interpolation itself can shift it.
+            Check($"unit mean at {t} s", mean, 1.0, 0.02);
+
+            // The variance IS the prediction, because the band-limited construction restores it
+            // analytically from the kernel's own sum of squares. A tolerance of 8% covers the
+            // sampling error of a 256x256 field holding only (256/12.2)^2 = 440 independent
+            // grains, which is what sets the scatter here rather than any modelling choice.
+            // Three times the 3.4% sampling error of a field this size (see Size above). The
+            // construction restores the variance analytically from the kernel's own sum of
+            // squares, so what is left here is the finite number of grains and nothing else.
+            Check($"variance matches the prediction at {t} s", var, surviving, 0.10 * surviving);
+        }
+
+        // THE CHECK. Two frames of the same target, at Milli et al.'s OWN CADENCE, must correlate
+        // at the floor they measured.
+        //
+        // The cadence matters and is not a detail. Their rho_0 = 0.713 is the correlation between
+        // two 0.63 s frames far apart in time, where nothing has averaged down within either
+        // frame; asking the same question of two long exposures is a different question with a
+        // different answer, and the model answers both. Comparing a 60 s pair against 0.713 would
+        // be comparing the model's prediction for one experiment against the measurement from
+        // another.
+        var a = new float[Size * Size];
+        var b = new float[Size * Size];
+        const double MilliCadenceSeconds = 0.63;
+        double fs = SpeckleField.StaticVarianceFraction;
+
+        double svShort = SpeckleField.SurvivingVarianceFraction(MilliCadenceSeconds, d, 4.0);
+        double repsShort = Math.Max(1.0, (1.0 - fs) / Math.Max(1e-9, svShort - fs));
+        SpeckleField.BuildModulation(a, Size, Size, plateScale, lod, fs, repsShort, 7777UL, 111UL);
+        SpeckleField.BuildModulation(b, Size, Size, plateScale, lod, fs, repsShort, 7777UL, 222UL);
+        double rho = Correlation(a, b);
+
+        Console.WriteLine($"   two {MilliCadenceSeconds:F2} s frames of the same field, different moments: rho = {rho:F4}");
+        Console.WriteLine($"   Milli et al. (2016) measure rho_0 = {SpeckleField.StaticVarianceFraction:F3} at that cadence");
+        Check("short frames correlate at Milli's measured floor", rho, SpeckleField.StaticVarianceFraction, 0.05);
+
+        // And the model's own prediction for the experiment nobody ran: two LONG exposures
+        // correlate far higher, because the temporal part has averaged down inside each of them
+        // and only the shared static pattern is left. Reported rather than checked against a
+        // measurement, there being none.
+        var aLong = new float[Size * Size];
+        var bLong = new float[Size * Size];
+        double svLong = SpeckleField.SurvivingVarianceFraction(60.0, d, 4.0);
+        double repsLong = Math.Max(1.0, (1.0 - fs) / Math.Max(1e-9, svLong - fs));
+        SpeckleField.BuildModulation(aLong, Size, Size, plateScale, lod, fs, repsLong, 7777UL, 111UL);
+        SpeckleField.BuildModulation(bLong, Size, Size, plateScale, lod, fs, repsLong, 7777UL, 222UL);
+        double rhoLong = Correlation(aLong, bLong);
+        Console.WriteLine($"   two 60 s exposures of the same field: rho = {rhoLong:F4} " +
+                          $"(predicted {fs / svLong:F4} = static over total)");
+        Check("long exposures correlate at static over total", rhoLong, fs / svLong, 0.03);
+
+        double reps = repsShort;
+
+        // And the control: a different pointing must share nothing.
+        var c = new float[Size * Size];
+        SpeckleField.BuildModulation(c, Size, Size, plateScale, lod, fs, reps, 8888UL, 111UL);
+        double rhoOther = Correlation(a, c);
+        Console.WriteLine($"   against a different pointing: rho = {rhoOther:F4}");
+        Check("a different pointing shares no pattern", Math.Abs(rhoOther) < 0.10);
+
+        // The grain size must be one resolution element, measured from the field's own
+        // autocorrelation rather than assumed from the code that built it.
+        double halfWidthPx = AutocorrelationHalfWidthPx(a, Size);
+        double grainPx = lod / plateScale;
+        Console.WriteLine($"   autocorrelation half-width {halfWidthPx:F2} px against a grain of {grainPx:F2} px");
+        Check("grains are one resolution element across", halfWidthPx, 0.5 * grainPx, 0.25 * grainPx);
+    }
+
+    /// <summary>Pearson correlation of two fields, which is the statistic Milli et al. use.</summary>
+    static double Correlation(float[] a, float[] b)
+    {
+        double ma = 0.0, mb = 0.0;
+        for (int i = 0; i < a.Length; i++) { ma += a[i]; mb += b[i]; }
+        ma /= a.Length; mb /= b.Length;
+        double sab = 0.0, saa = 0.0, sbb = 0.0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            double da = a[i] - ma, db = b[i] - mb;
+            sab += da * db; saa += da * da; sbb += db * db;
+        }
+        return sab / Math.Sqrt(saa * sbb);
+    }
+
+    /// <summary>Lag at which the field's own autocorrelation falls to half, along a row.</summary>
+    static double AutocorrelationHalfWidthPx(float[] field, int size)
+    {
+        double mean = 0.0;
+        for (int i = 0; i < field.Length; i++) mean += field[i];
+        mean /= field.Length;
+
+        double zero = 0.0;
+        for (int i = 0; i < field.Length; i++) { double d = field[i] - mean; zero += d * d; }
+
+        double prev = 1.0;
+        for (int lag = 1; lag < size / 2; lag++)
+        {
+            double acc = 0.0;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x + lag < size; x++)
+                    acc += (field[y * size + x] - mean) * (field[y * size + x + lag] - mean);
+            double norm = acc / zero * ((double)size * size) / ((double)size * (size - lag));
+            if (norm <= 0.5) return lag - 1 + (prev - 0.5) / Math.Max(1e-12, prev - norm);
+            prev = norm;
+        }
+        return size / 2.0;
     }
 
     // ---------------------------------------------------------------- 6

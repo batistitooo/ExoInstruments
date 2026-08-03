@@ -1182,9 +1182,32 @@ Noise is measured from **non-overlapping apertures of one resolution element** l
 | Post-processing algorithms | worse | VIP has PCA/KLIP, LOCI, LLSG, NMF, ANDROMEDA; this has median-subtraction ADI |
 | Forward instrument model | better | VIP starts from a cube it is given; this produces the cube |
 
-#### 7.522 What is Core-complete and not yet rendered
+#### 7.522 The rendered field
 
-The four Core files above are implemented, tested and validated. What is **not** yet wired into the game's frame path is the *rendering* of a speckle realisation into a SPHERE capture: the mask selection, the Lyot-stopped pupil and the throughput are live, so a coronagraphic capture already gets the right PSF, but the halo it sits on is still the smooth AO halo of §7.013 rather than a modified-Rician speckle field with λ/D grains. Closing that means one stage inserted after the PSF convolution in `ComputeFramePixels`, drawing on a grid at the speckle grain size; the Core function it would call is exercised by `BuildSpeckleFrame` in the harness. Until then §12 item 9's original entry stands for the *rendered* frame, while the physics behind it no longer does.
+The speckle field is rendered into the capture, as a **unit-mean multiplicative modulation** applied after the PSF convolution and before the sky (`ApplySpeckleField`). Multiplying is exact rather than convenient: the PSF convolution already delivers the halo's *mean* intensity at every radius, and what is missing is only the realisation, so a unit-mean field adds the graininess and changes nothing that was already right. Flux is preserved in expectation, so photometry is unaffected and only the noise changes.
+
+**The construction, and the two bugs the harness caught in it.** The obvious approach — one value per grain on a coarse grid, interpolated — is wrong, and measurably: bilinear reconstruction of independent samples is not band-limited and loses exactly 4/9 of the variance in two dimensions. The harness caught it at **0.47 of prediction**. A speckle field is a **band-limited complex Gaussian**, because the pupil is finite: the image-plane amplitude is the transform of a bounded pupil, so nothing finer than one resolution element exists. Built by smoothing white complex Gaussian noise at full resolution with a separable Gaussian of that width — exactly a band limit, and a linear filter of a Gaussian process is still Gaussian at every point, so the intensity `|A|²` keeps the right marginal. The variance is restored analytically from the kernel's own sum of squares.
+
+The second bug was the boundary. Clamping to the border pixel makes the outer taps repeat one value, undoing the smoothing there: variance came out at **1.92** where the physics says 1.00, and, worse, **two independent pointings correlated at 0.27** because both carried the same bright border. A speckle field is statistically homogeneous, so wrapping is the boundary that preserves its statistics exactly.
+
+**Two seeds, and the difference between them is the physics.** The static half is drawn from the instrument's fixed serial seed mixed with the pointing and wavelength, so every exposure of the same field carries the *same* frozen pattern; the temporal half is drawn from the exposure's own seed. If both came from the exposure the speckles would be ordinary noise wearing a fixed pattern's name and ADI would have nothing to remove.
+
+**What the rendered field reproduces**, measured in `tools/coronagraph-tests` §5b:
+
+| exposure | variance | predicted |
+|---|---|---|
+| 1 s | 0.9900 | 1.0000 |
+| 10 s | 0.7625 | 0.7590 |
+| 60 s | 0.7191 | 0.7207 |
+| 600 s | 0.7154 | 0.7138 |
+
+And the headline: **two frames at Milli et al.'s own 0.63 s cadence, same pointing, different moments, correlate at ρ = 0.7215 against their measured ρ₀ = 0.713** — the published measurement reproduced by construction, to 1.2 %. Two independent pointings correlate at 0.022. Two 60 s exposures correlate at 0.9898 against a predicted 0.9894, which is the model's answer to an experiment nobody ran: at that length the temporal part has averaged down inside each frame and only the shared static pattern is left. The intensity autocorrelation half-width is 6.1 px against a 12.2 px grain, narrower than the amplitude's as `|A|²` of a correlated Gaussian must be.
+
+*The cadence matters and is not a detail*: ρ₀ is the correlation of two **short** frames, and asking the same question of two long exposures is a different question with a different answer. Comparing a 60 s pair against 0.713 would be comparing the model's prediction for one experiment against the measurement from another.
+
+**The focal-plane mask** (`ApplyCoronagraphMask`) is a hard opaque disc at the frame centre, plus the Lyot stop's throughput applied to the whole frame. Nothing else is done, and that is correct rather than incomplete: the stop's *other* effect has already acted, upstream and invisibly, by being the pupil the PSF was computed from. What an observer measures as R_coro is therefore a **consequence** of blocking the core, not an input.
+
+**What this does to a resolved body** is a real limitation and is listed in §12.67: the modulation multiplies the whole signal plane, including an extended target's own disc. A real extended source averages over the speckles its own light produces, suppressing its granularity by roughly the number of resolution elements it covers, and that suppression is not modelled. Right for the point sources a coronagraph is pointed at; an overestimate on a resolved disc.
 
 ### 7.6 Image stacking (`Visualization/AstroImageStack.cs`)
 
@@ -1396,7 +1419,8 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 63. **ADI self-subtraction throughput is a declared form, not a fit.** `n/(n+1)` in the arc length measured in resolution elements has the right limits (nothing removed for no rotation, nothing lost for a long arc) and the right variable, but its shape between them is a modelling choice. Only one published measurement was found to check it against — Schmid et al. (2018) Test C, 0.766 at 91 mas over 120 degrees against this expression's 0.906 — and it is a three-frame median, the smallest number for which a median exists, which the paper's own table footnotes as self-subtraction affected. One point cannot constrain a curve (§7.52).
 64. **The 4QPM phase masks are declared and not modelled.** ESO publish their design wavelengths (666 and 823 nm) but no attenuation curve, and a four-quadrant phase mask's attenuation away from its design wavelength is the whole of its behaviour (§7.52).
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
-66. **The speckle field is not yet rendered into a game frame.** The physics is implemented, tested and validated against VIP, and the coronagraph's mask, Lyot-stopped pupil and throughput are live in the capture path; the halo those sit on is still the smooth AO halo rather than a speckle realisation (§7.522).
+66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
+67. **The speckle modulation is applied to the whole signal plane, including a resolved target's disc.** A real extended source averages over the speckles its own light produces, suppressing its granularity by roughly the number of resolution elements it covers; that suppression is not modelled. Correct for the point sources a coronagraph is pointed at, an overestimate of the granularity on a resolved body (§7.522).
 62. **The ASI294MM Pro's HCG mode is not offered.** The real camera switches its sense node at ZWO gain 120, reaching 1.2 e⁻ of read noise with the well falling to roughly 19,700 e⁻ and `K` to about 1.2 e⁻/ADU. This pipeline models the low-gain configuration throughout, with the gain slider acting as an analogue gain ahead of a fixed converter; the second conversion-gain configuration is a discrete hardware mode, not a point on that curve, so it cannot be reached by interpolation and is absent rather than approximated (§7.5).
 
 ### 12.1 The nebula-morphology limit, and the layer built for it

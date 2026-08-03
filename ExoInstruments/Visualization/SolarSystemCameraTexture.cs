@@ -3995,6 +3995,16 @@ namespace ExoInstruments.Visualization
             ApplyAstigmatismBlur(signal);
             DumpStage("astigmatism", signal);
 
+            // --- 2b. Extreme adaptive optics ------------------------------------------
+            // The coronagraph's focal-plane mask, and the speckle field an AO-corrected halo
+            // really is. Both act on the SIGNAL, after the optics that formed it and before the
+            // sky that never went through them.
+            ApplyCoronagraphMask(signal, inputs);
+            DumpStage("coronagraph", signal);
+            ApplySpeckleField(signal, inputs, captureSeed);
+            DumpStage("speckles", signal);
+            MarkStage("coronagraph + speckles");
+
             // --- 3. Sky, then 4. detector ----------------------------------------------
             // The sky is uniform, and convolving a constant field with a unit-sum kernel returns
             // it unchanged, so adding it after the PSF is exact and saves a transform.
@@ -5106,6 +5116,160 @@ namespace ExoInstruments.Visualization
             deadPixelIndices.CopyTo(combined, hotPixelIndices.Length);
             return combined;
         }
+
+        /// <summary>
+        /// The coronagraph's focal-plane mask, applied to the formed image.
+        ///
+        /// A hard opaque disc at the frame's own centre, which is where the instrument is pointed
+        /// and therefore where the star it is occulting sits. Nothing else is done to the light
+        /// here, and that is correct rather than incomplete: the OTHER half of a Lyot coronagraph,
+        /// the pupil stop, has already acted, upstream and invisibly, by being the pupil this
+        /// frame's point-spread function was computed from (see PupilApertureMeters).
+        ///
+        /// What a real observer measures as the peak attenuation R_coro is therefore not an input
+        /// to this method but a CONSEQUENCE of it: block the core, and what is left is the halo at
+        /// the mask rim. tools/coronagraph-tests measures that ratio on a rendered frame and
+        /// compares it with ESO's published 110 to 3000, which is a check on the halo model rather
+        /// than on this multiplication.
+        /// </summary>
+        private void ApplyCoronagraphMask(float[] signal, FrameComputeInputs inputs)
+        {
+            var mask = SelectedCoronagraphMask;
+            if (!mask.HasValue || signal == null) return;
+
+            int w = TextureWidth, h = TextureHeight;
+            double platePerPixelMas = inputs.PlateScaleArcsec * 1000.0;
+            if (!(platePerPixelMas > 0.0)) return;
+
+            double cx = 0.5 * (w - 1), cy = 0.5 * (h - 1);
+            double radiusPx = mask.Value.RadiusMas / platePerPixelMas;
+            double radiusPx2 = radiusPx * radiusPx;
+            float transmission = (float)mask.Value.SpotTransmission;
+
+            int y0 = Math.Max(0, (int)Math.Floor(cy - radiusPx));
+            int y1 = Math.Min(h - 1, (int)Math.Ceiling(cy + radiusPx));
+            int x0 = Math.Max(0, (int)Math.Floor(cx - radiusPx));
+            int x1 = Math.Min(w - 1, (int)Math.Ceiling(cx + radiusPx));
+
+            for (int y = y0; y <= y1; y++)
+            {
+                double dy = y - cy;
+                int row = y * w;
+                for (int x = x0; x <= x1; x++)
+                {
+                    double dx = x - cx;
+                    if (dx * dx + dy * dy <= radiusPx2) signal[row + x] *= transmission;
+                }
+            }
+
+            // The Lyot stop's own throughput, which is a real loss of light and is applied to the
+            // whole frame rather than only under the mask: everything in this image came through
+            // the stop. ESO measure it as 0.91 times the stop's geometric transmission, the 0.91
+            // being the share of blocked light that was diffracted rather than useful.
+            float throughput = (float)CoronagraphThroughput;
+            if (throughput < 1.0f)
+                for (int i = 0; i < signal.Length; i++) signal[i] *= throughput;
+        }
+
+        /// <summary>
+        /// Turns the smooth adaptive-optics halo into the speckle field it really is.
+        ///
+        /// WHY THIS RUNS WHENEVER THERE IS ADAPTIVE OPTICS, coronagraph or not. Speckles are what
+        /// an AO-corrected point-spread function is made of; the coronagraph does not create them,
+        /// it removes the core that was hiding them. Gating this on the mask would produce the
+        /// absurdity of a frame that gets noisier when the star is blocked.
+        ///
+        /// TWO SEEDS, AND THE DIFFERENCE BETWEEN THEM IS THE PHYSICS. The static half is drawn
+        /// from the instrument's own fixed serial seed mixed with the pointing, so every exposure
+        /// of the same field carries the SAME frozen pattern: that is what makes a speckle
+        /// indistinguishable from a companion in one frame and distinguishable across a rotating
+        /// sequence. The temporal half is drawn from the exposure's own seed, so it is a fresh
+        /// realisation each time and averages down within the exposure. If both came from the
+        /// exposure's seed the speckles would be ordinary noise wearing a fixed pattern's name,
+        /// and angular differential imaging would have nothing to remove.
+        ///
+        /// WHAT THIS DOES TO A RESOLVED BODY, stated because it is a real limitation. The
+        /// modulation multiplies the whole signal plane, including an extended target's own disc.
+        /// A real extended source averages over the speckles its own light produces, so its
+        /// granularity is suppressed by roughly the number of resolution elements it covers, and
+        /// this does not model that suppression. It is the right treatment for the point sources a
+        /// coronagraph is pointed at and an overestimate of the granularity on a resolved disc
+        /// (section 12).
+        /// </summary>
+        private void ApplySpeckleField(float[] signal, FrameComputeInputs inputs, ulong captureSeed)
+        {
+            if (signal == null) return;
+            int actuators = Spec.AdaptiveOpticsActuatorsAcrossPupil;
+            if (actuators < 2) return;
+
+            int w = TextureWidth, h = TextureHeight;
+            int n = w * h;
+            if (n <= 0 || signal.Length < n) return;
+
+            double platePerPixelMas = inputs.PlateScaleArcsec * 1000.0;
+            if (!(platePerPixelMas > 0.0)) return;
+
+            double wavelengthNm = FilterCentralWavelengthMeters(Filter) * 1e9;
+            double lambdaOverD = SpeckleField.LambdaOverDMas(wavelengthNm, PupilApertureMeters);
+            if (!(lambdaOverD > 0.0)) return;
+
+            // A grain smaller than a pixel cannot be rendered, and pretending otherwise would
+            // produce white noise wearing a speckle field's name. ZIMPOL samples lambda/D at about
+            // eleven pixels, so this never fires there; it is a guard for a future instrument that
+            // undersamples its own diffraction limit.
+            if (lambdaOverD < platePerPixelMas) return;
+
+            double windSpeed = DefaultSpeckleWindSpeedMetersPerSecond;
+
+            double surviving = SpeckleField.SurvivingVarianceFraction(
+                inputs.ExposureSeconds, PupilApertureMeters, windSpeed);
+
+            // The realisation count that reproduces that surviving variance, inverted from it so
+            // the two can never disagree: a field built from N realisations of the temporal part
+            // has variance f + (1-f)/N, and N is what makes that equal what the timescales say.
+            double f = SpeckleField.StaticVarianceFraction;
+            double excess = Math.Max(1e-9, surviving - f);
+            double realisations = Math.Max(1.0, (1.0 - f) / excess);
+
+            if (speckleScratch == null || speckleScratch.Length != n) speckleScratch = new float[n];
+
+            // The static seed carries the SENSOR and the POINTING and not the time: the same field
+            // observed again on another night shows the same speckles, and a different field does
+            // not. Rounded to a milliarcsecond of pointing, which is far finer than the speckles
+            // themselves and coarse enough that a re-acquisition of the same target lands on the
+            // same pattern.
+            ulong staticSeed = Pcg32.MixSeed(
+                SensorSerialSeed, inputs.TargetSeed, (long)Math.Round(wavelengthNm, 0));
+
+            SpeckleField.BuildModulation(
+                speckleScratch, w, h, platePerPixelMas, lambdaOverD,
+                f, realisations, staticSeed, captureSeed);
+
+            for (int i = 0; i < n; i++) signal[i] *= speckleScratch[i];
+
+            lastSpeckleSurvivingVariance = surviving;
+            lastSpeckleRealisations = realisations;
+            lastSpeckleControlRadiusMas =
+                SpeckleField.ControlRadiusMas(actuators, wavelengthNm, PupilApertureMeters);
+        }
+
+        /// <summary>
+        /// Wind speed used for the atmospheric speckle lifetime when the observing conditions
+        /// carry none: 4 m/s, the value Milli et al. (2016) report for the SPHERE sequence their
+        /// decorrelation timescales are measured from, so the model runs at the conditions its
+        /// own numbers were taken under rather than at an invented default.
+        /// </summary>
+        private const double DefaultSpeckleWindSpeedMetersPerSecond = 4.0;
+
+        private float[] speckleScratch;
+        private double lastSpeckleSurvivingVariance = 1.0;
+        private double lastSpeckleRealisations = 1.0;
+        private double lastSpeckleControlRadiusMas;
+
+        /// <summary>Surviving speckle variance, realisation count and AO control radius of the last capture, for the FITS header.</summary>
+        public double LastSpeckleSurvivingVariance => lastSpeckleSurvivingVariance;
+        public double LastSpeckleRealisations => lastSpeckleRealisations;
+        public double LastSpeckleControlRadiusMas => lastSpeckleControlRadiusMas;
 
         /// <summary>
         /// The sensor's flat field: what fraction of the light that entered the telescope each

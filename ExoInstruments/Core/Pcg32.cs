@@ -48,6 +48,9 @@ namespace ExoInstruments.Core
         /// <summary>The sensor's fixed photo-response and readout-offset maps. Their own streams because they are drawn from the SERIAL seed rather than the exposure's, and must not shift when an exposure's own draws change.</summary>
         public const ulong StreamPhotoResponse = 6UL;
         public const ulong StreamOffsetFpn = 7UL;
+        /// <summary>The speckle field's two halves, and they must be separate streams for a physical reason rather than a tidiness one: the static one is drawn from a seed that does not change between exposures and the temporal one from a seed that does, which is the whole of what makes a speckle pattern removable by differential imaging.</summary>
+        public const ulong StreamSpeckleStatic = 8UL;
+        public const ulong StreamSpeckleTemporal = 9UL;
 
         private ulong state;
         private readonly ulong increment;
