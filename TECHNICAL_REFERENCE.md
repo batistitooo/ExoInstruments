@@ -288,6 +288,47 @@ d[AU] = sqrt((L/L☉) / Seff),  L/L☉ = (R/R☉)²·(Teff/5778)⁴
 
 Full Greek-letter canonicalization table (all spelling variants → one 3-letter token), two-word and single-word Latin genitive constellation tables, HTML-entity decoding (handles exoplanet.eu's `&ouml;`-style names), HD/HR regex extraction, and an IAU-style truncated (not rounded) coordinate-based provisional designation generator (`J`+HHMM±DDMM) for unidentified sources.
 
+### 6.7 Target search index (`TargetSearchIndex.cs`, `TargetCatalogue.cs`, `TargetDesignations.cs`, `TargetQuery.cs`, `TargetKinds.cs`)
+
+One index over everything the telescope can point at, replacing the old substring name filter. About 16 000 entries in a full install: solar-system bodies (from `FlightGlobals.Bodies`, main thread), the merged exoplanet+BSC catalogue, `DeepSkyCatalog`, the packed galaxy catalogue, the SIMBAD cross-identification table, and the IAU proper names. Pure C# apart from the body collection, so the build runs on a background `Task` (109 ms desktop; a query is 2.3 ms and runs synchronously on text change).
+
+**Designation keys (`TargetDesignations.cs`).** Matching is on a canonical key, never on a raw substring: `NGC0224`, `NGC 224`, `ngc-224` and `NGC  224` all reduce to `ngc224`, with leading zeros stripped and a single-letter suffix preserved (`NGC 4038A` ≠ `NGC 4038`). Star designations go through `StarNames.Normalize` first, so `beta Pictoris` = `bet Pic`. The one genuinely ambiguous case is a digit between the letters and the number: in `Sh2 155` it belongs to the catalogue's name, in `NGC0224` and `M104` it is the object's. Resolved by an explicit list of catalogues whose *name* ends in a digit (`sh1`, `sh2`, `rcw3`); everything else reads the digit as the object's. **This is not cosmetic** — reading `M104` as prefix `M1` + number 4 turns a search for the Sombrero into a search for M14, a globular cluster in a different half of the sky, and that was a real bug caught by `tools/search-tests`. No edit distance, no phonetic matching, nowhere: in a catalogue of numbered objects those turn a typo into a confident wrong answer.
+
+**Ranking.** Each query word must match something (AND). Per word, strongest first: exact key 1000, key prefix 400, name prefix 200, substring 50. The *whole typed phrase* is scored separately at 100 000 — without it, `NGC 24` splits into the words `NGC` and `24`, which NGC 224 and several thousand others also satisfy. With no words at all the list is a browse: solar-system bodies first, then everything by ascending magnitude (unknown magnitude sorts as faint).
+
+**Query grammar (`TargetQuery.cs`).** `type:` / `kind:` (vocabulary and plurals in `TargetKinds.Group`), `in:` / `con:` (abbreviation, nominative or genitive), `mag:` / `v:` (`<`, `>` or bare = "no fainter than"), `alt:` (`>` or bare; `<` refused — nobody asks for targets that are lower). Several `type:` filters OR among themselves, everything else ANDs. An unparseable filter goes to `Unrecognised` and is reported to the player rather than dropped (which would silently widen the search) or treated as a name (which would silently narrow it to nothing). All numbers parse with `InvariantCulture`.
+
+**Merge order (`TargetCatalogue.cs`) is load-bearing.** Sources are added measured-first: bodies, stars, `DeepSkyCatalog`, galaxies, then the cross-ID table, then the IAU names. A later source may add **aliases** to an existing entry and may upgrade its displayed designation; it may never replace its numbers. So M31 is the HyperLEDA row with its measured D25, axis ratio and position angle, which merely *gains* the names `M 31` and `Andromeda`. Reversed, the entry would keep the name and lose the shape. Nothing is cross-matched by position between catalogues except IAU proper names onto BSC entries, and there only after HR, HD and Bayer designation have all failed, with a 10 arcsec tolerance.
+
+**Common-name choice** is a presentation decision and is written as one: no name is discarded and every one stays searchable, but the label sets aside all-uppercase legacy transliterations (`CRAB NEB`), asterisked designations that name the central object rather than the nebula around it (`M 87*` is the black hole), and radio-source and constellation-abbreviated forms (`Vir A`, `Ori Nebula`); among what remains, the shortest. A shipped hand-checked common name (`DeepSkyCatalog`'s "Crab") always wins over SIMBAD's.
+
+**Career fog.** A star whose identity is withheld is indexed under its provisional designation and under nothing else, and `SearchTarget.IdentityWithheld` makes `AddAliases` refuse — so the cross-ID and IAU name tables, which are added afterwards, cannot hand the identity back. The index is rebuilt when a scan reveals a star. Galaxies and nebulae are never fogged.
+
+**Data tables.** `DeepSkyCrossIdTable.cs` (generated, SIMBAD: all 110 Messier objects plus 146 named NGC/IC objects, with positions, sizes, V magnitudes and SIMBAD's own object-type vocabulary) and `StarProperNameTable.cs` (generated, IAU-CSN: 451 approved proper names, 405 with an HD number). The cross-ID generator matches catalogue designations **strictly** — SIMBAD numbers individual stars inside clusters in the same namespace (`NGC 1976 721` is a star in the Orion Nebula), and a loose prefix match drags several hundred of those in as deep-sky objects; 24 such rows are dropped.
+
+An object in the cross-ID table that no installed catalogue carries becomes a target in its own right, which is how the globular and open clusters — of which this mod has no catalogue at all — become pointable.
+
+### 6.8 Constellations (`Constellations.cs`, `BesselianFrames.cs`, `ConstellationTable.cs`)
+
+Which of the 88 IAU constellations a direction falls in. The boundaries are **Delporte (1930)**, adopted by the IAU in 1928 and unchanged since, in the lookup-ordered rearrangement of **Roman (1987, PASP 99, 695)** = VizieR VI/42 (357 arcs). Names, English meanings and genitives are the **IAU's own table**, not VizieR's widely-copied version of it, which carries three spellings the IAU does not use (`Chamaleon`, `Ophiucus`, `Pisces Austrinus`); the generator uses VizieR only as an independent check that the same 88 abbreviations appear on both, and refuses to write a file if they disagree.
+
+**The frame change is the whole problem.** The boundaries are lines of constant RA and Dec **in the mean equinox of B1875 and in no other frame**; in J2000 they are slanted curves. B1875 is a *Besselian* equinox of the *FK4* fundamental system, so getting a J2000 position there is not one precession:
+
+```
+FK5 J2000  --[Murray 1989 A&A 218,325 eq.28 + eq.29 rotating-system term]-->  FK4 B1950
+           --[Newcomb precession, Explanatory Supplement 1992 ch.3]-------->  FK4 B1875
+           --[Roman's ordered scan: first arc whose Dec floor is below the position
+              and whose RA arc brackets it]------------------------------->  constellation
+```
+
+Murray's eq. 29 term is evaluated at the target equinox (Besselian→Julian epoch conversion in `BesselianEpochToJulianYear`) and reaches 1.6×10⁻⁶ in the matrix elements over B1950→B1875, about a third of an arcsecond. That is below Roman's own 0.0001 h RA quantisation (1.5″ at the equator) — included anyway, because omitting it is a choice to be wrong by a known amount, and because including it makes this an exact reimplementation of astropy's `FK4NoETerms` chain rather than an approximation of it. **E-terms are deliberately excluded**: FK4 *star positions* carry up to 0.343″ of elliptic aberration, but Delporte's boundaries are grid lines, not observed positions.
+
+**Record order is part of the data.** Roman sorted the arcs by declination floor then by eastern terminus so a forward scan's first bracketing arc is the answer; re-sorting the array breaks the lookup while still answering plausibly for most of the sky. `tools/constellation-tests` checks that all 88 remain reachable, which is what catches that.
+
+Cross-validation (`tools/constellation-tests`): 3.0×10⁻⁹ arcsec against astropy `FK4NoETerms(B1875)` over 2 664 grid points; 8/8 of Roman's published worked examples; 99.959% agreement with astropy's `get_constellation` over 258 480 points, with every one of the 107 disagreements closer to a boundary (≤20.1″) than astropy's own two realisations of B1875 are to each other (21.0″) — `get_constellation` uses IAU 2006 precession to the Julian date of B1875 rather than going through FK4, which its own docstring calls "plenty sufficient for constellations".
+
+A solar-system body is given no constellation at all rather than the one it happens to be in this hour, and is excluded from `in:` searches for that reason.
+
 ---
 
 ## 7. Solar-system astrograph pipeline
@@ -412,6 +453,23 @@ Two things had to be fixed to make real resolution actually tractable:
 ### 7.06 Background processing
 
 The per-pixel physics pipeline (shot/dark/read noise, cosmic rays, blooming, CTI, PSF construction and convolution, defects — all pure C# array math, no Unity/KSP API touches) now runs on a background `Task`, following the same `StartImagingRefresh`/`PollImagingRenderTask` "gather on main thread → compute off-thread → upload on main thread" pattern already used for the direct-imaging/sky-chart/forecast renders elsewhere in this mod. Only the Unity camera render (`Camera.Render`, `ReadPixels`) and the final texture upload remain on the main thread; everything CelestialBody/Unity-API-dependent (magnitude, positions, cloud cover, seeing) is gathered into a plain-data struct before the background task starts.
+
+### 7.061 What a capture costs, and what parallelism is allowed to change (`Core/ParallelWork.cs`, `tools/capture-profile`)
+
+A galaxy photograph on the RC20 at 4×4 binning took **thirty seconds or more**. At 4×4 that frame is 1036×705 = 0.73 Mpx, so the pixel count was not the explanation, and reading the code produced the wrong suspect. `tools/capture-profile` replays the shipped stages at the shipped parameters and times each one.
+
+**What it found.** The **diffuse-emission fill was 87 % of a 4×4 capture** (1744 ms of 2012, single-threaded on .NET 10), and its cost does not fall with binning at all: it takes one sample per NATIVE pixel — 11.7 million on this sensor whatever the observer chose — because the average over the native sub-pixels is the integral the sensor performs (§7.3 and the comment at `DepositEmissionField`). That is deliberate and unchanged. What was not deliberate was the cost *inside* each sample: `Float16.ToDouble` raised two to an integer power with `Math.Pow`, and the C¹ interpolation stencil reads sixteen map cells, so one exposure made **187 million transcendental calls for an answer that is one of thirty-two constants**. It is now a table of those constants, checked bit for bit against the previous decoder over all 65 536 encodings.
+
+Four other exact changes, each measured rather than assumed:
+
+* **HEALPix ring geometry is memoised** (`Healpix.RingCache`). `RingInfo` is a pure function of `(nside, ring)` costing an inverse trigonometric call, a stencil needs four per sample, and a frame is far smaller than a map cell — the RC20 at 4×4 spans three rings of the Finkbeiner composite and asks for them 47 million times. Sixteen slots, direct-mapped on the ring index, thread-static so a parallel fill needs no lock.
+* **The transform's roots of unity come from a table** rather than from the recurrence `w_{j+1} = w_j · w`, which is the textbook implementation and the textbook example of error accumulation. The table is *more* accurate as well as faster; measured against the direct double-precision sum, old and new are indistinguishable (they differ by 2.1 × 10⁻¹² of the peak, against a single-precision storage floor of 1.2 × 10⁻⁷).
+* **The column pass is taken eight columns at a time**, one cache line. Same arithmetic, same values; a column of a row-major 8 MB tile is strided, so the plain loop fetched a whole line per element and used one of its eight doubles.
+* **An all-zero tile is skipped.** Convolution is linear, so a zero input transforms to zero and adds nothing; the signal plane at that point is genuinely sparse, because the sky is uniform and goes in *after* the PSF (§7.11).
+
+**The rule parallelism obeys.** Splitting a loop across cores must not change the frame, or the seed in the FITS header (§7.5) stops reproducing it. Floating-point addition is not associative, so a shared running total would make the result depend on scheduling. Every parallel stage here therefore either writes to per-element storage no other worker touches, or accumulates **per row** and sums the rows afterwards in row order — a fixed order whatever the thread count. The detector chain is deliberately **left serial**: its draws come from one PCG stream in pixel order and the Poisson sampler draws a variable number per pixel, so no partition reproduces the same realisation, and archival reproducibility of an already-captured frame is worth more than the 350 ms it would save at 1×1. One core is left for the game.
+
+`tools/capture-profile --determinism` runs every parallel stage at one worker and at the machine's count and compares bit for bit; `--accuracy` holds the tiled transform to the direct sum. Totals, best of five, idle machine, .NET 10: **4×4 2012 → 284 ms, 1×1 4166 → 954 ms.** KSP runs Mono and the game holds cores of its own, which is where thirty seconds came from; the ratios are what carries over. Each capture now logs its own per-stage breakdown and shows it in the capture readout (`SolarSystemCameraTexture.LastStageTimings`), so the next slow exposure answers the question itself.
 
 ### 7.07 Exposure range, ND filter, and Kerbin-scale overbrightness
 
@@ -787,6 +845,140 @@ Packed by `tools/pack_gaia_catalog.py` (12 bytes/star), indexed in 0.1° declina
 
 Validated headless by `tools/skyfield-tests/` (26 checks: projection scale and centring against the optics, colour-term limits, sky-model unit scaling, extinction ordering, flux conservation under trailing and clipping, catalogue density against the published total, pole and RA=0h wrap handling, and an end-to-end tracked/untracked comparison on a real patch of sky).
 
+### 7.15 Galaxies: the profile, and the measured shape that replaces it (`Core/GalaxyCatalog.cs`, `SersicProfile.cs`, `GalaxyRenderer.cs`, `GalaxyImageSet.cs`, `GalaxyImageRenderer.cs`)
+
+A galaxy is not a point source for any instrument in this roster — M31 is 3° long and the faintest
+catalogued object is still arcseconds across against SPHERE's 3.6 mas pixels — so it needs a shape
+as well as a brightness, and the shape has to come from measurement.
+
+**The catalogue (`tools/pack_galaxy_catalog.py`).** HyperLEDA (Makarov et al. 2014, A&A 570, A13),
+which carries the four quantities a render cannot do without: total B magnitude, the diameter D25 of
+the 25 B-mag/arcsec² isophote, the axis ratio of that isophote, and its position angle. Nothing
+ships; the packer builds it. At B ≤ 13 that is 1454 galaxies in 82 KB.
+
+**The analytic profile.** Sérsic (1968), with the index set from the de Vaucouleurs type where no
+fit exists (`SersicIndexForType`: n = 4 for E, 1 for Sb and later, the two classical laws as
+anchors). R_e is not assumed: the total magnitude and D25 over-determine a two-parameter profile, so
+`EffectiveRadiusFromIsophote` solves for it exactly, on the compact branch, and falls back to
+keeping the *size* where the two are inconsistent. b_n is inverted numerically rather than taken
+from the Ciotti & Bertin series, and the nucleus is integrated by adaptive subdivision because an
+n = 4 profile has an infinite central slope. Validated in `tools/galaxy-tests` against SciPy and
+astropy's `Sersic2D`.
+
+**And what that gets you, measured.** Replaying the shipped path over the 156 galaxies the sky chart
+plots (RC20, 4×4, 300 s, dark sky, σ = 44.5 e⁻/px):
+
+| | n | profile peak / σ | radius reaching 3σ | central pixel as DEPOSITED | pixels over full well |
+|---|---|---|---|---|---|
+| M31 | 1.0 | 10.4 | 0.32 × r25 | 4.6e2 e⁻ (μ 23.4) | 0 |
+| M51 | 1.0 | 21.9 | 0.50 × r25 | 9.7e2 e⁻ (μ 22.6) | 0 |
+| NGC 4945 | 1.0 | 12.5 | 0.37 × r25 | — | 0 |
+| M32 | 4.0 | 1 486 989 | 1.33 × r25 | 5.0e6 e⁻ (μ 13.3) | 15 (a 4.8″ disc) |
+| M49 | 4.0 | 425 043 | 1.03 × r25 | 1.4e6 e⁻ | 1 |
+
+The two columns on the right exist because **the third column is not what lands on the sensor**. A
+Sérsic n = 4 profile diverges at R = 0, so its central *value* says nothing; the renderer integrates
+it over each pixel and that integral converges. Measured, M32 saturates fifteen pixels at 300 s and
+none at all at 30 s. The ellipticals are therefore not a modelling error, they are an over-exposed
+bright nucleus, and shortening the sub fixes them.
+
+The spirals are the real defect, and the first column says why: a single Sérsic spreads their light
+so evenly that the peak barely clears the sky. None of them has arms, a dust lane, a bulge standing
+above its disc, or a star-forming knot, and **no relation in the literature puts them back**, because
+they are not a function of the Hubble type: M51's arms are M51's.
+
+A third failure was in the data rather than the model. HyperLEDA carries **PGC 779349 at B_T 8.30 in
+a D25 of 0.34′**, i.e. 13.6 B-mag/arcsec² averaged inside its own isophote where the catalogue's
+first percentile is 20.45; drawn, it is a saturated white disc with a bleed down its column, sitting
+on the sky chart among the brightest galaxies in the sky. `GalaxyCatalog.ImplausibleSurfaceBrightnessB`
+now drops such rows at load (and `pack_galaxy_catalog.py` at build), reporting the count: two of 1454.
+
+**So the structure comes from a measurement of that galaxy** (`tools/pack_galaxy_images.py`), the
+same answer §12.1 gives for nebula morphology: install a survey rather than invent a model.
+
+* **Only the SHAPE is taken.** Each map is normalised to unit total flux, so the survey contributes
+  the distribution of the light and nothing else; brightness stays HyperLEDA's B_T through the same
+  photometric chain a mapless galaxy uses. A survey's zero point, exposure time and photometric
+  system never enter the render, and a map can never make a galaxy brighter than the catalogue says.
+* **Two bands**, because morphology is wavelength dependent: arms are bluer than their disc, a bulge
+  redder than both, a dust lane darkest in the blue. Two unit-total maps let the renderer interpolate
+  the shape to its own passband's effective wavelength while the total stays fixed.
+* **Sources, in order:** DESI Legacy Imaging Surveys DR10 (Dey et al. 2019); Pan-STARRS1 DR1
+  (Chambers et al. 2016) from the survey's own stack cutouts, mosaicked across skycells because a
+  box crossing one edge comes back with the rest blank (M51's came back 65 % empty that way);
+  and for boxes too large to fetch at 0.25″, the Pan-STARRS **g** HiPS alone.
+* **The linearity of every service is measured, not assumed** (`tools/galaxy-images/check_transfer.py`,
+  transfer curve against the survey's own stack over the Sombrero's four decades of light). The
+  Pan-STARRS **r and i** HiPS turned out to be **asinh-scaled** — 5 decades of flux compressed into
+  a factor of 60 — with nothing in the header saying so. Packed as shape maps they would have
+  flattened every nucleus and lifted every outskirt, and still looked like galaxies. They are not
+  used. DSS2 is not used at all: a photographic plate is not linear by construction.
+* **Clipped data is refused.** The Legacy DR10 *r* HiPS returns, at some orders and positions, a flat
+  plateau of exactly 10.0 over the Sombrero's nucleus while the rest of the cutout runs to 19.3 —
+  eleven pixels, far too few to move any global statistic, and enough to take the central 5″ from
+  5.1 % of the light down to 1.6 %. The test that catches it: real floating-point sky data
+  essentially never repeats a value exactly, so a repeated value among the brightest percentile is a
+  clip. A second, deliberately loose check compares the two bands on the light in the core, and it
+  is loose because a dusty edge-on galaxy genuinely hides its core in the blue — at a factor of 2.5
+  it rejected Centaurus A, whose 2.65 is 1.06 mag of real differential extinction across its dust
+  lane. A band that fails either is not packed — but the survey is kept if its OTHER band survives,
+  because a clip is a property of one band and not of the sky: six southern galaxies lost their maps
+  outright when a failed band condemned the whole survey, while their g band was perfectly good.
+  Coverage is treated the opposite way, since a survey that did not observe a position did not
+  observe it in either filter.
+* **Foreground stars are removed by Gaia DR3 ASTROMETRY**, not by their appearance: only sources with
+  a parallax or proper motion significant at 3σ. Gaia detects a nearby galaxy's own bright clusters
+  and H II regions too, and those belong to the galaxy — their astrometry is consistent with zero.
+  Removing them would delete the very structure the layer exists to keep.
+* **Holes are filled locally.** The first version filled every mask with the elliptical azimuthal
+  median at that radius, which on a spiral is the *interarm* level, so stars sitting on arms were
+  replaced by discs of interarm sky and the map came out with black holes punched through it. The
+  fill is now a Gaussian-weighted average of the surrounding unmasked pixels, widened until covered.
+* **The survey's own noise is not packed as galaxy light.** A unit-total map spreads whatever is in
+  the box over a million pixels, so clipping a noisy sky positive and summing it took one M51 band's
+  peak down by a factor of sixty against the other. Each pixel is now shrunk toward the elliptical
+  model by its own significance (Wiener weight on a residual smoothed to `--denoise-scale`), so real
+  structure passes untouched and pure noise does not pass at all.
+* **A close companion is swallowed, not masked.** Masking M51's companion cut an elliptical hole
+  across M51's own northern arm, and the bridge between them belongs to neither entry. The map keeps
+  the pair as the survey saw it, the renderer normalises to the SUM of the catalogued fluxes, and the
+  companion is skipped in its own right.
+
+**Geometry.** The map is stored on its own tangent plane (north up, east left). The mapping between
+two tangent planes of the same sphere is exactly projective, so the renderer projects four known map
+corners through *the frame's own projection* — inheriting field rotation, sensor parity and
+distortion rather than re-deriving them — and solves the homography those four correspondences
+determine. Flux is conserved by multiplying by the transform's Jacobian, and a frame pixel covering
+many map pixels is integrated over rather than point sampled, because point sampling a resolved
+galaxy at a coarser grid aliases its arms.
+
+**What the game says about it.** The sky chart says on hover whether a galaxy has real imagery, from
+which survey and at what sampling ("coarser than this instrument's 1.1″/px" when it is), or that it
+will be a smooth Sérsic ellipse, or that it is drawn inside a neighbour's image. The capture readout
+then repeats it per frame, split between the two, and the FITS header records it as `GALSHAPE` and
+`GALSAMP` so a frame that gets measured downstream carries its own provenance. Same discipline as
+`DeepSkyObject.BeamsAcross` for nebulae: the player is told what the installed data can show before
+spending the exposure.
+
+Validated in `tools/galaxy-image-tests` against an independent astropy/numpy reprojection: band sums
+1.000000000, deprojection to 8.6e-11 arcsec, transform to 1.6e-6 map px, per-pixel agreement below
+7e-10 of the peak, and **flux conservation at 100.02 %** on a frame containing the whole map.
+
+**Open, and stated rather than hidden.** The stored sampling is capped, so the largest objects are
+held coarse: at the default 1024-pixel cap M31's 4.7° box comes out at **16.7″ per map pixel**,
+which the RC20 out-resolves fifteen times over. `--giant-pixels 4096` raises the cap for the three
+or four objects past 30′ only, putting M31 at 4.2″ for 32 MB of extra file. Either way the sky chart
+says the sampling on hover and the capture readout says it again per frame.
+
+Of the 156 charted galaxies, **146 have a map**: 94 from the Legacy Surveys (87 in two bands, 7 in
+one), 28 from the Pan-STARRS stacks in two bands, 24 from the Pan-STARRS g HiPS alone. The three
+that have none are far south of Pan-STARRS' −30° limit and outside the Legacy footprint: the
+**SMC**, NGC 4945 and NGC 2997. DES DR2 and SkyMapper both cover that sky through the same service,
+so a fourth tier is a small addition — but neither has been through `check_transfer.py` yet, and
+after what the Pan-STARRS r HiPS turned out to be, no survey goes in before it has. The analytic profile still answers wherever no survey covers the
+galaxy, with the two failure modes tabulated above — a bulge/disc decomposition and a core-Sérsic
+form for the luminous ellipticals are the fix for those and are not built.
+
 ### 7.2 Clouds (EVE integration — `Visualization/EveCloudIntegration.cs`)
 
 Reflection-based soft dependency on **EVE-Redux** (API "verified by decompiling EVE-Redux 1.11.7.2 with ilspycmd"). Samples the real installed cloud-layer cubemap texture for the home body at KSC's zenith direction (a fixed body-frame vector — narrow FOV means the exact viewing direction barely matters). Returns 0 if EVE isn't installed or no cloud layer is configured; **no procedural fallback**. Known approximation: EVE's own wind-drift texture animation isn't replicated (a static sample). Coverage feeds two effects, both of them things cloud physically does: `cloudTransmission = 1 - coverage·0.85` (never fully opaque), and the veiling term of §7.3.
@@ -874,6 +1066,10 @@ Two subtleties, both of which were real defects caught by the harness:
 - **The stacked composite gets no WCS at all.** Every sub is registered on the target body's own centroid (§7.6), and the body moves against the stars between subs, so no single pointing describes the stack: the planet is aligned and the field around it is not. Writing the last sub's WCS would hand a plate solve or a cross-match a pointing wrong by however far the body travelled, silently. Same standard as the omitted `EGAIN` on that product.
 - **An unguided frame's WCS describes the exposure's start**, matching `DATE-OBS`, since the sky turns during the exposure and a single WCS can only describe one instant of it. A `HISTORY` card says so outright, because a plate solve of a trailed frame will not converge and the reason belongs in the file rather than being inferred.
 
+**Which exports carry one.** The single saved photo and every *individual sub* of an `EverySub` export do; the composite and the per-filter stacks do not, for the reason above. A sub is one pointing at one instant with nothing registered into it, so it is exactly the frame that can carry a real WCS — and it is what makes Siril offer its annotation and coordinate grid on the file instead of demanding a plate solve first.
+
+**The pointing is frozen with the pixels, not read off the camera later.** A stacking series *pipelines*: the next exposure opens its shutter as soon as the previous one's integration ends (§7.6), and one `TickCapture` can finish frame *N*'s reduction and render frame *N+1*. The gather pass for *N+1* overwrites the camera's live `LastWcs` and pointing measurement before the caller that collects *N* ever runs, so reading them at collection time attaches the **next** exposure's pointing to this frame's pixels — off by one exposure, silently, in the one header a plate solve is meant to trust. `SolarSystemCameraTexture.CapturedFrameGeometry` is therefore published in the same statement group as the pixel snapshot, and `AstroImageStack` stores it per sub. The registration reference the stack aligns on travels in the same snapshot, for the same reason.
+
 The RA/Dec zero point remains the arbitrary convention of §1/§12.1 on stock. The WCS is internally exact and self-consistent — a source at a given catalogue position lands where the header says — but on stock the frame is not tied to the real sky.
 
 #### 7.7.2 Instrument, site and conditions
@@ -912,7 +1108,7 @@ Both render raw (time-series) and phase-folded scatter plots with error bars. Ph
 
 ### 8.4 GUI structure (`ExoInstrumentsGUI.cs`, ~4150 lines)
 
-Single IMGUI window, two-column layout. Left column: star-chart/target selection, or an active-session summary card. Right column: dispatches by which session object is non-null (`session`=transit, `rvSession`, `imagingSession`) or `photographySessionActive`, each with its own plot/report panel (`DrawTransitObservation`+`DrawTtvSection`, `DrawRvObservation`+`DrawRmSchedulingLine`+`DrawRmSection`, `DrawImagingObservation`+`DrawImagingFrame`, `DrawSolarSystemCameraView`+`DrawCameraControls`+`DrawStackingControls`). Fog-of-war (career mode) adds `DrawHiddenTargetInfoCard`/`DrawDecoyInfoCard`/`DrawCareerScanOutcome`, gated on KSP's stock game-mode flag rather than a bespoke mod setting. Forecast heatmaps (`DrawForecastPanel`, `DrawPhotographyForecastPanel`) are separate panels feeding off §5.4/§7.4 respectively.
+Single IMGUI window, two-column layout. Left column: star-chart/target selection, or an active-session summary card. Right column, **when no session is running**: the target search panel (`ExoInstrumentsGUI.TargetSearch.cs`, §6.7) — search box, one-click type filters, and a ranked clickable list, opposite the chart so looking a target up and seeing where it is are the same glance. The panel and the chart share one query: the chart emphasises **every** match (`TargetSearchIndex.QueryAll`, not the capped page the list draws) and dims everything else, and a dimmed star is not clickable, which is the pre-existing chart semantics extended to nebulae, galaxies and bodies. Otherwise the right column dispatches by which session object is non-null (`session`=transit, `rvSession`, `imagingSession`) or `photographySessionActive`, each with its own plot/report panel (`DrawTransitObservation`+`DrawTtvSection`, `DrawRvObservation`+`DrawRmSchedulingLine`+`DrawRmSection`, `DrawImagingObservation`+`DrawImagingFrame`, `DrawSolarSystemCameraView`+`DrawCameraControls`+`DrawStackingControls`). Fog-of-war (career mode) adds `DrawHiddenTargetInfoCard`/`DrawDecoyInfoCard`/`DrawCareerScanOutcome`, gated on KSP's stock game-mode flag rather than a bespoke mod setting. Forecast heatmaps (`DrawForecastPanel`, `DrawPhotographyForecastPanel`) are separate panels feeding off §5.4/§7.4 respectively.
 
 ---
 
@@ -995,7 +1191,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 10. **Every solar-system-photography instrument's sensor noise chain is anchored to real electron counts** (a real full well, read noise, and dark current, and a real photon-flux-calibrated signal — §7.0/§7.5), not abstract units — the remaining unanchored constant per instrument is astigmatism's pixel amplitude at the frame corner where a nonzero value is used (RC20 only; no published optical prescription specifies it to the needed precision), flagged individually in §7.1. (Optical throughput, absent entirely when this line was written, is now modelled where published and enumerated where not — see §7.001 and items 31-33 below.)
 11. **CTI is a simplified single-trap-species model**; Pyxel's own real CDM (which this is adapted from) uses full SRH capture physics in real electron counts across multiple trap species.
 12. **Cosmic ray incidence angle is isotropic-sampled**, not derived from a real particle angular-distribution model (matches the fact that Pyxel's own shipped angle model is an unimplemented stub) — though the *rate* is now a real derived quantity (sea-level muon flux over a cited real sensor's pixel area, see §7.5).
-13. **Zodiacal light is a fixed baseline constant**, not position/season-dependent (no real ecliptic geometry exists for Kerbol in this mod) — though its *magnitude relative to airglow* is now derived from two real cited surface-brightness measurements via the Pogson relation, not independently invented.
+13. ~~**Zodiacal light is a fixed baseline constant**, not position/season-dependent.~~ **CLOSED (§13.3).** It now varies with helioecliptic longitude and ecliptic latitude, from **Leinert et al. (1998) Table 16** (19x10 grid in S10sun at 500 nm, reproduced unchanged, converted by the S10sun unit definition m = 27.7815 - 2.5 log10 N), indexed in an ecliptic frame read from the home body's own orbital plane (`EclipticFrame`) rather than assumed. Both halves of the original excuse are gone: the table exists, and so does the plane. Cross-checked cell for cell against WFC3 IHB Table 9.4 (worst 0.073 mag, inside STScI's own rounding). The primary source rather than the handbook specifically because it measures in to 15 deg elongation where STScI stops at HST's 50 deg avoidance limit, which removed the one invented interpolation the first version needed. Inside 15 deg the value is clamped, not extrapolated, and reported as unmeasured; nothing in the roster can point within 62.5 deg of the Sun. *What remains:* the dust cloud measured is the Solar System's, which was already being assumed when the value was a constant, and the zodiacal light's slight reddening relative to the Sun (Leinert Sect. 8.4) is not modelled.
 14. **Habitable-zone polynomial fits are only valid 2600K–7200K** — no extrapolation outside that range (returns null instead).
 15. **BSC5-derived decoy stars carry no mass/radius/distance data** (pre-Hipparcos catalog, no such columns) — always treated as "unknown," never invented.
 16. **Transit duration (T14) assumes a circular orbit** — no eccentricity term, despite eccentricity being tracked elsewhere in the same star's data.
@@ -1022,8 +1218,21 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 36. **A photographed body's reflectance is grey.** Its spectrum is integrated as the Sun's (5772 K, IAU 2015 Resolution B3), which is real physics for reflected sunlight, but a KSP `CelestialBody` carries one albedo with no wavelength dependence to read, so the reddening or bluing a real planetary surface imposes on reflected light is absent (§7.0).
 37. **Airglow is integrated with a flat spectrum** because it is line emission (OI 557.7nm, OH Meinel bands) and no continuum shape could stand for it; the other three sky terms are integrated as scattered sunlight, which they are (§7.3).
 38. **The exported WCS is exact and self-consistent but tied to the arbitrary RA zero point** of §12.1 on stock: a source at a given catalogue position lands where the header says, and the frame plate-solves against itself, but the pointing is not the real sky's unless the installed pack models the real solar system (§7.7.1).
-39. **A stacked composite carries no WCS** (§7.7.1), because centroid registration on a moving body aligns the target and not the field, so no single pointing describes the stack.
+39. **A stacked composite carries no WCS** (§7.7.1), because centroid registration on a moving body aligns the target and not the field, so no single pointing describes the stack. The individual subs it was built from each carry their own.
 40. **The sky background's extinction is still evaluated at the filter's central wavelength**, not integrated across the band as the sources' now is: its four terms are each attenuated differently (airglow inside the atmosphere, zodiacal light outside it, moonlight and twilight already measured through it) and preserving that distinction was judged more important than resolving the residual in wavelength (§7.3).
+
+41. **The orbiting telescope's frame is one rectangle, and WFC3/UVIS is two chips with a gap.** The real detector is two butted 2051x4096 CCDs separated by 31 pixels (1.2"), and the imaging pipeline works on a single rectangular array. It is carried as one 4096x4102 frame with the gap closed. The gap is a real, visible feature of a real WFC3 frame. The *downlink* volume, where the gap genuinely does not travel, uses the true pixel count (§13.6).
+42. **One plate scale where the real instrument has four.** The handbook gives 0.0396 and 0.0393 arcsec/pixel for UVIS1's two axes and 0.0400/0.0398 for UVIS2's; WFC3/UVIS's field is rhomboidal rather than square because of exactly that anisotropy. This pipeline carries one plate scale per instrument and uses UVIS1's, the aperture most programmes are placed on (§13.7).
+43. **Field-dependent aberration on WFC3/UVIS is not modelled.** Tiny Tim carries a full field polynomial for focus, astigmatism and coma; this pipeline's astigmatism term is a single corner amplitude and cannot express one. The on-axis figure is already in the published delivered-PSF table (§13.4), so adding a corner amplitude on top would double-count what is measured. Set to zero and declared.
+44. **The extinction model has no ozone term**, so the atmosphere's hard UV cutoff below ~320 nm is not in the physics. It does not currently need to be: no ground instrument in the roster carries a filter below 420 nm, so the near-UV that only the orbiting telescope can reach is expressed as the instruments' real filter sets. Adding any ground UV filter would require adding the ozone term with it (§13.7).
+45. **Scattered planet light below ~16° from the sunlit limb is understated**, by up to a factor of three: the model uses SRW98's STIS slope, and ACS ISR 2003-05 measured the rise steepening faster than that at the smallest angles. The region lies inside every published bright-limb avoidance angle in the roster, so no instrument here can legally observe in it (§13.3).
+46. **Scattered planet light is carried to a non-Earth host body by a solid-angle ratio**, which is exact only where the body is small compared with the angular scale on which the baffle's off-axis rejection varies. The exact quantity is an integral of limb surface brightness against that rejection function, and no rejection function is published for any instrument here. It matters least where it is least trustworthy: a telescope far enough out for the approximation to be poor has negligible scattered planet light anyway (§13.3).
+47. **The limit-cycle displacement is treated as Gaussian in the PSF**, matching its RMS. Its true distribution is uniform, so the profile is given wings a uniform distribution does not have. Deliberate and conservative in the direction that matters: a marginally resolved feature is never reported sharper than it really is (§13.4).
+48. **The vehicle's moment of inertia is a solid-sphere estimate**, 2/5 M R^2 on total mass and bounding radius. KSP computes a real inertia tensor but does not expose one on an unloaded vessel, and the same number has to be available in both cases. Bounded on both sides by the extreme mass distributions (a point mass at 0 and a thin shell at 2/3 M R^2), and it enters only the limit-cycle rate, itself a coarse regime (§13.4).
+49. **The attitude-hold deadband and minimum control pulse are design values of this implementation, not sourced.** No observatory publishes either, because no observatory points a telescope with thrusters. They are declared as design values on `SpacePlatformSpec` rather than given a citation (§13.4).
+50. **Table 6.7's 1100 nm row is excluded as out-of-band.** It gives a delivered PSF narrower than a 2.4 m aperture's own diffraction limit, which is physically impossible, and sits one row past the detector's published 200-1000 nm range: the handbook's optical model run outside the band rather than a measurement. The pipeline correctly leaves that wavelength diffraction-limited (§13.4).
+51. **Electric-charge costs for the orbiting instrument are game balance, not a power budget.** KSP's ElectricCharge has no conversion to watts anywhere in the game, so a real spacecraft's load in watts cannot be converted into it. Labelled as balance where declared rather than dressed up with a citation (§13.6).
+52. **The downlink is KSP's antennas, not TDRSS.** The real HST stores frames on solid-state recorders and dumps them through a relay network shared with other spacecraft on a schedule; there is no counterpart in KSP and none is modelled. The frame *size* is exact arithmetic on the detector's published format (§13.6).
 
 ### 12.1 The nebula-morphology limit, and the layer built for it
 
@@ -1145,7 +1354,461 @@ unconditional clip had introduced on the RedCat.
 stdout; the skycalc client prints an informational note on stdout, and shell redirection silently
 made it the first line of a .cs file.
 
-## 13. Bibliography (papers/formulas actually cited in-source)
+## 13. Orbital telescopes
+
+The observatory's instruments up to this point are all somebody else's: real facilities on real
+mountains, whose time the player buys. This section covers the one instrument that does not exist
+until the player launches it, and the physics that only applies once it is up there.
+
+**What changes, and what does not.** The imaging pipeline of §7 is untouched. The same photon-flux
+model, the same system bandpass, the same pupil diffraction, the same detector chain and the same
+composite produce the frame. What changes is *who the observer is* — and with it, three things the
+ground path was entitled to assume:
+
+| | Ground (§5, §7) | Orbit (§13) |
+|---|---|---|
+| Position | one fixed site, `ObservatorySite` | a vessel's own orbit, `ObservingPlatform` |
+| When you may observe | Sun down, target up (`ImagingObservingConditions`) | body not in the way, and not too near it, the Sun or a moon (`SpaceObservingConditions`) |
+| Image degradation | seeing, extinction, scintillation, dispersion | residual wavefront error, spacecraft pointing |
+| Sky background | airglow + zodiacal + Moon + twilight + cloud | zodiacal + scattered planet light |
+
+### 13.0 Every model in this section, and what backs it
+
+No quantity below is fitted, tuned or chosen for effect. Each is either a published measurement used
+as published, or a closed-form consequence of one.
+
+| Quantity | Relation | Backed by |
+|---|---|---|
+| Body's angular radius | ρ = asin(R/a) | geometry |
+| Limb angle | α = θ − ρ, θ the angle to the body centre | geometry |
+| Occulted fraction of an orbit | acos(k)/π with k = cos ρ / cos β | derived in §13.2; reproduces the HST Primer's ~44 min |
+| Continuous viewing zone | never occulted for β ≥ 90° − ρ | same derivation; Primer's "within 24° of the orbital poles" |
+| Zodiacal light | m = 27.7815 − 2.5 log₁₀(N), N from a 19×10 measured grid | Leinert et al. 1998 Table 16, unit from the S10⊙ definition |
+| Solar elongation | cos ε = cos(λ−λ☉) cos β | spherical law of cosines |
+| Earth-shine vs limb angle | C ∝ 10^(−0.06564 α), flat above the 25° knee, zero off a dark limb | Shaw, Reinhart & Wilson 1998 (STIS ISR 98-21), their fitted relation |
+| Earth-shine absolute level | the 24° spectrum, integrated through Bessell V | WFC3 IHB Table 9.3; cross-checked against SRW98 to a ratio of 1.25 |
+| Earth-shine on another host | (A/A⊕)(1 AU/d)² × (1−cos ρ)/(1−cos ρ_ref) | albedo and inverse-square law; solid-angle ratio flagged as first-order (§12) |
+| Delivered PSF | bisection for the Gaussian σ that reproduces the published FWHM | WFC3 IHB Table 6.7, ten wavelengths, verified to 0.006″ |
+| Pupil diffraction | Fourier transform of the real pupil, in closed form | Tiny Tim `wfc3_uvis1.pup`; reduces to the Airy form to 9×10⁻¹⁶ |
+| Thruster limit cycle | Δω = M·t_p/I, T = 4θ_db/Δω, RMS = min(ωT, 2θ_db)/√12 | Wertz 1978 §18.3, Sidi 1997 ch. 7 |
+| Pointing → PSF | σ_total² = σ_jitter² + σ_vehicle², FWHM = 2√(2 ln 2)·σ | variance of independent displacements adds |
+| Wavefront + pointing | FWHM² = FWHM_wf² + FWHM_point², per sub-band | same, both Gaussian and independent |
+| Aperture sampling | r = √(r_in² + t(r_out² − r_in²)), θ = i·2π(1−1/φ) | equal-area mapping; Vogel spiral |
+| Frame volume | pixels × ADC bits | WFC3 IHB Table 5.1 format and ADC depth |
+| Effective focal length | f = 206265 × pixel / plate scale | WFC3 IHB; cross-checked against the Primer's 3.58″/mm |
+
+`VisualTelescopeSpec.SpacePlatform` is the single field the whole branch turns on. It is a
+`SpacePlatformSpec`, not a boolean, because every replacement term above is a property of a
+particular spacecraft rather than of "space": a solar avoidance angle, a bright-limb avoidance
+angle, a pointing-stability figure, a published delivered-PSF table. A ground instrument carries
+`null`, which is a different claim from carrying zeroes.
+
+### 13.1 The observer (`Visualization/ObservingPlatform.cs`)
+
+Everything geometric in §7 ran off one expression, `ObservatorySite.WorldPosition(home)`, repeated
+at seven call sites: target distance and phase angle, angular diameter, which way is up, the render
+camera's placement, the cloud sample. Adding a second possible answer meant asking the question in
+one place. `ObservingPlatform.WorldPosition` returns the ground site when no orbital telescope is
+selected, so **the ground path is unchanged by construction**.
+
+Two call sites deliberately did *not* move:
+
+- **`TryBuildSiteBasis`** still uses the ground site, always. That basis is not the observer's
+  horizon; it is how this mod's fictional RA/Dec frame is *defined* (§12.1), and
+  `TryEquatorialDirection` composes equatorial→horizontal with horizontal→world through it. The
+  composition is independent of which site is used, so the resulting direction is inertial and
+  correct from anywhere in the system. Substituting a spacecraft's radial vector there would pair
+  it with the ground site's latitude and produce a frame that is neither.
+- **The horizon rejection in `TryProjectBody`** is skipped in orbit. A spacecraft's sky is the whole
+  sphere; what blocks a line of sight is the host body's disk, handled analytically below and far
+  more precisely than a hemisphere test could.
+
+**Render camera placement.** The ground path borrows the live scaled-space camera's own position,
+which is the technique the whole capture path was built on (§7.13). An orbiting telescope is
+somewhere the player's camera has often never been, so its position goes through KSP's own
+`ScaledSpace.LocalToScaledSpace`. This is not an approximation of the ground trick but the general
+form of it, scaled space being a uniform scaling of the world about a moving origin.
+
+**The home body's scaled stand-in is re-enabled in orbit.** §7.13 documents suppressing it because
+a surface camera sits *inside* that sphere. A telescope at 500 km over Kerbin sits at 183 scaled
+units against Kerbin's scaled radius of 100, i.e. outside it, and the planet below is then a real
+object that can appear in the frame or occult the target — the one thing an orbiting telescope has
+to look past. Suppressing it there would delete it.
+
+### 13.2 Orbital visibility (`Core/OrbitalVisibility.cs`, `Core/SpaceObservingConditions.cs`)
+
+Four constraints, all geometry, all published per instrument:
+
+1. **Occultation** by the host body.
+2. **Limb avoidance**, with different angles for the sunlit and the dark limb, because the
+   constraint on the lit side is scattered light (§13.3) and on the dark side is guidance margin.
+3. **Solar avoidance** — a thermal and safety limit, not an image-quality one.
+4. **Moon avoidance**, measured to the moon's *limb* rather than its centre, so a large close moon
+   is avoided by its edge.
+
+**Duty cycle.** For a circular orbit of radius *a* about a body of blocking half-angle ρ, and a
+target at elevation β above the orbital plane, the target is blocked when
+
+```
+|cos φ| > cos ρ / cos β
+```
+
+so with *k* = cos ρ / cos β the blocked fraction is **acos(*k*)/π**, and *k* ≥ 1 is the
+continuous-viewing condition: a target more than (90° − ρ) off the plane is never blocked at all.
+
+**Why ρ is the body's angular radius *plus* the limb avoidance angle.** An exposure ends when the
+pointing enters the avoidance zone, not when the target finally disappears. That distinction is not
+academic, and it is what makes the model checkable:
+
+| | | |
+|---|---|---|
+| Earth's angular radius from 500 km | 68.0° | |
+| Geometric occultation, in-plane target | **36.3 min** of a 96 min orbit | |
+| Plus 15.5° bright-Earth avoidance | **44.5 min** | HST Primer: "about 44 minutes per orbit" |
+
+The Primer's operational figure falls out of the geometry once the avoidance angle is included,
+which says the model and STScI are measuring the same thing.
+
+**A discrepancy inside the source, recorded rather than smoothed.** The same Primer page states a
+500 km orbit and a continuous viewing zone "within 24° of the orbital poles". Those are not
+consistent: 500 km gives 22.0°, and 24° implies 603 km. HST flew near 610 km after its early
+servicing missions and has decayed since, so the two figures are from different epochs of the same
+orbit. The model reproduces the stated altitude; the harness prints the implied one.
+
+### 13.3 The orbital sky (`Core/ZodiacalLight.cs`, `Core/Earthshine.cs`)
+
+The ground model's four terms all vanish together, for one reason: each is made by an atmosphere.
+Airglow is emitted in one, twilight is scattered through one, moonlight reaches the detector by
+being scattered in one, cloud veiling needs one to hold the cloud. Two terms remain, both from
+outside.
+
+**Zodiacal light — this closes §12 item 13.** It was a single constant, Leinert et al. (1998)'s
+value at the ecliptic pole, because "no real ecliptic geometry exists for Kerbol in this mod". Both
+halves of that have changed: the table exists, and so does the plane.
+
+**The source is the primary one.** Leinert, Ch. et al. (1998), *A&AS* 127, 1, **Table 16**:
+"Zodiacal light brightness observed from the Earth (in S10⊙) at 500 nm", on a 19×10 grid of
+helioecliptic longitude λ−λ☉ against ecliptic latitude β, plus the pole value 60 ± 3 S10⊙ from its
+own caption. It is reproduced unchanged. The paper states its own interpolation rule — "Intermediate
+values may be obtained by smooth interpolations, although small scale irregularities (e.g. cometary
+trails) cannot be taken into account" — and bilinear interpolation *is* that rule. Nothing is
+fitted, smoothed or extended.
+
+**The unit conversion is a definition, not a calibration.** One S10⊙ is the surface brightness of a
+single 10th-magnitude solar-type star spread over one square degree. A square degree is 3600² arcsec²,
+and spreading a fixed flux over N times the area costs 2.5 log₁₀ N magnitudes, so
+
+```
+m(1 S10⊙) = 10 + 2.5 log10(3600²) = 10 + 17.7815 = 27.7815 mag/arcsec²
+m(N S10⊙) = 27.7815 − 2.5 log10(N)
+```
+
+**No colour term is required, and that is the one thing that could have gone wrong.** The unit is
+defined against a *solar-type* star and the zodiacal light *is* scattered sunlight, so what the table
+records is a ratio between two nearly identical spectra. That is also why the table's 500 nm
+reference and the V band's 551 nm effective wavelength need no correction between them: a ratio is
+being converted, not a flux. The pipeline then integrates the resulting surface brightness with the
+solar spectral shape, the same treatment every other scattered-sunlight term already gets.
+
+**Whether a cell exists at all is decided by the spherical law of cosines** with the Sun on the
+ecliptic:
+
+```
+cos ε = cos(λ − λ☉) cos β
+```
+
+Leinert's blanks are exactly the cells too close to the Sun; the paper describes the table as
+completing the earlier Levasseur-Regourd & Dumont (1980) work "up to 15° solar elongation", and the
+grid's innermost filled cell, (10°, 10°), sits at ε = 14.1° with the outermost blank at 11.2°.
+
+**Why not the WFC3 handbook's Table 9.4**, which covers the same quantity and which the first
+version of this used. They are *the same measurement*: converting Leinert's S10⊙ through the
+relation above reproduces STScI's magnitudes cell for cell — the harness compares all 78 cells where
+both publish, worst discrepancy **0.073 mag**, inside STScI's own 0.1 mag rounding. But STScI's
+table stops at HST's 50° solar avoidance limit and marks everything inside it "SA", while Leinert
+measures all the way in to 15°. **Taking the primary source removed the only invented interpolation
+in the model**: the first version had to blend toward a text figure across the handbook's empty
+corner with a cos β weight that was nothing but a plausible shape. There is now no fitted or
+invented quantity anywhere in the zodiacal path.
+
+Inside 15° the value is *clamped* to the nearest measured one rather than extrapolated. That
+understates the real light, which keeps rising toward the Sun, and it is the safe direction to be
+wrong in a region nothing can point at: the smallest solar avoidance angle in the whole roster is
+HST's 62.5°, four times the limit.
+
+**Two properties of the measurement the model had to be checked against keeping.**
+
+- **The gegenschein.** The zodiacal light is *not* monotonic in elongation. Along the ecliptic it
+  falls to a minimum of 140 S10⊙ near λ−λ☉ = 135–150° and then **brightens again to 180 S10⊙ at the
+  anti-solar point**, where dust grains backscatter. An earlier version of the harness asserted
+  monotonicity and failed; the assertion was wrong, not the table. A model that had smoothed this
+  away would have lost a named phenomenon.
+- **The darkest sky is not the ecliptic pole.** The minimum is 56 S10⊙ (23.41 mag/arcsec²) at
+  (150–180°, 75°), against the pole's 60 S10⊙ (23.34). The constant this table replaced was the pole
+  value, so it was not even the darkest sky available.
+
+**Why this mattered more than it looks.** On the ground, airglow at 21.7 mag/arcsec² is four times
+brighter and swamps the difference. Above the atmosphere the zodiacal light is very nearly the
+entire background, and holding it flat understated the real sky by **2.06 magnitudes — a factor of
+6.7 in flux, 2.6 in the noise** — at the brightest pointing an instrument here may legally take
+(62.5° from the Sun on the ecliptic), on exactly the faint targets a space telescope exists to reach.
+
+*Still an approximation of:* the dust cloud measured is the Solar System's. That assumption was
+already being made when the value was a constant; what changed is that its shape is now the measured
+one instead of flat. Leinert's own Sect. 8.4 documents a slight reddening of the zodiacal light
+relative to the Sun, which is not modelled (§12).
+
+**Scattered planet light.** Not "don't point at the planet": at these angles the planet is nowhere
+near the field, and what arrives is light that entered off-axis and scattered off the baffles. It
+is flat down to about 25° from the sunlit limb and then climbs exponentially, reaching forty times
+the dark-sky level by 14°. That cliff, not occultation, sets the usable window on most orbits.
+
+Two sources, each used for what it measured:
+
+- **Shape** — Shaw, Reinhart & Wilson (1998), STIS ISR 98-21: `C_BG = 3.4564 × 10^(−0.06564 α)`
+  e⁻/s/px below a ~25° knee, against a measured plateau of ~0.075 e⁻/s/px above it and a dark-limb
+  level of ~0.033 e⁻/s/px which they attribute to zodiacal light. Their own exponential meets their
+  own plateau at the knee to 5%.
+- **Absolute level and wavelength dependence** — WFC3 IHB **Table 9.3**, whose earth-shine column is
+  quoted at a specific geometry the handbook states: the ~24° limb angle of a pointing at the orbit
+  pole.
+
+So the table pins the curve and SRW98 supplies its slope. The two are cross-checked rather than
+assumed to agree: converting SRW98's count rate at 24° through their stated PHOTFLAM and plate
+scale gives 3.19×10⁻¹⁸ against the handbook's 2.55×10⁻¹⁸ erg cm⁻² s⁻¹ Å⁻¹ arcsec⁻², **a ratio of
+1.25 on two different instruments a decade apart**.
+
+*Known to be understated:* ACS ISR 2003-05 measured the same effect rising *faster* than the STIS
+fit below ~16°, by up to a factor of three. That region lies inside every bright-limb avoidance
+angle in the roster, so no instrument here can legally observe in it.
+
+*Carried to another host body* by two factors, `Earthshine.HostBodyScaling`: albedo over distance²
+against Earth's own, and the body's solid angle against Earth's from 500 km. The second is a
+first-order correction and is labelled one — the exact quantity is an integral of limb surface
+brightness against the baffle's off-axis rejection function, which nobody publishes. It matters
+least where it is least trustworthy: a telescope far enough out for it to be poor has negligible
+scattered planet light anyway.
+
+### 13.4 What replaces seeing (`Core/PointingStability.cs`, `OpticalPsf` Gaussian term)
+
+Two Gaussian terms take the atmosphere's place, summed in quadrature per sub-band
+(`BuildSpaceSubBands`). Quadrature is legitimate here and is not everywhere in this codebase (cf.
+`AtmosphericFwhmForDelivered`, §7.013): these are independent random *displacements* of the same
+image, so their variances add, which is a statement about the displacements and not about any
+profile's shape.
+
+**Residual wavefront error.** A perfect 2.4 m aperture at 500 nm gives a 0.042″ core. HST delivers
+0.067″. The difference is the primary's mid-frequency polishing figure, which the WFC3 handbook
+names as the cause, and it cannot be computed from an aperture and an obstruction — it is a
+property of one individual mirror measured after it flew. So it is carried as the measured table it
+is (**Table 6.7**, ten wavelengths), and `OpticalPsf.GaussianFwhmForDelivered` inverts it by
+bisection on the real kernel into the broadening the builder needs. The handbook states outright
+that "the PSFs over most of the UVIS wavelength range are well described by gaussian profiles
+(before pixelation)", so the profile is the one the table is quoted against.
+
+This is chromatic and the sub-band split is what carries it: a fixed surface error is a larger
+fraction of a wave in the blue, which is why the published widths *turn over* near 500 nm and climb
+back to 0.083″ at 200 nm. The harness rebuilds the kernel at each tabulated wavelength and asserts
+the measured FWHM comes back at the published one, to 0.006″.
+
+*A finding, recorded:* Table 6.7's last row, 1100 nm, gives 0.089″ — **narrower than a 2.4 m
+aperture's own diffraction limit of 0.092″**, which no telescope can deliver. It sits one row past
+the detector's published 200–1000 nm range (Table 5.1), so it is the handbook's optical model run
+outside the band rather than a measurement. It is excluded from the assertion and the pipeline
+correctly leaves that wavelength diffraction-limited.
+
+**Spacecraft pointing.** The difference between the two kinds of attitude control is not a matter
+of degree but of kind, and it is the reason the part ships with reaction wheels:
+
+- A **reaction wheel** exchanges momentum continuously and can be commanded to any torque down to
+  zero, so a proportional controller holds the boresight at a *point*. What is left is sensor noise
+  and wheel imbalance — HST's published 0.008″ rms, a fifth of a UVIS pixel.
+- A **thruster** is on or off. It cannot be commanded to a small torque, so the attitude cannot be
+  held at a point at all: the controller lets the vehicle drift out of a deadband, pulses it back,
+  and the attitude traverses that band forever. This is the standard limit cycle (Wertz 1978
+  §18.3; Sidi 1997 ch. 7): a triangle wave of peak-to-peak amplitude 2θ_db at rate
+  Δω = M·t_pulse/I, period 4θ_db/Δω.
+
+Over an exposure the image is laid down uniformly along a line of length `min(ωT, 2θ_db)`, whose
+RMS is that over √12 — one expression covering both regimes, which agree exactly at the crossover
+(asserted). At a 30″ deadband that is **437 pixels** of smear against 0.2 for wheels.
+
+**Measured beats modelled.** When the vessel is loaded and unpacked, KSP is integrating the real
+attitude motion, so the real body rate is sampled and used instead of the analytic estimate; there
+is nothing to model when the answer is observable. On an unloaded vessel the attitude is frozen and
+unobservable, and the analytic path runs from the authority measured the last time it *was* loaded.
+
+### 13.5 The part (`Flight/ModuleExoSpaceTelescope.cs`, `Parts/ExoSpaceTelescope.cfg`)
+
+**The model is Tarsier Space Technology's, under its MIT licence** (Copyright (c) 2013 tobyb121),
+redistributed with the licence text beside it as that licence requires. None of Tarsier's *code* is
+used. It is a placeholder for a purpose-built mesh and a good one, because reading the binary with
+`tools/dump_mu.py` shows its transform tree already carries the three things a telescope part needs:
+
+```
+TelescopeContainer
+  Telescope          <- Animation component, clips "open" and "close": the aperture door
+    Telescope 1      <- tube mesh and collider
+    CameraTransform
+    LookTransform    <- at (0, 0, 0.666), +Z along the tube: the optical boresight
+```
+
+`LookTransform`'s convention (+Z is the optical axis, origin at the entrance pupil) is exactly what
+the module wants, so `boresightTransformName = LookTransform` and no transform has to be generated.
+Swapping in a bespoke mesh later means matching those three names and nothing else. `tools/dump_mu.py`
+exists so that claim can be checked against the binary rather than assumed: a part config naming a
+transform the model does not have produces a part which loads, renders and silently does not work.
+
+**Aperture door.** A hard gate on observing, not an animation. HST's exists as bright-object
+protection of last resort — to close over the optics if attitude control is ever lost with the Sun
+in reach. The module drives the model's own `Animation` directly, playing the named clip for each
+direction, which is how the shipped model was authored and how Tarsier's own module drives it: a
+door is not necessarily symmetric in time, and a model supplying two clips is saying so. A model
+with one clip is played forwards to open and backwards to close instead, and a model with no
+animation counts as permanently open — a telescope without a door, not a door stuck shut.
+
+**Open means FULLY open.** The state is false for the whole of the transit and becomes true when the
+clip finishes. A door part way across the pupil is an obstruction of unknown outline, which is
+precisely the thing this pipeline cannot model (see the partial-obstruction paragraph below), so
+there is no partly-open state to be in. The commanded state is persisted separately from the played
+one, so an *unloaded* vessel can still be asked (§13.6).
+
+**Obstruction.** Rays are cast from a Vogel (sunflower) spiral across the pupil's real **open
+annulus** — the secondary's shadow is excluded, since a ray through the middle of a Cassegrain is
+blocked by the instrument's own secondary whatever else is there. The mapping
+`r = √(r_in² + t(r_out² − r_in²))` makes every sample stand for equal area, so a straight count of
+blocked rays *is* an area fraction; the harness checks that the inner half-area really receives half
+the samples. Hits on the telescope's own part are ignored; the worst offender among the rest is
+named, because a player needs to be told which part to move.
+
+**A clear aperture is a hard gate, not a penalty**, and that is not a simplification. A partially
+blocked pupil is not a telescope collecting proportionally less light — it is a telescope with a
+*different pupil* and therefore a different PSF, depending on the obstruction's outline, its
+distance from the pupil plane and its orientation, none of which is recoverable from "12% of the
+area is covered". This pipeline computes its PSF from a real pupil (§7.112) and there is no honest
+way to hand it a fairing edge. Real observatories work the same way: nobody takes science frames
+through their own structure and corrects afterwards. The 1% tolerance is a *sampling* tolerance, for
+a ray grazing mounting hardware at the very rim.
+
+**Pointing.** The rotation handed to SAS is exact rather than iterated: the shortest rotation taking
+the boresight's current world direction onto the target, applied to the vessel's current attitude,
+*is* the attitude at which the boresight is on target. SAS then flies to it with whatever authority
+the vessel has — which is precisely the point, since the difference between a vessel that settles
+and one that hunts is what §13.4 measures.
+
+**Boresight.** Taken from the model, which is the only thing that knows where its own pupil is. The
+module falls back to building one when a model supplies none — at `apertureOffsetMeters` along the
+part's +Y, in the *part's* frame rather than the model's, since a MODEL node may carry its own scale
+or rotation while the optical axis is a property of the part. That fallback is what lets the module
+work with a part composed from stock meshes; it is not what the shipped part uses.
+
+### 13.6 Operating it from the ground (`Flight/SpaceTelescopeRegistry.cs`)
+
+A `PartModule` exists only while its vessel is loaded, and the telescope the player wants to use
+from the observatory is by construction *not* loaded: they are at the space centre and it is in
+orbit. So the authoritative source is the save's own vessel list, with the module's persistent
+fields read out of the protovessel; a live module, when there is one, only supplies fresher values
+for the same fields.
+
+Four quantities are cached in persistent fields for exactly this reason — measured while loaded,
+read back while not: the blocked-aperture fraction, the blocking part's name, the attitude control
+mode, and the control torque and inertia. None can change while a vessel is unloaded (its geometry
+and hardware are fixed), which is what makes caching them legitimate here and would not make it
+legitimate for anything that moves. Power and the radio link are *not* cached: both are readable on
+an unloaded vessel directly.
+
+**Two different permissions.** Taking the exposure needs power and a clear aperture. *Commanding*
+it from the space centre additionally needs a working CommNet link — a telescope with no antenna is
+not broken, it is one an astronaut has to be next to. Flying the vessel yourself satisfies the
+second condition trivially.
+
+**Data volume** is arithmetic on the detector's own published format: two 2051×4096 CCDs at 16 bits
+is 268.8 Mbit, 32 MB. Against KSP's own antenna rates that is 538 s on a 500 kbit/s Communotron 16
+and 134 s on a 2 Mbit/s relay — a real design trade a player can get wrong. The link rate is KSP's
+because that is the hardware in the game; the real HST downlinks through TDRSS on a schedule set by
+a network shared with other spacecraft (HST Primer: Data Storage and Transmission), which has no
+counterpart here and is not modelled. Electric charge is a KSP resource with no conversion to watts
+anywhere in the game, so those numbers are game balance and are labelled as such where declared.
+
+### 13.7 The instrument (`VisualTelescopeCatalog.HubbleWfc3Uvis`)
+
+Every figure and its source is in the catalogue entry's own comment. Three points worth surfacing:
+
+**It is not the biggest telescope in the roster, and presenting it that way would be a lie the
+numbers expose.** At 2.4 m it has under a twelfth of the VLT's collecting area, and its 0.067″
+delivered core is nearly three times *coarser* than SPHERE's adaptive-optics 25 mas. What it has
+instead is the near-ultraviolet (WFC3/UVIS works from 200 nm; ozone's Hartley band closes the ground
+below ~320 nm outright, and the ozone is stratospheric so a mountain is underneath it), a PSF
+identical in every frame ever taken, and a sky ~1.6 mag darker because airglow is something an
+atmosphere does.
+
+**The focal length is the instrument's, not the telescope's.** The OTA is f/24, giving 57.6 m, and
+using that would be wrong by a third: WFC3 sits behind its own relay optics. It is derived from two
+published numbers — `f = 206265 × 15 µm / 0.0396″ = 78.1 m`, i.e. f/32.6 — and the harness asserts
+the plate scale comes back out at 0.0396″. Separately, the Primer's own three optics figures are
+checked against each other: 206265/(2.4 × 24 × 1000 mm) must be the published 3.58″/mm, and is
+(3.581).
+
+**Pupil.** Tiny Tim's own `wfc3_uvis1.pup` gives "0.330 = OTA Secondary Mirror Radius", "0.022 = OTA
+Spider Width", and three mirror pads of radius 0.065 at published positions, all in pupil-radius
+units. This is the only instrument in the roster whose vane width is published, which is why its
+diffraction spikes are computed rather than declared unmodelled (§12 item 9d), and the pads are why
+`PupilDiffraction` now carries a **complex** amplitude: three pads at ~120° are not centrally
+symmetric, so unlike the annulus and the opposed vane pairs their transform has an imaginary part
+that does not cancel. They block only 1.4% of the open pupil — like the vanes, what makes them
+visible is the shape of what they stop, not the amount. The reducibility contract is unchanged and
+asserted: with no vanes and no pads the 2-D transform still reproduces the closed-form Airy
+intensity to 9×10⁻¹⁶.
+
+**Cosmic rays.** The handbook publishes an impacted-pixel *fraction*, not a rate: "5% to 9% per chip
+during 1800 sec exposures in SAA-free orbits", with "negligible events of less than 500 e⁻ and a
+median of ~1000 e⁻". The catalogue needs events/min/cm², so 110 is derived from that fraction and
+this pipeline's own 2–14 px track-length distribution; the harness runs the derivation in reverse
+and confirms 5.9%, inside the published range. That is ~110× the sea-level muon flux the ground
+instruments carry, which is why the field is per-instrument.
+
+### 13.8 Validation (`tools/spacecraft-tests/`)
+
+80 checks, none of which test that the code does what the code says. Every assertion is against a
+published figure or a self-consistency identity between two independently published quantities.
+Run with:
+
+```
+cd tools/spacecraft-tests
+dotnet run -c Release -p:Core=../../ExoInstruments/Core
+```
+
+Covered: the Primer's three optics figures against each other; occultation duration and CVZ width
+against the Primer's operational numbers; Table 9.4 reproduced at its own grid points, with its
+symmetries and bounds; SRW98's fit against its own plateau, and its absolute level against WFC3's
+across two instruments; the delivered-PSF inversion against all ten rows of Table 6.7; the pupil
+reducibility contract and pad geometry; the limit cycle's two regimes meeting at the crossover;
+equal-area aperture sampling; frame volume and downlink; and the cosmic-ray derivation.
+
+## 14. Bibliography (papers/formulas actually cited in-source)
+
+### Orbital telescopes (§13)
+
+- Space Telescope Science Institute. *The Hubble Space Telescope Primer for Cycle 34* — Orbital Constraints; Pointing, Orientation, and Roll Constraints; Data Storage and Transmission; Optical Performance, Guiding Performance, and Observing Efficiency. — OTA design, aperture, focal ratio, plate scale, delivered PSF at 5000 A, encircled energy; orbit altitude and period, occultation duration, continuous viewing zone, South Atlantic Anomaly; slew rate, guide-star acquisition, pointing jitter, thermal drift; solar avoidance and off-nominal roll limits.
+- Space Telescope Science Institute. *Wide Field Camera 3 Instrument Handbook*, Cycle 24. — Table 5.1 (detector format, pixel size, plate scale, field of view, wavelength range, quantum efficiency, dark count, read noise, full well, gain, ADC maximum, operating temperature); Tables 5.3 and 5.4 (per-amplifier gain and read noise); Sect. 5.4.6 (full-well maximum and ADC truncation); Sect. 5.4.10 (cosmic-ray impacted-pixel fraction and electron deposition); Table 6.7 (PSF FWHM vs wavelength); Table 6.8 (encircled energy); Sect. 7.9.5 (bright Earth avoidance angle); Table 9.3 (earth-shine and zodiacal sky spectra); Table 9.4 and Sect. 9.7.1 (zodiacal background vs heliocentric ecliptic coordinates, and the 20.9 mag/arcsec^2 figure at minimum elongation).
+- Shaw, R., Reinhart, M. & Wilson, J. (1998). "Scattered Light from the Earth Limb Measured with the STIS CCD." *STScI Instrument Science Report* STIS 98-21. — The exponential rise of scattered planet light with decreasing bright-limb angle, its 25 degree knee, and the dark-limb and plateau levels.
+- Biretta, J. et al. (2003). "ACS Background Light vs. Bright Earth Limb Angle." *STScI Instrument Science Report* ACS 2003-05. — Independent measurement of the same effect on ACS; the bound on how far the STIS slope understates it below 16 degrees.
+- Krist, J. & Hook, R. *The Tiny Tim User's Guide*, version 6.3 (2004); Krist, J., Hook, R. & Stoehr, F. (2011). "20 years of Hubble Space Telescope optical modeling using Tiny Tim." *Proc. SPIE* 8127, 81270J. — HST's obscuration set (primary edge, secondary and spider, three mirror support pads) and the `wfc3_uvis1.pup` pupil table: secondary radius 0.330, spider width 0.022, pad radii 0.065 and positions, in pupil-radius units.
+- Leinert, Ch. et al. (1998). "The 1997 reference of diffuse night sky brightness." *A&AS* 127, 1. — **Table 16**, zodiacal light brightness observed from the Earth in S10sun at 500 nm on a grid of helioecliptic longitude against ecliptic latitude, with the ecliptic-pole value in its caption and its own interpolation rule; Sect. 8.4 and Fig. 39 for the reddening relative to the Sun, which is not modelled.
+- Wertz, J. R., ed. (1978). *Spacecraft Attitude Determination and Control*, Reidel, Sect. 18.3; Sidi, M. J. (1997). *Spacecraft Dynamics and Control*, Cambridge University Press, ch. 7. — The on-off thruster limit cycle: rate increment per minimum impulse, deadband traversal, and cycle period.
+- Abramowitz, M. & Stegun, I. A. (1964). *Handbook of Mathematical Functions*, Eq. 7.1.26. — Rational approximation to the error function, for the exact pixel integral of the Gaussian PSF component.
+
+
+### Target search, constellations and nomenclature (§6.7, §6.8)
+
+- Delporte, E. (1930). *Délimitation Scientifique des Constellations (tables et cartes)*. Cambridge University Press. — The constellation boundaries the IAU adopted in 1928, as lines of constant right ascension and declination in the mean equinox of B1875.
+- Roman, N. G. (1987). "Identification of a Constellation From a Position." *PASP* 99, 695. VizieR **VI/42**. — Delporte's boundaries rearranged into 357 arcs sorted by southern declination and eastern terminus, so a forward scan's first bracketing arc is the answer; the eight worked examples in its ReadMe are reproduced by `tools/constellation-tests`.
+- Murray, C. A. (1989). "The transformation of coordinates between the systems B1950.0 and J2000.0, and the principal galactic axes referred to J2000.0." *A&A* 218, 325. — Eq. 28, the FK4(B1950)↔FK5(J2000) rotation with the E-terms removed; eq. 29, the term linear in epoch that accounts for FK4 being a rotating system.
+- Seidelmann, P. K., ed. (1992). *Explanatory Supplement to the Astronomical Almanac*, ch. 3. — Newcomb's precession between Besselian equinoxes (the ζ, z, θ expressions), and the Besselian↔Julian epoch relation.
+- Wenger, M. et al. (2000). "The SIMBAD astronomical database." *A&AS* 143, 9. — Cross-identifications, positions, angular sizes, V magnitudes and the object-type vocabulary for every Messier object and every named NGC/IC object (`Core/DeepSkyCrossIdTable.cs`).
+- IAU Division C Working Group on Star Names. *IAU Catalog of Star Names (IAU-CSN)*. — The 451 officially approved stellar proper names with their HR/HD/HIP designations (`Core/StarProperNameTable.cs`); the reason "Vega" finds `alf Lyr`.
+- International Astronomical Union. *The Constellations* (official table of the 88 names, abbreviations and genitives). — Names, English meanings and genitives; used in preference to VizieR's widely-copied list, which carries three spellings the IAU does not use.
+- de Vaucouleurs, G. et al. (1991). *Third Reference Catalogue of Bright Galaxies*, Table 2. — The de Vaucouleurs numerical type T read back as its Hubble class, for the one-line description of a HyperLEDA galaxy.
 
 - Ballesteros, F. J. (2012). "New insights into black bodies." *EPL* 97, 34008. — B-V→Teff relation.
 - Bouchy, F. et al. (2009). SOPHIE spectrograph characterization.

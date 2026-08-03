@@ -143,13 +143,13 @@ namespace ExoInstruments.Core
 
             if (ir1 > 0)
             {
-                RingInfo(nside, ir1, out long start, out long ringPix, out theta1, out bool shifted);
-                FillRing(phi, start, ringPix, shifted, pixels, weights, 0);
+                RingInfo(nside, ir1, out long start, out long ringPix, out theta1, out double dPhi, out bool shifted);
+                FillRing(phi, start, ringPix, shifted, dPhi, pixels, weights, 0);
             }
             if (ir2 < 4L * nside)
             {
-                RingInfo(nside, ir2, out long start, out long ringPix, out theta2, out bool shifted);
-                FillRing(phi, start, ringPix, shifted, pixels, weights, 2);
+                RingInfo(nside, ir2, out long start, out long ringPix, out theta2, out double dPhi, out bool shifted);
+                FillRing(phi, start, ringPix, shifted, dPhi, pixels, weights, 2);
             }
 
             if (ir1 == 0)
@@ -261,10 +261,10 @@ namespace ExoInstruments.Core
                 return 4;
             }
 
-            RingInfo(nside, ir1 - 1L, out long start0, out long ringPix0, out _, out bool shifted0);
-            RingInfo(nside, ir1, out long start1, out long ringPix1, out double theta1, out bool shifted1);
-            RingInfo(nside, ir2, out long start2, out long ringPix2, out double theta2, out bool shifted2);
-            RingInfo(nside, ir2 + 1L, out long start3, out long ringPix3, out _, out bool shifted3);
+            RingInfo(nside, ir1 - 1L, out long start0, out long ringPix0, out _, out double dPhi0, out bool shifted0);
+            RingInfo(nside, ir1, out long start1, out long ringPix1, out double theta1, out double dPhi1, out bool shifted1);
+            RingInfo(nside, ir2, out long start2, out long ringPix2, out double theta2, out double dPhi2, out bool shifted2);
+            RingInfo(nside, ir2 + 1L, out long start3, out long ringPix3, out _, out double dPhi3, out bool shifted3);
 
             // Fractional position between the two bracketing rings. In the belt the ring index is
             // nside*(2 - 1.5z) exactly, and that is the coordinate the rings are equally spaced in.
@@ -278,10 +278,10 @@ namespace ExoInstruments.Core
 
             CatmullRom(t, out double rowMinus, out double row0, out double row1, out double rowPlus);
 
-            FillRingCubic(phi, start0, ringPix0, shifted0, pixels, weights, 0, rowMinus);
-            FillRingCubic(phi, start1, ringPix1, shifted1, pixels, weights, 4, row0);
-            FillRingCubic(phi, start2, ringPix2, shifted2, pixels, weights, 8, row1);
-            FillRingCubic(phi, start3, ringPix3, shifted3, pixels, weights, 12, rowPlus);
+            FillRingCubic(phi, start0, ringPix0, shifted0, dPhi0, pixels, weights, 0, rowMinus);
+            FillRingCubic(phi, start1, ringPix1, shifted1, dPhi1, pixels, weights, 4, row0);
+            FillRingCubic(phi, start2, ringPix2, shifted2, dPhi2, pixels, weights, 8, row1);
+            FillRingCubic(phi, start3, ringPix3, shifted3, dPhi3, pixels, weights, 12, rowPlus);
             return CubicTaps;
         }
 
@@ -296,10 +296,9 @@ namespace ExoInstruments.Core
         /// already scaled by the ring's own weight, so the sixteen taps a caller reads are the
         /// finished tensor product.
         /// </summary>
-        private static void FillRingCubic(double phi, long start, long ringPix, bool shifted,
+        private static void FillRingCubic(double phi, long start, long ringPix, bool shifted, double dPhi,
                                           long[] pixels, double[] weights, int slot, double ringWeight)
         {
-            double dPhi = 2.0 * Math.PI / ringPix;
             double offset = shifted ? 0.5 : 0.0;
             double t = phi / dPhi - offset;
             long i1 = t < 0.0 ? (long)t - 1L : (long)t;
@@ -307,14 +306,34 @@ namespace ExoInstruments.Core
 
             CatmullRom(w, out double c0, out double c1, out double c2, out double c3);
 
-            pixels[slot] = start + Mod(i1 - 1L, ringPix);
-            pixels[slot + 1] = start + Mod(i1, ringPix);
-            pixels[slot + 2] = start + Mod(i1 + 1L, ringPix);
-            pixels[slot + 3] = start + Mod(i1 + 2L, ringPix);
+            pixels[slot] = start + WrapOnce(i1 - 1L, ringPix);
+            pixels[slot + 1] = start + WrapOnce(i1, ringPix);
+            pixels[slot + 2] = start + WrapOnce(i1 + 1L, ringPix);
+            pixels[slot + 3] = start + WrapOnce(i1 + 2L, ringPix);
             weights[slot] = ringWeight * c0;
             weights[slot + 1] = ringWeight * c1;
             weights[slot + 2] = ringWeight * c2;
             weights[slot + 3] = ringWeight * c3;
+        }
+
+        /// <summary>
+        /// The same answer Mod(v, m) gives, for a v that is already within one period of the range.
+        ///
+        /// EXACT, not approximate, and the range is guaranteed by the caller rather than assumed:
+        /// phi lies in [0, 2*pi) so phi/dPhi lies in [0, ringPix), which puts the stencil's four
+        /// consecutive indices between -2 and ringPix+1. Every ring HEALPix defines holds at least
+        /// four pixels, so a single add or subtract brings any of them into [0, ringPix), which is
+        /// what the remainder would have returned.
+        ///
+        /// Worth writing out because it replaces a 64-bit integer division, the one operation on
+        /// this path that the processor cannot pipeline: sixteen of them per sample, and a capture
+        /// takes one sample per native pixel of the sensor.
+        /// </summary>
+        private static long WrapOnce(long v, long m)
+        {
+            if (v < 0L) return v + m;
+            if (v >= m) return v - m;
+            return v;
         }
 
         /// <summary>
@@ -339,10 +358,9 @@ namespace ExoInstruments.Core
             return AngleToNested(nside, theta, phi);
         }
 
-        private static void FillRing(double phi, long start, long ringPix, bool shifted,
+        private static void FillRing(double phi, long start, long ringPix, bool shifted, double dPhi,
                                      long[] pixels, double[] weights, int slot)
         {
-            double dPhi = 2.0 * Math.PI / ringPix;
             double t = phi / dPhi - (shifted ? 0.5 : 0.0);
             long i1 = t < 0.0 ? (long)t - 1L : (long)t;
             double w = (phi - (i1 + (shifted ? 0.5 : 0.0)) * dPhi) / dPhi;
@@ -364,9 +382,90 @@ namespace ExoInstruments.Core
             return z > 0.0 ? ring : 4L * nside - ring - 1L;
         }
 
-        /// <summary>First pixel, pixel count, colatitude and half-pixel offset of a ring, numbered 1 at the north pole to 4*nside-1 at the south.</summary>
+        /// <summary>
+        /// Ring geometry a stencil has already asked for, remembered so it is computed once.
+        ///
+        /// WHY THIS IS NOT A SHORTCUT. RingInfo is a pure function of (nside, ring): given the
+        /// two, its four outputs are determined, so returning a remembered set is returning the
+        /// same numbers and not an estimate of them. What makes it worth remembering is the
+        /// ratio between how many times it is asked and how many distinct answers exist. It
+        /// costs an inverse trigonometric call, a stencil needs four per sample, and a frame is
+        /// FAR smaller than a map cell: the RC20 at 4x4 with its Barlow spans 4.75 arcmin, where
+        /// the Finkbeiner composite's rings lie 2.6 arcmin apart, so its 11.7 million samples
+        /// (one per native pixel, see the emission fill) fall across three rings and ask for
+        /// them 47 million times. Measured on that frame, the four calls per sample were 43
+        /// percent of the whole lookup.
+        ///
+        /// DIRECT-MAPPED ON THE RING INDEX, sixteen slots, because the rings a frame touches are
+        /// consecutive: any field narrower than sixteen rings (every instrument in the roster on
+        /// every map this project ships) never evicts anything. A wider one still gets the right
+        /// answer, just more misses.
+        ///
+        /// THREAD-STATIC, so a parallel frame fill gives each worker its own and no lock is
+        /// needed. It holds no state a caller can observe: nside is checked on every use and the
+        /// table cleared if it changed, so two maps of different resolutions cannot mix.
+        /// </summary>
+        private sealed class RingCache
+        {
+            private const int Slots = 16;
+            private const int Mask = Slots - 1;
+
+            private int nside = -1;
+            private readonly long[] ring = new long[Slots];
+            private readonly long[] startPix = new long[Slots];
+            private readonly long[] ringPix = new long[Slots];
+            private readonly double[] theta = new double[Slots];
+            private readonly double[] deltaPhi = new double[Slots];
+            private readonly bool[] shifted = new bool[Slots];
+
+            internal RingCache() { Clear(); }
+
+            private void Clear()
+            {
+                // Rings are numbered from 1, so -1 is a value no query can carry.
+                for (int i = 0; i < Slots; i++) ring[i] = -1L;
+            }
+
+            internal void Get(int n, long r, out long start, out long pix, out double th,
+                              out double dPhi, out bool shift)
+            {
+                if (nside != n) { nside = n; Clear(); }
+
+                int slot = (int)(r & Mask);
+                if (ring[slot] != r)
+                {
+                    RingInfoUncached(n, r, out startPix[slot], out ringPix[slot],
+                                     out theta[slot], out shifted[slot]);
+                    deltaPhi[slot] = 2.0 * Math.PI / ringPix[slot];
+                    ring[slot] = r;
+                }
+
+                start = startPix[slot];
+                pix = ringPix[slot];
+                th = theta[slot];
+                dPhi = deltaPhi[slot];
+                shift = shifted[slot];
+            }
+        }
+
+        [ThreadStatic] private static RingCache ringCache;
+
+        /// <summary>
+        /// First pixel, pixel count, colatitude, azimuthal pixel width and half-pixel offset of a
+        /// ring, numbered 1 at the north pole to 4*nside-1 at the south. Answered from the
+        /// per-thread memo above; see RingCache for why that is exact.
+        /// </summary>
         private static void RingInfo(int nside, long ring, out long startPix, out long ringPix,
-                                     out double theta, out bool shifted)
+                                     out double theta, out double deltaPhi, out bool shifted)
+        {
+            RingCache cache = ringCache;
+            if (cache == null) ringCache = cache = new RingCache();
+            cache.Get(nside, ring, out startPix, out ringPix, out theta, out deltaPhi, out shifted);
+        }
+
+        /// <summary>The geometry itself, computed rather than remembered.</summary>
+        private static void RingInfoUncached(int nside, long ring, out long startPix, out long ringPix,
+                                             out double theta, out bool shifted)
         {
             long npix = PixelCount(nside);
             double fact2 = 4.0 / npix;
@@ -430,8 +529,8 @@ namespace ExoInstruments.Core
                 indexInRing = 4L * southRing - 1L - (ip - 2L * southRing * (southRing - 1L));
             }
 
-            RingInfo(nside, ring, out long start, out long ringPix, out theta, out bool shifted);
-            phi = (indexInRing + (shifted ? 0.5 : 0.0)) * (2.0 * Math.PI / ringPix);
+            RingInfo(nside, ring, out long start, out long ringPix, out theta, out double dPhi, out bool shifted);
+            phi = (indexInRing + (shifted ? 0.5 : 0.0)) * dPhi;
         }
 
         // ------------------------------------------------------------------ RING

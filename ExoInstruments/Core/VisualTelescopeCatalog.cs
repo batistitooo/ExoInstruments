@@ -38,6 +38,24 @@ namespace ExoInstruments.Core
         /// <summary>The observatory this instrument stands at, for the FITS OBSERVAT keyword. The same site the altitude and seeing figures below are measured at, named rather than implied.</summary>
         public string SiteName;
 
+        /// <summary>
+        /// The orbiting platform this instrument flies on, or null for a ground instrument.
+        ///
+        /// This one field is what the whole imaging pipeline branches on. Non-null means: no
+        /// seeing, no extinction, no scintillation, no atmospheric dispersion, no airglow, no
+        /// day/night cycle and no airmass, because none of those exist above the atmosphere;
+        /// and in their place, the constraints and the sky background that only exist up there
+        /// (see SpacePlatformSpec, OrbitalVisibility, Earthshine, ZodiacalLight).
+        ///
+        /// Deliberately NOT a bool. A boolean would say only that the atmosphere is gone; what
+        /// actually has to be known is which spacecraft, because every replacement term is a
+        /// property of that spacecraft rather than of "space".
+        /// </summary>
+        public SpacePlatformSpec SpacePlatform;
+
+        /// <summary>True when this instrument observes from orbit. Ground instruments carry no platform at all.</summary>
+        public bool IsSpaceBased => SpacePlatform != null;
+
         /// <summary>Detector operating temperature in Celsius, the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
         public double DetectorTemperatureCelsius = double.NaN;
 
@@ -149,6 +167,19 @@ namespace ExoInstruments.Core
         /// </summary>
         public int SpiderVaneCount;
         public double SpiderVaneWidthMeters;
+
+        /// <summary>
+        /// Circular obscurations in the pupil that are neither the secondary nor the spider: the
+        /// pads holding the primary mirror in its cell, positioned and sized in fractions of the
+        /// pupil radius (see PupilPad).
+        ///
+        /// Null for every instrument whose pupil table nobody publishes, which is all of the
+        /// amateur and most of the professional roster: a pad's position has to be measured on
+        /// the actual telescope, and no manufacturer datasheet carries one. It is populated only
+        /// where a real pupil table exists to transcribe, which so far means HST, whose Tiny Tim
+        /// pupil files give all three pads to four decimal places.
+        /// </summary>
+        public PupilPad[] PrimaryMirrorPads;
 
         /// <summary>
         /// Measured transmission curves for this instrument's Red/Green/Blue filter positions,
@@ -1253,7 +1284,260 @@ namespace ExoInstruments.Core
             HasAtmosphericDispersionCorrector = true,
         };
 
+        /// <summary>
+        /// The Hubble Space Telescope's Optical Telescope Assembly with Wide Field Camera 3's
+        /// UVIS channel: the first instrument in this roster that observes from orbit.
+        ///
+        /// WHAT IT IS NOT. It is not simply the biggest telescope here, and presenting it that
+        /// way would be a lie the numbers immediately expose. At 2.4 m it has less than a
+        /// twelfth of the VLT's collecting area, and its delivered 0.067 arcsec core at 500 nm
+        /// is nearly three times COARSER than SPHERE's adaptive-optics 25 mas. On the two axes
+        /// this catalogue has been climbing so far, aperture and resolution, HST loses to
+        /// instruments already in it.
+        ///
+        /// WHAT IT IS. Three things no ground instrument in this roster can offer at all:
+        ///
+        ///   * The near-ultraviolet. WFC3/UVIS works from 200 nm. The ground does not: ozone's
+        ///     Hartley band closes the atmosphere below about 320 nm outright, and no mirror
+        ///     size, site altitude or adaptive optics buys any of it back, because the ozone is
+        ///     in the stratosphere and a mountain is underneath it. That is why no ground
+        ///     instrument in this roster carries a filter below 420 nm and this one reaches to
+        ///     200: the difference is expressed as the instruments' real filter sets rather than
+        ///     asserted here. The extinction model itself has no ozone term (its Chappuis-band
+        ///     residual is folded into the aerosol fit; see AtmosphericImagingNoise), so if a
+        ///     ground UV filter is ever added to this catalogue, one will have to be added with
+        ///     it. Recorded in section 12.
+        ///   * A deterministic point-spread function. Every frame has the same PSF, because
+        ///     there is no atmosphere to vary. That is what the published FWHM table below
+        ///     MEANS: not a typical value with a distribution around it, but the width the
+        ///     instrument delivers.
+        ///   * A sky roughly 1.6 magnitudes darker, because the airglow that sets a dark
+        ///     ground site's 21.7 mag/arcsec^2 floor is a property of the atmosphere and is
+        ///     simply absent. What is left is zodiacal light, and above the atmosphere it is
+        ///     nearly the entire background (see ZodiacalLight).
+        ///
+        /// Optics: HST Primer (Cycle 34), "Optical Performance, Guiding Performance, and
+        /// Observing Efficiency": Ritchey-Chretien Cassegrain, 2.4 m aperture, f/24, plate scale
+        /// 3.58 arcsec/mm on axis, PSF FWHM 0.043 arcsec at 5000 A, encircled energy within
+        /// 0.1 arcsec 87 per cent at 5000 A. Note that the focal length below is not independently
+        /// asserted: f/24 on 2.4 m gives 57.6 m, and 206265/57600 mm gives 3.581 arcsec/mm, which
+        /// is the published plate scale. The harness checks that identity rather than trusting
+        /// the transcription.
+        ///
+        /// Pupil: Tiny Tim's own wfc3_uvis1.pup table (Krist &amp; Hook, "The Tiny Tim User's
+        /// Guide"; the source distribution at github.com/spacetelescope/tinytim), which gives
+        /// "0.330 = OTA Secondary Mirror Radius", "0.022 = OTA Spider Width", and three mirror
+        /// pads of radius 0.065 at (0.8921, 0.0000), (-0.4615, 0.7555) and (-0.4564, -0.7606),
+        /// all in units of the pupil radius. HST's spider has four vanes.
+        ///
+        /// Detector: WFC3 Instrument Handbook (Cycle 24) Table 5.1, with the per-amplifier
+        /// figures from Tables 5.3 and 5.4; see the field comments for which number is which.
+        /// </summary>
+        public static readonly VisualTelescopeSpec HubbleWfc3Uvis = new VisualTelescopeSpec
+        {
+            Name = "Hubble Space Telescope (OTA)",
+            CameraName = "WFC3/UVIS",
+            SiteName = "Low Earth orbit",
+            // WFC3 IHB Table 5.1, "Operating Temperature": -83 C for the UVIS CCDs.
+            DetectorTemperatureCelsius = -83.0,
+            // No adjustable cooler: the detector runs at a fixed setpoint held by the
+            // instrument's own thermoelectric coolers and radiator, and no observer is offered a
+            // dial. Same treatment as FORS2 and SPHERE.
+            CoolerDeltaBelowAmbientC = 0.0,
+
+            ApertureMeters = 2.4,
+
+            // THE EFFECTIVE FOCAL LENGTH AT WFC3/UVIS, NOT THE OTA's OWN. The telescope is f/24,
+            // giving 57.6 m, and using that here would be wrong by a third: WFC3 is not at the
+            // OTA's Cassegrain focus, it is behind its own relay optics, and the instrument's
+            // published plate scale is what fixes the focal length that actually forms the image.
+            //
+            // So it is derived from two published numbers rather than asserted:
+            //     f = 206265 * pixel_size / plate_scale = 206265 * 15e-6 / 0.0396 = 78.13 m
+            // which is f/32.6. Both inputs are the WFC3 Instrument Handbook's own (Table 5.1 for
+            // the 15 um pixel, the "UVIS Plate Scale" section for the 0.0396 arcsec/pixel of
+            // UVIS1's x axis), and tools/spacecraft-tests asserts that the plate scale this
+            // pipeline computes from it comes back out at 0.0396.
+            //
+            // 0.0396 rather than Table 5.1's rounded 0.040, and rather than an average over both
+            // chips: the handbook gives 0.0396 and 0.0393 for UVIS1's two axes and 0.0400 and
+            // 0.0398 for UVIS2's. That anisotropy is real, WFC3/UVIS's field is rhomboidal
+            // rather than square because of it, and this pipeline carries ONE plate scale and
+            // cannot express it. Recorded in section 12; the figure used is UVIS1's, the
+            // aperture most programmes are placed on.
+            FocalLengthMeters = 206265.0 * 15.0e-6 / 0.0396,
+            BarlowFactor = 1.0,          // a space telescope carries the instruments it launched with
+            SecondaryObstructionFraction = 0.330,
+            SpiderVaneCount = 4,
+            // 0.022 of the pupil RADIUS, and the pupil radius is 1.2 m: 0.0264 m. This is the one
+            // instrument in the roster whose vane width is published, which is why it is the one
+            // whose diffraction spikes are computed rather than declared unmodelled.
+            SpiderVaneWidthMeters = 0.022 * 1.2,
+            PrimaryMirrorPads = new[]
+            {
+                new PupilPad(0.8921,  0.0000, 0.065),
+                new PupilPad(-0.4615, 0.7555, 0.065),
+                new PupilPad(-0.4564, -0.7606, 0.065),
+            },
+
+            // Two mirrors in the OTA, and WFC3 adds its own pick-off mirror and channel-select
+            // optics. Their combined throughput is not carried as a reflectivity product here,
+            // because STScI publishes the whole chain measured end to end instead: the handbook's
+            // throughput curves "include the throughput of the OTA, all of the optical elements"
+            // and the QE. Multiplying an assumed 0.87^N on top of a measured system throughput
+            // would double-count it. MirrorCount is therefore 0 and the loss lives in the
+            // measured QE figures below, which is where the measurement put it.
+            MirrorCount = 0,
+            RelayOpticsTransmission = 1.0,
+
+            // No atmosphere: no site altitude, no seeing, no dispersion corrector, and no
+            // adaptive optics to correct a turbulence that is not there. ZenithSeeingFwhmArcsec
+            // is 0 for the one instrument in this roster for which zero is the physically correct
+            // value, and the field's own comment says so.
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            HasAtmosphericDispersionCorrector = false,
+            AdaptiveOpticsFwhmArcsec = 0.0,
+
+            // WFC3 IHB Table 5.1: "2 butted 2051 x 4096, 31-pixel gap (1.2")", 15 um pixels.
+            // The imaging pipeline works on ONE rectangular frame, so the sensor carried here is
+            // one 4096 x 4102 chip: the two CCDs butted along their long edges, 2 x 2051 rows,
+            // WITHOUT the 31-pixel gap, which cannot be represented as a rectangle. The gap is a
+            // real feature of a real WFC3 frame and its absence is recorded in section 12. The
+            // downlink volume, where the gap does not matter, uses the true pixel count (see
+            // SpacePlatformSpec.FullFramePixels).
+            NativeSensorWidthPx = 4096,
+            NativeSensorHeightPx = 4102,
+            NativePixelSizeMeters = 15.0e-6,
+
+            // WFC3 IHB Table 5.1: "50-59% @ 250 nm, 68-69% @ 600 nm, 47-52% @ 800 nm". Three
+            // published points, so this is one of the two instruments in the roster with a real
+            // QE CURVE rather than a peak held flat. The midpoint of each published range is
+            // used, and the curve is carried only over the detector's own stated 200-1000 nm
+            // range. The 250 nm figure is the handbook's own, excluding multiple-electron events
+            // as its footnote 1 specifies, which is the conservative reading.
+            QuantumEfficiency = 0.685,
+            QuantumEfficiencyCurve = new SpectralCurve(
+                new[] { 200.0, 250.0, 600.0, 800.0, 1000.0 },
+                new[] { 0.400, 0.545, 0.685, 0.495, 0.150 }),
+
+            // WFC3 IHB Table 5.1: full well "63,000-72,000 e-"; Sect. 5.4.6 gives the maximum as
+            // "~72500 e-". The ETC's own working value is used, because it is the one STScI
+            // computes saturation against: "the ETC uses a CCD full-well value of 63,000 e-".
+            FullWellElectrons = 63000.0,
+            // Table 5.1 quotes "3.1-3.2 e-"; Table 5.4's per-amplifier unbinned means are 2.91,
+            // 2.99, 2.90 and 3.01. The four-amplifier mean, 2.95, is used: the frame is read
+            // through all four, so no single amplifier's figure describes it.
+            ReadNoiseElectrons = 2.95,
+            // Table 5.1: "~7 e-/hr/pixel (median, Dec. 2015)". Per second.
+            DarkCurrentElectronsPerSecond = 7.0 / 3600.0,
+
+            // Table 5.1: "ADC Maximum 65,535 DN", i.e. 16 bits, and "Gain 1.55 e-/DN". Table 5.3
+            // gives the four amplifiers as 1.56, 1.55, 1.58, 1.57; 1.55 is the handbook's own
+            // summary figure and the only supported setting.
+            AdcBits = 16,
+            ElectronsPerAduAtUnityGain = 1.55,
+
+            // Cosmic rays in orbit are not the sea-level muon flux this roster's ground
+            // instruments carry: there is no atmosphere overhead. WFC3 IHB Sect. 5.4.10 gives
+            // the quantity that is actually measured, "the fraction of WFC3 pixels impacted by
+            // cosmic rays varies from 5% to 9% per chip during 1800 sec exposures in SAA-free
+            // orbits", together with the deposition, "negligible events of less than 500 e- and
+            // a median of ~1000 e-". The event RATE below is derived from that impacted-pixel
+            // fraction and this pipeline's own track-length distribution rather than quoted, and
+            // tools/spacecraft-tests asserts that a simulated 1800 s frame lands back inside the
+            // published 5-9 per cent. See TECHNICAL_REFERENCE for the derivation.
+            CosmicRayEventsPerMinutePerCm2 = 110.0,
+
+            // WFC3 IHB Sect. 6.7: UVIS exposure times run from 0.5 s to 3600 s. There is no
+            // shorter setting; the shutter is a rotating disk and 0.5 s is its floor.
+            MinExposureSeconds = 0.5f,
+            MaxExposureSeconds = 3600.0f,
+            // A real research CCD with one supported gain: the observer has no dial, exactly as
+            // for FORS2. MinGain == MaxGain is this catalogue's own convention for that.
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // WFC3/UVIS's real broadband filter set, from the handbook's Table 6.2 filter list:
+            // F606W as the wide V, F438W as B, F547M as V, F625W as R, and F656N as H-alpha.
+            // Widths are the filters' own published rectangular widths.
+            LuminanceCentralWavelengthNm = 588.7,   // F606W pivot
+            LuminanceBandwidthAngstrom = 2182.0,
+            BlueCentralWavelengthNm = 432.6,        // F438W
+            BlueBandwidthAngstrom = 618.0,
+            GreenCentralWavelengthNm = 544.7,       // F547M
+            GreenBandwidthAngstrom = 650.0,
+            RedCentralWavelengthNm = 624.2,         // F625W
+            RedBandwidthAngstrom = 1463.0,
+            HAlphaCentralWavelengthNm = 656.1,      // F656N
+            HAlphaBandwidthAngstrom = 18.0,
+
+            // Not applied: STScI publishes full system throughput curves that already include
+            // each filter's transmission along with the OTA and the QE, so a separate peak
+            // transmission here would double-count. 1.0 by this file's convention means the
+            // separate figure is not modelled, which is exactly the case.
+            LuminanceFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
+
+            AvailableFilters = new[]
+            {
+                CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green,
+                CameraFilter.Blue, CameraFilter.HAlpha,
+            },
+
+            // Field-dependent aberration is real on WFC3/UVIS and Tiny Tim carries a full
+            // polynomial for it, but this pipeline's astigmatism term is a single corner
+            // amplitude and cannot express a field polynomial. The delivered PSF table below
+            // already carries the on-axis figure the handbook publishes, so adding a corner
+            // amplitude on top would double-count what is measured. Declared in section 12.
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,   // an observatory does not point without its guidance system
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Hubble Space Telescope",
+
+                // HST Primer, Pointing, Orientation, and Roll Constraints: "The target-to-sun
+                // angle at the time of observation must be greater than 62.5 degrees."
+                SunAvoidanceAngleDeg = 62.5,
+                // WFC3 IHB Sect. 7.9.5: the standard bright Earth avoidance angle is 20 degrees,
+                // with a non-standard 25 available at a cost in observing time.
+                BrightLimbAvoidanceAngleDeg = 20.0,
+                // The dark limb carries no scattered-light constraint (SRW98 measure the
+                // dark-limb background as flat), so what is left is the geometric margin the
+                // guidance system needs. STScI's published figure for the dark limb is 7.6
+                // degrees.
+                DarkLimbAvoidanceAngleDeg = 7.6,
+                MoonAvoidanceAngleDeg = 9.0,
+
+                // HST Primer: "designed to keep telescope jitter below 0.007 arcsec rms, but the
+                // current performance has jitter of 0.008 arcsec rms". The achieved figure.
+                PointingJitterArcsecRms = 0.008,
+
+                // WFC3 IHB Table 6.7, "WFC3/UVIS PSF FWHM (pre-pixelation, in units of pixels and
+                // arcseconds), and sharpness, vs. wavelength", arcsec column, transcribed whole.
+                // The turnover near 500 nm and the climb back into the UV are the OTA's
+                // mid-frequency polishing errors, which the handbook names as the cause; this is
+                // the measured consequence and it is why HST is not diffraction-limited anywhere
+                // in this band.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(
+                    new[] { 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0 },
+                    new[] { 0.083, 0.075, 0.070, 0.067, 0.067, 0.070, 0.074, 0.078, 0.084, 0.089 }),
+
+                HasApertureDoor = true,
+
+                // The true readout: two 2051 x 4096 CCDs. Used for the downlink volume, where the
+                // 31-pixel gap between them genuinely does not travel and the imaging pipeline's
+                // rectangular approximation does not apply.
+                FullFramePixels = 2L * 2051L * 4096L,
+                DownlinkBitsPerPixel = 16,
+            },
+        };
+
         /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI; see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
-        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere };
+        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis };
     }
 }

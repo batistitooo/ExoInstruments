@@ -242,5 +242,18 @@ namespace ExoInstruments.Core
         /// <summary>Dispersion offset in pixels, already resolved into the frame's axes.</summary>
         public double OffsetX;
         public double OffsetY;
+
+        /// <summary>
+        /// Gaussian broadening to apply to THIS sub-band's kernel, arcsec FWHM: residual
+        /// wavefront error plus pointing excursion (see OpticalPsf.BuildKernel).
+        ///
+        /// Per sub-band rather than one figure for the whole passband, because the wavefront
+        /// half of it is not achromatic. A fixed surface error of a given physical depth is a
+        /// larger fraction of a wave in the blue than in the red, so it costs more image quality
+        /// there; HST's own published delivered widths turn over near 500 nm and climb again to
+        /// 0.083 arcsec at 200 nm, and holding one figure across the band would erase that.
+        /// Zero leaves this sub-band purely diffraction-limited.
+        /// </summary>
+        public double GaussianFwhmArcsec;
     }
 }

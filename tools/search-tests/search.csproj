@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>search</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SearchTests.cs" />
+    <Compile Include="$(Core)/BesselianFrames.cs" />
+    <Compile Include="$(Core)/Constellations.cs" />
+    <Compile Include="$(Core)/ConstellationTable.cs" />
+    <Compile Include="$(Core)/DeepSkyCatalog.cs" />
+    <Compile Include="$(Core)/DeepSkyCrossIdTable.cs" />
+    <Compile Include="$(Core)/GalaxyCatalog.cs" />
+    <Compile Include="$(Core)/StarNames.cs" />
+    <Compile Include="$(Core)/StarProperNameTable.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/ExoplanetCSVLoader.cs" />
+    <Compile Include="$(Core)/BackgroundStarCatalogLoader.cs" />
+    <Compile Include="$(Core)/StarCatalogMerger.cs" />
+    <Compile Include="$(Core)/TargetCatalogue.cs" />
+    <Compile Include="$(Core)/TargetDesignations.cs" />
+    <Compile Include="$(Core)/TargetKinds.cs" />
+    <Compile Include="$(Core)/TargetQuery.cs" />
+    <Compile Include="$(Core)/TargetSearchIndex.cs" />
+  </ItemGroup>
+</Project>

@@ -98,6 +98,14 @@ namespace ExoInstruments.Visualization
             public string EmissionMapSource;
             /// <summary>Which published map that reddening came from, for the header's own record.</summary>
             public string DustMapSource;
+            /// <summary>
+            /// Where the galaxies in this frame got their SHAPE: a survey image, or the analytic
+            /// profile. A frame that is going to be measured has to say which, because the two are
+            /// not the same kind of statement about the sky.
+            /// </summary>
+            public string GalaxyShapeSource;
+            /// <summary>Sampling of the coarsest shape map used, arcsec per map pixel, or NaN when none was.</summary>
+            public double GalaxyMapSamplingArcsec;
             /// <summary>Filter's central wavelength and FWHM, nanometres, so a colour term can be recomputed downstream.</summary>
             public double FilterCentralWavelengthNm;
             public double FilterBandwidthNm;
@@ -312,6 +320,14 @@ namespace ExoInstruments.Visualization
                     AppendStringCard(sb, "LINE", info.EmissionLineName, "emission line imaged");
                 if (!string.IsNullOrEmpty(info.EmissionMapSource))
                     AppendCommentaryCard(sb, "COMMENT", "LINEBRIT from " + info.EmissionMapSource);
+            }
+
+            if (!string.IsNullOrEmpty(info.GalaxyShapeSource))
+            {
+                AppendStringCard(sb, "GALSHAPE", info.GalaxyShapeSource, "where the galaxy shapes came from");
+                if (!double.IsNaN(info.GalaxyMapSamplingArcsec))
+                    AppendCard(sb, "GALSAMP", info.GalaxyMapSamplingArcsec.ToString("F3", CultureInfo.InvariantCulture),
+                               "coarsest shape map sampling (arcsec/px)");
             }
             if (info.FilterCentralWavelengthNm > 0.0)
                 AppendCard(sb, "WAVELNTH", info.FilterCentralWavelengthNm.ToString("F2", CultureInfo.InvariantCulture), "filter central wavelength (nm)");

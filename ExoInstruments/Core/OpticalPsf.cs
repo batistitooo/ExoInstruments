@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace ExoInstruments.Core
 {
@@ -403,7 +404,38 @@ namespace ExoInstruments.Core
             double defocusDiscRadiusPx,
             out int radiusPx)
             => BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
-                           atmosphericFwhmArcsec, defocusDiscRadiusPx, 0, 0.0, out radiusPx);
+                           atmosphericFwhmArcsec, defocusDiscRadiusPx, 0, 0.0, 0.0, out radiusPx);
+
+        /// <summary>The spider overload without a Gaussian term, kept so existing ground-based callers read unchanged.</summary>
+        public static float[] BuildKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double wavelengthMeters,
+            double atmosphericFwhmArcsec,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            out int radiusPx)
+            => BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
+                           atmosphericFwhmArcsec, defocusDiscRadiusPx, vaneCount, vaneWidthMeters, 0.0,
+                           null, out radiusPx);
+
+        /// <summary>The overload without mirror pads, for the pupils that have none.</summary>
+        public static float[] BuildKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double wavelengthMeters,
+            double atmosphericFwhmArcsec,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            double gaussianFwhmArcsec,
+            out int radiusPx)
+            => BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
+                           atmosphericFwhmArcsec, defocusDiscRadiusPx, vaneCount, vaneWidthMeters,
+                           gaussianFwhmArcsec, null, out radiusPx);
 
         /// <summary>
         /// As above, but for a pupil whose secondary sits on a spider. With vanes the diffraction
@@ -417,6 +449,20 @@ namespace ExoInstruments.Core
         /// bounded by MaxKernelRadiusPx. The kernel therefore carries the spikes only within its
         /// own support and is renormalised as always, so no flux is lost but the very far spike
         /// wings are not drawn. That is the same computational bound the Airy wings already have.
+        ///
+        /// gaussianFwhmArcsec adds a fourth, Gaussian component. It carries the two effects that
+        /// really are Gaussian and that a ground instrument does not have to care about:
+        ///
+        ///   * the optics' own residual wavefront error, the polishing figure a real mirror is
+        ///     left with, which is why HST delivers 0.067 arcsec at 500 nm where its 2.4 m
+        ///     aperture alone would give 0.044. The WFC3 Instrument Handbook states outright
+        ///     that "the PSFs over most of the UVIS wavelength range are well described by
+        ///     gaussian profiles (before pixelation)" (Sect. 6.6.1), so this is the profile its
+        ///     own published table is quoted against, not a convenient stand-in;
+        ///   * the spacecraft's pointing excursion over the exposure (see PointingStability).
+        ///
+        /// The two are independent and are handed in already summed in quadrature by the caller.
+        /// Zero leaves the kernel exactly as it was.
         /// </summary>
         public static float[] BuildKernel(
             double plateScaleArcsecPerPixel,
@@ -427,6 +473,8 @@ namespace ExoInstruments.Core
             double defocusDiscRadiusPx,
             int vaneCount,
             double vaneWidthMeters,
+            double gaussianFwhmArcsec,
+            PupilPad[] pads,
             out int radiusPx)
         {
             radiusPx = 0;
@@ -437,14 +485,18 @@ namespace ExoInstruments.Core
             double airyFwhm = AiryFwhmArcsec(apertureMeters, obstructionRatio, wavelengthMeters);
             int accR = RadiusFor(airyFwhm, plateScaleArcsecPerPixel);
             double[] acc;
+            bool hasPads = pads != null && pads.Length > 0;
             bool hasVanes = vaneCount > 0 && vaneWidthMeters > 0.0;
-            if (hasVanes)
+            if (hasVanes || hasPads)
             {
-                // Spikes reach far beyond the core, so the diffraction term is given the widest
-                // support the kernel budget allows rather than the core's own few pixels.
+                // Spikes and pad shadows reach far beyond the core, so the diffraction term is
+                // given the widest support the kernel budget allows rather than the core's own
+                // few pixels.
                 accR = Math.Min(MaxKernelRadiusPx, Math.Max(accR, (int)Math.Ceiling(8.0 * airyFwhm / plateScaleArcsecPerPixel)));
                 var pupil = new PupilDiffraction(apertureMeters, obstructionRatio, wavelengthMeters,
-                                                 vaneCount, vaneWidthMeters, 0.0);
+                                                 hasVanes ? vaneCount : 0,
+                                                 hasVanes ? vaneWidthMeters : 0.0,
+                                                 0.0, pads);
                 acc = SampleTwoDimensional(accR, plateScaleArcsecPerPixel, pupil);
             }
             else
@@ -470,6 +522,24 @@ namespace ExoInstruments.Core
 
                 int outR = Math.Min(MaxKernelRadiusPx, accR + atmR);
                 acc = Convolve(acc, accR, atm, atmR, outR);
+                accR = outR;
+            }
+
+            // Component 2b: the Gaussian term, wavefront error and pointing (see the summary).
+            // Placed before defocus and after the atmosphere for no reason other than order of
+            // discovery: convolution commutes, so where it sits in this chain cannot matter.
+            double gaussFwhm = Math.Max(0.0, gaussianFwhmArcsec);
+            if (gaussFwhm > 0.0)
+            {
+                // A Gaussian is down to 1e-6 of peak at 2.2 FWHM, so it needs nothing like the
+                // atmospheric profile's reach; three FWHM is already beyond any pixel that could
+                // carry a value.
+                int gR = Math.Max(1, Math.Min(MaxKernelRadiusPx,
+                    (int)Math.Ceiling(3.0 * gaussFwhm / plateScaleArcsecPerPixel)));
+                double[] g = SampleGaussian(gR, plateScaleArcsecPerPixel, gaussFwhm);
+
+                int outR = Math.Min(MaxKernelRadiusPx, accR + gR);
+                acc = Convolve(acc, accR, g, gR, outR);
                 accR = outR;
             }
 
@@ -521,7 +591,7 @@ namespace ExoInstruments.Core
         /// difference is not in this kernel; the first-order part of it, the shift of a source's
         /// own centroid with its colour, is applied per source where the source is deposited.
         /// </summary>
-        /// <param name="subBands">Wavelength (m), photon weight, and dispersion offset (pixels) per sub-band. Weights need not be normalised.</param>
+        /// <param name="subBands">Wavelength (m), photon weight, dispersion offset (pixels) and Gaussian FWHM (arcsec) per sub-band. Weights need not be normalised.</param>
         public static float[] BuildChromaticKernel(
             double plateScaleArcsecPerPixel,
             double apertureMeters,
@@ -531,6 +601,24 @@ namespace ExoInstruments.Core
             double defocusDiscRadiusPx,
             int vaneCount,
             double vaneWidthMeters,
+            IList<ChromaticSubBand> subBands,
+            out int radiusPx)
+            => BuildChromaticKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio,
+                                    atmosphericFwhmArcsecAtReference, referenceWavelengthMeters,
+                                    defocusDiscRadiusPx, vaneCount, vaneWidthMeters, null,
+                                    subBands, out radiusPx);
+
+        /// <summary>As above, for a pupil that also carries mirror support pads.</summary>
+        public static float[] BuildChromaticKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double atmosphericFwhmArcsecAtReference,
+            double referenceWavelengthMeters,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            PupilPad[] pads,
             IList<ChromaticSubBand> subBands,
             out int radiusPx)
         {
@@ -545,13 +633,23 @@ namespace ExoInstruments.Core
 
             // Two passes: size the output first, because the offsets push the support out and a
             // kernel that has to be grown after the fact would have to be re-accumulated.
-            int maxRadius = 1;
-            var kernels = new List<float[]>(subBands.Count);
-            var radii = new List<int>(subBands.Count);
-            var used = new List<ChromaticSubBand>(subBands.Count);
-            foreach (ChromaticSubBand band in subBands)
+            //
+            // THE SUB-BANDS ARE BUILT IN PARALLEL, and that changes nothing about the kernel.
+            // Each one is an independent BuildKernel over its own wavelength: no sub-band reads
+            // another's result, and the weighted sum below still runs serially in sub-band order,
+            // so the accumulation order (which is what a floating-point sum depends on) is the
+            // order the caller supplied whatever the thread count. What it buys is real: this
+            // loop is twelve numerical Hankel quadratures and twelve direct kernel convolutions,
+            // measured at a quarter of the whole capture on the RC20 at 4x4 binning, and it
+            // cannot be cached between exposures because the seeing follows the airmass and the
+            // airmass follows the sky.
+            var bandKernels = new float[subBands.Count][];
+            var bandRadii = new int[subBands.Count];
+
+            Action<int> buildBand = i =>
             {
-                if (!(band.Weight > 0.0) || !(band.WavelengthMeters > 0.0)) continue;
+                ChromaticSubBand band = subBands[i];
+                if (!(band.Weight > 0.0) || !(band.WavelengthMeters > 0.0)) return;
 
                 // Seeing scales as lambda^(-1/5): r0 goes as lambda^(6/5) and the FWHM as
                 // lambda/r0. Fried (1966); the same exponent every seeing-monitor paper quotes.
@@ -560,16 +658,31 @@ namespace ExoInstruments.Core
                       * Math.Pow(band.WavelengthMeters / referenceWavelengthMeters, -0.2)
                     : atmosphericFwhmArcsecAtReference;
 
-                float[] k = BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio,
-                                        band.WavelengthMeters, fwhm, defocusDiscRadiusPx,
-                                        vaneCount, vaneWidthMeters, out int r);
-                if (k == null) continue;
-                kernels.Add(k);
-                radii.Add(r);
+                bandKernels[i] = BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio,
+                                             band.WavelengthMeters, fwhm, defocusDiscRadiusPx,
+                                             vaneCount, vaneWidthMeters, band.GaussianFwhmArcsec,
+                                             pads, out bandRadii[i]);
+            };
+
+            if (subBands.Count > 1 && ParallelWork.MaxWorkers > 1)
+                Parallel.For(0, subBands.Count, ParallelWork.Options, buildBand);
+            else
+                for (int i = 0; i < subBands.Count; i++) buildBand(i);
+
+            int maxRadius = 1;
+            var kernels = new List<float[]>(subBands.Count);
+            var radii = new List<int>(subBands.Count);
+            var used = new List<ChromaticSubBand>(subBands.Count);
+            for (int i = 0; i < subBands.Count; i++)
+            {
+                if (bandKernels[i] == null) continue;
+                ChromaticSubBand band = subBands[i];
+                kernels.Add(bandKernels[i]);
+                radii.Add(bandRadii[i]);
                 used.Add(band);
 
-                int reach = r + (int)Math.Ceiling(Math.Sqrt(band.OffsetX * band.OffsetX
-                                                          + band.OffsetY * band.OffsetY));
+                int reach = bandRadii[i] + (int)Math.Ceiling(Math.Sqrt(band.OffsetX * band.OffsetX
+                                                                    + band.OffsetY * band.OffsetY));
                 if (reach > maxRadius) maxRadius = reach;
             }
             if (kernels.Count == 0) return null;
@@ -719,6 +832,117 @@ namespace ExoInstruments.Core
         {
             float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, atmFwhm, 0.0, out int r);
             return MeasureKernelFwhmArcsec(k, r, plateScale);
+        }
+
+        /// <summary>
+        /// The Gaussian FWHM which, convolved with THIS telescope's own diffraction pattern,
+        /// makes the finished PSF deliver exactly deliveredFwhmArcsec.
+        ///
+        /// The Gaussian counterpart of AtmosphericFwhmForDelivered, solved the same way and for
+        /// the same reason: an Airy pattern is not a Gaussian, so subtracting the diffraction
+        /// core in quadrature leaves a kernel measurably wider than the published figure. What
+        /// this exists for is to take an instrument's OWN tabulated delivered FWHM, which is
+        /// what an observatory publishes and what a user can check, and turn it into the one
+        /// number the kernel builder needs, so the finished frame reproduces the table.
+        ///
+        /// Returns 0 when diffraction alone already meets or exceeds the delivered figure, which
+        /// is the correct answer and not a failure: it says the published width is at or below
+        /// this aperture's own limit, and nothing should be added.
+        /// </summary>
+        public static double GaussianFwhmForDelivered(
+            double deliveredFwhmArcsec,
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double wavelengthMeters,
+            int vaneCount,
+            double vaneWidthMeters)
+        {
+            if (deliveredFwhmArcsec <= 0.0) return 0.0;
+
+            double diffractionOnly = MeasuredGaussianFwhmFor(
+                0.0, plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
+                vaneCount, vaneWidthMeters);
+            if (diffractionOnly >= deliveredFwhmArcsec) return 0.0;
+
+            double lo = 0.0, hi = deliveredFwhmArcsec;
+            for (int i = 0; i < 24; i++)
+            {
+                double mid = 0.5 * (lo + hi);
+                double fwhm = MeasuredGaussianFwhmFor(mid, plateScaleArcsecPerPixel, apertureMeters,
+                                                      obstructionRatio, wavelengthMeters,
+                                                      vaneCount, vaneWidthMeters);
+                if (fwhm < deliveredFwhmArcsec) lo = mid; else hi = mid;
+            }
+            return 0.5 * (lo + hi);
+        }
+
+        private static double MeasuredGaussianFwhmFor(double gaussFwhm, double plateScale, double aperture,
+                                                      double obstruction, double wavelength,
+                                                      int vaneCount, double vaneWidthMeters)
+        {
+            float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, 0.0, 0.0,
+                                    vaneCount, vaneWidthMeters, gaussFwhm, out int r);
+            return MeasureKernelFwhmArcsec(k, r, plateScale);
+        }
+
+        /// <summary>
+        /// A circular Gaussian of the given FWHM, integrated over each pixel rather than sampled
+        /// at its centre.
+        ///
+        /// Integration matters here in a way it does not for the wide profiles: the Gaussians
+        /// this carries can be NARROWER than one pixel (HST's pointing jitter is 0.008 arcsec
+        /// against a 0.04 arcsec pixel), and a sub-pixel profile sampled at pixel centres is
+        /// simply wrong, in the specific way of putting all the flux in one pixel and none in
+        /// its neighbours. A 2D Gaussian is separable and each factor integrates to a difference
+        /// of error functions, so the exact pixel integral costs no more than the sample would.
+        /// </summary>
+        private static double[] SampleGaussian(int radius, double plateScaleArcsecPerPixel, double fwhmArcsec)
+        {
+            int size = 2 * radius + 1;
+            var k = new double[size * size];
+
+            double sigmaPx = fwhmArcsec / (2.0 * Math.Sqrt(2.0 * Math.Log(2.0))) / plateScaleArcsecPerPixel;
+            if (!(sigmaPx > 0.0))
+            {
+                k[radius * size + radius] = 1.0;
+                return k;
+            }
+
+            // Separable: build the 1D integrated profile once and take outer products.
+            var line = new double[size];
+            double norm = 1.0 / (sigmaPx * Math.Sqrt(2.0));
+            for (int i = -radius; i <= radius; i++)
+            {
+                double hi = Erf((i + 0.5) * norm);
+                double lo = Erf((i - 0.5) * norm);
+                line[i + radius] = 0.5 * (hi - lo);
+            }
+
+            for (int dy = 0; dy < size; dy++)
+                for (int dx = 0; dx < size; dx++)
+                    k[dy * size + dx] = line[dy] * line[dx];
+
+            return k;
+        }
+
+        /// <summary>
+        /// The error function, to about 1.2e-7 absolute: Abramowitz &amp; Stegun (1964), "Handbook
+        /// of Mathematical Functions", Eq. 7.1.26. The .NET Framework this mod targets has no
+        /// Math.Erf, and the pixel integral above needs one; A&amp;S 7.1.26 is the standard rational
+        /// approximation for exactly this situation and its stated error bound is four orders
+        /// below the kernel's own truncation.
+        /// </summary>
+        private static double Erf(double x)
+        {
+            const double a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+            const double a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+
+            int sign = x < 0.0 ? -1 : 1;
+            double ax = Math.Abs(x);
+            double t = 1.0 / (1.0 + p * ax);
+            double y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.Exp(-ax * ax);
+            return sign * y;
         }
 
         /// <summary>Uniformly illuminated defocus blur disc, antialiased at its rim by the fraction of each pixel that falls inside.</summary>

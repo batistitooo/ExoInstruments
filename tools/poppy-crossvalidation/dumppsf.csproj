@@ -8,8 +8,9 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="DumpPsf.cs" />
+    <Compile Include="DumpPsf.cs" /><Compile Include="Stub.cs" />
     <!-- The real shipped Core, not a copy: this harness must measure what the mod computes. -->
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
     <Compile Include="$(Core)/AtmosphericRefraction.cs" />
     <Compile Include="$(Core)/RadialPsfProfile.cs" />

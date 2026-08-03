@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="DumpColour.cs" />
     <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/Colorimetry.cs" />
     <Compile Include="$(Core)/CieColourMatchingTable.cs" />
     <Compile Include="$(Core)/StellarColor.cs" />
@@ -17,7 +18,7 @@
     <Compile Include="$(Core)/SystemBandpass.cs" />
     <Compile Include="$(Core)/SpectralCurve.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
-    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" /><Compile Include="$(Core)/SpacePlatformSpec.cs" />
     <Compile Include="$(Core)/StellarPhotometry.cs" />
     <Compile Include="$(Core)/PhotonFluxModel.cs" />
     <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />

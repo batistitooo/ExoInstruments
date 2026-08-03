@@ -1,17 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading.Tasks;
 using UnityEngine;
 using KSP.UI.Screens;
 using KSP.UI.Screens.DebugToolbar;
 using ExoInstruments.Core;
+using ExoInstruments.Flight;
 using ExoInstruments.Session;
 using ExoInstruments.Visualization;
 
 namespace ExoInstruments
 {
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
-    public class ExoInstrumentsGUI : MonoBehaviour
+    public partial class ExoInstrumentsGUI : MonoBehaviour
     {
         private ApplicationLauncherButton button;
         private bool windowVisible = false;
@@ -32,8 +34,6 @@ namespace ExoInstruments
         private RossiterMcLaughlin.RmFitResult lastRmResult;
         private StarTarget lastRmPlanet;
         private DirectImagingResult lastImagingResult;
-        private string searchFilter = "";
-        private const int MaxShownInList = 40; // IMGUI chokes rendering thousands of buttons per frame
 
         // Sibling lookup is an O(catalog) scan; cache it per selected star since
         // DrawObservatorySelector re-runs every IMGUI pass.
@@ -110,7 +110,15 @@ namespace ExoInstruments
         private const float SkyChartRefreshIntervalSeconds = 1f;
         private float nextSkyChartRefreshTime = 0f;
         private double lastSkyChartRefreshUt = double.NaN;
-        private Task<(List<SkyChartPoint> Points, Color[] Pixels)> skyChartRenderTask;
+        private Task<(List<SkyChartPoint> Points, Color32[] Pixels)> skyChartRenderTask;
+
+        // Two pixel buffers, not one, because the background refresh and a main-thread pan render
+        // can be in flight at the same time and each needs a buffer nobody else is writing. The
+        // background one is safe to reuse across refreshes: StartSkyChartRefresh refuses to start a
+        // second task while one is outstanding, and PollSkyChartRenderTask has finished reading it
+        // before it clears the field. See SkyChartTexture.EnsureBuffer for why they are reused at all.
+        private Color32[] skyChartDragPixels;
+        private Color32[] skyChartRefreshPixels;
 
         // Sky chart camera: zoom 1 = whole sky fits the view (old fixed behavior).
         // Pan is in raw (unzoomed) dome-projection pixel space; see SkyChartView.
@@ -188,6 +196,8 @@ namespace ExoInstruments
         private GUIStyle smallCaptionStyle;
         private GUIStyle wrappedLabelStyle;
         private GUIStyle sectionHeaderStyle;
+        private GUIStyle warpRateStyle;
+        private GUIStyle searchResultStyle;
         private bool stylesInitialized = false;
 
         // Stand-in for clicking a not-yet-built observatory building: type this
@@ -242,6 +252,7 @@ namespace ExoInstruments
 
         void Awake()
         {
+            BindInstance();
             GameEvents.onGUIApplicationLauncherReady.Add(AddButton);
         }
 
@@ -438,11 +449,49 @@ namespace ExoInstruments
                 var catalog = new GalaxyCatalog();
                 catalog.Load(path);
                 SolarSystemCameraTexture.GalaxyCatalog = catalog;
-                Debug.Log($"[ExoInstruments] Galaxy catalogue: {catalog.Count} galaxies, {catalog.Source}");
+                Debug.Log($"[ExoInstruments] Galaxy catalogue: {catalog.Count} galaxies, {catalog.Source}"
+                        + (catalog.RejectedAsImplausible > 0
+                           ? $" | {catalog.RejectedAsImplausible} row(s) dropped: brighter than "
+                             + $"{GalaxyCatalog.ImplausibleSurfaceBrightnessB:F0} B-mag/arcsec^2 inside D25, "
+                             + "which no galaxy is"
+                           : ""));
             }
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the galaxy catalogue: {e.Message}");
+            }
+
+            LoadGalaxyImages();
+        }
+
+        /// <summary>
+        /// The measured shape maps, which are optional: without them a galaxy is drawn from its
+        /// Sersic profile and comes out a smooth ellipse, which is all four catalogued numbers can
+        /// say. Only the index is read here; the pixels are read per frame for the galaxies a
+        /// frame actually contains.
+        /// </summary>
+        private void LoadGalaxyImages()
+        {
+            string path = KSPUtil.ApplicationRootPath
+                        + "GameData/ExoInstruments/PluginData/GalaxyImages.galimg";
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    Debug.Log("[ExoInstruments] No galaxy shape maps installed, so galaxies are drawn "
+                            + "from their Sersic profiles: a smooth ellipse, with no arms and no dust "
+                            + "lane. Build them with tools/pack_galaxy_images.py and place the result at "
+                            + path);
+                    return;
+                }
+                var images = new GalaxyImageSet();
+                images.Load(path);
+                SolarSystemCameraTexture.GalaxyImages = images;
+                Debug.Log($"[ExoInstruments] Galaxy shape maps: {images.Count} galaxies, {images.Source}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the galaxy shape maps: {e.Message}");
             }
         }
 
@@ -513,6 +562,8 @@ namespace ExoInstruments
             PollImagingRenderTask();
             PollSkyChartRenderTask();
             PollForecastRenderTask();
+            MaybeStartTargetIndexBuild();
+            PollTargetIndexTask();
             PollTransitAnalysisTask();
             PollRvAnalysisTask();
             BetterTimeWarpIntegration.PollRestore();
@@ -539,7 +590,10 @@ namespace ExoInstruments
                         solarSystemCamera.Filter, solarSystemCamera.GetLastCaptureGray(),
                         solarSystemCamera.FovDeg, solarSystemCamera.ExposureSeconds,
                         solarSystemCamera.GetDefectPixelIndices(),
-                        solarSystemCamera.LastRegistrationX, solarSystemCamera.LastRegistrationY);
+                        // The geometry frozen with these pixels, not the camera's live pointing:
+                        // the series is pipelined, so the next exposure may already have been
+                        // gathered by the time this sub is collected. See CapturedFrameGeometry.
+                        solarSystemCamera.LastCaptureGeometry);
                     solarSystemCamera.ConsumeCapturedPhoto();
 
                     if (subResult == AstroSubResult.FilterFull)
@@ -594,6 +648,12 @@ namespace ExoInstruments
                     double skyUt = Planetarium.GetUniversalTime();
                     if (skyUt != lastSkyChartRefreshUt)
                     {
+                        // The search list reports every target's altitude and can filter on it, and
+                        // both go stale as the sky turns. Re-run on the chart's own cadence and for
+                        // the same reason: the two are showing the same instant. BEFORE the chart
+                        // refresh, so the refresh snapshots the highlights this pass produced, and
+                        // without a re-raster of its own, which that refresh is about to do anyway.
+                        RunTargetSearch(rerenderChart: false);
                         StartSkyChartRefresh();
                         lastSkyChartRefreshUt = skyUt;
                     }
@@ -642,6 +702,7 @@ namespace ExoInstruments
 
         void OnDestroy()
         {
+            UnbindInstance();
             GameEvents.onGUIApplicationLauncherReady.Remove(AddButton);
             if (button != null)
             {
@@ -695,7 +756,15 @@ namespace ExoInstruments
             // KSC_ALL alone doesn't cover camera scroll/pan/rotate; CAMERACONTROLS is a
             // separate flag, and without it the mouse wheel zooms the KSC camera right
             // through this fullscreen panel.
-            InputLockManager.SetControlLock(ControlTypes.KSC_ALL | ControlTypes.CAMERACONTROLS, InputLockId);
+            //
+            // TIMEWARP is masked back OUT of KSC_ALL, which contains it: with it locked, the
+            // habitual "," and "." did nothing while the panel was open, so the only way to move
+            // the clock was a "warp to..." button that jumps to one specific time. Warping to the
+            // next night is ordinary use of this mod, not an edge case; the panel's own arrows
+            // (DrawWarpControls) are there because the fullscreen box covers the stock widget, and
+            // this keeps the keys working alongside them.
+            InputLockManager.SetControlLock(
+                (ControlTypes.KSC_ALL & ~ControlTypes.TIMEWARP) | ControlTypes.CAMERACONTROLS, InputLockId);
         }
 
         void CloseObservatoryWindow()
@@ -762,6 +831,17 @@ namespace ExoInstruments
             smallCaptionStyle = new GUIStyle(GUI.skin.label) { fontSize = 10, fontStyle = FontStyle.Italic, wordWrap = true };
             wrappedLabelStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
             sectionHeaderStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
+            warpRateStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+            // Two lines per search result, the name and everything known about it, in one button:
+            // the row IS the click target, so it is left-aligned and wraps like a list entry rather
+            // than centring like a control.
+            searchResultStyle = new GUIStyle(GUI.skin.button)
+            {
+                richText = true,
+                wordWrap = true,
+                alignment = TextAnchor.MiddleLeft,
+                padding = new RectOffset(8, 8, 6, 6),
+            };
             stylesInitialized = true;
         }
 
@@ -816,11 +896,73 @@ namespace ExoInstruments
             GUILayout.BeginHorizontal();
             GUILayout.Label("<b>ExoInstruments Observatory</b>", headerLabelStyle);
             GUILayout.FlexibleSpace();
+            DrawWarpControls();
+            GUILayout.Space(18);
             if (GUILayout.Button("Close", GUILayout.Width(90), GUILayout.Height(28)))
             {
                 CloseObservatoryWindow();
             }
             GUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Plain warp rate arrows, the stock widget's job done inside the panel.
+        ///
+        /// WHY THEY EXIST. This panel is a fullscreen BeginArea, so it sits on top of the stock
+        /// warp control in the corner and there is nothing left to click. Every other way this mod
+        /// moves the clock is a jump to one computed instant ("warp to the next window", a forecast
+        /// cell): useful, but no substitute for stepping the rate by hand when you just want to
+        /// watch the sky turn or nudge past a cloud of minutes.
+        ///
+        /// Rates come from TimeWarp.fetch.warpRates rather than a table of our own, so a player
+        /// running BetterTimeWarpContinued gets their extended set here with no special casing.
+        /// </summary>
+        void DrawWarpControls()
+        {
+            if (TimeWarp.fetch == null) return;
+
+            float[] rates = TimeWarp.fetch.warpRates;
+            if (rates == null || rates.Length == 0) return;
+
+            int index = Mathf.Clamp(TimeWarp.CurrentRateIndex, 0, rates.Length - 1);
+            bool wasEnabled = GUI.enabled;
+
+            GUI.enabled = wasEnabled && index > 0;
+            if (GUILayout.Button("<<", GUILayout.Width(36), GUILayout.Height(28)))
+                SetWarpRateIndex(index - 1);
+
+            GUI.enabled = wasEnabled;
+            GUILayout.Label(DescribeWarpRate(rates[index]), warpRateStyle, GUILayout.Width(64), GUILayout.Height(28));
+
+            GUI.enabled = wasEnabled && index < rates.Length - 1;
+            if (GUILayout.Button(">>", GUILayout.Width(36), GUILayout.Height(28)))
+                SetWarpRateIndex(index + 1);
+
+            // Dropping from 100,000x one step at a time is a dozen clicks, and the moment you want
+            // to stop is usually the moment something is about to happen.
+            GUI.enabled = wasEnabled && index > 0;
+            if (GUILayout.Button("Stop", GUILayout.Width(52), GUILayout.Height(28)))
+                SetWarpRateIndex(0);
+
+            GUI.enabled = wasEnabled;
+        }
+
+        /// <summary>
+        /// instant: false so the rate ramps the way the stock arrows do rather than snapping.
+        /// No screen message: the readout next to the arrows already says the rate, and stock's
+        /// message would land under this fullscreen panel anyway.
+        /// </summary>
+        static void SetWarpRateIndex(int index)
+        {
+            TimeWarp.SetRate(index, false, false);
+        }
+
+        /// <summary>Invariant formatting on purpose: a machine locale that prints decimal commas would put "1,5kx" in the middle of an otherwise English panel.</summary>
+        static string DescribeWarpRate(float rate)
+        {
+            if (rate >= 1e6f) return (rate / 1e6f).ToString("0.###", CultureInfo.InvariantCulture) + "Mx";
+            if (rate >= 1e3f) return (rate / 1e3f).ToString("0.###", CultureInfo.InvariantCulture) + "kx";
+            return rate.ToString("0.###", CultureInfo.InvariantCulture) + "x";
         }
 
         void DrawLeftColumn()
@@ -931,7 +1073,14 @@ namespace ExoInstruments
 
             DrawInstrumentPresentation(SelectedInstrument);
 
-            if (CareerFogActive)
+            // An orbital instrument needs a second choice the ground ones do not: WHICH
+            // spacecraft. See ExoInstrumentsGUI.SpaceTelescopes.cs.
+            if (SelectedInstrument.VisualTelescope != null && SelectedInstrument.VisualTelescope.IsSpaceBased)
+            {
+                DrawSpacecraftSelector();
+            }
+
+            if (CareerFogActive && SelectedInstrument.ScanCostFunds > 0.0)
             {
                 GUILayout.Label($"Telescope time: {SelectedInstrument.ScanCostFunds:N0} Funds per observation.   " +
                                  $"Detection reward: x{SelectedInstrument.ScienceRewardMultiplier:0.#}.", smallCaptionStyle);
@@ -1030,6 +1179,13 @@ namespace ExoInstruments
         {
             selectedObservatoryIndex = index;
             InstrumentSpec instrument = Observatories.All[index];
+
+            // Leaving an orbital instrument puts the observer back on the ground. Done here
+            // rather than in the spacecraft picker, because the picker is only drawn while an
+            // orbital instrument is selected and so never sees the moment one is deselected.
+            if (instrument.VisualTelescope == null || !instrument.VisualTelescope.IsSpaceBased)
+                ObservingPlatform.SetGround();
+
             if (instrument.Method != DetectionMethod.SolarSystemPhotography) return;
             if (instrument.VisualTelescope == null) return;
             if (instrument.VisualTelescope == SolarSystemCameraTexture.ActiveTelescope) return;
@@ -1435,6 +1591,10 @@ namespace ExoInstruments
 
                     // Only the selected photography target gets a ring.
                     IsSelectedTarget = c.Body == selectedPhotographyBody,
+
+                    // A search running: a body the search did not match steps back with everything
+                    // else, so "type:nebula" does not leave the planets shouting over the answers.
+                    IsHighlighted = IsSearchHighlightedBody(c.Body),
                 });
 
                 hitList.Add((c.Body, c.Alt, c.Az));
@@ -1613,10 +1773,31 @@ namespace ExoInstruments
         bool CanExposePhotography()
         {
             if (!selectedPhotographyTarget.HasTarget) return false;
+
+            // Orbit and ground are gated by completely different constraints, so there is no
+            // shared test to fall through to: an orbiting telescope has no night and no horizon,
+            // and a ground one has no aperture door, no attitude control and no radio link.
+            if (ObservingPlatform.IsSpaceBased) return CanExposeFromOrbit();
+
             var conditions = ImagingObservingConditions.Evaluate(
                 Planetarium.GetUniversalTime(), null, null, BuildImagingObserverContext());
             TryComputeTargetAltAz(selectedPhotographyTarget, out double targetAlt, out _);
             return conditions.IsNight && targetAlt > 0.0;
+        }
+
+        /// <summary>
+        /// Whether the selected spacecraft can take this exposure right now: the spacecraft has
+        /// to be usable at all (door, aperture, attitude, power), commandable from where the
+        /// player is (link, unless they are flying it), and pointing somewhere the instrument is
+        /// allowed to look.
+        /// </summary>
+        bool CanExposeFromOrbit()
+        {
+            SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
+            if (!CanCommand(link, out _)) return false;
+            if (!solarSystemCamera.TryBuildOrbitalConditions(selectedPhotographyTarget,
+                                                             out SpaceConditionsSnapshot c)) return false;
+            return c.Observable;
         }
 
         /// <summary>
@@ -2034,6 +2215,44 @@ namespace ExoInstruments
                             ? $" ({solarSystemCamera.LastGalaxiesWithModelledColour} with no catalogued colour, "
                               + "band conversion from the mean colour of their type)"
                             : ""),
+                        smallCaptionStyle);
+
+                    // Which of the two a galaxy came from decides what is on the screen: a real
+                    // image of it, or a smooth ellipse with the right total brightness and no
+                    // structure at all. And when it is a real image, the map's own sampling against
+                    // this instrument's pixel says whether the structure is the survey's or an
+                    // interpolation of it, the same way the emission map reports its beam.
+                    int fromImages = solarSystemCamera.LastGalaxiesFromImages;
+                    int fromProfile = solarSystemCamera.LastGalaxiesDrawn - fromImages;
+                    double sampling = solarSystemCamera.LastGalaxyMapSamplingArcsec;
+                    double framePlateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+                    string detail = fromImages > 0
+                        ? $"   {fromImages} from measured survey imagery"
+                          + (double.IsNaN(sampling) ? ""
+                             : $" sampled at {sampling:F2}\"/px against this frame's {framePlateScale:F2}\"/px"
+                               + (sampling > 1.5 * framePlateScale
+                                  ? $", so structure finer than {sampling * 2.0:F1}\" is interpolated"
+                                  : ""))
+                        : "";
+                    if (fromProfile > 0)
+                        detail += (detail.Length > 0 ? "; " : "   ")
+                                + $"{fromProfile} from a Sersic profile, which is a smooth ellipse: "
+                                + "no arms, no dust lane, no knots"
+                                + (SolarSystemCameraTexture.GalaxyImages == null
+                                   ? " (no shape maps installed; see tools/pack_galaxy_images.py)" : "");
+                    if (detail.Length > 0) GUILayout.Label(detail, smallCaptionStyle);
+                }
+
+                // What the exposure cost to reduce, and where. Shown because "the shutter closed a
+                // while ago and the picture is still not here" is otherwise indistinguishable from
+                // a hung capture, and because the breakdown is the only thing that says which
+                // setting to change: the sky maps are sampled once per NATIVE pixel whatever the
+                // binning, so a slow frame is not always a big frame.
+                if (!string.IsNullOrEmpty(solarSystemCamera.LastStageTimings))
+                {
+                    GUILayout.Label(
+                        $"Reduction: {solarSystemCamera.LastReductionMilliseconds:F0} ms on "
+                        + $"{ParallelWork.MaxWorkers} core(s) -- {solarSystemCamera.LastStageTimings}",
                         smallCaptionStyle);
                 }
 
@@ -2693,8 +2912,13 @@ namespace ExoInstruments
                 {
                     float[] sub = astroStack.SubFrame(filter, i);
                     if (sub == null) continue;
+                    // A sub is one pointing at one instant and nothing has been registered into it,
+                    // so unlike the stack it can carry its own WCS: the one recorded when this very
+                    // exposure was taken, which is why AstroImageStack keeps it per sub.
                     written += WriteFrame(dir, sub, $"{FilterLabel(filter)}_sub{i + 1:D3}", filter,
-                                          astroStack.SubExposureSeconds(filter, i), 1, calibrated: true);
+                                          astroStack.SubExposureSeconds(filter, i), 1, calibrated: true,
+                                          wcs: astroStack.SubWcs(filter, i),
+                                          trailed: astroStack.SubTrailed(filter, i));
                 }
             }
             return written;
@@ -2707,9 +2931,15 @@ namespace ExoInstruments
         /// own integration time rather than the stack's total; a header that describes a different
         /// exposure than the pixels is worse than no header. NSTACK says how many subs went in, so a
         /// reader can tell a single sub from an average of ten.
+        ///
+        /// The WCS follows the same rule and is the caller's to supply, because only the caller
+        /// knows whether the pixels are one exposure or several: an individual sub passes the
+        /// pointing recorded with it, a registered stack passes none, for the reason spelled out in
+        /// ExportComposite.
         /// </summary>
         int WriteFrame(string dir, float[] gray, string suffix, CameraFilter filter,
-                       float exposureSeconds, int subCount, bool calibrated)
+                       float exposureSeconds, int subCount, bool calibrated,
+                       Core.FitsWcs wcs = default(Core.FitsWcs), bool trailed = false)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             if (gray.Length != w * h) return 0;
@@ -2729,6 +2959,9 @@ namespace ExoInstruments
                 ObjectName = selectedPhotographyTarget.DisplayName,
                 UtcTimestamp = DateTime.UtcNow,
                 ImageType = "Light Frame",
+                // Invalid for a stacked frame, and FitsWriter then writes no WCS keywords at all.
+                Wcs = wcs,
+                TrailedByDrift = trailed,
             };
             FillCommonFitsMetadata(ref fitsInfo);
             fitsInfo.FilterCentralWavelengthNm = SolarSystemCameraTexture.CentralWavelengthNmOf(filter);
@@ -2811,6 +3044,21 @@ namespace ExoInstruments
                 ? SolarSystemCameraTexture.EmissionMap.LineName : null;
             info.EmissionMapSource = SolarSystemCameraTexture.EmissionMap != null
                 ? SolarSystemCameraTexture.EmissionMap.Source : null;
+
+            // A frame that will be measured has to record which kind of statement its galaxies are:
+            // a photograph of that galaxy, or a profile fitted to four catalogued numbers.
+            if (solarSystemCamera.LastGalaxiesDrawn > 0)
+            {
+                int fromImages = solarSystemCamera.LastGalaxiesFromImages;
+                int fromProfile = solarSystemCamera.LastGalaxiesDrawn - fromImages;
+                var images = SolarSystemCameraTexture.GalaxyImages;
+                info.GalaxyShapeSource =
+                    fromImages > 0 && fromProfile > 0
+                        ? $"{fromImages} from {images?.Source}; {fromProfile} from Sersic profiles"
+                    : fromImages > 0 ? images?.Source
+                    : "Sersic profiles from HyperLEDA B_T, D25, b/a, PA";
+                info.GalaxyMapSamplingArcsec = solarSystemCamera.LastGalaxyMapSamplingArcsec;
+            }
 
             info.OpticalThroughput = spec.OpticsTransmission;
             info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;
@@ -2952,8 +3200,8 @@ namespace ExoInstruments
                 ImageType = "Light Frame",
                 // A raw sub is one pointing at one instant, so it can carry a real WCS, measured
                 // from the same projection that placed the stars in it (see Core.FitsWcs).
-                Wcs = solarSystemCamera.LastWcs,
-                TrailedByDrift = solarSystemCamera.LastFrameTrailed,
+                Wcs = solarSystemCamera.LastCaptureGeometry.Wcs,
+                TrailedByDrift = solarSystemCamera.LastCaptureGeometry.Trailed,
                 FilterCentralWavelengthNm = solarSystemCamera.ActiveFilterCentralWavelengthNm,
                 FilterBandwidthNm = solarSystemCamera.ActiveFilterBandwidthNm,
             };
@@ -2970,15 +3218,7 @@ namespace ExoInstruments
             // the equatorial KSC; on a pack that relocates the space centre it reads as wherever
             // the observatory actually stands, and the chart above it changes accordingly.
             GUILayout.Label($"Observing from {ObservatorySite.Describe()}", smallCaptionStyle);
-            GUILayout.Label($"Select target star: ({catalog.Count} loaded)");
-            GUILayout.Label("Filter by name (matches are highlighted and clickable on the sky chart):");
-
-            string newFilter = GUILayout.TextField(searchFilter, GUILayout.Height(28));
-            if (newFilter != searchFilter)
-            {
-                searchFilter = newFilter;
-                RefreshSkyChartHighlights();
-            }
+            GUILayout.Label("Click anything on the chart to point at it, or search for it by name on the right.");
 
             GUILayout.Space(6);
             Rect chartRect = GUILayoutUtility.GetRect(SkyChartWidth, SkyChartHeight,
@@ -3006,51 +3246,6 @@ namespace ExoInstruments
                 RenderSkyChartTexture();
             }
             GUILayout.EndHorizontal();
-
-            DrawUnmappedMatches();
-        }
-
-        /// <summary>
-        /// Catalog entries with no RaDeg/DecDeg never appear on the sky chart;
-        /// this is the only way to still select them, shown only while filtering
-        /// so it doesn't bloat the view for the common case.
-        /// </summary>
-        void DrawUnmappedMatches()
-        {
-            if (string.IsNullOrEmpty(searchFilter)) return;
-
-            List<StarTarget> unmapped = null;
-            foreach (var star in catalog)
-            {
-                if (star.RaDeg.HasValue && star.DecDeg.HasValue) continue;
-                // Career: an unscanned target with no coordinates is unreachable by
-                // construction; there's no position to point the telescope at and
-                // no name the player could search for. Skip rather than leak.
-                if (IsIdentityHidden(star)) continue;
-                if (star.Name.IndexOf(searchFilter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (unmapped == null) unmapped = new List<StarTarget>();
-                unmapped.Add(star);
-            }
-            if (unmapped == null) return;
-
-            GUILayout.Space(6);
-            GUILayout.Label("No sky coordinates (not on the chart above):");
-            int shown = 0;
-            foreach (var star in unmapped)
-            {
-                bool isSelected = (selectedStar == star);
-                string label = isSelected ? $"> {star.Name} [{star.Status}] <" : $"{star.Name} [{star.Status}]";
-                if (GUILayout.Button(label))
-                {
-                    selectedStar = star;
-                }
-                shown++;
-                if (shown >= MaxShownInList)
-                {
-                    GUILayout.Label($"... showing first {MaxShownInList} matches, refine your search.");
-                    break;
-                }
-            }
         }
 
         /// <summary>
@@ -3423,11 +3618,14 @@ namespace ExoInstruments
 
             if (session == null && rvSession == null && imagingSession == null)
             {
-                GUILayout.Label(selectedPhotographyTarget.HasTarget
+                // Target selection: the chart is on the left, the search for what to put on it is
+                // here. Both drive the same pointing, and the chart lights up whatever the search
+                // matched, so the two halves are one view.
+                DrawTargetSearchPanel();
+                GUILayout.Space(10);
+                GUILayout.Label(selectedStar != null || selectedPhotographyTarget.HasTarget
                     ? "Click \"Start Observation\" on the left when ready."
-                    : selectedStar == null
-                    ? "Select a target on the left to begin."
-                    : "Click \"Start Observation\" on the left when ready.");
+                    : "Pick a target here or on the chart to begin.");
                 GUILayout.EndScrollView();
                 return;
             }
@@ -3545,6 +3743,10 @@ namespace ExoInstruments
             {
                 lastScanWasFirstForStar = true;
                 award += ScienceRewards.ScienceRewardFirstScan;
+                // The star has a name now, so the search box must be able to find it under that
+                // name. The index is rebuilt rather than patched: a reveal can unlock a whole
+                // system at once, and its proper name may arrive from the IAU table too.
+                targetIndexStale = true;
             }
             if (stellarCharacterization && scenario.MarkCharacterized(target.CatalogKey))
             {
@@ -3668,6 +3870,13 @@ namespace ExoInstruments
 
         private static bool IsInstrumentUnlocked(InstrumentSpec instrument)
         {
+            // The orbital instrument is not bought, so no unlock list can answer for it: it is
+            // available exactly when the player has put one up there, in every game mode
+            // including sandbox. See Observatories.OrbitalObservatory for why it is gated this
+            // way and not with Funds.
+            if (instrument.VisualTelescope != null && instrument.VisualTelescope.IsSpaceBased)
+                return Instance != null && Instance.HasAnyOrbitalTelescope;
+
             if (!CareerFogActive) return true;
             if (instrument.UnlockedByDefault) return true;
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
@@ -5155,8 +5364,13 @@ namespace ExoInstruments
             double localMeridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
                 ut, home.rotationPeriod, home.initialRotation, ObservatorySite.LongitudeDeg);
             var catalogSnapshot = catalog;
-            string filterSnapshot = searchFilter;
             var pointingSnapshot = selectedPhotographyTarget;
+            // The search results decide what the chart emphasises, so they are snapshotted here
+            // alongside the catalogue: the background task must not read a set the main thread is
+            // rewriting under it while the player types.
+            var highlightedStarsSnapshot = new HashSet<StarTarget>(highlightedStars);
+            var highlightedPositionsSnapshot = new HashSet<long>(highlightedSkyPositions);
+            bool searchActive = searchHighlightActive;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
 
             // Solar-system bodies must be sampled on the MAIN thread (they read
@@ -5165,6 +5379,9 @@ namespace ExoInstruments
             // task purely as SkyChartPoints (no KSP types cross the boundary).
             var bodyPoints = BuildChartBodyPoints(out var bodyHitList);
             cachedChartBodies = bodyHitList;
+
+            var buffer = skyChartRefreshPixels =
+                SkyChartTexture.EnsureBuffer(skyChartRefreshPixels, SkyChartWidth, SkyChartHeight);
 
             skyChartRenderTask = Task.Run(() =>
             {
@@ -5180,14 +5397,17 @@ namespace ExoInstruments
                         Target = star,
                         AltitudeDeg = horizontal.Value.AltitudeDeg,
                         AzimuthDeg = horizontal.Value.AzimuthDeg,
-                        IsHighlighted = MatchesFilter(star, filterSnapshot),
+                        IsHighlighted = !searchActive || highlightedStarsSnapshot.Contains(star),
                         IsSelectedTarget = IsPhotographyTarget(star, pointingSnapshot)
                     });
                 }
                 points.AddRange(bodyPoints);
-                points.AddRange(BuildDeepSkyPoints(localMeridianRaDeg, pointingSnapshot));
-                var pixels = SkyChartTexture.ComputePixels(points, SkyChartWidth, SkyChartHeight, view, !string.IsNullOrEmpty(filterSnapshot));
-                return (points, pixels);
+                points.AddRange(BuildDeepSkyPoints(localMeridianRaDeg, pointingSnapshot,
+                                                   searchActive, highlightedPositionsSnapshot));
+                SkyChartTexture.ComputePixels(points, SkyChartWidth, SkyChartHeight, view, searchActive, buffer);
+                // The buffer comes back with the points rather than being read off the field: same
+                // array either way, but it says outright which buffer this result belongs to.
+                return (points, buffer);
             });
         }
 
@@ -5211,7 +5431,27 @@ namespace ExoInstruments
                     : $"{obj.MajorArcmin * 60.0:F0} x {obj.MinorArcmin * 60.0:F0} arcsec";
             string note = "";
             var map = SolarSystemCameraTexture.EmissionMap;
-            if (obj.Kind == DeepSkyKind.DarkNebula)
+            if (obj.Kind == DeepSkyKind.Galaxy)
+            {
+                // Which kind of picture this target can give, said before the exposure is spent:
+                // a photograph of that galaxy at a stated sampling, or a Sersic ellipse. Same
+                // discipline as BeamsAcross below, which is why it sits here.
+                var images = SolarSystemCameraTexture.GalaxyImages;
+                GalaxyImage image = images != null ? images.Describe(obj.Id) : null;
+                if (image != null)
+                {
+                    double frameScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+                    note = $", real {image.SurveyId} imagery at {image.SamplingArcsec:F1}\"/px"
+                         + (image.SamplingArcsec > 1.5 * frameScale
+                            ? $", coarser than this instrument's {frameScale:F1}\"/px"
+                            : "");
+                }
+                else if (images != null && images.IsCoveredByAnother(obj.Id, out string owner))
+                    note = $", drawn inside {owner}'s own image";
+                else
+                    note = ", no imagery installed, so a smooth Sersic ellipse";
+            }
+            else if (obj.Kind == DeepSkyKind.DarkNebula)
             {
                 // An emission map holds what is emitted, so a silhouette is not in it at all. Say
                 // so on the chart rather than let the player spend an exposure finding out.
@@ -5237,10 +5477,13 @@ namespace ExoInstruments
         /// The bright nebulae, placed on the chart the same way a star is. Pure computation on
         /// plain data, so it runs on the chart's background task.
         ///
-        /// Not gated by the search filter: these are never "highlighted", which is what keeps them
-        /// out of the star hit test. They have their own, HitTestDeepSky.
+        /// A deep-sky marker is never a candidate for the STAR hit test (that one requires a
+        /// Target, and these carry none); it has its own, HitTestDeepSky, which is why highlighting
+        /// one costs nothing in clickability. What the highlight does here is exactly what it does
+        /// for a star: say which markers the current search matched.
         /// </summary>
-        static List<SkyChartPoint> BuildDeepSkyPoints(double localMeridianRaDeg, SkyTarget pointing)
+        static List<SkyChartPoint> BuildDeepSkyPoints(double localMeridianRaDeg, SkyTarget pointing,
+                                                      bool searchActive, HashSet<long> highlighted)
         {
             var points = new List<SkyChartPoint>();
             foreach (var obj in DeepSkyCatalog.All)
@@ -5255,6 +5498,7 @@ namespace ExoInstruments
                     DeepSky = obj,
                     AltitudeDeg = horizontal.AltitudeDeg,
                     AzimuthDeg = horizontal.AzimuthDeg,
+                    IsHighlighted = !searchActive || highlighted.Contains(SkyPositionKey(obj.RaDeg, obj.DecDeg)),
                     IsSelectedTarget = pointing.IsEquatorial
                                     && Math.Abs(pointing.RaDeg - obj.RaDeg) < 1e-6
                                     && Math.Abs(pointing.DecDeg - obj.DecDeg) < 1e-6,
@@ -5289,6 +5533,7 @@ namespace ExoInstruments
                         },
                         AltitudeDeg = h.AltitudeDeg,
                         AzimuthDeg = h.AzimuthDeg,
+                        IsHighlighted = !searchActive || highlighted.Contains(SkyPositionKey(g.RaDeg, g.DecDeg)),
                         IsSelectedTarget = pointing.IsEquatorial
                                         && Math.Abs(pointing.RaDeg - g.RaDeg) < 1e-6
                                         && Math.Abs(pointing.DecDeg - g.DecDeg) < 1e-6,
@@ -5314,7 +5559,7 @@ namespace ExoInstruments
             var (points, pixels) = skyChartRenderTask.Result;
             cachedSkyChartPoints = points;
             skyChartTexture = SkyChartTexture.ApplyToTexture(pixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
-            skyChartRenderTask = null;
+            skyChartRenderTask = null; // cleared last: it is what gates the next task's writes to that buffer
         }
 
         // --- Observing-quality forecast heatmap --------------------------------
@@ -5847,8 +6092,7 @@ namespace ExoInstruments
             for (int i = 0; i < cachedSkyChartPoints.Count; i++)
             {
                 var p = cachedSkyChartPoints[i];
-                if (p.IsBody) continue; // bodies have no Target and aren't filtered by the star search
-                p.IsHighlighted = MatchesFilter(p.Target, searchFilter);
+                p.IsHighlighted = IsSearchHighlighted(p);
                 cachedSkyChartPoints[i] = p;
             }
             RenderSkyChartTexture();
@@ -5858,18 +6102,9 @@ namespace ExoInstruments
         void RenderSkyChartTexture()
         {
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
-            var pixels = SkyChartTexture.ComputePixels(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, !string.IsNullOrEmpty(searchFilter));
-            skyChartTexture = SkyChartTexture.ApplyToTexture(pixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
-        }
-
-        private static bool MatchesFilter(StarTarget star, string filter)
-        {
-            if (string.IsNullOrEmpty(filter)) return true;
-            // Matches what the player is allowed to see: searching "51 Peg" in
-            // career must not light up an unscanned 51 Peg (that would be the
-            // whole fog answered by the search box). Unscanned stars are instead
-            // findable by their provisional designation ("J2257+2046").
-            return GetDisplayName(star).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+            skyChartDragPixels = SkyChartTexture.EnsureBuffer(skyChartDragPixels, SkyChartWidth, SkyChartHeight);
+            SkyChartTexture.ComputePixels(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, searchHighlightActive, skyChartDragPixels);
+            skyChartTexture = SkyChartTexture.ApplyToTexture(skyChartDragPixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
         }
 
         void ClearTextures()

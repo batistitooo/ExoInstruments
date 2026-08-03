@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DumpFrame.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/Pcg32.cs" />
     <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
@@ -17,7 +18,7 @@
     <Compile Include="$(Core)/FourierConvolution.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
     <Compile Include="$(Core)/RadialPsfProfile.cs" />
-    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" /><Compile Include="$(Core)/SpacePlatformSpec.cs" />
     <Compile Include="$(Core)/SpectralCurve.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/SystemBandpass.cs" />

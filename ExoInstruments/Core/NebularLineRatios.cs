@@ -150,6 +150,48 @@ namespace ExoInstruments.Core
             return double.NaN;
         }
 
+        /// <summary>
+        /// Every ratio one pixel needs, solved once from that pixel's own H-alpha brightness.
+        ///
+        /// IDENTICAL ARITHMETIC, NOT A CHEAPER ONE. RatioToHalpha below takes the brightness and
+        /// derives the temperature before answering, so a caller stepping through the five
+        /// derivable lines at one pixel recomputed the same logarithm five times and the same two
+        /// exponentials twice each; the doublet partners then divided a value their sibling had
+        /// just computed. This evaluates each of those exactly once and hands back the same
+        /// numbers. Nothing is tabulated or interpolated: the two ratio functions are still
+        /// evaluated in full, at the temperature this pixel's own brightness implies.
+        ///
+        /// It is worth a type of its own because it runs once per frame pixel: an RC20 exposure
+        /// is 11.7 million pixels at 1x1, where the repetition was measured at about four seconds
+        /// of the capture.
+        /// </summary>
+        public struct RatioSet
+        {
+            /// <summary>The electron temperature this pixel's brightness implies, kelvin.</summary>
+            public readonly double ElectronTemperatureK;
+
+            private readonly double nii6584;
+            private readonly double sii6716;
+
+            public RatioSet(double halphaRayleighs)
+            {
+                ElectronTemperatureK = NebularLineRatios.ElectronTemperatureK(halphaRayleighs);
+                nii6584 = Nii6584OverHalpha(ElectronTemperatureK);
+                sii6716 = Sii6716OverHalpha(ElectronTemperatureK);
+            }
+
+            /// <summary>The same answer RatioToHalpha gives, from the temperature already solved for.</summary>
+            public double RatioToHalpha(EmissionLines.Line line)
+            {
+                if (Same(line, EmissionLines.HAlpha)) return 1.0;
+                if (Same(line, EmissionLines.NII6584)) return nii6584;
+                if (Same(line, EmissionLines.NII6548)) return nii6584 / EmissionLines.NiiDoubletRatio;
+                if (Same(line, EmissionLines.SII6716)) return sii6716;
+                if (Same(line, EmissionLines.SII6731)) return sii6716 / SiiDoubletRatio;
+                return double.NaN;
+            }
+        }
+
         /// <summary>Every line this can derive from an H-alpha map, in wavelength order.</summary>
         public static readonly EmissionLines.Line[] DerivableLines =
         {

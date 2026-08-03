@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 namespace ExoInstruments.Core
 {
@@ -70,12 +71,31 @@ namespace ExoInstruments.Core
 
                     int spanY = Math.Min(tile, height - tileY);
                     int spanX = Math.Min(tile, width - tileX);
+                    bool anySignal = false;
                     for (int y = 0; y < spanY; y++)
                     {
                         int src = (tileY + y) * width + tileX;
                         int dst = y * n;
-                        for (int x = 0; x < spanX; x++) re[dst + x] = image[src + x];
+                        for (int x = 0; x < spanX; x++)
+                        {
+                            float v = image[src + x];
+                            re[dst + x] = v;
+                            if (v != 0f) anySignal = true;
+                        }
                     }
+
+                    // A TILE WITH NOTHING IN IT CONTRIBUTES NOTHING, exactly. Convolution is
+                    // linear, so an all-zero input transforms to zero, multiplies to zero and
+                    // comes back zero, and adding that to the accumulator leaves every bit of it
+                    // as it was. This is a skipped no-op, not a dropped term.
+                    //
+                    // It is worth testing for because the signal plane at this point is SPARSE by
+                    // construction: the sky has not been added yet (it is uniform, and a uniform
+                    // field through a unit-sum kernel is unchanged, so it goes in afterwards), the
+                    // stars are points, and a deep-sky target occupies the part of the frame it
+                    // subtends. A galaxy portrait on a wide field, or any frame where the rendered
+                    // scene came back empty, leaves whole tiles at zero.
+                    if (!anySignal) continue;
 
                     Transform2D(re, im, n, false);
 
@@ -248,67 +268,222 @@ namespace ExoInstruments.Core
         private static void Transform2D(double[] re, double[] im, int n, bool inverse)
             => Transform2D(re, im, n, n, inverse);
 
-        /// <summary>The rectangular form. nx and ny must each be a power of two.</summary>
+        /// <summary>
+        /// The rectangular form. nx and ny must each be a power of two.
+        ///
+        /// SPREAD ACROSS CORES, AND EXACTLY. A separable transform is a set of INDEPENDENT
+        /// one-dimensional transforms: no row's result depends on another row's, and once the row
+        /// pass is finished, no column's depends on another column's. Nothing is accumulated
+        /// across workers, so each output cell is produced by the same sequence of operations on
+        /// the same inputs whichever worker ran it, and the result does not depend on the thread
+        /// count. That is the condition ParallelWork sets out, and this is the easiest place in
+        /// the pipeline to meet it.
+        /// </summary>
         private static void Transform2D(double[] re, double[] im, int nx, int ny, bool inverse)
         {
-            var rowRe = new double[Math.Max(nx, ny)];
-            var rowIm = new double[Math.Max(nx, ny)];
+            Twiddles rowTwiddles = TwiddlesFor(nx);
+            Twiddles columnTwiddles = nx == ny ? rowTwiddles : TwiddlesFor(ny);
+            int scratch = Math.Max(nx, ny * ColumnBlock);
+            int blocks = (nx + ColumnBlock - 1) / ColumnBlock;
+
+            // Cells transformed, as a stand-in for the work: each pass is one transform per line
+            // and each transform is O(length log length).
+            bool parallel = ParallelWork.Worthwhile((long)nx * ny);
+
+            if (parallel)
+            {
+                Parallel.For(0, ny, ParallelWork.Options,
+                    () => new LineBuffers(scratch),
+                    (y, state, buffers) => { TransformRow(re, im, nx, y, inverse, rowTwiddles, buffers); return buffers; },
+                    buffers => { });
+                Parallel.For(0, blocks, ParallelWork.Options,
+                    () => new LineBuffers(scratch),
+                    (b, state, buffers) =>
+                    {
+                        int x0 = b * ColumnBlock;
+                        TransformColumns(re, im, nx, ny, x0, Math.Min(ColumnBlock, nx - x0),
+                                         inverse, columnTwiddles, buffers);
+                        return buffers;
+                    },
+                    buffers => { });
+                return;
+            }
+
+            var single = new LineBuffers(scratch);
+            for (int y = 0; y < ny; y++) TransformRow(re, im, nx, y, inverse, rowTwiddles, single);
+            for (int x0 = 0; x0 < nx; x0 += ColumnBlock)
+                TransformColumns(re, im, nx, ny, x0, Math.Min(ColumnBlock, nx - x0),
+                                 inverse, columnTwiddles, single);
+        }
+
+        /// <summary>
+        /// Columns taken at a time in the column pass: eight doubles, which is one 64-byte cache
+        /// line.
+        ///
+        /// WHY IT MATTERS AND WHAT IT DOES NOT CHANGE. Each column is still its own independent
+        /// transform over the same values, so every output is bit for bit what it was; only the
+        /// order the cells are FETCHED in changes. A column of a row-major grid is strided, so
+        /// reading one column pulls a whole cache line per element and uses one of its eight
+        /// doubles; the other seven belong to the seven neighbouring columns, which were then read
+        /// again, one line each, when their turn came. Gathering the eight together spends one
+        /// fetch where the plain loop spent eight. On a 1024x1024 tile the grid is 8 MB per plane
+        /// and nothing of it stays in cache between columns, which is why the column pass, doing
+        /// exactly the same arithmetic as the row pass, cost several times as much.
+        /// </summary>
+        private const int ColumnBlock = 8;
+
+        /// <summary>One worker's line buffers, so the row and column passes allocate once per worker rather than once per line.</summary>
+        private sealed class LineBuffers
+        {
+            internal readonly double[] Re;
+            internal readonly double[] Im;
+            internal LineBuffers(int length) { Re = new double[length]; Im = new double[length]; }
+        }
+
+        private static void TransformRow(double[] re, double[] im, int nx, int y,
+                                         bool inverse, Twiddles twiddles, LineBuffers buffers)
+        {
+            int row = y * nx;
+            Array.Copy(re, row, buffers.Re, 0, nx);
+            Array.Copy(im, row, buffers.Im, 0, nx);
+            Transform1D(buffers.Re, buffers.Im, nx, inverse, twiddles, 0);
+            Array.Copy(buffers.Re, 0, re, row, nx);
+            Array.Copy(buffers.Im, 0, im, row, nx);
+        }
+
+        private static void TransformColumns(double[] re, double[] im, int nx, int ny,
+                                             int x0, int count,
+                                             bool inverse, Twiddles twiddles, LineBuffers buffers)
+        {
+            if (count <= 0) return;
+            double[] lineRe = buffers.Re, lineIm = buffers.Im;
 
             for (int y = 0; y < ny; y++)
             {
-                int row = y * nx;
-                Array.Copy(re, row, rowRe, 0, nx);
-                Array.Copy(im, row, rowIm, 0, nx);
-                Transform1D(rowRe, rowIm, nx, inverse);
-                Array.Copy(rowRe, 0, re, row, nx);
-                Array.Copy(rowIm, 0, im, row, nx);
-            }
-
-            for (int x = 0; x < nx; x++)
-            {
-                for (int y = 0; y < ny; y++) { rowRe[y] = re[y * nx + x]; rowIm[y] = im[y * nx + x]; }
-                Transform1D(rowRe, rowIm, ny, inverse);
-                for (int y = 0; y < ny; y++) { re[y * nx + x] = rowRe[y]; im[y * nx + x] = rowIm[y]; }
-            }
-        }
-
-        /// <summary>In-place iterative radix-2 Cooley-Tukey FFT. n must be a power of two. The inverse pass carries the 1/n normalisation.</summary>
-        private static void Transform1D(double[] re, double[] im, int n, bool inverse)
-        {
-            // Bit-reversal permutation.
-            for (int i = 1, j = 0; i < n; i++)
-            {
-                int bit = n >> 1;
-                for (; (j & bit) != 0; bit >>= 1) j ^= bit;
-                j ^= bit;
-                if (i < j)
+                int row = y * nx + x0;
+                for (int c = 0; c < count; c++)
                 {
-                    double tr = re[i]; re[i] = re[j]; re[j] = tr;
-                    double ti = im[i]; im[i] = im[j]; im[j] = ti;
+                    lineRe[c * ny + y] = re[row + c];
+                    lineIm[c * ny + y] = im[row + c];
                 }
             }
 
+            for (int c = 0; c < count; c++)
+                Transform1D(lineRe, lineIm, ny, inverse, twiddles, c * ny);
+
+            for (int y = 0; y < ny; y++)
+            {
+                int row = y * nx + x0;
+                for (int c = 0; c < count; c++)
+                {
+                    re[row + c] = lineRe[c * ny + y];
+                    im[row + c] = lineIm[c * ny + y];
+                }
+            }
+        }
+
+        /// <summary>
+        /// The roots of unity a transform of length N steps through, and its bit-reversal
+        /// permutation, computed once per length and shared by every transform of that length.
+        ///
+        /// A TABLE IS MORE ACCURATE THAN THE RECURRENCE IT REPLACES, not merely faster. The
+        /// previous form advanced the twiddle factor by repeated complex multiplication,
+        /// w_(j+1) = w_j * w, which is the textbook implementation and also the textbook example
+        /// of error accumulation: the relative error grows as the square root of the number of
+        /// steps, so the last butterflies of a 1024-point stage carry roughly thirty times the
+        /// rounding error of the first. Each entry here is evaluated directly from its own angle,
+        /// so every one is correct to a rounding, and the transform's error stops depending on
+        /// how far into the stage a butterfly sits. It is also faster, because the recurrence
+        /// serialises the inner loop behind a chain of dependent multiplications.
+        ///
+        /// One table serves both directions: the inverse transform's twiddle is the forward
+        /// one's conjugate, so only the sign of the imaginary part changes.
+        /// </summary>
+        private sealed class Twiddles
+        {
+            internal readonly double[] Cos;      // cos(2 pi m / N), m in [0, N/2)
+            internal readonly double[] Sin;      // sin(2 pi m / N)
+            internal readonly int[] Reversed;    // bit-reversal permutation of [0, N)
+
+            internal Twiddles(int n)
+            {
+                int half = Math.Max(1, n / 2);
+                Cos = new double[half];
+                Sin = new double[half];
+                for (int m = 0; m < half; m++)
+                {
+                    double angle = 2.0 * Math.PI * m / n;
+                    Cos[m] = Math.Cos(angle);
+                    Sin[m] = Math.Sin(angle);
+                }
+
+                Reversed = new int[n];
+                int bits = 0;
+                while ((1 << bits) < n) bits++;
+                for (int i = 0; i < n; i++)
+                {
+                    int r = 0;
+                    for (int b = 0; b < bits; b++) if ((i & (1 << b)) != 0) r |= 1 << (bits - 1 - b);
+                    Reversed[i] = r;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tables by length. A capture uses at most a handful of lengths and reuses each of them
+        /// for every line of every tile, so they are built once and held; the largest this file
+        /// can ask for is 2048 entries, a few tens of kilobytes.
+        /// </summary>
+        private static readonly System.Collections.Generic.Dictionary<int, Twiddles> twiddleTables
+            = new System.Collections.Generic.Dictionary<int, Twiddles>();
+
+        private static Twiddles TwiddlesFor(int n)
+        {
+            lock (twiddleTables)
+            {
+                if (!twiddleTables.TryGetValue(n, out Twiddles table))
+                {
+                    table = new Twiddles(n);
+                    twiddleTables[n] = table;
+                }
+                return table;
+            }
+        }
+
+        /// <summary>In-place iterative radix-2 Cooley-Tukey FFT over n entries starting at offset. n must be a power of two. The inverse pass carries the 1/n normalisation.</summary>
+        private static void Transform1D(double[] re, double[] im, int n, bool inverse, Twiddles twiddles, int offset)
+        {
+            int[] reversed = twiddles.Reversed;
+            for (int i = 0; i < n; i++)
+            {
+                int j = reversed[i];
+                if (i < j)
+                {
+                    int a = offset + i, b = offset + j;
+                    double tr = re[a]; re[a] = re[b]; re[b] = tr;
+                    double ti = im[a]; im[a] = im[b]; im[b] = ti;
+                }
+            }
+
+            double[] cos = twiddles.Cos, sin = twiddles.Sin;
+            double sign = inverse ? 1.0 : -1.0;
+
             for (int len = 2; len <= n; len <<= 1)
             {
-                double angle = 2.0 * Math.PI / len * (inverse ? 1.0 : -1.0);
-                double wRe = Math.Cos(angle);
-                double wIm = Math.Sin(angle);
-                for (int i = 0; i < n; i += len)
+                int half = len >> 1;
+                int stride = n / len;
+                for (int i = offset; i < offset + n; i += len)
                 {
-                    double curRe = 1.0, curIm = 0.0;
-                    int half = len >> 1;
-                    for (int j = 0; j < half; j++)
+                    for (int j = 0, m = 0; j < half; j++, m += stride)
                     {
-                        int a = i + j, b = i + j + half;
+                        double wRe = cos[m], wIm = sign * sin[m];
+                        int a = i + j, b = a + half;
                         double ur = re[a], ui = im[a];
-                        double vr = re[b] * curRe - im[b] * curIm;
-                        double vi = re[b] * curIm + im[b] * curRe;
+                        double br = re[b], bi = im[b];
+                        double vr = br * wRe - bi * wIm;
+                        double vi = br * wIm + bi * wRe;
                         re[a] = ur + vr; im[a] = ui + vi;
                         re[b] = ur - vr; im[b] = ui - vi;
-
-                        double nextRe = curRe * wRe - curIm * wIm;
-                        curIm = curRe * wIm + curIm * wRe;
-                        curRe = nextRe;
                     }
                 }
             }
@@ -316,7 +491,7 @@ namespace ExoInstruments.Core
             if (inverse)
             {
                 double inv = 1.0 / n;
-                for (int i = 0; i < n; i++) { re[i] *= inv; im[i] *= inv; }
+                for (int i = offset; i < offset + n; i++) { re[i] *= inv; im[i] *= inv; }
             }
         }
     }

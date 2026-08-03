@@ -406,6 +406,15 @@ frame to divide by.
       same way the live preview is (zscale + the selected curve); the FITS beside it is linear ADU.
 - [ ] **20.7** **Export with no composed image** but with subs held: `Composite` should say to compose
       first, while `One per filter` and `Every sub` must still work.
+- [ ] **20.8** **Each sub carries its own WCS.** Open a `_sub` FITS in Siril: `Image Information ->
+      Astrometry` must already be populated, and the annotation and coordinate-grid options must be
+      available without running a plate solve first. The `_stack` and composite FITS must show no
+      astrometric solution at all, which is deliberate (§7.7.1).
+- [ ] **20.9** **The pointing is not off by one exposure.** Export every sub of an UNGUIDED series of
+      8 and read `CRVAL1` down the numbered files: it must walk monotonically in the direction the
+      sky turned, and `sub001`'s value must match the pointing that sub was actually taken at, not
+      `sub002`'s. This is the pipelining hazard: the next exposure is gathered before the previous
+      one is collected, so a live read of the camera's pointing lands one frame late.
 
 ## 15. Dynamic range in the convolution
 
@@ -446,3 +455,160 @@ frame to divide by.
 - [ ] **17.3** Same in `SII`, where the residuals appeared identically.
 - [ ] **17.4** The other patches carry them too: IC 2177 Seagull has 362 such cells, the worst of
       the fourteen. Worth one frame.
+
+## 21. Galaxies with a real shape
+
+Every check here needs `GalaxyImages.galimg` installed in `PluginData`; build it with
+`tools/pack_galaxy_images.py` (see §7.15). Without it nothing below applies and galaxies stay
+smooth ellipses, which is what §13 already covers.
+
+- [ ] **21.1** **The maps load.** `KSP.log` must carry
+      `Galaxy shape maps: <n> galaxies, shape maps from: ...` naming the surveys. With no file it
+      says so instead, and points at the packer.
+- [ ] **21.2** **M51 on the RC20**, 4x4, 300 s, `Luminance`. It must show **two spiral arms and the
+      companion NGC 5195 north of it**, not a smooth ellipse. This is the whole point of the layer:
+      the same frame before it was a featureless smudge peaking at 22 sigma.
+- [ ] **21.3** **The readout says where the shape came from**: `... from measured survey imagery
+      sampled at X"/px against this frame's Y"/px`. When X is more than about 1.5 Y it also says
+      what scale is interpolated rather than measured.
+- [ ] **21.4** **The companion is not drawn twice.** NGC 5195 has its own catalogue entry and its own
+      chart marker, but it is inside M51's map: there must be exactly one of it, at the right
+      brightness, with the tidal bridge between the two.
+- [ ] **21.5** **No black discs.** Foreground stars are cut out of the map and filled from their
+      surroundings; if any fill shows as a dark disc on an arm, the local inpainting has regressed
+      to the azimuthal median (see §7.15).
+- [ ] **21.6** **No ghost stars either.** The stars in the frame come from the star catalogue, and
+      the map's own foreground stars were removed, so a star must not appear twice, once sharp and
+      once soft.
+- [ ] **21.7** **The total brightness is still the catalogue's.** Photograph a galaxy with a map and
+      one without at similar B_T and D25; their integrated signal must be comparable. A map
+      contributes shape only, so it can never change how bright a galaxy is.
+- [ ] **21.8** **Colour is real.** Take `Red` and `Blue` subs of a face-on spiral with a two-band map
+      and compose them: the arms must come out bluer than the bulge, because the two maps were
+      measured in different bands and the renderer interpolates between them.
+- [ ] **21.9** **The orientation is right.** Compare any mapped galaxy against a published image at
+      the same orientation: a mirrored transform is the failure this is looking for, and it is the
+      one that still looks like a galaxy. `tools/galaxy-image-tests` checks it numerically.
+- [ ] **21.10** **A galaxy with no map still works.** Nothing about the fallback changed; a frame
+      mixing the two must draw both, and the readout must count them separately.
+
+## 22. The target search panel
+
+The search itself is covered headless by `tools/search-tests` (49 checks, including that `M31`
+finds the HyperLEDA row for NGC 224 and that career fog is not leaked through the name tables).
+Everything below is what needs the game: the panel, the click, and the sky chart reacting.
+
+- [ ] **22.1** Open the observatory with no session running. The right column shows **Find a
+      target** with a count of targets in it (about 16 000 with the optional catalogues installed,
+      about 14 700 without a galaxy catalogue). If it says "Building the target index..." it must
+      resolve within a second or two, and must never freeze the game while it does — the build runs
+      on a background task.
+
+- [ ] **22.2** There is **no filter box above the sky chart** any more. The chart's caption reads
+      "Click anything on the chart to point at it, or search for it by name on the right."
+
+- [ ] **22.3** Type `M31`. Exactly one result, labelled `M 31 (Andromeda)`, described as a galaxy
+      with its D25 and its constellation, sourced to HyperLEDA. Now type `NGC0224`, then `NGC 224`,
+      then `Andromeda`: the same single result each time.
+
+- [ ] **22.4** Type `Vega`. The result is the Bright Star Catalogue's `alf Lyr`. This is the IAU
+      proper-name table attaching to a catalogue star by HR number; if it comes back as a separate
+      "IAU Catalog of Star Names" entry instead, the join failed.
+
+- [ ] **22.5** Type `M13`. It resolves, as a globular cluster, sourced to SIMBAD. There is no
+      cluster catalogue in this mod at all — this target exists only because the cross-identification
+      table carries a position for it.
+
+- [ ] **22.6** Type `NGC 24`. **NGC 24 is first**, not NGC 247 or NGC 2400. Those are further down
+      the list, which is the other half of the check: the longer designations must still be
+      reachable.
+
+- [ ] **22.7** Click a result. The telescope points at it, the row gains its `>` marker, and the
+      left column shows the target card. For a catalogue star it must also become the selected star,
+      so the detection instruments can be started on it.
+
+- [ ] **22.8** With a search running, look at the **sky chart**. Matches are drawn bright and
+      ringed; everything else — stars, nebula crosses, galaxy crosses, planet discs — is dimmed. A
+      dimmed star is not clickable, which is deliberate and is the pre-existing behaviour.
+      Clear the search: everything returns to normal brightness and full clickability.
+
+- [ ] **22.9** Press the **galaxy** filter button. The box gains `type:galaxy`, the list shows only
+      galaxies, and the chart lights up *every* matching galaxy, not just the hundred and twenty the
+      list draws. Press it again: the token is removed from the box. Type `type:galaxy` by hand and
+      the button must show as pressed.
+
+- [ ] **22.10** Type `type:nebula in:Ori`. Only nebulae in Orion. Then `in:Orion` and `in:Orionis`:
+      identical results. Then `mag:<9` on its own with the galaxy filter: only galaxies brighter
+      than B = 9, and none of unknown brightness.
+
+- [ ] **22.11** Type `alt:>30`. Only targets currently at least 30 degrees up; every row's altitude
+      readout agrees. Warp a few hours and watch the list change on its own — the altitudes and this
+      filter refresh on the sky chart's own once-a-second cadence.
+
+- [ ] **22.12** Type `type:nebulla`. The panel says so explicitly and lists the filter words it does
+      understand. It must not silently ignore the word (which would widen the search) or treat it as
+      a name (which would empty it).
+
+- [ ] **22.13** Type `Duna` (or any body of the installed planet pack). It resolves as a planet with
+      its radius, and clicking it points the telescope the same way clicking its disc on the chart
+      does. Moons resolve as "moon of <planet>".
+
+- [ ] **22.14** **Career only.** In a fresh career, type `Vega` or `51 Peg`. No catalogue star is
+      returned under its real name. Type an unscanned star's provisional designation as the chart
+      shows it (`Unscanned J2257+2046`) and it is found. Now complete a scan of a star and search
+      its real name: it is found, because the index rebuilds on reveal. Galaxies and nebulae are
+      findable throughout.
+
+- [ ] **22.15** Resize the game window, including narrow. The panel's results area grows and shrinks
+      with the column; the filter buttons stay on one row.
+
+## 23. Capture speed, and that speeding it up changed nothing
+
+A galaxy photograph on the RC20 at 4×4 binning used to take thirty seconds or more. §7.061 of the
+technical reference has what that was and what was done. These checks are about the two things that
+could have gone wrong: the frame changing, and the game stuttering.
+
+Headless first, from `tools/capture-profile`:
+
+```
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- "" 4 --determinism
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- "" 1 --determinism
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- "" 4 --target 85.24,-2.46 --determinism
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- "" 4 --accuracy
+```
+
+- [ ] **23.1** All four exit zero. `--determinism` must report every stage **identical**, not
+      close: the emission fill, the galaxy deposit, the PSF kernel and the convolution each run at
+      one worker and at the machine's full count, and a single differing value is a failure. It is
+      the property the exposure's recorded seed rests on.
+
+- [ ] **23.2** `--accuracy` holds the tiled transform to the direct double-precision sum. The worst
+      residual must stay under an ulp of the convolution's own peak, i.e. under what storing the
+      result as a float costs anyway.
+
+Then in game:
+
+- [ ] **23.3** Photograph a galaxy on the RC20 at 4×4, L filter. The capture readout now carries a
+      **Reduction:** line with the total and the per-stage breakdown, and the same line appears once
+      in the log. It should read a few hundred milliseconds to a couple of seconds, not tens of
+      seconds. Note which stage leads — that is the answer to "why is this slow" and no longer needs
+      a harness to obtain.
+
+- [ ] **23.4** Same shot at 1×1. It is slower, but the **emission fill barely changes** while
+      everything else grows: that stage samples once per native pixel whatever the binning, which is
+      what makes the sensor's integral right. If it scales with the frame instead, the sub-pixel
+      loop has been broken.
+
+- [ ] **23.5** Watch the game's frame rate while a capture reduces. It may dip; it must not freeze.
+      One core is deliberately left for KSP (`Core/ParallelWork.cs`), so the reduction never takes
+      the whole machine.
+
+- [ ] **23.6** Shoot the same target twice without moving anything, and compare the two FITS files'
+      `EXPSEED`. Same seed, same frame, pixel for pixel — including on a machine with a different
+      core count, which is the point of 23.1.
+
+- [ ] **23.7** Photograph a field with a bright nebula in it (the Horsehead, through H-alpha) and
+      one at high Galactic latitude with none. The nebula field must still show the SHASSA patch's
+      structure at its own 0.86 arcmin cells, and the empty field must still show the faint diffuse
+      glow rather than nothing: the skipped work is empty *tiles of the convolution*, never a map
+      sample.

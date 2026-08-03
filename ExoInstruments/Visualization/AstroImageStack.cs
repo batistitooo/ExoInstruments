@@ -46,6 +46,20 @@ namespace ExoInstruments.Visualization
         public double RegistrationY;
         public float ExposureSeconds;
 
+        /// <summary>
+        /// Where this sub pointed, as it was measured for THIS exposure.
+        ///
+        /// Kept per sub rather than taken from the camera at export time because a series is a
+        /// series of pointings: the mount drifts, the sky turns, and by the time the last sub is
+        /// written the camera's own "last" WCS describes only the last one. An unregistered sub is
+        /// a raw frame at one instant, so unlike the stack it can carry a real WCS, and that is the
+        /// whole difference between a file Siril can annotate and a file it has to plate-solve.
+        /// </summary>
+        public Core.FitsWcs Wcs;
+
+        /// <summary>True when the sky turned under the sensor during this sub, so its sources are trailed and its WCS describes the exposure's start only.</summary>
+        public bool Trailed;
+
         /// <summary>Variance-of-Laplacian sharpness score (see AstroImageStack.ComputeSharpness), the lucky-imaging selection metric for this sub.</summary>
         public float Quality;
     }
@@ -157,14 +171,24 @@ namespace ExoInstruments.Visualization
         /// cosmetically corrected out before the sub is stored; see CosmeticCorrect.
         /// </summary>
         public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds, int[] defectPixelIndices)
-            => AddSub(filter, gray, fovDeg, exposureSeconds, defectPixelIndices, double.NaN, double.NaN);
+            => AddSub(filter, gray, fovDeg, exposureSeconds, defectPixelIndices,
+                      new SolarSystemCameraTexture.CapturedFrameGeometry
+                      {
+                          // Explicit NaN, not the struct's default zero: zero is a legitimate
+                          // registration reference (a target on the frame's first pixel) and
+                          // HasRegistration would accept it as one.
+                          RegistrationX = double.NaN,
+                          RegistrationY = double.NaN,
+                      });
 
         /// <summary>
-        /// As above, recording where the aim point landed in this sub so the stack can register on
-        /// the KNOWN offset rather than estimate one from the pixels.
+        /// As above, recording the geometry the camera froze with this exposure's pixels: where the
+        /// aim point landed, so the stack can register on the KNOWN offset rather than estimate one
+        /// from the pixels, and where the frame pointed, so an exported sub can carry its own WCS.
         /// </summary>
         public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds,
-                                     int[] defectPixelIndices, double registrationX, double registrationY)
+                                     int[] defectPixelIndices,
+                                     SolarSystemCameraTexture.CapturedFrameGeometry geometry)
         {
             if (gray == null || gray.Length != SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight)
                 return AstroSubResult.FovMismatch; // malformed input, treat like an incompatible sub rather than silently accepting it
@@ -190,8 +214,10 @@ namespace ExoInstruments.Visualization
                 Pixels = Pack(corrected),
                 FovDeg = fovDeg,
                 ExposureSeconds = exposureSeconds,
-                RegistrationX = registrationX,
-                RegistrationY = registrationY,
+                RegistrationX = geometry.RegistrationX,
+                RegistrationY = geometry.RegistrationY,
+                Wcs = geometry.Wcs,
+                Trailed = geometry.Trailed,
             });
             return AstroSubResult.Added;
         }
@@ -345,6 +371,28 @@ namespace ExoInstruments.Visualization
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return 0f;
             if (index < 0 || index >= list.Count) return 0f;
             return list[index].ExposureSeconds;
+        }
+
+        /// <summary>
+        /// That sub's own world coordinate system, for an export that writes the subs individually.
+        ///
+        /// Invalid (IsValid false, so FitsWriter omits the keywords entirely) when the geometry
+        /// could not be resolved for that exposure, and invalid for an out-of-range index, which is
+        /// the same answer: nothing is known about where that frame pointed.
+        /// </summary>
+        public Core.FitsWcs SubWcs(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return default(Core.FitsWcs);
+            if (index < 0 || index >= list.Count) return default(Core.FitsWcs);
+            return list[index].Wcs;
+        }
+
+        /// <summary>True when that sub was taken unguided long enough to trail; its header says so, because a plate solve of a trailed frame will not converge.</summary>
+        public bool SubTrailed(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return false;
+            if (index < 0 || index >= list.Count) return false;
+            return list[index].Trailed;
         }
 
         /// <summary>Total real exposure time stacked into this filter so far, in seconds, the actual integration time a real stack of this many subs represents.</summary>

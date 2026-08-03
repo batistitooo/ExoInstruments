@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="DumpRefraction.cs" />
     <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/AtmosphericRefraction.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
     <Compile Include="$(Core)/PupilDiffraction.cs" />
@@ -33,7 +34,7 @@
     <Compile Include="$(Core)/ReddenedResponseCache.cs" />
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
-    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" /><Compile Include="$(Core)/SpacePlatformSpec.cs" />
     <Compile Include="$(Core)/StarTarget.cs" />
   </ItemGroup>
 </Project>

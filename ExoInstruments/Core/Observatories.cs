@@ -450,9 +450,64 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
+        /// <summary>
+        /// The orbital telescope, and the one entry in this catalogue that is not bought.
+        ///
+        /// EVERY OTHER INSTRUMENT HERE IS TELESCOPE TIME. The player pays Funds for an allocation
+        /// on a facility that already exists and that somebody else built; that is what the
+        /// unlock economy in this file models, and it is what observing on a real ground
+        /// telescope is. This one is different in kind: nobody sells time on it, because it does
+        /// not exist until the player launches it. So UnlockCostFunds is zero and
+        /// UnlockedByDefault is false, and neither is doing the gating; the gate is whether there
+        /// is an operational telescope in orbit, which ExoInstrumentsGUI asks
+        /// SpaceTelescopeRegistry rather than the scenario's unlock list.
+        ///
+        /// The cost is still real, it is just paid somewhere else: in the part's entry cost, in
+        /// the launch, and in having built a spacecraft that can hold a target steady enough to
+        /// photograph through. That is the right place for it in a game about launching things.
+        ///
+        /// ScanCostFunds is likewise zero. There is no facility to bill: the observatory is
+        /// commanding hardware it already owns, and the consumables it burns doing so are
+        /// electric charge and, if the attitude is on thrusters, propellant. Both are already
+        /// modelled where they are actually spent.
+        /// </summary>
+        public static readonly InstrumentSpec OrbitalObservatory = new InstrumentSpec
+        {
+            Name = "Orbital Observatory",
+            DisplayName = "Orbital Observatory (Space Telescope)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "Hubble Space Telescope Optical Telescope Assembly (2.4 m f/24 Ritchey-Chretien; HST Primer, "
+                     + "Cycle 34) with Wide Field Camera 3's UVIS channel (WFC3 Instrument Handbook, Cycle 24). "
+                     + "Pupil geometry from Tiny Tim's wfc3_uvis1.pup (Krist & Hook). See "
+                     + "VisualTelescopeCatalog.HubbleWfc3Uvis for the full per-figure sourcing.",
+            Description = "A 2.4-metre telescope you have to put in orbit yourself. It does not out-resolve the "
+                        + "VLT and it does not out-collect it; on both counts it loses to instruments already in "
+                        + "this list. What it has instead is the near-ultraviolet, which the air blocks outright "
+                        + "and no mountain gets above; a point-spread function that is identical in every frame "
+                        + "ever taken, because there is no atmosphere to vary; and a sky about 1.6 magnitudes "
+                        + "darker, because airglow is something an atmosphere does. It also has constraints no "
+                        + "ground telescope has: the planet occults most targets for part of every orbit, the "
+                        + "Sun and the sunlit limb are hard exclusion zones, and every exposure is only as sharp "
+                        + "as the spacecraft's attitude control can hold.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.HubbleWfc3Uvis.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.HubbleWfc3Uvis,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
+        };
+
         public static readonly InstrumentSpec[] All =
         {
-            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere
+            Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
+            OrbitalObservatory
         };
     }
 }

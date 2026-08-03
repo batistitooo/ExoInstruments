@@ -26,18 +26,23 @@ namespace ExoInstruments.Core
         public const double DarkSkyZenithVMagPerArcsec2 = 21.7;
 
         /// <summary>
-        /// Zodiacal light at the ecliptic pole, its faintest value: V = 23.3 mag/arcsec^2
-        /// (Leinert et al. 1998, A&amp;AS 127, 1). Carried as a separate term from the airglow
-        /// because it originates outside the atmosphere and so is attenuated by extinction
-        /// rather than enhanced by the van Rhijn path length.
+        /// Zodiacal light at the ecliptic pole: 60 S10sun, i.e. V = 23.34 mag/arcsec^2 (Leinert
+        /// et al. 1998, A&amp;AS 127, 1, Table 16's caption). Carried as a separate term from the
+        /// airglow because it originates outside the atmosphere and so is attenuated by
+        /// extinction rather than enhanced by the van Rhijn path length.
         ///
-        /// Held at the polar value everywhere: the zodiacal cloud's brightness depends on
-        /// ecliptic latitude and solar elongation, and while an ecliptic plane is well defined
-        /// in any KSP system, the cloud's own density distribution is a Solar System measurement
-        /// with no counterpart to read from the game. The faintest published value is the
-        /// conservative choice.
+        /// THIS IS NOW A FALLBACK, NOT THE MODEL. The angle-resolved measurement lives in
+        /// ZodiacalLight, which reproduces Leinert's whole Table 16; this constant is what
+        /// remains for the one case that cannot use it, a caller with no ecliptic frame to
+        /// resolve (a system whose home body has no orbit on record).
+        ///
+        /// It is also NOT the faintest value in the table, which is why the old comment here
+        /// claiming it was "the conservative choice" was wrong twice over: the cloud's minimum is
+        /// 56 S10sun at high latitude on the anti-solar side, slightly fainter than the pole, and
+        /// against a real pointing anywhere near the Sun the polar value understates the sky by
+        /// up to two magnitudes.
         /// </summary>
-        public const double ZodiacalVMagPerArcsec2 = 23.3;
+        public const double ZodiacalVMagPerArcsec2 = 23.34;
 
         /// <summary>
         /// V surface brightness with a full Moon at the reference separation, ~18.7

@@ -87,6 +87,16 @@ namespace ExoInstruments.Visualization
         // Reference rings, in degrees of altitude. 0 = horizon (drawn brighter).
         private static readonly double[] AltitudeRingsDeg = { 0.0, 20.0, 40.0, 60.0 };
 
+        // The raster works in Color32, not Color: the buffer is a quarter of the size (4 bytes per
+        // pixel instead of 16) and SetPixels32 hands an RGBA32 texture its own layout with no
+        // per-pixel conversion. These are the same colours as above, converted once at class load
+        // rather than once per pixel. Alpha is preserved: the grid is deliberately semi-transparent
+        // and GUI.DrawTexture blends it against the panel behind.
+        private static readonly Color32 BackgroundColor32 = BackgroundColor;
+        private static readonly Color32 HorizonColor32 = HorizonColor;
+        private static readonly Color32 GridColor32 = GridColor;
+        private static readonly Color32 HighlightRingColor32 = HighlightRingColor;
+
         public static float ComputeRMax(int width, int height)
         {
             return (float)(Math.Min(width, height) / 2.0 - 4.0);
@@ -113,15 +123,32 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Pure computation — safe to call from a background Task. Fills the full chart buffer
+        /// A buffer of the right size for <see cref="ComputePixels"/>, reusing <paramref name="existing"/>
+        /// when it already fits.
+        ///
+        /// WHY THE CALLER OWNS THE BUFFER. Panning re-rasters the chart on every MouseDrag event, and
+        /// allocating a fresh 640x640 buffer each time was the dominant cost: 6.6 MB per event as
+        /// Color, which is hundreds of MB/s of garbage under a drag and shows up as GC hitches rather
+        /// than as steady slowness. Reusing one array removes the allocation entirely. Each caller
+        /// needs its OWN buffer, because the background refresh task and the main thread's drag
+        /// render can be in flight at the same time.
+        /// </summary>
+        public static Color32[] EnsureBuffer(Color32[] existing, int width, int height)
+        {
+            int needed = width * height;
+            return existing != null && existing.Length == needed ? existing : new Color32[needed];
+        }
+
+        /// <summary>
+        /// Pure computation — safe to call from a background Task, as long as no other thread is
+        /// writing <paramref name="pixels"/> (see EnsureBuffer). Fills the full chart buffer
         /// (background, rings, all catalog points). searchActive gates the highlight ring: without
         /// it, an empty search box would draw a ring on every star — not the calm finder-chart look we want.
         /// Click hit-testing is unaffected; every point stays clickable when no search is active.
         /// </summary>
-        public static Color[] ComputePixels(List<SkyChartPoint> points, int width, int height, SkyChartView view, bool searchActive)
+        public static void ComputePixels(List<SkyChartPoint> points, int width, int height, SkyChartView view, bool searchActive, Color32[] pixels)
         {
-            var pixels = new Color[width * height];
-            FillBackground(pixels);
+            FillBackground(pixels, width);
 
             DrawReferenceGrid(pixels, width, height, view);
 
@@ -132,24 +159,25 @@ namespace ExoInstruments.Visualization
                 // stars, then solar-system bodies on top so their bigger discs
                 // are never buried under the star field.
                 foreach (var p in points)
-                    if (!p.IsBody && !p.IsDeepSky && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, false);
+                    if (!p.IsBody && !p.IsDeepSky && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, false, false);
                 foreach (var p in points)
-                    if (!p.IsBody && !p.IsDeepSky && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, true);
+                    if (!p.IsBody && !p.IsDeepSky && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, view, true, false);
                 foreach (var p in points)
-                    if (p.IsDeepSky) PlotDeepSky(pixels, width, height, p, view);
+                    if (p.IsDeepSky) PlotDeepSky(pixels, width, height, p, view, searchActive && !p.IsHighlighted);
                 foreach (var p in points)
-                    if (p.IsBody) PlotStar(pixels, width, height, p, view, false);
+                    if (p.IsBody) PlotStar(pixels, width, height, p, view, false, searchActive && !p.IsHighlighted);
             }
-
-            return pixels;
         }
 
         /// <summary>
         /// Main-thread-only: uploads an already-computed pixel buffer (see
         /// ComputePixels) into a texture, reusing <paramref name="existing"/>
         /// when its size already matches.
+        ///
+        /// SetPixels32 rather than SetPixels: the texture is RGBA32, so a Color32 buffer is already
+        /// in its layout and the upload is a copy instead of a per-pixel float-to-byte conversion.
         /// </summary>
-        public static Texture2D ApplyToTexture(Color[] pixels, int width, int height, Texture2D existing)
+        public static Texture2D ApplyToTexture(Color32[] pixels, int width, int height, Texture2D existing)
         {
             Texture2D tex = existing;
             if (tex == null || tex.width != width || tex.height != height)
@@ -158,8 +186,8 @@ namespace ExoInstruments.Visualization
                 tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
                 tex.filterMode = FilterMode.Point;
             }
-            tex.SetPixels(pixels);
-            tex.Apply();
+            tex.SetPixels32(pixels);
+            tex.Apply(false); // no mip chain on this texture, so skip the mipmap pass outright
             return tex;
         }
 
@@ -190,9 +218,9 @@ namespace ExoInstruments.Visualization
         // Deep-sky markers: a cross rather than a disc, because a nebula is not a point source and
         // a disc among the star discs would read as another star. Line emitters and reflection
         // nebulae are tinted apart; one shows in a narrowband filter and the other cannot.
-        private static readonly Color EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
-        private static readonly Color ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
-        private static readonly Color GalaxyMarkerColor = new Color(0.95f, 0.86f, 0.55f, 1f);
+        private static readonly Color32 EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
+        private static readonly Color32 ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
+        private static readonly Color32 GalaxyMarkerColor = new Color(0.95f, 0.86f, 0.55f, 1f);
 
         /// <summary>
         /// Cross sized to the object's own apparent extent, so the chart says how much sky it
@@ -200,7 +228,8 @@ namespace ExoInstruments.Visualization
         /// the 25 arcsec Cat's Eye is the difference between a wide-field target and one that needs
         /// the CDK. Floored so the small ones stay clickable, capped so the big ones stay a marker.
         /// </summary>
-        private static void PlotDeepSky(Color[] pixels, int width, int height, SkyChartPoint p, SkyChartView view)
+        private static void PlotDeepSky(Color32[] pixels, int width, int height, SkyChartPoint p,
+                                        SkyChartView view, bool dimmed)
         {
             Vector2 px = ProjectToPixel(p.AltitudeDeg, p.AzimuthDeg, width, height, view);
 
@@ -209,9 +238,13 @@ namespace ExoInstruments.Visualization
             double pxPerDeg = ComputeRMax(width, height) / 90.0 * view.Zoom;
             float arm = (float)Math.Max(4.0, Math.Min(40.0, p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5));
 
-            Color color = p.DeepSky.Kind == DeepSkyKind.ReflectionNebula ? ReflectionMarkerColor
-                        : p.DeepSky.Kind == DeepSkyKind.Galaxy ? GalaxyMarkerColor
-                        : EmissionMarkerColor;
+            Color32 color = p.DeepSky.Kind == DeepSkyKind.ReflectionNebula ? ReflectionMarkerColor
+                          : p.DeepSky.Kind == DeepSkyKind.Galaxy ? GalaxyMarkerColor
+                          : EmissionMarkerColor;
+            // A search is running and this object is not one of its results: the marker stays, so
+            // the chart still says what is up there, but it steps back the same way an unmatched
+            // star does rather than competing with the answers.
+            if (dimmed) color = Dim(color);
 
             // A gap at the centre, so the cross frames the object instead of covering it.
             float gap = Math.Max(1.5f, arm * 0.35f);
@@ -227,7 +260,18 @@ namespace ExoInstruments.Visualization
                 DrawHighlightRing(pixels, width, height, px.x, px.y, arm, view.Zoom);
         }
 
-        private static void SetPixel(Color[] pixels, int width, int height, float x, float y, Color color)
+        /// <summary>The same desaturate-and-darken an unmatched star gets, so the chart reads consistently whatever kind of object is being searched for.</summary>
+        private static Color32 Dim(Color32 color)
+        {
+            Color c = color;
+            float grey = c.grayscale;
+            return new Color(Mathf.Lerp(c.r, grey, DimmedDesaturation) * DimmedBrightnessFactor,
+                             Mathf.Lerp(c.g, grey, DimmedDesaturation) * DimmedBrightnessFactor,
+                             Mathf.Lerp(c.b, grey, DimmedDesaturation) * DimmedBrightnessFactor,
+                             c.a);
+        }
+
+        private static void SetPixel(Color32[] pixels, int width, int height, float x, float y, Color32 color)
         {
             int ix = (int)Math.Round(x), iy = (int)Math.Round(y);
             if (ix < 0 || ix >= width || iy < 0 || iy >= height) return;
@@ -262,7 +306,8 @@ namespace ExoInstruments.Visualization
             return found;
         }
 
-        private static void PlotStar(Color[] pixels, int width, int height, SkyChartPoint p, SkyChartView view, bool emphasize)
+        private static void PlotStar(Color32[] pixels, int width, int height, SkyChartPoint p,
+                                     SkyChartView view, bool emphasize, bool dimmed)
         {
             Vector2 px = ProjectToPixel(p.AltitudeDeg, p.AzimuthDeg, width, height, view);
 
@@ -270,7 +315,10 @@ namespace ExoInstruments.Visualization
             {
                 // Solar-system body: bigger disc, grows with zoom. Only the selected photography target gets the ring.
                 float bodyRadius = Mathf.Min(p.BodyMarkerRadiusPx + (view.Zoom - 1f) * 0.9f, 20f);
-                DrawFilledCircle(pixels, width, height, px.x, px.y, bodyRadius, p.BodyColor);
+                // A running search that did not match this body steps its disc back, the same way
+                // an unmatched star's is stepped back. With no search running nothing is dimmed.
+                DrawFilledCircle(pixels, width, height, px.x, px.y, bodyRadius,
+                                 dimmed ? Dim(p.BodyColor) : (Color32)p.BodyColor);
                 if (p.IsSelectedTarget)
                 {
                     DrawHighlightRing(pixels, width, height, px.x, px.y, bodyRadius, view.Zoom);
@@ -279,7 +327,7 @@ namespace ExoInstruments.Visualization
             }
 
             float radius = ComputeMarkerRadius(p.Target.ApparentMagnitude, view.Zoom);
-            Color color = ComputeStarDisplayColor(p.Target, emphasize);
+            Color32 color = ComputeStarDisplayColor(p.Target, emphasize);
             DrawFilledCircle(pixels, width, height, px.x, px.y, radius, color);
             if (emphasize || p.IsSelectedTarget)
             {
@@ -329,7 +377,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Thin flat outline just outside the star's fill, the interactivity cue now that fill color is the star's real hue, not a flat highlight color. Fully opaque (no alpha blend), matching a real finder chart's plain ink circle rather than a glowing HUD marker.</summary>
-        private static void DrawHighlightRing(Color[] pixels, int width, int height, float cx, float cy, float innerRadius, float zoom)
+        private static void DrawHighlightRing(Color32[] pixels, int width, int height, float cx, float cy, float innerRadius, float zoom)
         {
             float thickness = Mathf.Max(1f, 0.6f + (zoom - 1f) * 0.12f);
             float ringInner = innerRadius + 0.8f;
@@ -350,12 +398,12 @@ namespace ExoInstruments.Visualization
                     float dy = y - cy;
                     float distSq = dx * dx + dy * dy;
                     if (distSq < innerSq || distSq > outerSq) continue;
-                    SetPixelSafe(pixels, width, height, x, y, HighlightRingColor);
+                    SetPixelSafe(pixels, width, height, x, y, HighlightRingColor32);
                 }
             }
         }
 
-        private static void DrawFilledCircle(Color[] pixels, int width, int height, float cx, float cy, float radius, Color color)
+        private static void DrawFilledCircle(Color32[] pixels, int width, int height, float cx, float cy, float radius, Color32 color)
         {
             int minX = Mathf.FloorToInt(cx - radius);
             int maxX = Mathf.CeilToInt(cx + radius);
@@ -454,11 +502,11 @@ namespace ExoInstruments.Visualization
             return true;
         }
 
-        private static void DrawReferenceGrid(Color[] pixels, int width, int height, SkyChartView view)
+        private static void DrawReferenceGrid(Color32[] pixels, int width, int height, SkyChartView view)
         {
             foreach (double altDeg in AltitudeRingsDeg)
             {
-                Color color = altDeg <= 0.0 ? HorizonColor : GridColor;
+                Color32 color = altDeg <= 0.0 ? HorizonColor32 : GridColor32;
                 for (double azDeg = 0; azDeg < 360.0; azDeg += 0.5)
                 {
                     Vector2 p = ProjectToPixel(altDeg, azDeg, width, height, view);
@@ -472,24 +520,39 @@ namespace ExoInstruments.Visualization
             DrawRadialLine(pixels, width, height, 90.0, view);
         }
 
-        private static void DrawRadialLine(Color[] pixels, int width, int height, double azDeg, SkyChartView view)
+        private static void DrawRadialLine(Color32[] pixels, int width, int height, double azDeg, SkyChartView view)
         {
             for (double alt = -10.0; alt <= 90.0; alt += 0.5)
             {
                 Vector2 p1 = ProjectToPixel(alt, azDeg, width, height, view);
-                SetPixelSafe(pixels, width, height, (int)p1.x, (int)p1.y, GridColor);
+                SetPixelSafe(pixels, width, height, (int)p1.x, (int)p1.y, GridColor32);
 
                 Vector2 p2 = ProjectToPixel(alt, azDeg + 180.0, width, height, view);
-                SetPixelSafe(pixels, width, height, (int)p2.x, (int)p2.y, GridColor);
+                SetPixelSafe(pixels, width, height, (int)p2.x, (int)p2.y, GridColor32);
             }
         }
 
-        private static void FillBackground(Color[] pixels)
+        /// <summary>
+        /// Clears to the sky colour by filling one row and then doubling it, so the buffer is
+        /// cleared in log2(height) block copies (a memmove each, Color32 being blittable) instead of
+        /// one write per pixel. At 640x640 that is ten copies rather than 409,600 stores, and it
+        /// runs on every pan.
+        /// </summary>
+        private static void FillBackground(Color32[] pixels, int width)
         {
-            for (int i = 0; i < pixels.Length; i++) pixels[i] = BackgroundColor;
+            int seed = Math.Min(width, pixels.Length);
+            for (int i = 0; i < seed; i++) pixels[i] = BackgroundColor32;
+
+            int filled = seed;
+            while (filled < pixels.Length)
+            {
+                int n = Math.Min(filled, pixels.Length - filled);
+                Array.Copy(pixels, 0, pixels, filled, n);
+                filled += n;
+            }
         }
 
-        private static void SetPixelSafe(Color[] pixels, int width, int height, int x, int y, Color color)
+        private static void SetPixelSafe(Color32[] pixels, int width, int height, int x, int y, Color32 color)
         {
             if (x < 0 || x >= width || y < 0 || y >= height) return;
             pixels[y * width + x] = color;

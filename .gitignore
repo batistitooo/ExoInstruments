@@ -10,3 +10,11 @@ riderModule.iml
 .DS_Store
 .idea/
 .claude/
+
+# Harness virtualenvs and their generated dumps. The older harnesses have theirs committed, which
+# is why these patterns are anchored rather than global: they stop NEW ones being added (astropy
+# alone is ~90 MB per env) without untracking what is already in history.
+tools/*/env/
+tools/*/env
+tools/*/exo_*.csv
+tools/*/exo_*.bin

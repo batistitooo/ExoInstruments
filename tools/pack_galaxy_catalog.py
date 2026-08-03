@@ -126,6 +126,7 @@ def main():
 
     out = []
     dropped = 0
+    implausible = []
     for row in rows:
         vals = {k: number(row, k) for k in REQUIRED}
         if any(math.isnan(v) for v in vals.values()):
@@ -158,10 +159,29 @@ def main():
             dropped += 1
             continue
 
+        # A row whose magnitude and size cannot both be right. The isophote that defines D25 is
+        # drawn at 25 mag/arcsec^2, so the light inside it averages a few magnitudes brighter than
+        # that and no more: over the B <= 13 catalogue the first percentile is 20.45 and the median
+        # 22.64. HyperLEDA nonetheless carries PGC 779349 at B_T 8.30 in 0.34 arcmin, i.e. 13.6
+        # mag/arcsec^2, seven magnitudes out; drawn, it is a saturated white disc sitting on the sky
+        # chart among the brightest galaxies in the sky. Mirrors
+        # Core/GalaxyCatalog.ImplausibleSurfaceBrightnessB, which drops the same rows at load so an
+        # already-installed catalogue is safe too.
+        semi_major = d25 * 60.0 * 0.5
+        area = math.pi * semi_major * semi_major * min(1.0, axis)
+        if area > 0.0 and bt + 2.5 * math.log10(area) < 18.0:
+            implausible.append((row.get("objname", "").strip(), bt, d25,
+                                bt + 2.5 * math.log10(area)))
+            dropped += 1
+            continue
+
         out.append((row.get("objname", "").strip(), ra, dec, bt, bv, d25, min(1.0, axis), pa, t))
 
     out.sort(key=lambda g: g[2])
     print(f"{len(out)} kept, {dropped} dropped for a missing or impossible value")
+    for (nm, bt, d25, mu) in implausible:
+        print(f"  dropped {nm}: B_T {bt:.2f} in D25 {d25:.2f}' is {mu:.2f} B-mag/arcsec^2 inside "
+              f"the isophote, which no galaxy is")
 
     # A few named galaxies, printed so a units error cannot pass silently. Measured values from a
     # real run: M31 at B_T 4.29, D25 177.8' (2.96 deg), b/a 0.392, PA 35; M87 at 9.65, 7.11', 0.938.

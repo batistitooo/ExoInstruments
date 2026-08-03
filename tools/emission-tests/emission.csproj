@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="DumpEmission.cs" />
     <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/SpectralCurve.cs" />
     <Compile Include="$(Core)/SystemBandpass.cs" />
     <Compile Include="$(Core)/PhotonFluxModel.cs" />
@@ -44,6 +45,7 @@
     <Compile Include="$(Core)/StarTarget.cs" />
     <Compile Include="$(Core)/SkyCoordinates.cs" />
     <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/SpacePlatformSpec.cs" />
     <Compile Include="$(Core)/FilterCurves.cs" />
     <Compile Include="$(Core)/OpticalPsf.cs" />
     <Compile Include="$(Core)/AtmosphericRefraction.cs" />

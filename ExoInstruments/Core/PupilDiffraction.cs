@@ -61,6 +61,14 @@ namespace ExoInstruments.Core
         private readonly double[] _vaneSin;
         private readonly double _onAxisAmplitude;  // the pupil's open area
 
+        // Mirror support pads: circular obscurations at arbitrary positions in the pupil, in
+        // metres. Unlike the annulus and the opposed vane pairs, these are NOT centrally
+        // symmetric, so the far-field amplitude they produce is complex; see Amplitude.
+        private readonly double[] _padX;
+        private readonly double[] _padY;
+        private readonly double[] _padRadius;
+        private readonly bool _hasPads;
+
         /// <summary>Aperture diameter (m).</summary>
         public double ApertureMeters => 2.0 * _outerRadius;
 
@@ -83,6 +91,33 @@ namespace ExoInstruments.Core
         public PupilDiffraction(
             double apertureMeters, double obstructionRatio, double wavelengthMeters,
             int vaneCount, double vaneWidthMeters, double vaneRotationRad)
+            : this(apertureMeters, obstructionRatio, wavelengthMeters, vaneCount, vaneWidthMeters,
+                   vaneRotationRad, null)
+        {
+        }
+
+        /// <param name="pads">
+        /// Circular obscurations at arbitrary positions in the pupil, each given in FRACTIONS OF
+        /// THE PUPIL RADIUS, which is the convention every published pupil table uses (Tiny Tim's
+        /// .pup files among them). Null or empty for a pupil with none.
+        ///
+        /// What these are, on a real telescope: the pads that hold the primary mirror in its
+        /// cell. HST has three, and Krist's Tiny Tim paper names them alongside the secondary and
+        /// the spider as one of the telescope's three obscurations; the three-lobed shadow they
+        /// cast is visible in its spherically-aberrated Faint Object Camera images.
+        ///
+        /// They block very little, about 1.4 per cent of HST's open pupil between them, and that
+        /// is precisely why they are worth computing rather than lumping into the obstruction
+        /// ratio: like the spider vanes, what makes them visible is not how much light they stop
+        /// but the SHAPE of what they stop and where it sits. Three pads at roughly 120 degrees
+        /// are not centrally symmetric, which is the reason this class had to learn to carry a
+        /// complex amplitude at all: unlike the annulus and the opposed vane pairs, their
+        /// transform has an imaginary part that does not cancel.
+        /// </param>
+        public PupilDiffraction(
+            double apertureMeters, double obstructionRatio, double wavelengthMeters,
+            int vaneCount, double vaneWidthMeters, double vaneRotationRad,
+            PupilPad[] pads)
         {
             if (apertureMeters <= 0.0 || wavelengthMeters <= 0.0)
                 throw new ArgumentException("aperture and wavelength must be positive");
@@ -107,14 +142,42 @@ namespace ExoInstruments.Core
                 _vaneSin[k] = Math.Sin(phi);
             }
 
+            int padCount = 0;
+            if (pads != null)
+                for (int i = 0; i < pads.Length; i++)
+                    if (pads[i].RadiusFraction > 0.0) padCount++;
+
+            _hasPads = padCount > 0;
+            _padX = new double[Math.Max(1, padCount)];
+            _padY = new double[Math.Max(1, padCount)];
+            _padRadius = new double[Math.Max(1, padCount)];
+            double padArea = 0.0;
+            if (_hasPads)
+            {
+                int j = 0;
+                for (int i = 0; i < pads.Length; i++)
+                {
+                    if (!(pads[i].RadiusFraction > 0.0)) continue;
+                    _padX[j] = pads[i].XFraction * _outerRadius;
+                    _padY[j] = pads[i].YFraction * _outerRadius;
+                    _padRadius[j] = pads[i].RadiusFraction * _outerRadius;
+                    padArea += Math.PI * _padRadius[j] * _padRadius[j];
+                    j++;
+                }
+            }
+
             double annulusArea = Math.PI * (_outerRadius * _outerRadius - _innerRadius * _innerRadius);
             double vaneArea = 2.0 * _vanePairs * _vaneWidth * _vaneLength;
-            _onAxisAmplitude = annulusArea - vaneArea;
+            _onAxisAmplitude = annulusArea - vaneArea - padArea;
             VaneObscurationFraction = annulusArea > 0.0 ? vaneArea / annulusArea : 0.0;
+            PadObscurationFraction = annulusArea > 0.0 ? padArea / annulusArea : 0.0;
 
             if (_onAxisAmplitude <= 0.0)
-                throw new ArgumentException("vanes obscure the entire pupil");
+                throw new ArgumentException("obscurations cover the entire pupil");
         }
+
+        /// <summary>Fraction of the pupil's open area the mirror support pads remove.</summary>
+        public double PadObscurationFraction { get; }
 
         /// <summary>
         /// Normalised intensity (1.0 on axis) at an angular offset, in radians, resolved into two
@@ -122,30 +185,67 @@ namespace ExoInstruments.Core
         /// </summary>
         public double Intensity(double thetaXRad, double thetaYRad)
         {
-            double amp = Amplitude(thetaXRad, thetaYRad) / _onAxisAmplitude;
-            return amp * amp;
+            AmplitudeComplex(thetaXRad, thetaYRad, out double re, out double im);
+            double norm = 1.0 / _onAxisAmplitude;
+            re *= norm; im *= norm;
+            return re * re + im * im;
         }
 
-        /// <summary>The far-field amplitude itself, in units of area. Real, by the pupil's central symmetry.</summary>
+        /// <summary>
+        /// The REAL part of the far-field amplitude, in units of area.
+        ///
+        /// For a pupil made only of the annulus and opposed vane pairs this is the whole
+        /// amplitude, because such a pupil is centrally symmetric and its transform is real;
+        /// that is the case this class was originally written for and it is unchanged. Once
+        /// mirror pads are present the amplitude has an imaginary part too, and Intensity uses
+        /// AmplitudeComplex rather than this. Kept because the harness's reducibility check
+        /// against OpticalPsf.AiryIntensity is written against it.
+        /// </summary>
         public double Amplitude(double thetaXRad, double thetaYRad)
+        {
+            AmplitudeComplex(thetaXRad, thetaYRad, out double re, out _);
+            return re;
+        }
+
+        /// <summary>
+        /// The far-field amplitude, in units of area, as a complex number.
+        ///
+        /// Each obscuration contributes minus its own transform, and a shape displaced by d in
+        /// the pupil carries the phase factor exp(-2 pi i u . d). For the annulus that
+        /// displacement is zero and for a pair of opposed vanes the two phases are conjugate and
+        /// sum to a cosine, which is why both stay real. A mirror pad sits at neither, so it
+        /// contributes a genuine complex term.
+        /// </summary>
+        public void AmplitudeComplex(double thetaXRad, double thetaYRad, out double re, out double im)
         {
             // Spatial frequency, in cycles per metre of pupil.
             double ux = thetaXRad / _wavelength;
             double uy = thetaYRad / _wavelength;
             double u = Math.Sqrt(ux * ux + uy * uy);
 
-            double amp = DiscTransform(_outerRadius, u) - DiscTransform(_innerRadius, u);
+            re = DiscTransform(_outerRadius, u) - DiscTransform(_innerRadius, u);
+            im = 0.0;
 
             for (int k = 0; k < _vanePairs; k++)
             {
                 double uPar = ux * _vaneCos[k] + uy * _vaneSin[k];
                 double uPerp = -ux * _vaneSin[k] + uy * _vaneCos[k];
-                amp -= 2.0 * _vaneWidth * _vaneLength
-                     * Sinc(Math.PI * _vaneWidth * uPerp)
-                     * Sinc(Math.PI * _vaneLength * uPar)
-                     * Math.Cos(2.0 * Math.PI * _vaneMidRadius * uPar);
+                re -= 2.0 * _vaneWidth * _vaneLength
+                    * Sinc(Math.PI * _vaneWidth * uPerp)
+                    * Sinc(Math.PI * _vaneLength * uPar)
+                    * Math.Cos(2.0 * Math.PI * _vaneMidRadius * uPar);
             }
-            return amp;
+
+            if (!_hasPads) return;
+
+            for (int k = 0; k < _padRadius.Length; k++)
+            {
+                double a = DiscTransform(_padRadius[k], u);
+                if (a == 0.0) continue;
+                double phase = 2.0 * Math.PI * (ux * _padX[k] + uy * _padY[k]);
+                re -= a * Math.Cos(phase);
+                im += a * Math.Sin(phase);
+            }
         }
 
         /// <summary>
@@ -210,5 +310,24 @@ namespace ExoInstruments.Core
         /// <summary>Convenience: pixel-averaged intensity addressed in arcsec.</summary>
         public double PixelAveragedIntensityArcsec(double thetaXArcsec, double thetaYArcsec, double pixelScaleArcsec)
             => PixelAveragedIntensity(thetaXArcsec * ArcsecToRad, thetaYArcsec * ArcsecToRad, pixelScaleArcsec * ArcsecToRad);
+    }
+
+    /// <summary>
+    /// One circular obscuration in the pupil, positioned and sized in fractions of the pupil's
+    /// RADIUS: the convention published pupil tables use, so a table can be transcribed without
+    /// arithmetic. See PupilDiffraction's pads constructor parameter.
+    /// </summary>
+    public struct PupilPad
+    {
+        public double XFraction;
+        public double YFraction;
+        public double RadiusFraction;
+
+        public PupilPad(double xFraction, double yFraction, double radiusFraction)
+        {
+            XFraction = xFraction;
+            YFraction = yFraction;
+            RadiusFraction = radiusFraction;
+        }
     }
 }

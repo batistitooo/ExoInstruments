@@ -34,6 +34,25 @@ namespace ExoInstruments.Core
 
         public double SemiMajorArcsec => D25Arcmin * 60.0 * 0.5;
 
+        /// <summary>
+        /// Mean B surface brightness inside the D25 ellipse, magnitudes per square arcsecond: the
+        /// total magnitude spread over the isophote's own area.
+        ///
+        /// This is the one combination of the catalogued numbers that can be sanity-checked without
+        /// any model, because it is bounded by what the isophote MEANS. A galaxy whose edge is
+        /// defined at 25 mag/arcsec^2 cannot average many magnitudes brighter than that inside it;
+        /// over the shipped catalogue the first and ninety-ninth percentiles are 20.45 and 24.34.
+        /// </summary>
+        public double MeanSurfaceBrightnessB
+        {
+            get
+            {
+                double a = SemiMajorArcsec, b = a * AxisRatio;
+                double area = Math.PI * a * b;
+                return area > 0.0 ? TotalBMag + 2.5 * Math.Log10(area) : double.NaN;
+            }
+        }
+
         /// <summary>V from B and the catalogued colour, so the photometry chain has the band it anchors on. NaN colour leaves V unknown.</summary>
         public double TotalVMag => double.IsNaN(ColourBv) ? double.NaN : TotalBMag - ColourBv;
     }
@@ -74,6 +93,24 @@ namespace ExoInstruments.Core
         public int Count => galaxies != null ? galaxies.Length : 0;
         public string Source { get; private set; }
 
+        /// <summary>
+        /// Rows dropped at load because their magnitude and their size cannot both be right; see
+        /// the check in Load. Reported rather than silent, because dropping catalogue rows is
+        /// something the log should say out loud.
+        /// </summary>
+        public int RejectedAsImplausible { get; private set; }
+
+        /// <summary>
+        /// Mean surface brightness inside D25, in B mag/arcsec^2, at which a catalogue row stops
+        /// being a galaxy and becomes an error.
+        ///
+        /// The isophote that defines D25 is drawn at 25 mag/arcsec^2, and the light inside it
+        /// averages a few magnitudes brighter than that: 20.45 at the first percentile of the
+        /// shipped catalogue, 22.64 at the median. 18 leaves two and a half magnitudes of margin
+        /// below anything real and still catches the entries that are seven magnitudes out.
+        /// </summary>
+        public const double ImplausibleSurfaceBrightnessB = 18.0;
+
         public void Load(string path)
         {
             using (var stream = File.OpenRead(path))
@@ -93,7 +130,8 @@ namespace ExoInstruments.Core
                 if (count < 0 || count > 20_000_000) throw new InvalidDataException("implausible galaxy count " + count);
                 string source = ReadString(reader, 4096);
 
-                var list = new Galaxy[count];
+                var accepted = new List<Galaxy>(count);
+                int rejected = 0;
                 for (int i = 0; i < count; i++)
                 {
                     var g = new Galaxy
@@ -110,18 +148,33 @@ namespace ExoInstruments.Core
                         SersicIndex = reader.ReadSingle(),
                     };
                     g.IsSersicIndexMeasured = reader.ReadByte() != 0;
-                    list[i] = g;
+
+                    // A row whose magnitude and size cannot both be right is dropped rather than
+                    // drawn. This is not hypothetical: HyperLEDA at B <= 13 carries one entry,
+                    // PGC 779349, at B_T 8.30 in a D25 of 0.34 arcmin, i.e. a mean surface
+                    // brightness of 13.6 mag/arcsec^2 where the catalogue's own first percentile is
+                    // 20.45. Nothing that size is that bright; it renders as a saturated white disc
+                    // several arcseconds across with a bleed down its column, and it sits on the sky
+                    // chart looking like one of the brightest galaxies in the sky.
+                    if (!(g.MeanSurfaceBrightnessB > ImplausibleSurfaceBrightnessB))
+                    {
+                        rejected++;
+                        continue;
+                    }
+                    accepted.Add(g);
                 }
+
+                Galaxy[] list = accepted.ToArray();
 
                 // The packer writes in ascending declination; sorting here as well costs nothing on
                 // a catalogue this size and means a hand-edited file cannot silently break the
                 // cone search's bisection.
                 Array.Sort(list, (a, b) => a.DecDeg.CompareTo(b.DecDeg));
-                var decs = new double[count];
-                for (int i = 0; i < count; i++) decs[i] = list[i].DecDeg;
+                var decs = new double[list.Length];
+                for (int i = 0; i < list.Length; i++) decs[i] = list[i].DecDeg;
 
                 largestSemiMajorDeg = 0.0;
-                for (int i = 0; i < count; i++)
+                for (int i = 0; i < list.Length; i++)
                 {
                     double half = list[i].D25Arcmin / 120.0;
                     if (half > largestSemiMajorDeg) largestSemiMajorDeg = half;
@@ -130,6 +183,7 @@ namespace ExoInstruments.Core
                 galaxies = list;
                 decSorted = decs;
                 Source = source;
+                RejectedAsImplausible = rejected;
             }
         }
 
@@ -174,6 +228,26 @@ namespace ExoInstruments.Core
                 if (sepDeg <= radiusDeg + g.D25Arcmin / 120.0) found.Add(g);
             }
             return found;
+        }
+
+        /// <summary>
+        /// One galaxy by its catalogue designation. Needed by the shape-map layer: a map that
+        /// swallows a close companion is normalised to the SUM of the catalogued fluxes, so the
+        /// companion's own entry has to be findable by the name the map stored.
+        /// </summary>
+        public bool TryGetByName(string name, out Galaxy galaxy)
+        {
+            galaxy = default(Galaxy);
+            if (galaxies == null || string.IsNullOrEmpty(name)) return false;
+            for (int i = 0; i < galaxies.Length; i++)
+            {
+                if (string.Equals(galaxies[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    galaxy = galaxies[i];
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static int LowerBound(double[] sorted, double value)

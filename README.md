@@ -8,6 +8,13 @@
 
 This project uses a proprietary license. It is not a Creative Commons license: redistribution of copies (even unmodified ones) is not permitted here, only personal use of the original. Full legal terms are in [LICENSE](./LICENSE).
 
+**Bundled third-party assets.** `ExoInstruments/Parts/OrbitalObservatory/model.mu` and
+`texture001.dds` are not covered by the above. They are Tarsier Space Technology's, Copyright (c)
+2013 tobyb121, under the **MIT licence**, whose text ships beside them in `TARSIER-LICENSE.txt`. MIT
+permits this bundling and does not require the rest of the project to change licence, but it also
+cannot be overridden by it: anyone who receives those two files keeps their MIT rights over them,
+whatever the terms above say about the rest. None of Tarsier's source code is used.
+
 ## Overview
 
 **ExoInstruments** is an independent mod for *Kerbal Space Program 1* that replaces the game's fictional science-experiment loop with a ground-based exoplanet survey built on real observational astrophysics. Rather than abstracting "science points" from generic biome scans, the mod asks the player to run an actual survey program: select a star from a real catalog, choose an instrument appropriate to its brightness and the physics of the detection method, and extract a signal from simulated, noise-limited data exactly the way an observational astronomer would.
@@ -16,8 +23,6 @@ This project uses a proprietary license. It is not a Creative Commons license: r
 ## Key Features
 
 - **Physically grounded stellar catalog.** Target stars are drawn from real astronomical data, each carrying its own apparent magnitude, spectral properties, and, where a companion is known, real orbital parameters.
-
-<p align="center"><img src="images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
 
 - **Photon-noise-limited instrumental precision.** Every instrument's achievable precision scales with target magnitude via the same photon-noise relation used in the observational literature; fainter stars are always harder, no instrument cheats the trade-off.
 
@@ -78,6 +83,14 @@ This project uses a proprietary license. It is not a Creative Commons license: r
 
 - **Career-mode discovery loop ("fog of war").** A star's identity and catalog status stay hidden until actually observed. A large real background-star catalog is blended in as camouflage, so anything discovered is a genuinely real system.
 
+- **A target search engine, not a name filter.** The right-hand half of the target-selection view is a search box over *everything the telescope can point at* — the planets and moons of whatever planet pack is installed, the whole star catalogue, the nebulae, every galaxy in the installed catalogue, and every Messier and named NGC/IC object — about sixteen thousand targets in a stock install with the optional catalogues. Type a name in any form it is written in and the list narrows as you type: `M31`, `NGC 224`, `NGC0224` and `Andromeda` all find one entry, `Vega` finds the Bright Star Catalogue's `alf Lyr`, and `M13` finds a globular cluster that no catalogue in this mod carries at all. Matching is on canonical **designations**, not substrings, so `NGC 24` returns NGC 24 and not the two hundred designations it is a substring of. Filter by what a thing is (`type:galaxy`, `type:nebula`, `type:cluster`, or the one-click buttons), by where it is (`in:Ori`, `in:Orion`, `in:Orionis` — the real IAU boundary, see below), by how bright (`mag:<9`) and by whether it is up right now (`alt:>30`). Every result carries its type, magnitude, apparent size, constellation, coordinates, current altitude, **and which catalogue it came from** — two rows in one list can be measured to entirely different standards, and you are entitled to know which is which before spending a night on one. Clicking a result points the telescope; the sky chart on the left simultaneously lights up every match and steps everything else back, so the list and the chart are two views of one search.
+
+<p align="center"><img src="images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
+
+- **The IAU constellations, done properly.** Every fixed target knows which of the 88 constellations it lies in, and the search can filter on it. This is not a lookup table of approximate regions: Delporte's boundaries (adopted by the IAU in 1928, published 1930, unchanged since) are lines of constant right ascension and declination **in the mean equinox of B1875 and in no other frame**, so a J2000 catalogue position is carried there through the real chain — Murray (1989)'s FK5-to-FK4 rotation including its rotating-system term, then Newcomb's precession — before Roman (1987)'s ordered scan of the boundary arcs. `tools/constellation-tests` reproduces astropy's own FK4 transform to **3 nanoarcseconds**, reproduces all eight worked examples published with the boundary catalogue, and shows that the 0.04% of a quarter-million-point grid where it disagrees with astropy's `get_constellation` are all closer to a boundary than astropy's own two routes to "B1875" are to each other.
+
+- **Names from the bodies that assign them.** Cross-identifications (M31 = NGC 224 = the Andromeda Galaxy) come from **SIMBAD**, which maintains them from the literature; star proper names come from the **IAU Catalog of Star Names**, the list the IAU Working Group on Star Names actually approves, rather than from the folklore that half the "traditional" star names in circulation are. Both are pulled by generators under `tools/`, not typed from memory.
+
 - **Decluttered sky chart.** A density-aware thinning pass caps how many real hosts survive per sky cell, so a single dense survey field (Kepler-style) can't give away "something's here" before it's ever been scanned. Solar-system bodies get their own decluttering too: a planet and its own moons often land on nearly the same point of sky from Kerbin, so overlapping markers are nudged apart into a small ring, just far enough that each one stays individually clickable at any zoom level.
 
 - **A real, upgradeable KSC Observatory building.** Not a toolbar button bolted onto stock scenery, but a genuine facility built on the same stock systems the VAB or Astronaut Complex use; real hover highlighting, a real right-click facility dialog, and a real funds-gated upgrade path. Its telescope continuously points at whatever target is currently being observed, using the same real altitude/azimuth conversion the rest of the mod already relies on, so the rig's orientation reflects the target's actual position in Kerbin's sky, not a cosmetic animation.
@@ -101,6 +114,62 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 | **CDK1000** | PlaneWave CDK1000, 1.0 m Corrected Dall-Kirkham (Palomar-class) | Solar-System Photography | N/A; not an exoplanet detector | Research-grade step up from the RC20: nearly four times the light-collecting area |
 | **VLT FORS2** | Real VLT Unit Telescope 1, 8.2 m, real FORS2 imager | Solar-System Photography | N/A; not an exoplanet detector | The actual Very Large Telescope, pointed at the neighborhood instead of a distant galaxy |
 | **VLT SPHERE** | Real VLT Unit Telescope 3, 8.2 m, real SPHERE/ZIMPOL adaptive optics | Solar-System Photography | N/A; not an exoplanet detector | Same VLT, extreme adaptive optics: real ~25 mas resolution instead of ordinary seeing |
+| **Orbital Observatory** | HST's 2.4 m OTA with WFC3/UVIS — *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The near-ultraviolet the atmosphere blocks outright, an identical PSF in every frame, and a sky with no airglow in it |
+
+## Building a space telescope
+
+Every other instrument above is somebody else's telescope, whose time you buy. This one does not
+exist until you launch it.
+
+**The part.** *Orbital Astrophysics Observatory*, in the Science category. Its model is Tarsier Space
+Technology's Deep Space Telescope, used under that mod's MIT licence and shipped with the licence
+text beside it; none of Tarsier's code is used, and it is a placeholder until a bespoke mesh exists.
+It carries the telescope, its aperture door, and its own reaction wheels. It appears in the observatory's instrument list only
+once you have one in orbit; there is no Funds price, because the cost is the part, the launch, and
+building a spacecraft that can actually hold a target still.
+
+**What it needs to work.** Four things, all checked, all reported by name when they fail:
+
+1. **The aperture door open.** Toggle it in flight or by action group. It is a hard gate, not an
+   animation: HST's own door exists to close over the optics if attitude control is ever lost with
+   the Sun in reach.
+2. **A clear view down the tube.** The mod casts a hundred rays across the telescope's real open
+   pupil into your actual vessel geometry. Mount a solar panel, an antenna or a fairing over the
+   open end and the panel tells you which part is in the way. There is no partial credit: a
+   partially blocked pupil is not a telescope collecting less light, it is a telescope with a
+   different point-spread function, and the honest answer is that observatories do not take science
+   frames through their own structure.
+3. **Attitude control it can hold a target with.** This is the one that actually shows up in the
+   photograph. Reaction wheels hold the boresight at a *point*, and what is left is HST's published
+   0.008″ jitter, a fifth of a pixel. Thrusters cannot: an on-off thruster has no small setting, so
+   the vehicle drifts across a deadband and gets pulsed back, forever — the standard limit cycle,
+   and at this plate scale it is **hundreds of pixels** of smear. A telescope pointed on RCS alone
+   does not take a slightly worse photograph, it takes a streak. The part ships with wheels for
+   exactly this reason; add more if the spacecraft is heavy.
+4. **Electric charge.**
+
+**Where you operate it from.** Flying the spacecraft, you are there: power and a clear aperture are
+enough. From the observatory at the space centre, every command and every returned frame goes over
+a radio, so it also needs **an antenna with a working link**. Without one it still works — you just
+have to go and fly it. The frame is 32 MB of real data, which is 9 minutes on a Communotron 16 and
+2 on a relay dish, so the antenna you picked is a real decision.
+
+**What it is good at, and what it is not.** It is not the biggest telescope in the list and it does
+not out-resolve the VLT: at 2.4 m it has under a twelfth of the VLT's collecting area, and its
+delivered 0.067″ core is nearly three times coarser than SPHERE's adaptive optics. What it has is
+
+- **the near-ultraviolet**, down to 200 nm, which ozone closes on the ground completely and which no
+  mirror size or mountain buys back;
+- **a point-spread function that is identical in every frame ever taken**, because there is no
+  atmosphere to vary;
+- **a sky about 1.6 magnitudes darker**, because airglow is something an atmosphere does.
+
+**And constraints no ground telescope has.** The planet occults most targets for part of every
+orbit; you cannot point within 62.5° of the Sun, 20° of the sunlit limb, 7.6° of the dark limb or
+9° of a moon; and the observing window is finite, so an exposure longer than it gets cut off. The
+panel shows all of it, including how long the current orbit will actually let you integrate for. A
+target near your orbital pole falls in the **continuous viewing zone** and is never occulted at all.
+
 
 ## Solar-System Observing Guide
 
@@ -700,6 +769,58 @@ Galaxies are drawn as crosses on the sky chart down to B = 11, sized to their ow
 has no such cut and draws whatever clears the frame's noise floor. `tools/galaxy-tests` validates the
 profile against SciPy and astropy: b_n to 4 × 10⁻¹⁵, the surface brightness against astropy's
 `Sersic2D` to 1.2 × 10⁻¹³, the deposited flux to 4.5 × 10⁻⁴ over 81 shapes.
+
+## Optional: real galaxy imagery, so a galaxy is not a smooth ellipse
+
+A Sérsic profile fitted to four catalogued numbers is an ellipse of light, and that is all it can
+ever be. Measured over the 156 galaxies the sky chart plots, on the RC20 at 4×4 in a 300 s sub: M31
+peaks at **10.4σ** above the sky and reaches 3σ only out to a third of its catalogued radius, M51 at
+21.9σ. That is why a spiral reads as nothing — its light is spread perfectly evenly. None of them
+has arms, a dust lane or a knot, and **no published relation puts them back**: those are properties
+of the individual galaxy, not of its Hubble type.
+
+So the structure comes from a photograph of that galaxy:
+
+```
+cd tools
+python3 -m venv galaxy-images/env
+./galaxy-images/env/bin/pip install numpy scipy astropy requests
+./galaxy-images/env/bin/python pack_galaxy_images.py \
+    --catalog "<KSP>/GameData/ExoInstruments/PluginData/GalaxyCatalog.galcat" \
+    --bmax 11 --out GalaxyImages.galimg
+cp GalaxyImages.galimg "<KSP>/GameData/ExoInstruments/PluginData/"
+```
+
+Sources are the **DESI Legacy Imaging Surveys DR10** (Dey et al. 2019) and **Pan-STARRS1 DR1**
+(Chambers et al. 2016), in two bands so the shape can be interpolated to the filter actually fitted:
+the arms come out bluer than the bulge because they were measured that way.
+
+**Only the shape is taken.** Every map is normalised to unit total flux, so brightness still comes
+from HyperLEDA's B_T through the same photometric chain a mapless galaxy uses. A survey's zero point
+never enters the render, and installing maps cannot make a galaxy brighter than the catalogue says.
+
+Three things the packer does that are worth knowing about:
+
+* **It measures each service's linearity instead of trusting it.** The Pan-STARRS *r* and *i* HiPS
+  turn out to be asinh-scaled, with nothing in the header saying so; packed as shape maps they would
+  have flattened every nucleus and still looked like galaxies. `galaxy-images/check_transfer.py`
+  measures the transfer curve against the survey's own stack, and those two bands are not used.
+* **Foreground stars are removed by Gaia DR3 astrometry**, not by how they look, because Gaia also
+  detects a nearby galaxy's own clusters and H II regions — deleting those would delete the
+  structure the whole layer exists for. Only sources with parallax or proper motion significant at
+  3σ are cut, and the holes are filled from their surroundings.
+* **A close companion is kept, not masked.** M51 and NGC 5195 arrive as the survey saw them, bridge
+  included, normalised to the sum of their catalogued fluxes, and the companion is not drawn twice.
+
+At B ≤ 11 that is 146 galaxies of the 156 on the chart, in 273 MB, loaded lazily: only the maps a
+frame actually contains are read from disk. The three with nothing at all (the SMC, NGC 4945,
+NGC 2997) are far south of Pan-STARRS' limit and outside the Legacy footprint. The giants are the ones the cap bites: M31's 4.7° box is stored at
+16.7″ per map pixel by default, and `--giant-pixels 4096` puts it at 4.2″ for 32 MB more.
+
+The sky chart says on hover whether a galaxy has real imagery and at what sampling, and the capture
+readout says which of the two each galaxy in the frame came from, so the picture never claims more
+resolution than the data behind it. `tools/galaxy-image-tests` checks the whole chain against an independent astropy
+reprojection: flux conservation lands at 100.02 %, geometry at 1.6 × 10⁻⁶ map pixels.
 
 ## Colour, dispersion, and the sky's own lines
 
