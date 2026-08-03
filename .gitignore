@@ -18,3 +18,18 @@ tools/*/env/
 tools/*/env
 tools/*/exo_*.csv
 tools/*/exo_*.bin
+
+# Packed data products, and the survey cutouts they are built from. These are the
+# optional catalogues and maps that go in GameData/ExoInstruments/PluginData/, and
+# they are large: the Gaia catalogue is 88 MB, the H-alpha map 25 MB, and the galaxy
+# image cache runs to gigabytes of survey imagery. Every one of them is reproducible
+# by rerunning its packer in tools/, whose README records where each pixel came from,
+# so what the repository carries is the provenance rather than the bytes.
+tools/*.galcat
+tools/*.galimg
+tools/*.starcat
+tools/*.emission
+tools/*.patchset
+tools/*.dustmap
+tools/galaxy_image_cache/
+tools/*.log
