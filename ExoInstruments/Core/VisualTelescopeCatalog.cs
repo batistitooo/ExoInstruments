@@ -380,6 +380,31 @@ namespace ExoInstruments.Core
         public double FieldStopSquareArcmin = double.NaN;
 
         /// <summary>
+        /// The focal-plane masks this instrument's coronagraph carries, or null for an instrument
+        /// that has none, which is every entry on this roster except SPHERE.
+        ///
+        /// Deliberately the mask TABLE rather than a boolean. A coronagraph is not a capability an
+        /// instrument either has or lacks; it is a set of masks that trade inner working angle
+        /// against attenuation, and choosing between them is the observation (see
+        /// Core.Coronagraph).
+        /// </summary>
+        public Coronagraph.Mask[] CoronagraphMasks;
+
+        /// <summary>
+        /// The Lyot pupil stop that goes with those masks. Only meaningful when CoronagraphMasks
+        /// is non-null, and it is where the suppression actually happens: the focal-plane mask
+        /// converts the star's light into a ring around the pupil edge, and this is what throws
+        /// that ring away.
+        /// </summary>
+        public Coronagraph.LyotStop CoronagraphLyotStop;
+
+        /// <summary>Actuators across the deformable mirror of the adaptive-optics system in front of this instrument, or 0 where there is none. Sets the AO control radius, and with it where the speckle ring falls (see Core.SpeckleField).</summary>
+        public int AdaptiveOpticsActuatorsAcrossPupil;
+
+        /// <summary>True when this instrument carries a coronagraph at all.</summary>
+        public bool HasCoronagraph => CoronagraphMasks != null && CoronagraphMasks.Length > 0;
+
+        /// <summary>
         /// Diameter of the illuminated/corrected image circle at the focal plane, in millimetres,
         /// as the manufacturer publishes it. NaN means not published. Used to cut off illumination
         /// outside it; on this roster every published circle is larger than the sensor's diagonal,
@@ -1479,6 +1504,19 @@ namespace ExoInstruments.Core
             PhotoResponseNonUniformity = double.NaN,
             OffsetFixedPatternElectrons = double.NaN,
             LinearityDeviationAtFullWell = double.NaN,
+
+            // What makes this instrument SPHERE rather than a telescope with a good Strehl ratio.
+            // The five classical Lyot masks of the visual coronagraph, their measured attenuations,
+            // and the pupil stop that does the actual suppressing; all from Schmid et al. (2018)
+            // Tables 8 and 9, and all in Core.Coronagraph rather than restated here.
+            CoronagraphMasks = Coronagraph.VisualMasks,
+            CoronagraphLyotStop = Coronagraph.StopB1_2,
+
+            // SAXO's high-order deformable mirror, 41x41 actuators (Fusco et al. 2006; Beuzit
+            // et al. 2019). Its half-width in resolution elements is the AO control radius, and
+            // that number is checkable rather than decorative: 20.5 lambda/D at 626 nm on 8.2 m is
+            // 323 mas, and Schmid et al. report the observed speckle ring at 0.3 to 0.4 arcsec.
+            AdaptiveOpticsActuatorsAcrossPupil = 41,
 
             MinExposureSeconds = 1.1f,
             MaxExposureSeconds = 3600.0f,

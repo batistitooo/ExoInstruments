@@ -290,6 +290,67 @@ namespace ExoInstruments.Visualization
         public static double SaturationElectrons(double gainMultiplier)
             => Math.Min(FullWellElectrons, DigitalSaturationElectrons(gainMultiplier));
 
+        /// <summary>
+        /// Which of the instrument's coronagraphic focal-plane masks is in the beam, or null for
+        /// none. Null on every instrument that has no coronagraph, which is all of them but SPHERE.
+        /// </summary>
+        public static Coronagraph.Mask? SelectedCoronagraphMask
+        {
+            get
+            {
+                if (!Spec.HasCoronagraph) return null;
+                if (selectedCoronagraphMaskName == null) return null;
+                return Coronagraph.Find(selectedCoronagraphMaskName);
+            }
+        }
+
+        /// <summary>Selects a coronagraphic mask by ESO's own name, or null to take it out of the beam. Ignored on an instrument that does not carry it.</summary>
+        public static void SetCoronagraphMask(string maskName)
+        {
+            if (maskName == null) { selectedCoronagraphMaskName = null; return; }
+            if (!Spec.HasCoronagraph) return;
+            if (Coronagraph.Find(maskName) == null) return;
+            selectedCoronagraphMaskName = maskName;
+        }
+
+        private static string selectedCoronagraphMaskName;
+
+        /// <summary>
+        /// The pupil the light last passed through, which is what the point-spread function is the
+        /// diffraction pattern of.
+        ///
+        /// WHY THESE ARE PROPERTIES AND NOT Spec FIELDS. With a coronagraph in the beam the
+        /// telescope's own pupil is no longer the one that forms the image: the Lyot stop
+        /// downstream undersizes the outer edge, oversizes the central obstruction and widens the
+        /// spider vanes, all deliberately, to throw away the light the focal-plane mask diffracted
+        /// to the pupil rims. On SPHERE that turns an 8.2 m aperture with a 14.0% obstruction into
+        /// a 7.42 m aperture with a 22.2% one (Schmid et al. 2018, Table 9). The first dark ring
+        /// moves outward, the core widens, and the diffraction rings the mask scattered are gone.
+        /// That is not a brightness correction; it is a different PSF, and every site that builds
+        /// one reads these rather than the spec.
+        /// </summary>
+        public static double PupilApertureMeters
+            => SelectedCoronagraphMask.HasValue ? Spec.CoronagraphLyotStop.ApertureMeters : Spec.ApertureMeters;
+
+        public static double PupilObstructionFraction
+            => SelectedCoronagraphMask.HasValue ? Spec.CoronagraphLyotStop.ObstructionFraction : Spec.SecondaryObstructionFraction;
+
+        public static double PupilVaneWidthMeters
+            => SelectedCoronagraphMask.HasValue ? Spec.CoronagraphLyotStop.SpiderVaneWidthMeters : Spec.SpiderVaneWidthMeters;
+
+        /// <summary>
+        /// Vane count under the stop. The "B" family of SPHERE's pupil masks exists specifically to
+        /// hide the telescope's own spiders during pupil-stabilised observing, so with one in the
+        /// beam the vanes in the pupil are the STOP's four rather than the telescope's, and they
+        /// are six times wider.
+        /// </summary>
+        public static int PupilVaneCount
+            => SelectedCoronagraphMask.HasValue ? 4 : Spec.SpiderVaneCount;
+
+        /// <summary>Fraction of the entering light the pupil stop passes, 1 with no coronagraph in the beam.</summary>
+        public static double CoronagraphThroughput
+            => SelectedCoronagraphMask.HasValue ? Coronagraph.Throughput(Spec.CoronagraphLyotStop) : 1.0;
+
         /// <summary>Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal length and the sensor's real pixel pitch. Public because it's the single number that decides whether a target is resolvable at all; real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it front and center for exactly that reason.</summary>
         public static float PlateScaleArcsecPerPixel
         {
@@ -2925,9 +2986,9 @@ namespace ExoInstruments.Visualization
                     if (deliveredFwhm > 0.0)
                     {
                         wavefront = OpticalPsf.GaussianFwhmForDelivered(
-                            deliveredFwhm, inputs.PlateScaleArcsec, Spec.ApertureMeters,
-                            Spec.SecondaryObstructionFraction, lambdaM,
-                            Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters);
+                            deliveredFwhm, inputs.PlateScaleArcsec, PupilApertureMeters,
+                            PupilObstructionFraction, lambdaM,
+                            PupilVaneCount, PupilVaneWidthMeters);
                     }
                 }
 
@@ -3610,7 +3671,7 @@ namespace ExoInstruments.Visualization
                 // computed separately from the pupil; solve for the residual that reproduces it.
                 atmosphericFwhm = OpticalPsf.AtmosphericFwhmForDelivered(
                     Spec.AdaptiveOpticsFwhmArcsec, inputs.PlateScaleArcsec,
-                    Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
+                    PupilApertureMeters, PupilObstructionFraction, wavelength);
             }
             else
             {
@@ -3655,14 +3716,14 @@ namespace ExoInstruments.Visualization
 
                 psfCacheCore = subBands != null
                     ? OpticalPsf.BuildChromaticKernel(
-                        inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
+                        inputs.PlateScaleArcsec, PupilApertureMeters, PupilObstructionFraction,
                         atmosphericFwhm, wavelength, inputs.DefocusDiscRadiusPx,
-                        Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, Spec.PrimaryMirrorPads,
+                        PupilVaneCount, PupilVaneWidthMeters, Spec.PrimaryMirrorPads,
                         subBands, out psfCacheCoreRadius)
                     : OpticalPsf.BuildKernel(
-                        inputs.PlateScaleArcsec, Spec.ApertureMeters, Spec.SecondaryObstructionFraction,
+                        inputs.PlateScaleArcsec, PupilApertureMeters, PupilObstructionFraction,
                         wavelength, atmosphericFwhm, inputs.DefocusDiscRadiusPx,
-                        Spec.SpiderVaneCount, Spec.SpiderVaneWidthMeters, 0.0,
+                        PupilVaneCount, PupilVaneWidthMeters, 0.0,
                         Spec.PrimaryMirrorPads, out psfCacheCoreRadius);
 
                 // A real adaptive-optics PSF is two-component: a corrected core carrying the
@@ -3708,7 +3769,7 @@ namespace ExoInstruments.Visualization
                 psfCachePointingFwhm = pointingFwhm;
 
                 psfCacheDiffractionFwhm = OpticalPsf.AiryFwhmArcsec(
-                    Spec.ApertureMeters, Spec.SecondaryObstructionFraction, wavelength);
+                    PupilApertureMeters, PupilObstructionFraction, wavelength);
             }
 
             core = psfCacheCore;

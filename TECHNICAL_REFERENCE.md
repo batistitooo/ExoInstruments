@@ -1119,6 +1119,73 @@ The flat removes a factor 2.18 of residual pattern and the reduced stack lands *
 
 This compares *models*, not codebases. Pyxel is a general framework covering detector families this roster has no instrument for, and most of what it offers has no counterpart here and is counted against neither side.
 
+### 7.52 High contrast — the coronagraph, the speckles, and what they rule out (`Core/Coronagraph.cs`, `SpeckleField.cs`, `AngularDifferentialImaging.cs`, `ContrastCurve.cs`)
+
+Until this section existed the roster's extreme-AO instrument was a telescope with a very good Strehl ratio: a narrow core on a wide halo, sourced correctly from Schmid et al. (2018) but describing an instrument nobody built. SPHERE exists to image things a hundred thousand times fainter than the star beside them, and it does that with components none of which is a Strehl ratio.
+
+**The coronagraph is a lookup, not a model, and that is deliberate.** ESO measured both stages on the real instrument and published them (Schmid et al. 2018, A&A 619, A9, Tables 8 and 9). A first-principles Lyot propagation would be a second opinion about an instrument that has already been measured, and where it disagreed it would be wrong. The five classical Lyot masks, with peak attenuations formed as ratios of ESO's own normalised counts against the clear stop's 7983 (R_PRIM) and 7813 (I_PRIM):
+
+| mask | radius = inner working angle | R_PRIM | I_PRIM | ESO's prose |
+|---|---|---|---|---|
+| CLC-S-WF | 46.5 mas | 111 | 150 | "R_coro ≈ 110−150" |
+| CLC-M-WF | 77.5 mas | 307 | 601 | "300−600" |
+| CLC-MT-WF | 77.5 mas (astrometric, 0.1 % spot) | 307 | 601 | |
+| CLC-L-WF | 155 mas | 258 | 710 | |
+| CLC-XL-WF | 538 mas | 1064 | 2894 | "1000−3000" |
+
+Attenuation is interpolated **linear in 1/λ**, because a mask of fixed angular radius spans ρ/(λ/D) resolution elements and it is that count, not the wavelength, that sets how much of the core it removes; held flat outside the two measured filters rather than extrapolated. The 4QPM phase masks (666 and 823 nm) are declared and not modelled: ESO publish their design wavelengths but no attenuation curve, and a 4QPM's behaviour away from its design wavelength is the whole of its behaviour.
+
+**The Lyot stop is where the suppression happens, and it changes the PSF.** The mask converts the star's light into a bright ring at the pupil rims; the stop throws that ring away. Read from Table 9 in millimetres of the internal pupil image and scaled by the same table's 5.97 mm ↔ 8.2 m, STOPB1_2 turns an **8.2 m aperture with a 14.0 % obstruction into a 7.42 m aperture with a 22.2 % one**, with spider vanes six times wider (0.247 m against 0.041). `SolarSystemCameraTexture` therefore builds its PSF from `PupilApertureMeters` / `PupilObstructionFraction` / `PupilVaneCount` / `PupilVaneWidthMeters` — the pupil the light *last passed through* — rather than from the telescope's own. *The scaling validates itself against a number not used to derive it*: the annulus these three dimensions describe, less its four vanes, is **74.7 %** of the telescope's, against the **72.6 %** ESO publish for the same stop.
+
+The stop's throughput and its geometry are two different numbers and ESO measure both: it removes 27 % of the pupil's *area* but only 9 % of the useful light, because the area it removes is where the diffracted light went (5.0 % diffracted at the rims, 1.5 % in dead-actuator maxima, 2.5 % scattered), giving Φ/Φ_no_stop ≈ 0.91·T_geom. **That 0.91 is the entire argument for a Lyot stop.**
+
+**Speckles, not photon noise, are the limit.** The residual wavefront interferes into grains one resolution element across, each as bright as a planet and looking exactly like one. Soummer et al. (2007, ApJ 669, 642) and Aime & Soummer (2004) give the distribution: intensity `I = |A_c + A_s|²` follows a **modified Rician**, mean `I_c + I_s`, variance `I_s² + 2 I_c I_s`. Two consequences a Gaussian of the same width does not have: the tail is heavy, so bright speckles are far more common than Gaussian statistics predict, and the variance depends on the *static* field `I_c`, which is why non-common-path aberration correction is worth doing.
+
+**Which parts average down is the whole observing strategy**, and Milli et al. (2016, SPIE 9909, arXiv:1608.02149) measured it on SPHERE directly — 52 minutes at 1.6 Hz, correlated pairwise:
+
+| component | share | timescale | removed by |
+|---|---|---|---|
+| static | 71.3 % (their ρ₀) | none over an hour | ADI or a reference star, only |
+| fast | 5.9 % (their Λ) | τ = 3.5 s, *instrumental* — it appears with the internal lamp | a long exposure |
+| atmospheric | 22.8 % (the residual) | 0.6 D/v (Macintosh et al. 2005) = 1.2 s at 4 m/s | a long exposure |
+
+The split between the static and random amplitudes falls out with no free parameter. A fully developed speckle pattern has spatial variance equal to its mean squared, so the static field contributes `I_c²`, the random `I_s²`, and their interference `2 I_c I_s` — summing to `(I_c+I_s)² = m²` whatever the split. The static share of the variance is therefore exactly `(I_c/m)²`, and setting it to Milli's 0.713 gives `I_c = m√0.713 = 0.844 m`.
+
+The consequence, measured in the harness: **integrating for an hour instead of a minute removes 1 % of the speckle noise** (0.7211 → 0.7131 of the variance). That is the wall.
+
+**ADI is what gets through it.** Marois et al. (2006, ApJ 641, 556): stop tracking the field, let the sky rotate through a pupil-stabilised instrument at the parallactic rate, build a reference from the sequence's own median, subtract, derotate, stack. Speckles belong to the optics and stay; a companion belongs to the sky and sweeps. The parallactic angle is spherical trigonometry on latitude, declination and hour angle; the rotation that moves a source by one resolution element is `λ/(D·r)`, which at 91 mas and 790 nm is 12.5°.
+
+The cost is not optional: the companion is in the reference too, so subtracting it subtracts part of the companion from itself. **Self-subtraction** is modelled as `n/(n+1)` in the arc length `n` measured in resolution elements — a declared modelling choice (§12.63) with the right limits, not a fit. The one available measurement is reported honestly rather than claimed as agreement: Schmid et al.'s Test C gives 0.766 at 91 mas over 120°, where this expression gives 0.906, on a **three-frame** median the paper itself footnotes as self-subtraction affected. And a longer sequence is not monotonically better, because the reference itself decorrelates at 73 ppm/s (Milli et al.), leaving a residual `√(2(1−ρ))` that grows from 0.09 at a minute to 0.73 at an hour.
+
+**"Five sigma" is not five sigma close to the star**, and this is the single most common error the contrast-curve code exists to avoid. At 2 λ/D an annulus holds about 12 resolution elements; estimating a standard deviation from twelve numbers and treating it as exact is what a Gaussian threshold assumes. Mawet et al. (2014, ApJ 792, 97) give the correction — a Student *t* with *n*−1 degrees of freedom, times `√(1+1/n)` for the estimated mean:
+
+| separation | resolution elements | threshold | penalty vs 5σ |
+|---|---|---|---|
+| 1 λ/D | 6 | 34.40 σ | **6.88×** |
+| 2 λ/D | 12 | 10.68 σ | 2.14× |
+| 5 λ/D | 31 | 6.42 σ | 1.28× |
+| 20 λ/D | 125 | 5.30 σ | 1.06× |
+| 100 λ/D | 628 | 5.06 σ | 1.01× |
+
+Noise is measured from **non-overlapping apertures of one resolution element** laid around each annulus, not pixel to pixel: speckles are correlated over a resolution element, so a pixel-wise sigma counts each speckle several times and comes out too small.
+
+#### 7.521 Validation against VIP
+
+`tools/coronagraph-tests` checks the chain three ways: against ESO numbers *not used to build it* (the 74.7 %/72.6 % transmission, the 323 mas control radius against an observed 300–400 mas ring), against the statistics the physics demands (modified Rician moments to 0.2 % on 2 M draws; variance dividing exactly by *n* under averaging), and against **VIP** (`vip_hci`), the package high-contrast papers compute their detection limits with.
+
+| comparison | verdict | detail |
+|---|---|---|
+| Small-sample threshold | **equal** | our Student *t* quantile on a continued-fraction incomplete beta reproduces SciPy's `t.ppf` at a 2.87e-7 tail to **4.4e-8 relative** |
+| Annulus noise estimator | **equal** | median ratio **1.029** over 14 annuli, scatter 0.027 |
+| Contrast curve end to end | **equal** | **0.095 mag** worst disagreement over 14 separations |
+| ADI throughput calibration | worse | VIP injects and recovers fake companions; ours is analytic |
+| Post-processing algorithms | worse | VIP has PCA/KLIP, LOCI, LLSG, NMF, ANDROMEDA; this has median-subtraction ADI |
+| Forward instrument model | better | VIP starts from a cube it is given; this produces the cube |
+
+#### 7.522 What is Core-complete and not yet rendered
+
+The four Core files above are implemented, tested and validated. What is **not** yet wired into the game's frame path is the *rendering* of a speckle realisation into a SPHERE capture: the mask selection, the Lyot-stopped pupil and the throughput are live, so a coronagraphic capture already gets the right PSF, but the halo it sits on is still the smooth AO halo of §7.013 rather than a modified-Rician speckle field with λ/D grains. Closing that means one stage inserted after the PSF convolution in `ComputeFramePixels`, drawing on a grid at the speckle grain size; the Core function it would call is exercised by `BuildSpeckleFrame` in the harness. Until then §12 item 9's original entry stands for the *rendered* frame, while the physics behind it no longer does.
+
 ### 7.6 Image stacking (`Visualization/AstroImageStack.cs`)
 
 - Per-filter stacks of up to 30 subs, centroid-based alignment (brightness-weighted, falls back to frame center if nothing exceeds threshold), robust sky-background subtraction (trimmed-median of a 20px border band, trims brightest 15% first to reject limb/hot-pixel contamination).
@@ -1326,6 +1393,10 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 59. **The converter has no differential or integral non-linearity.** Quantisation and clipping are modelled exactly (and agree with Pyxel's converter on every level tested), but a real ADC's code widths are not perfectly uniform. No DNL/INL figure is published for any converter on this roster (§7.51, §7.512).
 60. **A measured per-pixel flat cannot be loaded.** Pyxel can take a real flat-field image as its PRNU map, which is strictly better than any parametric model where one exists. Nothing here can. No measured map is published for any detector on this roster, so nothing is lost today (§7.512).
 61. ~~**Two catalogue figures are internally inconsistent.**~~ **CLOSED.** Both were found by the calibration harness and both are corrected in §7.5: the ASI294MM Pro's read noise from 1.2 to **8.0 e⁻** (the low-gain figure that belongs with its well and converter), and FORS2's from 3.8 to **2.7 e⁻** (Issue 103 Table 2.8, against 4.1 in Issue 82.1 and 3.8 in neither).
+63. **ADI self-subtraction throughput is a declared form, not a fit.** `n/(n+1)` in the arc length measured in resolution elements has the right limits (nothing removed for no rotation, nothing lost for a long arc) and the right variable, but its shape between them is a modelling choice. Only one published measurement was found to check it against — Schmid et al. (2018) Test C, 0.766 at 91 mas over 120 degrees against this expression's 0.906 — and it is a three-frame median, the smallest number for which a median exists, which the paper's own table footnotes as self-subtraction affected. One point cannot constrain a curve (§7.52).
+64. **The 4QPM phase masks are declared and not modelled.** ESO publish their design wavelengths (666 and 823 nm) but no attenuation curve, and a four-quadrant phase mask's attenuation away from its design wavelength is the whole of its behaviour (§7.52).
+65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
+66. **The speckle field is not yet rendered into a game frame.** The physics is implemented, tested and validated against VIP, and the coronagraph's mask, Lyot-stopped pupil and throughput are live in the capture path; the halo those sit on is still the smooth AO halo rather than a speckle realisation (§7.522).
 62. **The ASI294MM Pro's HCG mode is not offered.** The real camera switches its sense node at ZWO gain 120, reaching 1.2 e⁻ of read noise with the well falling to roughly 19,700 e⁻ and `K` to about 1.2 e⁻/ADU. This pipeline models the low-gain configuration throughout, with the gain slider acting as an analogue gain ahead of a fixed converter; the second conversion-gain configuration is a discrete hardware mode, not a point on that curve, so it cannot be reached by interpolation and is absent rather than approximated (§7.5).
 
 ### 12.1 The nebula-morphology limit, and the layer built for it

@@ -1,0 +1,9 @@
+key,value
+plate_scale_mas_per_px,1.80018158708
+lambda_over_d_mas,19.8718532848
+lambda_over_d_px,11.038804878
+star_peak,1
+inner_working_angle_mas,46.5
+outer_radius_mas,800
+five_sigma_tail_probability,2.86651571924E-07
+frame_size,401
