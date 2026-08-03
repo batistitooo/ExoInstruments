@@ -1,0 +1,6 @@
+band,centre_nm,width_nm,peak_to_peak
+R_SPECIAL,655,165,0
+I_BESS,768,138,0.000568004
+z_Gunn,910,13,0.00658798
+Luminance,715,770,0.00133301
+1 nm line,956,1,0.0596505

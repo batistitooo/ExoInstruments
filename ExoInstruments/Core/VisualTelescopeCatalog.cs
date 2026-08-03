@@ -401,6 +401,31 @@ namespace ExoInstruments.Core
         /// <summary>Actuators across the deformable mirror of the adaptive-optics system in front of this instrument, or 0 where there is none. Sets the AO control radius, and with it where the speckle ring falls (see Core.SpeckleField).</summary>
         public int AdaptiveOpticsActuatorsAcrossPupil;
 
+        /// <summary>
+        /// Thickness of the detector's silicon in microns, for instruments whose is published, or
+        /// NaN. Sets the fringe period and with it everything about how this detector corrugates a
+        /// red sky (see Core.Fringing).
+        ///
+        /// NaN means no fringing is modelled, which for this roster is every instrument but FORS2:
+        /// the ZWO camera's IMX492 is a front-side-illuminated-style stacked CMOS whose layer
+        /// structure Sony does not publish, and Schmid et al. give no thickness for ZIMPOL's CCDs.
+        /// </summary>
+        public double DetectorSiliconThicknessMicrons = double.NaN;
+
+        /// <summary>
+        /// Peak-to-peak variation of that thickness across the array, as a fraction, and the
+        /// spatial scale it varies on in pixels.
+        ///
+        /// The AMPLITUDE and the SCALE are measured; the particular realisation is not, and is
+        /// drawn from the sensor's serial seed exactly as the photo-response and defect maps are.
+        /// Walsh et al. (2008) give the scale directly, at "around 40 pixels peak-to-peak for the
+        /// closest spaced fringes", and the amplitude follows from it: one fringe is one turn of
+        /// phase, which is a thickness change of lambda/(2n), or 0.33% of a 40 um layer at 950 nm.
+        /// NaN on any instrument with no published thickness.
+        /// </summary>
+        public double DetectorThicknessVariationFraction = double.NaN;
+        public double DetectorThicknessVariationScalePixels = double.NaN;
+
         /// <summary>True when this instrument carries a coronagraph at all.</summary>
         public bool HasCoronagraph => CoronagraphMasks != null && CoronagraphMasks.Length > 0;
 
@@ -1308,6 +1333,21 @@ namespace ExoInstruments.Core
             // optical axis, so what is modelled is the manual's own figure read literally: a square
             // stop, centred (see Core.FocalPlaneIllumination and section 12).
             FieldStopSquareArcmin = 6.8,
+
+            // The MIT/LL CCID-20's silicon, from ESO's own SPIE paper on these very devices:
+            // "The MIT/LL CCID-20 is a 40 um thick high resistivity deep depletion CCD" (Downing,
+            // Baade, Sinclaire, Deiries and Christen 2006). Independently confirmed by the fringe
+            // period: Walsh et al. (2008) measure 2.9 nm near 950 nm, which implies 43.4 um through
+            // silicon's own dispersion, an 8.5% agreement between a spectroscopic measurement and a
+            // fabrication figure that were never compared before (see Core.Fringing).
+            DetectorSiliconThicknessMicrons = 40.0,
+
+            // One fringe is one turn of phase, i.e. a thickness change of lambda/(2n) = 132 nm at
+            // 950 nm, which on a 40 um layer is 0.33%; Walsh et al. put the closest fringes about
+            // 40 pixels apart. Amplitude and scale are therefore both measured, and only the
+            // particular map is drawn, from the same serial seed the defect and flat maps use.
+            DetectorThicknessVariationFraction = 0.0033,
+            DetectorThicknessVariationScalePixels = 40.0,
 
             // Not published for the MIT/LL CCID-20: neither the user manual nor ESO's QC1 pages
             // give a PRNU or a fixed-pattern figure for this mosaic, so both are left unpublished

@@ -4097,6 +4097,7 @@ namespace ExoInstruments.Visualization
 
             EnsureFlatFieldMap();
             EnsureOffsetFpnMap();
+            EnsureFringeMap();
 
             // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
             // counting process, and the two only agree once the count is large. At the few
@@ -4121,7 +4122,10 @@ namespace ExoInstruments.Visualization
             for (int i = 0; i < n; i++)
             {
                 double sceneElectrons = signal != null ? signal[i] : 0.0;
-                double collected = (sceneElectrons + skyElectrons) * FlatFieldAt(i);
+                // The fringe modulation rides on the SKY alone: it is an interference effect whose
+                // depth depends on the source's spectrum, and the sky's line forest fringes where a
+                // stellar continuum does not (see EnsureFringeMap).
+                double collected = (sceneElectrons + skyElectrons * FringeAt(i)) * FlatFieldAt(i);
                 double meanElectrons = Math.Max(0.0, collected + darkElectrons);
                 raw[i] = (float)SamplePoisson(rng, meanElectrons);
             }
@@ -4368,7 +4372,7 @@ namespace ExoInstruments.Visualization
                 double sceneElectrons = signal != null ? signal[idx] : 0.0;   // null = shutter closed
                 // Its photo response is the array's, through the same flat field as every other
                 // pixel: what makes it hot is its dark current, not its sensitivity to light.
-                double collected = (sceneElectrons + skyElectrons) * FlatFieldAt(idx);
+                double collected = (sceneElectrons + skyElectrons * FringeAt(idx)) * FlatFieldAt(idx);
                 double mean = Math.Max(0.0, collected + darkElectrons * hotMultiplier);
                 raw[idx] = (float)SamplePoisson(rng, mean);
             }
@@ -5335,6 +5339,98 @@ namespace ExoInstruments.Visualization
             flatFieldMap = map;
         }
 
+        /// <summary>
+        /// The detector's fringe map: how much more or less of the SKY each pixel records because
+        /// its own silicon is a slightly different thickness from its neighbour's.
+        ///
+        /// APPLIED TO THE SKY AND NOT TO THE SCENE, which is the whole character of the effect
+        /// rather than a shortcut. Fringing is an interference modulation of the detector's
+        /// response, and how strongly it bites depends on the SPECTRUM of what is being detected:
+        /// a source with isolated emission lines samples the modulation at a few phases and fringes
+        /// hard, while a smooth continuum runs it through many turns and cancels itself. The night
+        /// sky past 700 nm is a picket fence of OH bands and fringes at a percent; a star is a
+        /// continuum and does not. tools/fringe-tests measures that difference at a factor of
+        /// eleven on one bandwidth. It is also why a real observer defringes by subtracting a
+        /// SCALED SKY FRAME rather than by dividing a flat.
+        ///
+        /// Built once per instrument, binning and FILTER, the filter being what decides how much of
+        /// the modulation survives the passband integral.
+        /// </summary>
+        private void EnsureFringeMap()
+        {
+            if (fringeMap != null && fringeMapFilter == Filter) return;
+
+            fringeMap = null;
+            fringeMapFilter = Filter;
+
+            double thickness = Spec.DetectorSiliconThicknessMicrons;
+            double variation = Spec.DetectorThicknessVariationFraction;
+            double scalePx = Spec.DetectorThicknessVariationScalePixels;
+            if (double.IsNaN(thickness) || !(thickness > 0.0)) return;
+            if (double.IsNaN(variation) || !(variation > 0.0)) return;
+            if (double.IsNaN(scalePx) || !(scalePx > 0.0)) return;
+
+            int width = TextureWidth, height = TextureHeight;
+            int n = width * height;
+            if (n <= 0) return;
+
+            // The passband, as a top-hat of the filter's own published centre and width, which is
+            // what the rest of this pipeline uses wherever a real measured curve is not carried.
+            double centreNm = FilterCentralWavelengthMeters(Filter) * 1e9;
+            double widthNm = FilterBandwidthAngstrom(Filter) * 0.1;
+            if (!(centreNm > 0.0) || !(widthNm > 0.0)) return;
+
+            double lo = Math.Max(AirglowTable.MinWavelengthNm, centreNm - 0.5 * widthNm);
+            double hi = Math.Min(AirglowTable.MaxWavelengthNm, centreNm + 0.5 * widthNm);
+            if (!(hi > lo)) return;
+
+            // Nothing to compute if the band stops short of where silicon becomes transparent
+            // enough to have a second surface. That is most of this roster's filters.
+            if (hi <= FringeOnsetWavelengthNm) return;
+
+            Func<double, double> sky = l => Airglow.LineDensityAtZenith(l) + Airglow.ContinuumDensityAtZenith(l);
+            Func<double, double> response = l => (l >= lo && l <= hi) ? 1.0 : 0.0;
+
+            // The thickness map: smooth, on the measured spatial scale, from the serial seed. Its
+            // AMPLITUDE and its SCALE are Walsh et al.'s measurements; only this realisation is a
+            // draw, exactly as the flat field's is.
+            var thicknessMap = new float[n];
+            SpeckleField.BuildModulation(
+                thicknessMap, width, height,
+                plateScaleMasPerPixel: 1.0, lambdaOverDMas: scalePx,
+                staticVarianceFraction: 1.0 - 1e-9, realisations: 1.0,
+                staticSeed: Pcg32.MixSeed(SensorSerialSeed, 0x46524E47L), temporalSeed: 1UL);
+
+            var map = new ushort[n];
+            // The map's own values have unit mean and unit variance, so scaling their deviation to
+            // the published peak-to-peak fraction (four sigma of a unit-variance field spans it)
+            // gives a thickness field of the measured amplitude.
+            double thicknessSigma = thickness * variation / 4.0;
+
+            for (int i = 0; i < n; i++)
+            {
+                double localThickness = thickness + (thicknessMap[i] - 1.0) * thicknessSigma;
+                double path = Fringing.OpticalPathNm(localThickness, centreNm);
+                double m = Fringing.Modulation(path, sky, response, lo, hi, AirglowTable.StepNm);
+                map[i] = Float16.FromDouble(m - 1.0);
+            }
+
+            fringeMap = map;
+        }
+
+        /// <summary>Below this the absorption length in silicon is far shorter than any thinned layer and there is no second surface to interfere with. Walsh et al.'s own 774 nm flat showed no fringes at all.</summary>
+        private const double FringeOnsetWavelengthNm = 774.0;
+
+        private ushort[] fringeMap;
+        private CameraFilter fringeMapFilter = (CameraFilter)(-1);
+
+        /// <summary>This pixel's fringe factor on the sky: 1 where nothing is modelled.</summary>
+        private float FringeAt(int index)
+        {
+            if (fringeMap == null || index < 0 || index >= fringeMap.Length) return 1f;
+            return 1f + (float)Float16.ToDouble(fringeMap[index]);
+        }
+
         /// <summary>The sensor's per-pixel readout offsets in electrons, built once per instrument and binning for the same reasons as the flat field above.</summary>
         private void EnsureOffsetFpnMap()
         {
@@ -5442,6 +5538,7 @@ namespace ExoInstruments.Visualization
             deadPixelIndices = null;
             flatFieldMap = null;
             offsetFpnMap = null;
+            fringeMap = null;
             lastCaptureSnapshot = null;
             hasLockedAim = false;
         }
