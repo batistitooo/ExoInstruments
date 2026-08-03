@@ -85,3 +85,50 @@ recovered to 0.0041 mag.
 The magnitude range is chosen so every star is *detected*. A star below the frame's own limit does
 not come back with a large error bar — it does not come back at all, and a round trip that includes
 one is testing the detection limit instead of the photometry.
+
+
+---
+
+# Does a pointing that goes in come back out?
+
+The astrometric half of the same argument. A WCS written from the **commanded** pointing describes
+intent; one fitted to where the stars actually landed describes the result.
+
+The truth is constructed (tangent point, plate scale 0.125″/px, rotation 17.5°, unflipped), stars
+are projected through it, the pixels are perturbed with known centroid error, and the fitter is
+handed only pixels and sky.
+
+| check | result |
+|---|---|
+| projection inverts itself | 3.2×10⁻¹⁰ px, 3.4×10⁻¹¹ arcsec |
+| exact recovery, tangent point offered **81.8″ wrong** | map agrees with truth to 4.3×10⁻⁵ ″ frame-wide |
+| centroid noise 10 → 160 stars | pointing error 0.0033″ → 0.0014″ → 0.00071″, as 1/√N |
+| one mismatched pair, no clipping | 0.68″ error — the fit is wrecked |
+| the same with 3σ clipping | found and rejected, clean answer recovered |
+| ambiguous match | refused, not guessed |
+
+## Two things this found by failing first
+
+**The rotation is not the truth's, and that is correct.** Fitting with a tangent point an arcminute
+away returns 17.4938° against 17.5°. A CD matrix is expressed against its own tangent point's local
+north, and meridians converge: predicted difference Δα·sin δ = 22.49″, measured **22.48″**. The right
+invariant is that the two WCSs are the same *map*, not that their matrices match.
+
+**The cosine rule cannot measure a small separation.** Every pointing-error check bottomed out at
+exactly 3.07×10⁻³ arcsec in three sections until the floor was recognised as the *formula's*: near
+zero, `cos θ ≈ 1 − θ²/2` is resolved to ~10⁻¹⁶, so θ is recovered only to 3 mas. Fixed with the
+haversine, which also removed a floor on the 160-star pointing error that had looked like the fit
+refusing to improve.
+
+## The matching tolerance is a trade
+
+It must exceed the pointing error or nothing matches; it must stay inside the field's mean separation
+or sources acquire rivals and are refused. Sixty stars over 2048 px (264 px apart on average),
+4″ pointing error:
+
+| tolerance | matched | ambiguous |
+|---|---|---|
+| 3″ | 2 | 0 |
+| 6″ | 49 | 11 |
+| 10″ | 39 | 21 |
+| 20″ | 13 | 47 |

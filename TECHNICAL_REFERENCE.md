@@ -1188,6 +1188,41 @@ Zero point recovered as **23.9959 ± 0.0047 against the 24.0000 the field was bu
 
 The zero point is fitted as an uncertainty-weighted mean, and it carries **its own error**, folded into every calibrated magnitude: a zero point without an error is a systematic waiting to be discovered. It is deliberately not a colour-dependent fit; a real zero point carries a colour term, needing standards of known colour (§12.71).
 
+### 7.518 Measured astrometry — where the frame was really pointed (`Core/AstrometricSolution.cs`, `FitsWcs`)
+
+§7.517 answers *how much light*; this answers *where*, and the two together are what a scientific frame is for. The pipeline already wrote a WCS into every export, built from where the telescope was **commanded** to point and from the instrument's nominal plate scale — a description of intent. This produces the other kind: a WCS **fitted** to where the stars actually landed. The difference between them is the measurement.
+
+**A refinement, not a blind solve.** astrometry.net's quad hashes exist to place a frame whose pointing is entirely unknown; this pipeline always knows roughly where it pointed, so the problem solved here is the one an observatory actually has — take a good guess, match to a catalogue, fit the six parameters that say what the frame really did.
+
+**The fit is exactly linear**, because it is done in the tangent plane. Pixel position is affine in the standard coordinates (ξ, η) and thoroughly non-linear in (RA, Dec), so projecting first turns the solution into closed-form least squares with no starting guess and no convergence. What iterates is only outlier rejection — one mismatched pair drags a least-squares fit anywhere.
+
+`FitsWcs` gains the pieces it was missing: `TryStandardCoordinates` / `SkyFromStandardCoordinates` (the gnomonic projection and its exact inverse), `TrySkyToPixel` / `PixelToSky`, and the two derived quantities a solved frame is asked for — `RotationDeg` (position angle of the +y axis, east of north) and `FlippedParity` (a normal frame has north up and east *left*, hence a negative CD determinant).
+
+**Verified in `tools/photometry-tests` §A1–A5**, by constructing a WCS with a known tangent point, scale, rotation and parity, projecting stars through it, perturbing the pixels with known centroid error, and handing the fitter only the pixels and the sky:
+
+| check | result |
+|---|---|
+| projection inverts itself | 3.2×10⁻¹⁰ px, 3.4×10⁻¹¹ arcsec |
+| exact recovery, tangent point deliberately offered **81.8″ wrong** | scale to 10⁻⁸, map agrees with truth to 4.3×10⁻⁵ ″ over the whole frame |
+| centroid noise, 10 → 160 stars | residual = input noise less the fit's own dof; pointing error 0.0033″ → 0.0014″ → 0.00071″, falling as 1/√N |
+| one mismatched pair | wrecks the fit without clipping (0.68″ error); 3σ clipping finds it and recovers the clean answer |
+| ambiguous match | refused rather than guessed |
+
+**Two things this harness taught, both from failing first.**
+
+*The rotation is not the truth's, and that is correct.* Fitting with a tangent point an arcminute away returned 17.4938° against the 17.5° built in. A CD matrix is expressed against its own tangent point's local north, and two tangent points an arcminute apart do not share one: **meridians converge**. The predicted difference is Δα·sin δ = 22.49″; the measured difference is **22.48″**. The right invariant is not that the CD matrices match but that the two WCSs are the same *map*, which they are to 4.3×10⁻⁵ ″.
+
+*The cosine rule cannot measure a small separation.* Every pointing-error check bottomed out at exactly 3.07×10⁻³ arcsec in three different sections until the floor was recognised as the *formula's*: `acos(sin d₁ sin d₂ + cos d₁ cos d₂ cos Δα)` is exact in algebra and useless in floating point near zero, where cos ≈ 1 − θ²/2 is resolved to ~10⁻¹⁶ and θ therefore only to √(2×10⁻¹⁶) = 3 mas. `AstrometricSolution.SeparationArcsec` uses the **haversine**, which puts the small quantity inside a sine where relative precision survives to zero. The same fix removed a floor on the pointing error at 160 stars that had looked like the fit refusing to improve.
+
+**The matching tolerance is a trade, and the harness shows it.** It must exceed the pointing error or nothing matches; it must stay well inside the field's mean separation or half the sources acquire a rival and are refused. Sixty stars over 2048 px sit 264 px apart on average, against a 4″ pointing error:
+
+| tolerance | matched | ambiguous |
+|---|---|---|
+| 3″ | 2 | 0 |
+| 6″ | 49 | 11 |
+| 10″ | 39 | 21 |
+| 20″ | 13 | 47 |
+
 ### 7.52 High contrast — the coronagraph, the speckles, and what they rule out (`Core/Coronagraph.cs`, `SpeckleField.cs`, `AngularDifferentialImaging.cs`, `ContrastCurve.cs`)
 
 Until this section existed the roster's extreme-AO instrument was a telescope with a very good Strehl ratio: a narrow core on a wide halo, sourced correctly from Schmid et al. (2018) but describing an instrument nobody built. SPHERE exists to image things a hundred thousand times fainter than the star beside them, and it does that with components none of which is a Strehl ratio.
@@ -1490,6 +1525,8 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
 66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
 71. **The photometric zero point carries no colour term.** A filter's effective wavelength depends on the spectrum behind it, so a real zero point is a function of colour; fitting one needs standard stars of known colour and a second passband, and what is fitted here is an uncertainty-weighted mean offset (§7.517).
+74. **The astrometric solution is a six-parameter linear plate model with no distortion term.** Real optics add higher-order distortion, which FITS carries as SIP or TPV coefficients; this fits CRVAL, CRPIX and the CD matrix and nothing beyond them, so any distortion the instrument has appears as residual rather than as a fitted term. The residuals are reported, so the presence of one would be visible (§7.518).
+75. **Source matching is nearest-neighbour from a supplied guess, not a blind solve.** It cannot place a frame whose pointing is unknown, which is the problem astrometry.net exists for; this pipeline always has a commanded pointing, so the problem solved is refinement (§7.518).
 73. **The uncertainty does not model centroid jitter.** At low signal-to-noise the refitted centroid wanders between realisations, so the aperture moves and captures a varying fraction of the flux. The harness measures the resulting excess at +3.5 % in sigma at 3000 electrons, falling to nothing by 10^5 (§7.517).
 72. **Source detection is the simplest thing that works.** Local maxima above a sigma-clipped threshold, with a one-resolution-element exclusion. No deblending, no PSF fitting, no moving-object rejection. Detection is not what §7.517 exists to validate, and anything cleverer would be a second algorithm needing its own validation (§7.517).
 70. **Mount pointing error is not modelled.** Periodic error from a worm gear, guiding residual and flexure are all real and all instrument-specific, and no mount model is published for any tube on this roster - the catalogue names optics and cameras, not mounts. Dithering (§7.516) is modelled because it is an observer's choice needing no instrument parameter; the errors it partly mitigates are not (§7.516).

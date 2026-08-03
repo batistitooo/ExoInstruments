@@ -38,6 +38,9 @@ static class PhotometryTests
         SectionUncertaintyIsHonest();
         SectionZeroPointAndRoundTrip();
 
+        // The astrometric half of the same argument, in its own file: how much light, and where.
+        failures += AstrometryTests.Run(args);
+
         Console.WriteLine();
         Console.WriteLine(new string('=', 78));
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");

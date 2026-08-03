@@ -148,6 +148,124 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// Standard coordinates: where a sky position falls on the tangent plane of a reference
+        /// point, in degrees east and north. The gnomonic projection itself, written out.
+        ///
+        ///     cos c = sin d0 sin d + cos d0 cos d cos(a - a0)
+        ///     xi    = cos d sin(a - a0) / cos c
+        ///     eta   = (cos d0 sin d - sin d0 cos d cos(a - a0)) / cos c
+        ///
+        /// This is the quantity a plate solution is linear in, which is the whole reason it exists
+        /// as a separate step: pixel position is an AFFINE function of (xi, eta) and a thoroughly
+        /// non-linear one of (RA, Dec), so a fit done in the tangent plane is an exact linear
+        /// least-squares problem while the same fit done on the sphere is not.
+        ///
+        /// Returns false behind the tangent point, where the projection diverges and there is no
+        /// answer rather than a large one.
+        /// </summary>
+        public static bool TryStandardCoordinates(
+            double raDeg, double decDeg, double referenceRaDeg, double referenceDecDeg,
+            out double xiDeg, out double etaDeg)
+        {
+            const double DegToRad = Math.PI / 180.0;
+            xiDeg = etaDeg = 0.0;
+
+            double d = decDeg * DegToRad, d0 = referenceDecDeg * DegToRad;
+            double da = (raDeg - referenceRaDeg) * DegToRad;
+
+            double sinD = Math.Sin(d), cosD = Math.Cos(d);
+            double sinD0 = Math.Sin(d0), cosD0 = Math.Cos(d0);
+            double cosDa = Math.Cos(da), sinDa = Math.Sin(da);
+
+            double cosC = sinD0 * sinD + cosD0 * cosD * cosDa;
+            if (cosC <= 1e-12) return false;
+
+            xiDeg = (cosD * sinDa / cosC) / DegToRad;
+            etaDeg = ((cosD0 * sinD - sinD0 * cosD * cosDa) / cosC) / DegToRad;
+            return true;
+        }
+
+        /// <summary>The inverse: the sky position at a given tangent-plane offset from a reference point.</summary>
+        public static void SkyFromStandardCoordinates(
+            double xiDeg, double etaDeg, double referenceRaDeg, double referenceDecDeg,
+            out double raDeg, out double decDeg)
+        {
+            const double DegToRad = Math.PI / 180.0;
+            double xi = xiDeg * DegToRad, eta = etaDeg * DegToRad;
+            double d0 = referenceDecDeg * DegToRad;
+            double sinD0 = Math.Sin(d0), cosD0 = Math.Cos(d0);
+
+            double r = Math.Sqrt(xi * xi + eta * eta);
+            if (r < 1e-15)
+            {
+                raDeg = referenceRaDeg; decDeg = referenceDecDeg; return;
+            }
+            double c = Math.Atan(r);
+            double sinC = Math.Sin(c), cosC = Math.Cos(c);
+
+            double sinDec = cosC * sinD0 + eta * sinC * cosD0 / r;
+            decDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, sinDec))) / DegToRad;
+            raDeg = referenceRaDeg
+                  + Math.Atan2(xi * sinC, r * cosD0 * cosC - eta * sinD0 * sinC) / DegToRad;
+        }
+
+        /// <summary>
+        /// Where a sky position lands on the detector, in FITS pixel coordinates.
+        ///
+        /// FITS COORDINATES, WHICH ARE NOT ARRAY INDICES, and the difference is exactly the kind of
+        /// half-pixel that silently biases an astrometric solution. FITS puts pixel centres on
+        /// integers starting at 1; this codebase's array index i spans [i, i+1) and is centred at
+        /// i+0.5 (see StarFieldRenderer.Splat), while a centroid measured by AperturePhotometry
+        /// returns the index itself for a source centred on pixel i. The conversion is therefore
+        /// FITS = centroid + 1, and it is written at the call site rather than hidden here.
+        /// </summary>
+        public bool TrySkyToPixel(double raDeg, double decDeg, out double pixelX, out double pixelY)
+        {
+            pixelX = pixelY = 0.0;
+            if (!IsValid) return false;
+            if (!TryStandardCoordinates(raDeg, decDeg, ReferenceRaDeg, ReferenceDecDeg,
+                                        out double xi, out double eta)) return false;
+
+            double det = Cd11 * Cd22 - Cd12 * Cd21;
+            if (Math.Abs(det) < 1e-30 || double.IsNaN(det)) return false;
+
+            pixelX = ReferencePixelX + (Cd22 * xi - Cd12 * eta) / det;
+            pixelY = ReferencePixelY + (-Cd21 * xi + Cd11 * eta) / det;
+            return true;
+        }
+
+        /// <summary>The inverse: what sky position a FITS pixel looks at.</summary>
+        public void PixelToSky(double pixelX, double pixelY, out double raDeg, out double decDeg)
+        {
+            double dx = pixelX - ReferencePixelX, dy = pixelY - ReferencePixelY;
+            double xi = Cd11 * dx + Cd12 * dy;
+            double eta = Cd21 * dx + Cd22 * dy;
+            SkyFromStandardCoordinates(xi, eta, ReferenceRaDeg, ReferenceDecDeg, out raDeg, out decDeg);
+        }
+
+        /// <summary>
+        /// Position angle of the detector's +y axis, degrees east of north.
+        ///
+        /// The FITS CROTA2 of a CD matrix, which for a north-up frame is zero. Reported because it
+        /// is the quantity an observer recognises: a solved frame's rotation says which way the
+        /// instrument was actually sitting, and it is what a mosaic or a proper-motion measurement
+        /// has to agree on.
+        /// </summary>
+        public double RotationDeg => Math.Atan2(-Cd12, Cd22) * 180.0 / Math.PI;
+
+        /// <summary>
+        /// True when the frame is mirrored relative to the sky, which is what an odd number of
+        /// reflections in the optical train does.
+        ///
+        /// A normal astronomical frame has north up and east LEFT, giving a CD matrix of negative
+        /// determinant; a positive determinant means the image is flipped. It is not a defect and
+        /// it is not cosmetic: astrometry, position angles and any comparison with a catalogue all
+        /// depend on knowing it, and it is exactly the sort of thing a solved WCS is asked to
+        /// settle rather than assumed.
+        /// </summary>
+        public bool FlippedParity => (Cd11 * Cd22 - Cd12 * Cd21) > 0.0;
+
+        /// <summary>
         /// Where the sky point at tangent-plane offset (xiDeg east, etaDeg north) from
         /// (raDeg, decDeg) lands on the sensor.
         ///
