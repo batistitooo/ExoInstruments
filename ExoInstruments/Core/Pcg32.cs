@@ -51,6 +51,8 @@ namespace ExoInstruments.Core
         /// <summary>The speckle field's two halves, and they must be separate streams for a physical reason rather than a tidiness one: the static one is drawn from a seed that does not change between exposures and the temporal one from a seed that does, which is the whole of what makes a speckle pattern removable by differential imaging.</summary>
         public const ulong StreamSpeckleStatic = 8UL;
         public const ulong StreamSpeckleTemporal = 9UL;
+        /// <summary>The dither pattern's own stream, so that changing how a sequence is dithered cannot shift the noise inside any of its frames.</summary>
+        public const ulong StreamDither = 10UL;
 
         private ulong state;
         private readonly ulong increment;

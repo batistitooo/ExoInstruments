@@ -68,6 +68,7 @@ static class CalibrationTests
         SectionLinearityInverts();
         SectionBiasQc1();
         SectionCalibrationRemovesWhatItShould();
+        SectionDithering();
         ExportForCrossValidation();
 
         Console.WriteLine();
@@ -490,6 +491,113 @@ static class CalibrationTests
         rows.Add(Row("photon_floor", floor));
         File.WriteAllLines(Path.Combine(outDir, "reduction.csv"), rows);
         Console.WriteLine($"  -> {Path.Combine(outDir, "reduction.csv")}");
+    }
+
+    // ---------------------------------------------------------------- section 7
+
+    /// <summary>
+    /// What dithering buys, and what it cannot buy.
+    ///
+    /// Section 6 established that the calibration reaches the photon-noise floor when the master
+    /// frames are perfect. They never are: a master flat built from N frames carries its own shot
+    /// noise, and THAT residual is still fixed to the detector, so an undithered stack cannot
+    /// average it down however long it runs. Dithering breaks the registration between sky and
+    /// silicon and lets it fall as 1/sqrt(k) in the number of distinct positions.
+    ///
+    /// The number to watch is that k is bounded by the PATTERN and not by the sequence: a hundred
+    /// subs at four positions buys a factor of two.
+    /// </summary>
+    static void SectionDithering()
+    {
+        Header("7. Dithering");
+
+        Console.WriteLine("   pattern   subs   distinct positions   residual suppression");
+        foreach (var kind in new[] { DitherPattern.Kind.None, DitherPattern.Kind.Spiral, DitherPattern.Kind.Random })
+        {
+            foreach (int subs in new[] { 4, 16, 64 })
+            {
+                int k = DitherPattern.DistinctPositions(kind, subs, 3.0, 4242UL);
+                double s = DitherPattern.ResidualSuppression(k);
+                Console.WriteLine($"   {kind,-8} {subs,6} {k,20} {s,22:F4}");
+                Check($"{kind} at {subs} subs visits at most that many positions", k <= subs);
+                if (kind == DitherPattern.Kind.None) Check("no dither means no suppression", s, 1.0, 1e-12);
+                else Check($"{kind} at {subs} subs suppresses something", s < 1.0);
+            }
+        }
+
+        // The spiral must be compact and even: every ring filled before the next is started.
+        double maxR = 0.0;
+        for (int i = 0; i < 25; i++)
+        {
+            double dx, dy;
+            DitherPattern.OffsetForSub(DitherPattern.Kind.Spiral, i, 1.0, 0UL, out dx, out dy);
+            maxR = Math.Max(maxR, Math.Max(Math.Abs(dx), Math.Abs(dy)));
+        }
+        Console.WriteLine($"   the spiral's first 25 subs stay within {maxR:F0} steps of centre (rings 0-2 hold exactly 25)");
+        Check("the spiral fills rings before starting the next", maxR, 2.0, 1e-12);
+
+        // The random pattern must be uniform over the DISC, not over the radius: drawing the
+        // radius uniformly would pile the positions at the centre where they smear least.
+        const int N = 200000;
+        int inner = 0;
+        for (int i = 0; i < N; i++)
+        {
+            double dx, dy;
+            DitherPattern.OffsetForSub(DitherPattern.Kind.Random, i, 1.0, 99UL, out dx, out dy);
+            if (dx * dx + dy * dy <= 0.25) inner++;   // inside half the radius = a quarter of the area
+        }
+        double fraction = inner / (double)N;
+        Console.WriteLine($"   {fraction * 100:F2}% of random positions fall inside half the radius (uniform over the disc: 25%)");
+        Check("the random pattern is uniform over the disc", fraction, 0.25, 0.005);
+
+        // AND THE MEASUREMENT. A residual fixed to the detector, stacked with and without dither.
+        var spec = VisualTelescopeCatalog.Rc20;
+        const int W = 128, H = 128, Subs = 16;
+        int nativePerSide = spec.SensorNativePixelsPerSide;
+        double prnuSigma = SensorNonUniformity.BinnedPhotoResponseSigma(spec.PhotoResponseNonUniformity, nativePerSide);
+
+        // The residual the calibration left behind: a fixed multiplicative pattern of this size.
+        ushort[] residualMap = SensorNonUniformity.BuildPhotoResponseMap(
+            Pcg32.MixSeed(SensorSerialSeed, 7L), W * H, prnuSigma);
+
+        foreach (var kind in new[] { DitherPattern.Kind.None, DitherPattern.Kind.Random })
+        {
+            // Stack Subs frames of a uniform sky, aligning on the SKY: sub i sees the residual
+            // shifted by its own dither offset, which is exactly what aligning does to it.
+            var stack = new double[W * H];
+            for (int s = 0; s < Subs; s++)
+            {
+                double dx, dy;
+                DitherPattern.OffsetForSub(kind, s, 3.0, 4242UL, out dx, out dy);
+                int ox = (int)Math.Round(dx), oy = (int)Math.Round(dy);
+                for (int y = 0; y < H; y++)
+                {
+                    for (int x = 0; x < W; x++)
+                    {
+                        int sx = ((x + ox) % W + W) % W, sy = ((y + oy) % H + H) % H;
+                        stack[y * W + x] += SensorNonUniformity.PhotoResponse(residualMap, sy * W + sx);
+                    }
+                }
+            }
+            for (int i = 0; i < stack.Length; i++) stack[i] /= Subs;
+
+            double mean = 0.0;
+            for (int i = 0; i < stack.Length; i++) mean += stack[i];
+            mean /= stack.Length;
+            double variance = 0.0;
+            for (int i = 0; i < stack.Length; i++) { double d = stack[i] - mean; variance += d * d; }
+            double rms = Math.Sqrt(variance / stack.Length);
+
+            int k = DitherPattern.DistinctPositions(kind, Subs, 3.0, 4242UL);
+            double predicted = prnuSigma * DitherPattern.ResidualSuppression(k);
+            Console.WriteLine($"   {kind,-8}: {Subs} subs, {k} positions -> residual {rms * 100:F4}% " +
+                              $"(predicted {predicted * 100:F4}%, undithered would be {prnuSigma * 100:F4}%)");
+
+            if (kind == DitherPattern.Kind.None)
+                Check("undithered stacking leaves the residual untouched", rms, prnuSigma, 0.05 * prnuSigma);
+            else
+                Check("dithered stacking suppresses it as 1/sqrt(k)", rms, predicted, 0.25 * predicted);
+        }
     }
 
     // ---------------------------------------------------------------- cross-validation

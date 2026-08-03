@@ -1141,6 +1141,25 @@ A thinned CCD is an etalon nobody meant to build: light that reaches the silicon
 
 **Applied to the sky term and not to the scene**, which is the character of the effect rather than a shortcut: how hard a source fringes depends on its spectrum, and a stellar continuum does not. It is also why a real observer defringes by subtracting a *scaled sky frame* rather than by dividing a flat. The thickness map's amplitude (0.33 % of 40 µm, being `λ/2n` of phase) and scale (40 px) are both Walsh's measurements; only the particular realisation is drawn, from the same serial seed the defect and flat maps use. FORS2 is the only instrument on the roster with a published silicon thickness, so it is the only one that fringes.
 
+### 7.516 Dithering — why an undithered stack has a floor (`Core/DitherPattern.cs`)
+
+Averaging *N* frames divides temporal noise by √N and does nothing at all to anything fixed to the detector. §7.51's calibration removes the fixed terms it can *model*; what is left is the part it got wrong — the shot noise on the master flat, the pixels the bad-pixel map missed, the fringe pattern that changed with the airglow between the science frame and the sky frame. Those residuals are still fixed to the silicon, so they still do not average down, and on a deep stack they are what limits it.
+
+Dithering breaks the registration. Offset the telescope a few pixels between subs and a patch of *sky* lands on different silicon each time; align on the sky before averaging and the sky adds coherently while the detector's residuals smear over as many pixels as there are dither positions. Nothing about the detector changed — the two things being separated stopped sharing a coordinate system.
+
+**The benefit is bounded by the pattern, not by the sequence.** A residual landing on *k* distinct pixels averages over *k* independent values of itself, so it falls as 1/√k. A hundred subs at four dither positions buys a factor of two, not of ten.
+
+Measured in `tools/calibration-tests` §7, stacking 16 subs of a fixed 0.310 % residual:
+
+| pattern | distinct positions | residual after stacking | predicted |
+|---|---|---|---|
+| none | 1 | **0.3085 %** | 0.3100 % (untouched) |
+| random | 14 | **0.0850 %** | 0.0829 % |
+
+Three patterns are offered: none, a square spiral (visits the centre, then the ring of eight, then the twenty-four — compact and evenly covered at any sequence length), and a random draw **uniform over the disc**, which needs the square root on the radius: drawing the radius uniformly would pile positions at the centre where they overlap most and smear least. The harness measures 25.11 % of random positions inside half the radius against the 25 % a uniform disc requires. Random beats a regular pattern at breaking up *periodic* detector structure, which a regular pattern can resonate with.
+
+Nothing here is sourced from a datasheet and nothing needs to be: a dither pattern is a choice an observer makes, not a property of an instrument. What *is* a property of the instrument, and is deliberately not modelled, is the mount's own pointing error (§12.70).
+
 ### 7.52 High contrast — the coronagraph, the speckles, and what they rule out (`Core/Coronagraph.cs`, `SpeckleField.cs`, `AngularDifferentialImaging.cs`, `ContrastCurve.cs`)
 
 Until this section existed the roster's extreme-AO instrument was a telescope with a very good Strehl ratio: a narrow core on a wide halo, sourced correctly from Schmid et al. (2018) but describing an instrument nobody built. SPHERE exists to image things a hundred thousand times fainter than the star beside them, and it does that with components none of which is a Strehl ratio.
@@ -1442,6 +1461,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 64. **The 4QPM phase masks are declared and not modelled.** ESO publish their design wavelengths (666 and 823 nm) but no attenuation curve, and a four-quadrant phase mask's attenuation away from its design wavelength is the whole of its behaviour (§7.52).
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
 66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
+70. **Mount pointing error is not modelled.** Periodic error from a worm gear, guiding residual and flexure are all real and all instrument-specific, and no mount model is published for any tube on this roster - the catalogue names optics and cameras, not mounts. Dithering (§7.516) is modelled because it is an observer's choice needing no instrument parameter; the errors it partly mitigates are not (§7.516).
 68. **The fringe map's realisation is drawn, not measured.** Its amplitude and its spatial scale are both Walsh et al.'s measurements; the particular pattern of thickness variation across one piece of silicon is not published for any detector and is drawn from the sensor's serial seed, exactly as the photo-response and defect maps are (§7.515).
 69. **Fringing is modelled on FORS2 alone.** It needs a published silicon thickness, and neither Sony (for the IMX492) nor Schmid et al. (for ZIMPOL's CCDs) give one (§7.515).
 67. **The speckle modulation is applied to the whole signal plane, including a resolved target's disc.** A real extended source averages over the speckles its own light produces, suppressing its granularity by roughly the number of resolution elements it covers; that suppression is not modelled. Correct for the point sources a coronagraph is pointed at, an overestimate of the granularity on a resolved body (§7.522).
