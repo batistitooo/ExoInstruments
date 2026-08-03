@@ -1160,6 +1160,32 @@ Three patterns are offered: none, a square spiral (visits the centre, then the r
 
 Nothing here is sourced from a datasheet and nothing needs to be: a dither pattern is a choice an observer makes, not a property of an instrument. What *is* a property of the instrument, and is deliberately not modelled, is the mount's own pointing error (§12.70).
 
+### 7.517 Measured photometry — running the pipeline backwards (`Core/AperturePhotometry.cs`)
+
+Everything before this is a *forward* model: a magnitude goes in, a frame comes out. That direction can be wrong in ways nothing catches, because a forward model is only ever checked against itself. Running the inverse closes the loop, and it is the only test that catches an error of **assembly** — a zero point disagreeing with the electron counts, a PSF that does not conserve flux, a gain applied twice.
+
+**The uncertainty is the point, not the flux**, and its last term is the one usually missing:
+
+`σ² = F + n_ap(B + σ_read²) + (n_ap²/n_ann)·σ_bkg²`
+
+The final term is the noise on the *background estimate*, subtracted from every aperture pixel and therefore entering `n_ap` times, reduced by however many annulus pixels went into it (Merline & Howell 1995; Howell, *Handbook of CCD Astronomy*). Dropping it understates the error on a faint source measured against a small annulus — exactly the regime where an error bar matters.
+
+Verified in `tools/photometry-tests` the only way an error bar can be: by repeating one star in 400 noise realisations and comparing the scatter with the sigma predicted for one of them. The ratio runs **0.990 to 0.972** from 3×10³ to 3×10⁵ e⁻ — consistently 2–3 % conservative, never optimistic. The annulus term shows itself directly: σ falls from 521 to 374 e⁻ on the same star as the annulus grows from 208 to 4212 pixels.
+
+**The round trip.** Five stars of known magnitude, placed at a known zero point, run through Poisson and read noise, then detected, measured, fitted and calibrated:
+
+| known | recovered | error | residual | in σ |
+|---|---|---|---|---|
+| 12.00 | 12.0005 | 0.0077 | +0.0005 | +0.07 |
+| 13.00 | 12.9959 | 0.0129 | −0.0041 | −0.32 |
+| 14.00 | 14.0176 | 0.0271 | +0.0176 | +0.65 |
+| 15.00 | 14.9629 | 0.0619 | −0.0371 | −0.60 |
+| 16.00 | 15.9464 | 0.1525 | −0.0536 | −0.35 |
+
+Zero point recovered as **23.9958 ± 0.0051 against the 24.0000 the field was built with**; worst residual 0.054 mag; every star inside 0.65 σ. The aperture sum also reproduces the analytic enclosed energy of a Gaussian to 0.05 % at a 6-pixel radius, the departure at smaller radii being pixel-centre discretisation going as 1/r (4.3 % at r = 2) rather than error — centre membership being kept because it is photutils' own default convention.
+
+The zero point is fitted as an uncertainty-weighted mean, and it carries **its own error**, folded into every calibrated magnitude: a zero point without an error is a systematic waiting to be discovered. It is deliberately not a colour-dependent fit; a real zero point carries a colour term, needing standards of known colour (§12.71).
+
 ### 7.52 High contrast — the coronagraph, the speckles, and what they rule out (`Core/Coronagraph.cs`, `SpeckleField.cs`, `AngularDifferentialImaging.cs`, `ContrastCurve.cs`)
 
 Until this section existed the roster's extreme-AO instrument was a telescope with a very good Strehl ratio: a narrow core on a wide halo, sourced correctly from Schmid et al. (2018) but describing an instrument nobody built. SPHERE exists to image things a hundred thousand times fainter than the star beside them, and it does that with components none of which is a Strehl ratio.
@@ -1461,6 +1487,8 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 64. **The 4QPM phase masks are declared and not modelled.** ESO publish their design wavelengths (666 and 823 nm) but no attenuation curve, and a four-quadrant phase mask's attenuation away from its design wavelength is the whole of its behaviour (§7.52).
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
 66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
+71. **The photometric zero point carries no colour term.** A filter's effective wavelength depends on the spectrum behind it, so a real zero point is a function of colour; fitting one needs standard stars of known colour and a second passband, and what is fitted here is an uncertainty-weighted mean offset (§7.517).
+72. **Source detection is the simplest thing that works.** Local maxima above a sigma-clipped threshold, with a one-resolution-element exclusion. No deblending, no PSF fitting, no moving-object rejection. Detection is not what §7.517 exists to validate, and anything cleverer would be a second algorithm needing its own validation (§7.517).
 70. **Mount pointing error is not modelled.** Periodic error from a worm gear, guiding residual and flexure are all real and all instrument-specific, and no mount model is published for any tube on this roster - the catalogue names optics and cameras, not mounts. Dithering (§7.516) is modelled because it is an observer's choice needing no instrument parameter; the errors it partly mitigates are not (§7.516).
 68. **The fringe map's realisation is drawn, not measured.** Its amplitude and its spatial scale are both Walsh et al.'s measurements; the particular pattern of thickness variation across one piece of silicon is not published for any detector and is drawn from the sensor's serial seed, exactly as the photo-response and defect maps are (§7.515).
 69. **Fringing is modelled on FORS2 alone.** It needs a published silicon thickness, and neither Sony (for the IMX492) nor Schmid et al. (for ZIMPOL's CCDs) give one (§7.515).
