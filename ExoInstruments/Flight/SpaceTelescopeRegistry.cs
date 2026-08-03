@@ -205,7 +205,14 @@ namespace ExoInstruments.Flight
                     ConfigNode node = m.moduleValues;
                     if (node == null) continue;
 
+                    // The node first, the part's prefab second. The node is authoritative when it
+                    // has the field, which covers a part config overridden per vessel; the prefab
+                    // covers every telescope saved before instrumentName became persistent, whose
+                    // module node carries the measured state and not the instrument's name. The
+                    // prefab always has it, because that is where the part config was read.
                     string instrumentName = node.GetValue("instrumentName");
+                    if (string.IsNullOrEmpty(instrumentName)) instrumentName = PrefabInstrumentName(part);
+
                     VisualTelescopeSpec spec = FindInstrument(instrumentName);
                     if (spec == null || spec.SpacePlatform == null) continue;
 
@@ -227,6 +234,21 @@ namespace ExoInstruments.Flight
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// The instrument name off the part's prefab module, which is the part config as loaded.
+        /// Null when the prefab is unavailable, which is a part whose config failed to load and
+        /// which cannot be observed through anyway.
+        /// </summary>
+        private static string PrefabInstrumentName(ProtoPartSnapshot part)
+        {
+            if (part == null || part.partInfo == null || part.partInfo.partPrefab == null) return null;
+
+            List<ModuleExoSpaceTelescope> prefabs =
+                part.partInfo.partPrefab.FindModulesImplementing<ModuleExoSpaceTelescope>();
+            if (prefabs == null || prefabs.Count == 0) return null;
+            return prefabs[0].instrumentName;
         }
 
         /// <summary>

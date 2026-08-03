@@ -111,6 +111,15 @@ namespace ExoInstruments
         private float nextSkyChartRefreshTime = 0f;
         private double lastSkyChartRefreshUt = double.NaN;
         private Task<(List<SkyChartPoint> Points, Color32[] Pixels)> skyChartRenderTask;
+        /// <summary>The zoom/pan the outstanding refresh is rasterising for, so a result that landed after the player kept panning can be spotted and re-rastered instead of snapping the view back.</summary>
+        private SkyChartView skyChartRenderTaskView;
+
+        // A pan is not one event per frame: IMGUI delivers every MouseDrag the OS produced, and a
+        // 1000 Hz mouse produces several per frame. Rasterising inside the event handler therefore
+        // rebuilt (and re-uploaded) the whole 640x640 chart several times for one displayed frame,
+        // of which only the last was ever seen. The handlers now just raise this flag and Update
+        // rasterises once, so the cost per frame no longer depends on how fast the mouse reports.
+        private bool skyChartRasterDirty = false;
 
         // Two pixel buffers, not one, because the background refresh and a main-thread pan render
         // can be in flight at the same time and each needs a buffer nobody else is writing. The
@@ -561,6 +570,9 @@ namespace ExoInstruments
             // safe to do every frame regardless of which session is active.
             PollImagingRenderTask();
             PollSkyChartRenderTask();
+            // After the poll: a completed refresh replaces the points this raster reads, and if it
+            // rastered for a stale view the poll is what asks for the redraw.
+            FlushSkyChartRaster();
             PollForecastRenderTask();
             MaybeStartTargetIndexBuild();
             PollTargetIndexTask();
@@ -640,7 +652,10 @@ namespace ExoInstruments
 
             if (session == null && rvSession == null && imagingSession == null)
             {
-                if (windowVisible && Time.realtimeSinceStartup >= nextSkyChartRefreshTime)
+                // Not while the chart is being dragged: a full refresh competes with the pan for the
+                // frame, and its result would land rastered for wherever the view was a moment ago.
+                // A pan lasts a second or two, so the sky it interrupts is at most that stale.
+                if (windowVisible && !skyChartDragging && Time.realtimeSinceStartup >= nextSkyChartRefreshTime)
                 {
                     // Paused or time-warp-stalled: UT hasn't moved, so the whole
                     // catalog would re-transform to the exact same Alt/Az it's
@@ -3274,6 +3289,16 @@ namespace ExoInstruments
         /// </summary>
         void UpdateSkyChartHover(Rect chartRect)
         {
+            // A drag is not a hover: the cursor is holding the sky, not pointing at a star, and the
+            // pan already owns that frame's budget. This is an O(catalogue) sweep, so the passes
+            // that cannot change its answer skip it — the layout pass has no real chartRect to test
+            // against anyway (GetRect hands back a dummy), and nothing between two mouse positions
+            // moves the cursor.
+            if (skyChartDragging) return;
+            EventType pass = Event.current.type;
+            if (pass != EventType.Repaint && pass != EventType.MouseMove
+                && pass != EventType.MouseDown && pass != EventType.MouseUp) return;
+
             Vector2 mouse = Event.current.mousePosition;
             if (!chartRect.Contains(mouse))
             {
@@ -3902,6 +3927,19 @@ namespace ExoInstruments
         /// </summary>
         void DrawLockedInstrumentRow(InstrumentSpec instrument)
         {
+            // THE ORBITAL INSTRUMENT IS NOT BOUGHT, so none of the Funds economy below describes
+            // it: its UnlockCostFunds and UnlockScienceThreshold are both zero by design (see
+            // Observatories.OrbitalObservatory), which made every affordability test trivially
+            // true and left an enabled Unlock button that spent nothing and, in sandbox, threw on
+            // Funding.Instance. What locks it is that there is no telescope up there, and the
+            // only thing that unlocks it is launching one.
+            if (instrument.VisualTelescope != null && instrument.VisualTelescope.IsSpaceBased)
+            {
+                GUILayout.Label($"Locked: {instrument.DisplayName} - no telescope in orbit. "
+                              + "Launch the Orbital Astrophysics Observatory part and open its aperture door.");
+                return;
+            }
+
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             double earnedScience = scenario?.TotalScienceEarned ?? 0.0;
             double funds = Funding.Instance != null ? Funding.Instance.Funds : 0.0;
@@ -3925,7 +3963,10 @@ namespace ExoInstruments
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Locked: {instrument.DisplayName} ({instrument.UnlockCostFunds:N0} Funds, {requirement})");
             GUILayout.FlexibleSpace();
-            GUI.enabled = scienceMet && fundsMet && scenario != null;
+            // Funding.Instance is null outside career, and the two lines above already read it
+            // defensively; this is the one place that spent it, so it guards the same way rather
+            // than assuming the mode it is in.
+            GUI.enabled = scienceMet && fundsMet && scenario != null && Funding.Instance != null;
             if (GUILayout.Button("Unlock", GUILayout.Width(70), GUILayout.Height(22)))
             {
                 Funding.Instance.AddFunds(-instrument.UnlockCostFunds, TransactionReasons.RnDPartPurchase);
@@ -5384,6 +5425,7 @@ namespace ExoInstruments
             var highlightedPositionsSnapshot = new HashSet<long>(highlightedSkyPositions);
             bool searchActive = searchHighlightActive;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
+            skyChartRenderTaskView = view;
 
             // Solar-system bodies must be sampled on the MAIN thread (they read
             // KSP CelestialBody positions/transforms). We compute their
@@ -5572,6 +5614,13 @@ namespace ExoInstruments
             cachedSkyChartPoints = points;
             skyChartTexture = SkyChartTexture.ApplyToTexture(pixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
             skyChartRenderTask = null; // cleared last: it is what gates the next task's writes to that buffer
+
+            // The view moved while the refresh was running, so those pixels are of the right sky at
+            // the wrong zoom/pan. Uploading them anyway (above) is deliberate — the fresh points are
+            // worth showing immediately — but they get re-rastered this same frame rather than left
+            // for the player to see the view snap back.
+            if (skyChartRenderTaskView.Zoom != skyChartZoom || skyChartRenderTaskView.Pan != skyChartPan)
+                skyChartRasterDirty = true;
         }
 
         // --- Observing-quality forecast heatmap --------------------------------
@@ -6110,9 +6159,23 @@ namespace ExoInstruments
             RenderSkyChartTexture();
         }
 
-        /// <summary>Synchronous: re-rasters the already-computed points at the current zoom/pan, with no catalog work, used for drag/zoom/recenter, where the user expects an immediate response.</summary>
+        /// <summary>
+        /// Asks for a re-raster of the already-computed points at the current zoom/pan, with no
+        /// catalog work; used for drag/zoom/recenter/highlight changes. The raster itself happens in
+        /// the next Update (see FlushSkyChartRaster), at most once per frame however many events
+        /// asked for it.
+        /// </summary>
         void RenderSkyChartTexture()
         {
+            skyChartRasterDirty = true;
+        }
+
+        /// <summary>Main thread, once per frame: does the re-raster any of this frame's chart interactions asked for.</summary>
+        void FlushSkyChartRaster()
+        {
+            if (!skyChartRasterDirty) return;
+            skyChartRasterDirty = false;
+
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
             skyChartDragPixels = SkyChartTexture.EnsureBuffer(skyChartDragPixels, SkyChartWidth, SkyChartHeight);
             SkyChartTexture.ComputePixels(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, searchHighlightActive, skyChartDragPixels);

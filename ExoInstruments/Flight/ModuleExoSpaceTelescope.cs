@@ -38,8 +38,13 @@ namespace ExoInstruments.Flight
         /// Name in VisualTelescopeCatalog of the instrument this part carries. Set in the part
         /// config, so a second telescope part is a config and a catalogue entry rather than a
         /// second module.
+        ///
+        /// PERSISTED, unlike an ordinary config-driven field, because SpaceTelescopeRegistry has
+        /// to read it off an UNLOADED vessel and KSP writes only persistent fields into a
+        /// protovessel's module node. Without it the ground-operations path could not tell which
+        /// instrument a saved telescope carried, and so found none at all.
         /// </summary>
-        [KSPField]
+        [KSPField(isPersistant = true)]
         public string instrumentName = "Hubble Space Telescope (OTA)";
 
         /// <summary>
