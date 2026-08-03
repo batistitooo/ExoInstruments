@@ -116,7 +116,7 @@ medianed with.
 | 90° | 10.72 | **0.979** | 0.915 |
 
 The declared form is **substantially too optimistic below ~3 λ/D of arc** and slightly pessimistic
-above it. §12.63 is rewritten accordingly.
+above it. §12 item 66 is rewritten accordingly.
 
 **A variable the form does not have:** at a fixed 12° of rotation the throughput still depends on
 frame count — 0.514 at 3, 0.391 at 7, 0.323 at 15, 0.271 at 31. The direction contradicts the

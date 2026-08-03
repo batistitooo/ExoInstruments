@@ -1,6 +1,6 @@
 # Brighter-fatter, against the one measurement it is published for
 
-§12.19 used to declare this effect not implemented on two grounds. Both were false.
+§12 item 19 (now item 23) used to declare this effect not implemented on two grounds. Both were false.
 
 It said the effect "needs per-sensor electrostatic-vertex calibration tables with no generic
 published values" — but **Downing, Baade, Sinclaire, Deiries & Christen (2006, SPIE Orlando)**
