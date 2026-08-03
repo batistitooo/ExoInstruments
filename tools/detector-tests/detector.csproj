@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>detector</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="BrighterFatterTests.cs" />
+    <Compile Include="$(Core)/BrighterFatter.cs" />
+    <Compile Include="$(Core)/NoiseSampler.cs" />
+    <Compile Include="$(Core)/Pcg32.cs" />
+  </ItemGroup>
+</Project>

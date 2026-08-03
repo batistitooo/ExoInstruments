@@ -87,3 +87,56 @@ look:
 | 5 λ/D | 31 | 6.42 σ | 1.28× |
 | 20 λ/D | 125 | 5.30 σ | 1.06× |
 | 100 λ/D | 628 | 5.06 σ | 1.01× |
+
+
+---
+
+# ADI, run rather than parameterised
+
+`SelfSubtractionThroughput` was an **analytic form** — a declared shape with the right limits,
+checked against one published data point from a *three-frame* median. `AngularDifferentialImaging`
+now carries the reduction itself, so the throughput can be measured the way VIP measures it: inject
+a companion of known flux, reduce, recover it.
+
+Injected at a **fixed signal-to-noise** (VIP's `fc_snr`, default 100), because a median is not
+linear: how much of a companion it absorbs depends on how far that companion stands above what it is
+medianed with.
+
+## The measured curve
+
+150 mas (6.8 λ/D), 21 frames, one resolution element of travel costing 8.39°:
+
+| rotation | arc (λ/D) | **measured** | analytic n/(n+1) |
+|---|---|---|---|
+| 1° | 0.12 | **0.018** | 0.106 |
+| 3° | 0.36 | **0.051** | 0.263 |
+| 6° | 0.71 | **0.105** | 0.417 |
+| 12° | 1.43 | **0.290** | 0.588 |
+| 30° | 3.57 | **0.842** | 0.781 |
+| 90° | 10.72 | **0.979** | 0.915 |
+
+The declared form is **substantially too optimistic below ~3 λ/D of arc** and slightly pessimistic
+above it. §12.63 is rewritten accordingly.
+
+**A variable the form does not have:** at a fixed 12° of rotation the throughput still depends on
+frame count — 0.514 at 3, 0.391 at 7, 0.323 at 15, 0.271 at 31. The direction contradicts the
+obvious guess. Reported rather than fitted.
+
+## What the reduction buys
+
+| separation | one frame | stacked ×21 | ADI | gain |
+|---|---|---|---|---|
+| 100 mas | 2.82×10⁻³ | 2.90×10⁻³ | **5.51×10⁻⁵** | 4.30 mag |
+| 150 mas | 1.99×10⁻³ | 2.05×10⁻³ | **3.03×10⁻⁵** | 4.58 mag |
+| 220 mas | 3.93×10⁻⁴ | 3.81×10⁻⁴ | **9.98×10⁻⁶** | 3.95 mag |
+| 300 mas | 2.16×10⁻⁴ | 2.16×10⁻⁴ | **4.98×10⁻⁶** | 4.09 mag |
+
+**Stacking 21 frames does nothing** — the third column is the first — and ADI buys four magnitudes.
+That is the 71 %-static speckle field made a measurement rather than an assertion.
+
+## Two things caught by failing
+
+A companion injected beyond the frame's half-width (346 mas) is outside the detector; the first
+version reported a throughput of exactly zero at 500 and 700 mas and thought it had measured
+something. And sweeping *separation* rather than *rotation* confounds the variable under test with
+the halo profile — the arc length is what the form is a claim about.

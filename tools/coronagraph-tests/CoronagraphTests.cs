@@ -65,6 +65,9 @@ static class CoronagraphTests
         SectionRenderedField();
         SectionSyntheticFrame();
 
+        // The reduction, run rather than parameterised.
+        failures += AdiTests.Run(args);
+
         Console.WriteLine();
         Console.WriteLine(new string('=', 78));
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");

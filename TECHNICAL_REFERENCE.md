@@ -1160,6 +1160,36 @@ Three patterns are offered: none, a square spiral (visits the centre, then the r
 
 Nothing here is sourced from a datasheet and nothing needs to be: a dither pattern is a choice an observer makes, not a property of an instrument. What *is* a property of the instrument, and is deliberately not modelled, is the mount's own pointing error (§12.70).
 
+### 7.5165 Brighter-fatter — and what §12 used to say about it (`Core/BrighterFatter.cs`)
+
+Charge already in a pixel repels electrons arriving afterwards, so a filling pixel's effective collecting area **shrinks** and its neighbours' grow. Two consequences that look nothing alike: a bright star is measurably broader than a faint one through the same optics, and in a flat field neighbouring pixels become positively correlated so the variance falls below Poisson — which means a photon transfer curve, deriving gain as signal/variance, **over-estimates the gain**.
+
+**§12.19 used to declare this not implemented on two grounds, and both were false.** It said the effect "needs per-sensor electrostatic-vertex calibration tables with no generic published values", and that "none of these instruments do stellar photometry". The second stopped being true at §7.517. The first was never quite true: **Downing, Baade, Sinclaire, Deiries & Christen (2006, SPIE Orlando)** measured it by spatial autocorrelation on ESO's own detectors and reported the numbers in prose — for an e2v CCD44-82 at ~90 ke⁻, nearest-neighbour correlation **1.4 % horizontally and 2.2 % vertically**, **summed 10 %** over all neighbours, and the stated consequence that the summed correlation "results in over estimating the gain of the system by 10%". The anisotropy is structural, a pixel being bounded in x by channel stops and in y by the clock lines' fields.
+
+**What is still unavailable for this roster**, and why every instrument carries `NaN`: the same paper tested three devices including the **MIT/LL CCID-20 that FORS2 uses**, and reports the autocorrelation for the e2v alone. The CCID-20 appears in the linearity and photon-transfer sections and nowhere after. So the mechanism is modelled and validated against the one device it is published for, and waits for a number — which is a different statement from the old one, and a better one.
+
+**Two derivations the model rests on, both checked numerically.**
+
+*From correlation to coefficient.* In the area formulation (Antilogus et al. 2014; Guyonnet et al. 2015) the flat-field covariance between neighbours is 2 a Q̄ Var, so `a = R/(2Q̄)`. At the published 1.4 % and 90 ke⁻ that is **7.8×10⁻⁸ per electron** — the order every published brighter-fatter coefficient sits at, from a measurement that had nothing to do with them.
+
+*The redistribution must be a symmetric flux, not a per-pixel area scaling.* The textbook form `Q'ᵢ = Qᵢ(1 + Σⱼ aᵢⱼ(Qⱼ − Qᵢ))` does **not** conserve charge: summed over a neighbouring pair it leaves −a(Qᵢ−Qⱼ)², which is negative definite, so the array loses charge in proportion to its own variance. The harness read a 2×10⁻⁴ deficit before the algebra explained it. The conserving form is a flux across each boundary, `F = a(Qᵢ−Qⱼ)(Qᵢ+Qⱼ)/2` — the difference setting which way the boundary moves, the mean setting how much charge density is there to move — subtracted from one pixel and added to the other. It gives the same first-order correlation and behaves correctly on a point source, where the density scaling the flux is the star's own.
+
+**Validated in `tools/detector-tests`:**
+
+| check | result |
+|---|---|
+| charge conservation | 6.4×10⁻⁹ % (exactly, by construction) |
+| the published correlations put in as coefficients come back out of a simulated flat | 1.58 % / 2.30 % against 1.40 % / 2.20 %, anisotropy preserved |
+| shot noise alone, no effect applied | 0.127 % (the estimator's own floor) |
+| PTC gain bias against `1 + Σ correlations` | 1.0165/1.0139, 1.0414/1.0386, 1.0759/1.0725 at 20/50/90 ke⁻ |
+| ESO's summed 10 % | predicts exactly their measured 10 % over-estimate |
+
+**And the namesake, in closed form.** The flux divergence for a smooth profile is `ΔQ = (a/2)∂²(Q²)/∂x²` — the Laplacian of the *square* of the profile — so the second moment gains `a·∫Q²/∫Q`, the denominator unchanged because charge is conserved. For a 2-D Gaussian of peak P and width s those integrals are P²πs² and 2πs²P, giving
+
+`Δ(s²) = aP/2`  hence  `Δs/s = aP/(4s²)`
+
+**The four is the part worth keeping.** The obvious answers are `a·P`, which is dimensionally wrong, and `a·P/(2s²)`, which is the 1-D kernel argument without the 2-D normalisation. The code carried the second until the harness measured the true growth at a ratio of **exactly 0.50** to it, at three brightnesses and to two decimals — not noise, but the missing factor of two. With the derived form the ratio is **0.99, 1.00, 1.00**.
+
 ### 7.517 Measured photometry — running the pipeline backwards (`Core/AperturePhotometry.cs`)
 
 Everything before this is a *forward* model: a magnitude goes in, a frame comes out. That direction can be wrong in ways nothing catches, because a forward model is only ever checked against itself. Running the inverse closes the loop, and it is the only test that catches an error of **assembly** — a zero point disagreeing with the electron counts, a PSF that does not conserve flux, a gain applied twice.
@@ -1272,6 +1302,42 @@ The cost is not optional: the companion is in the reference too, so subtracting 
 | 100 λ/D | 628 | 5.06 σ | 1.01× |
 
 Noise is measured from **non-overlapping apertures of one resolution element** laid around each annulus, not pixel to pixel: speckles are correlated over a resolution element, so a pixel-wise sigma counts each speckle several times and comes out too small.
+
+#### 7.5205 ADI, run rather than parameterised (`AngularDifferentialImaging.Rotate/MedianReference/Reduce`)
+
+The self-subtraction throughput above was an **analytic form**: a declared shape with the right limits, checked against one published data point from a three-frame median. That was honest and it was not a measurement. `Core.AngularDifferentialImaging` now carries the reduction itself — derotation, median reference, subtract-then-derotate-then-stack — so the throughput can be *measured* the way VIP measures it, by injecting a companion of known flux and recovering it.
+
+**The order is the technique.** Subtract *before* derotating, because the speckles are fixed in the instrument's frame and that is the frame they are common in; derotate *after*, because the companion is fixed on the sky and that is the frame it adds up in. Either the other way round aligns the wrong thing. The reference is a **median** and not a mean: a companion occupies any one sky position for only part of a rotating sequence, so the median returns a speckle value where a mean would return a value pulled up by the companion and subtract exactly that much of it away.
+
+**Injected at a fixed signal-to-noise**, which is VIP's own convention (`fc_snr`, default 100) and not a detail: a median is not a linear operator, so how much of a companion it absorbs depends on how far that companion stands above what it is medianed with. The first version of the harness injected a fixed contrast of 3×10⁻³ against a halo of 2.2×10⁻⁶ — a companion a thousand times brighter than the sky it sat on, which is not a companion.
+
+**The measured curve, at 150 mas (6.8 λ/D) with 21 frames**, one resolution element of travel costing 8.39°:
+
+| rotation | arc (λ/D) | **measured** | analytic n/(n+1) |
+|---|---|---|---|
+| 1° | 0.12 | **0.018** | 0.106 |
+| 3° | 0.36 | **0.051** | 0.263 |
+| 6° | 0.71 | **0.105** | 0.417 |
+| 12° | 1.43 | **0.290** | 0.588 |
+| 30° | 3.57 | **0.842** | 0.781 |
+| 90° | 10.72 | **0.979** | 0.915 |
+
+So the declared form is **substantially too optimistic below about 3 λ/D of arc** — a factor of two at 1.4 elements, a factor of six at 0.4 — and **slightly pessimistic above it**, crossing over near 3. §12.63 is rewritten accordingly: the form is no longer merely declared, it is bounded by measurement, and the measurement is the one to use where a sequence exists to reduce.
+
+**And a variable the analytic form does not have.** At a fixed 12° of rotation the measured throughput still depends on how the sequence was sampled: 0.514 at 3 frames, 0.391 at 7, 0.323 at 15, 0.271 at 31. The direction contradicts the obvious guess (a longer sequence gives a *better* reference, so it removes *more* of the companion), and `n/(n+1)` cannot express it at all. Reported rather than fitted.
+
+**What the reduction buys**, measured on the same speckle field, against a contrast curve computed from a single frame and from a plain stack of 21:
+
+| separation | one frame | stacked ×21 | ADI | gain over stacking |
+|---|---|---|---|---|
+| 100 mas | 2.82×10⁻³ | 2.90×10⁻³ | **5.51×10⁻⁵** | 4.30 mag |
+| 150 mas | 1.99×10⁻³ | 2.05×10⁻³ | **3.03×10⁻⁵** | 4.58 mag |
+| 220 mas | 3.93×10⁻⁴ | 3.81×10⁻⁴ | **9.98×10⁻⁶** | 3.95 mag |
+| 300 mas | 2.16×10⁻⁴ | 2.16×10⁻⁴ | **4.98×10⁻⁶** | 4.09 mag |
+
+**Stacking 21 frames does nothing at all** — the third column is the first column — and ADI buys four magnitudes. That is §7.52's argument made as a measurement rather than an assertion: the speckle field is 71 % static, so averaging removes the 29 % that is not and leaves the rest exactly where it was.
+
+Two things the harness caught by failing. A companion injected beyond the frame's own half-width (346 mas here) is outside the detector, and the first version reported a throughput of exactly zero at 500 and 700 mas and thought it had measured something. And sweeping *separation* rather than *rotation* moves the companion through parts of the frame with different speckle brightness, confounding the variable under test with the halo profile; the arc length is the variable the form is a claim about.
 
 #### 7.521 Validation against VIP
 
@@ -1475,7 +1541,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 16. **Transit duration (T14) assumes a circular orbit** — no eccentricity term, despite eccentricity being tracked elsewhere in the same star's data.
 17. **All positional/name catalog matching uses small-angle and string-heuristic approximations** — ambiguous matches are refused (flagged for review) rather than guessed, but the matching itself isn't a rigorous spherical-trigonometry/fuzzy-matching pipeline.
 18. **Deterministic hash-based "randomness"** for stellar activity level, rotation period, spot phase, RM spin-orbit angle, and direct-imaging pointing/position-angle — reproducible per star, not drawn from any measured distribution beyond the *range* the draw is confined to.
-19. **The solar-system astrograph's brighter-fatter effect was deliberately not implemented** — GalSim's real model needs sensor-specific electrostatic calibration tables with no generic published values, and the effect's main payoff (point-source core broadening) barely applies to any of these instruments' extended solar-system targets anyway.
+19. ~~**The brighter-fatter effect was deliberately not implemented**~~ **REWRITTEN (§7.5165).** The old entry gave two reasons and both became false: it said no generic published values exist, when ESO had measured the effect by spatial autocorrelation on their own detectors and published the numbers (Downing et al. 2006: 1.4 % horizontal, 2.2 % vertical, 10 % summed, at 90 ke⁻ on an e2v CCD44-82); and it said none of these instruments do stellar photometry, which stopped being true at §7.517. The mechanism is now modelled and validated against that one device. **What remains true is narrower and is the real limitation**: the same paper tested the MIT/LL CCID-20 that FORS2 uses and reports its autocorrelation nowhere, so every instrument on this roster carries `NaN` and the effect is off. The model waits for a number rather than being absent because a number was believed not to exist.
 20. **The solar-system astrograph's lucky-imaging sharpness scoring window (60% central region) and outlier-trim fraction (2%) are algorithmic engineering choices**, not measured quantities — the *operator itself* (variance of Laplacian) and the *keep fraction* (30%, literature range 1–60%) are literature-sourced, same distinction as other robust-statistics parameters already in the codebase (e.g. the sky-background trim fraction).
 21. **The real photon-flux magnitude model (§7.0) treats a KSP `CelestialBody.albedo` as a rigorous geometric albedo** in the H-G planetary-magnitude sense, and its `.Radius` as a perfect sphere — the best available real input data from the game itself, but not a measured planetary albedo in the astronomical sense.
 22. **The Lambertian phase law (Russell 1916) assumes a perfectly diffuse, uniform-albedo sphere** — real solar-system bodies (especially airless, cratered ones) show real deviations from this (opposition surge, limb darkening/brightening) that this mod doesn't model.
@@ -1520,11 +1586,13 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 59. **The converter has no differential or integral non-linearity.** Quantisation and clipping are modelled exactly (and agree with Pyxel's converter on every level tested), but a real ADC's code widths are not perfectly uniform. No DNL/INL figure is published for any converter on this roster (§7.51, §7.512).
 60. **A measured per-pixel flat cannot be loaded.** Pyxel can take a real flat-field image as its PRNU map, which is strictly better than any parametric model where one exists. Nothing here can. No measured map is published for any detector on this roster, so nothing is lost today (§7.512).
 61. ~~**Two catalogue figures are internally inconsistent.**~~ **CLOSED.** Both were found by the calibration harness and both are corrected in §7.5: the ASI294MM Pro's read noise from 1.2 to **8.0 e⁻** (the low-gain figure that belongs with its well and converter), and FORS2's from 3.8 to **2.7 e⁻** (Issue 103 Table 2.8, against 4.1 in Issue 82.1 and 3.8 in neither).
-63. **ADI self-subtraction throughput is a declared form, not a fit.** `n/(n+1)` in the arc length measured in resolution elements has the right limits (nothing removed for no rotation, nothing lost for a long arc) and the right variable, but its shape between them is a modelling choice. Only one published measurement was found to check it against — Schmid et al. (2018) Test C, 0.766 at 91 mas over 120 degrees against this expression's 0.906 — and it is a three-frame median, the smallest number for which a median exists, which the paper's own table footnotes as self-subtraction affected. One point cannot constrain a curve (§7.52).
+63. **The ADI self-subtraction throughput has an analytic form that is now bounded by measurement.** `n/(n+1)` in the arc length is still what `SelfSubtractionThroughput` returns, and it is still a declared shape rather than a fit; what has changed is that §7.5205 now *measures* the throughput by injection and recovery, and the two disagree in a known direction. The form is **substantially too optimistic below ~3 λ/D of arc** (0.588 against a measured 0.290 at 1.43 elements; 0.263 against 0.051 at 0.36) and slightly pessimistic above it. It also has no frame-count term, while the measurement shows one (0.514 at 3 frames falling to 0.271 at 31, at fixed rotation). Use the measurement where a sequence exists to reduce; the form is for reasoning about magnitudes.
 64. **The 4QPM phase masks are declared and not modelled.** ESO publish their design wavelengths (666 and 823 nm) but no attenuation curve, and a four-quadrant phase mask's attenuation away from its design wavelength is the whole of its behaviour (§7.52).
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
 66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
 71. **The photometric zero point carries no colour term.** A filter's effective wavelength depends on the spectrum behind it, so a real zero point is a function of colour; fitting one needs standard stars of known colour and a second passband, and what is fitted here is an uncertainty-weighted mean offset (§7.517).
+76. **The ADI reduction is median subtraction alone.** No PCA/KLIP, no LOCI, no LLSG, no reference-star differential imaging. Median-subtraction ADI is the technique the throughput model describes and the one Marois et al. (2006) introduced; the modern algorithms recover more and would each need their own validation (§7.5205).
+77. **Brighter-fatter is first order and four-neighbour.** The expansion is in a·Q, about 0.8 % at the published coefficient and a 100 ke⁻ well, so second-order terms are ~6×10⁻⁵; diagonal neighbours and longer-range correlations, which the published summed 10 % implies exist beyond the 1.4 %+2.2 % nearest pair, are not modelled (§7.5165).
 74. **The astrometric solution is a six-parameter linear plate model with no distortion term.** Real optics add higher-order distortion, which FITS carries as SIP or TPV coefficients; this fits CRVAL, CRPIX and the CD matrix and nothing beyond them, so any distortion the instrument has appears as residual rather than as a fitted term. The residuals are reported, so the presence of one would be visible (§7.518).
 75. **Source matching is nearest-neighbour from a supplied guess, not a blind solve.** It cannot place a frame whose pointing is unknown, which is the problem astrometry.net exists for; this pipeline always has a commanded pointing, so the problem solved is refinement (§7.518).
 73. **The uncertainty does not model centroid jitter.** At low signal-to-noise the refitted centroid wanders between realisations, so the aperture moves and captures a varying fraction of the flux. The harness measures the resulting excess at +3.5 % in sigma at 3000 electrons, falling to nothing by 10^5 (§7.517).

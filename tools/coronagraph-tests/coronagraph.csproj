@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="CoronagraphTests.cs" />
+    <Compile Include="AdiTests.cs" />
     <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/Coronagraph.cs" />
     <Compile Include="$(Core)/SpeckleField.cs" />

@@ -402,6 +402,33 @@ namespace ExoInstruments.Core
         public int AdaptiveOpticsActuatorsAcrossPupil;
 
         /// <summary>
+        /// Brighter-fatter: the nearest-neighbour charge correlation this detector shows in a flat
+        /// field, horizontally and vertically, and the signal level they were measured at. NaN
+        /// means not published, which is every instrument on this roster.
+        ///
+        /// THE MECHANISM IS MODELLED AND THE AMPLITUDE IS NOT AVAILABLE, which is a different
+        /// statement from the one section 12 used to make and a better one. ESO measured this
+        /// effect by spatial autocorrelation and published the numbers (Downing et al. 2006), so
+        /// the claim that no generic published values exist was wrong; but they measured it on an
+        /// e2v CCD44-82, and the same paper reports nothing for the MIT/LL CCID-20 that FORS2 uses.
+        /// Core.BrighterFatter therefore carries the physics, validated against the one device it
+        /// is published for, and waits for a number.
+        ///
+        /// Two directions rather than one because the device is not isotropic: a pixel is bounded
+        /// in x by channel stops and in y by the electric fields of the clock lines, and ESO
+        /// measure 1.4% against 2.2% on the same chip for exactly that reason.
+        /// </summary>
+        public double BrighterFatterHorizontalCorrelation = double.NaN;
+        public double BrighterFatterVerticalCorrelation = double.NaN;
+        public double BrighterFatterReferenceSignalElectrons = double.NaN;
+
+        /// <summary>True when this detector has a published brighter-fatter amplitude. False for every instrument currently on the roster.</summary>
+        public bool HasBrighterFatter =>
+            !double.IsNaN(BrighterFatterHorizontalCorrelation)
+            && !double.IsNaN(BrighterFatterReferenceSignalElectrons)
+            && BrighterFatterReferenceSignalElectrons > 0.0;
+
+        /// <summary>
         /// Thickness of the detector's silicon in microns, for instruments whose is published, or
         /// NaN. Sets the fringe period and with it everything about how this detector corrugates a
         /// red sky (see Core.Fringing).

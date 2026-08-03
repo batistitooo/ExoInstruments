@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace ExoInstruments.Core
 {
@@ -152,6 +153,122 @@ namespace ExoInstruments.Core
             double n = Math.Abs(fieldRotationDeg) / perElement;
             if (!(n > 0.0)) return 0.0;
             return n / (n + 1.0);
+        }
+
+        // ---------------------------------------------------------------- the reduction itself
+
+        /// <summary>
+        /// Rotates a frame about its centre by the given angle, counter-clockwise, with bilinear
+        /// interpolation.
+        ///
+        /// The derotation step of angular differential imaging, and the reason the technique has a
+        /// cost beyond self-subtraction: interpolating a speckle field smooths it slightly, so a
+        /// derotated frame is marginally quieter than the one it came from, and a reduction that
+        /// forgot to derotate the reference as well would mistake that for a gain.
+        ///
+        /// Pixels that rotate in from outside the frame read zero. That is what a detector with no
+        /// data there records, and padding them with the frame's mean instead would inject a
+        /// discontinuity at exactly the radius a contrast curve is measured over.
+        /// </summary>
+        public static float[] Rotate(float[] frame, int width, int height, double angleDeg)
+        {
+            var output = new float[width * height];
+            if (frame == null || width <= 0 || height <= 0) return output;
+
+            double t = angleDeg * Math.PI / 180.0;
+            double cos = Math.Cos(t), sin = Math.Sin(t);
+            double cx = 0.5 * (width - 1), cy = 0.5 * (height - 1);
+
+            for (int y = 0; y < height; y++)
+            {
+                double dy = y - cy;
+                for (int x = 0; x < width; x++)
+                {
+                    double dx = x - cx;
+                    // Sample the SOURCE at the inverse rotation of this destination pixel, which is
+                    // what makes the output complete rather than speckled with holes.
+                    double sx = cx + cos * dx + sin * dy;
+                    double sy = cy - sin * dx + cos * dy;
+
+                    int x0 = (int)Math.Floor(sx), y0 = (int)Math.Floor(sy);
+                    if (x0 < 0 || y0 < 0 || x0 + 1 >= width || y0 + 1 >= height) continue;
+
+                    double fx = sx - x0, fy = sy - y0;
+                    double a = frame[y0 * width + x0], b = frame[y0 * width + x0 + 1];
+                    double c = frame[(y0 + 1) * width + x0], d = frame[(y0 + 1) * width + x0 + 1];
+                    output[y * width + x] = (float)(a * (1 - fx) * (1 - fy) + b * fx * (1 - fy)
+                                                  + c * (1 - fx) * fy + d * fx * fy);
+                }
+            }
+            return output;
+        }
+
+        /// <summary>
+        /// The reference frame: the temporal MEDIAN of the sequence, pixel by pixel.
+        ///
+        /// Median rather than mean, and that is the whole of why this works. A companion occupies
+        /// any one sky position for only part of a sequence that rotates, so at that position most
+        /// frames show speckle and a few show speckle plus companion; the median returns one of the
+        /// many rather than an average pulled up by the few. A mean reference would contain the
+        /// companion in proportion to its dwell time and subtract exactly that much of it away.
+        /// </summary>
+        public static float[] MedianReference(IList<float[]> frames, int pixelCount)
+        {
+            var reference = new float[pixelCount];
+            if (frames == null || frames.Count == 0) return reference;
+
+            int n = frames.Count;
+            var column = new float[n];
+            for (int i = 0; i < pixelCount; i++)
+            {
+                for (int k = 0; k < n; k++) column[k] = frames[k][i];
+                Array.Sort(column);
+                reference[i] = (n % 2 == 1)
+                    ? column[n / 2]
+                    : 0.5f * (column[n / 2 - 1] + column[n / 2]);
+            }
+            return reference;
+        }
+
+        /// <summary>
+        /// The whole reduction: build the reference from the sequence, subtract it from every
+        /// frame, derotate each by its own parallactic angle, and average.
+        ///
+        /// THE ORDER IS THE TECHNIQUE. Subtract BEFORE derotating, because the speckles are fixed
+        /// in the instrument's frame and that is the frame they are common in; derotate AFTER,
+        /// because the companion is fixed on the sky and that is the frame it adds up in. Doing
+        /// either the other way round aligns the wrong thing and the method stops working.
+        ///
+        /// The angles are subtracted from the first frame's, so the output is aligned to the
+        /// sequence's own starting orientation rather than to an absolute north the caller may not
+        /// have. A caller who wants north up rotates once more, afterwards, by that first angle.
+        /// </summary>
+        public static float[] Reduce(IList<float[]> frames, IList<double> parallacticAnglesDeg,
+                                     int width, int height)
+        {
+            int pixelCount = width * height;
+            var stacked = new float[pixelCount];
+            if (frames == null || frames.Count == 0 || parallacticAnglesDeg == null) return stacked;
+            int n = Math.Min(frames.Count, parallacticAnglesDeg.Count);
+            if (n == 0) return stacked;
+
+            float[] reference = MedianReference(frames, pixelCount);
+
+            var residual = new float[pixelCount];
+            var accumulator = new double[pixelCount];
+            double reference0 = parallacticAnglesDeg[0];
+
+            for (int k = 0; k < n; k++)
+            {
+                for (int i = 0; i < pixelCount; i++) residual[i] = frames[k][i] - reference[i];
+
+                float[] derotated = Rotate(residual, width, height,
+                                           -(parallacticAnglesDeg[k] - reference0));
+                for (int i = 0; i < pixelCount; i++) accumulator[i] += derotated[i];
+            }
+
+            for (int i = 0; i < pixelCount; i++) stacked[i] = (float)(accumulator[i] / n);
+            return stacked;
         }
 
         /// <summary>
