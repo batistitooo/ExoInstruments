@@ -1170,19 +1170,21 @@ Everything before this is a *forward* model: a magnitude goes in, a frame comes 
 
 The final term is the noise on the *background estimate*, subtracted from every aperture pixel and therefore entering `n_ap` times, reduced by however many annulus pixels went into it (Merline & Howell 1995; Howell, *Handbook of CCD Astronomy*). Dropping it understates the error on a faint source measured against a small annulus — exactly the regime where an error bar matters.
 
-Verified in `tools/photometry-tests` the only way an error bar can be: by repeating one star in 400 noise realisations and comparing the scatter with the sigma predicted for one of them. The ratio runs **0.990 to 0.972** from 3×10³ to 3×10⁵ e⁻ — consistently 2–3 % conservative, never optimistic. The annulus term shows itself directly: σ falls from 521 to 374 e⁻ on the same star as the annulus grows from 208 to 4212 pixels.
+`sigma_bkg` is **measured from the annulus**, so it already carries the sky's shot noise, the dark current's and the amplifier's read noise. The textbook writes read noise as its own term because it is written for a background that is *known* rather than measured; carrying both against a measured one counts the amplifier twice.
+
+Verified in `tools/photometry-tests` the only way an error bar can be: by repeating one star in 400 noise realisations and comparing the scatter with the sigma predicted for one of them. **That test found the double count.** It first read a flat 2–3 % over-prediction (ratios 0.990 down to 0.972), which looked like harmless conservatism and was not — an error bar wrong in the safe direction still makes every detection significance downstream wrong by the same factor. After the fix the ratio straddles unity, **1.035 at 3×10³ e⁻ falling to 0.987 at 3×10⁵**, with the residual trend being centroid jitter: at low signal-to-noise the refitted centroid wanders between realisations, so the aperture moves and captures a varying fraction of the flux, extra variance the equation does not model and which vanishes once the centroid is well determined. The annulus term shows itself directly: σ falls from 509 to 356 e⁻ on the same star as the annulus grows from 208 to 4212 pixels.
 
 **The round trip.** Five stars of known magnitude, placed at a known zero point, run through Poisson and read noise, then detected, measured, fitted and calibrated:
 
 | known | recovered | error | residual | in σ |
 |---|---|---|---|---|
-| 12.00 | 12.0005 | 0.0077 | +0.0005 | +0.07 |
-| 13.00 | 12.9959 | 0.0129 | −0.0041 | −0.32 |
-| 14.00 | 14.0176 | 0.0271 | +0.0176 | +0.65 |
-| 15.00 | 14.9629 | 0.0619 | −0.0371 | −0.60 |
-| 16.00 | 15.9464 | 0.1525 | −0.0536 | −0.35 |
+| 12.00 | 12.0006 | 0.0072 | +0.0006 | +0.08 |
+| 13.00 | 12.9959 | 0.0118 | −0.0041 | −0.35 |
+| 14.00 | 14.0177 | 0.0240 | +0.0177 | +0.74 |
+| 15.00 | 14.9629 | 0.0542 | −0.0371 | −0.68 |
+| 16.00 | 15.9464 | 0.1332 | −0.0536 | −0.40 |
 
-Zero point recovered as **23.9958 ± 0.0051 against the 24.0000 the field was built with**; worst residual 0.054 mag; every star inside 0.65 σ. The aperture sum also reproduces the analytic enclosed energy of a Gaussian to 0.05 % at a 6-pixel radius, the departure at smaller radii being pixel-centre discretisation going as 1/r (4.3 % at r = 2) rather than error — centre membership being kept because it is photutils' own default convention.
+Zero point recovered as **23.9959 ± 0.0047 against the 24.0000 the field was built with**; worst residual 0.054 mag; every star inside 0.74 σ. The aperture sum also reproduces the analytic enclosed energy of a Gaussian to 0.05 % at a 6-pixel radius, the departure at smaller radii being pixel-centre discretisation going as 1/r (4.3 % at r = 2) rather than error — centre membership being kept because it is photutils' own default convention.
 
 The zero point is fitted as an uncertainty-weighted mean, and it carries **its own error**, folded into every calibrated magnitude: a zero point without an error is a systematic waiting to be discovered. It is deliberately not a colour-dependent fit; a real zero point carries a colour term, needing standards of known colour (§12.71).
 
@@ -1488,6 +1490,7 @@ Fog-of-war and unlock state as `HashSet<string>` "claim once" gates, keyed by `S
 65. **The coronagraphic mask's dust and suspension wires are not rendered.** Both are documented facts about the real masks — dust on the deposited small masks, 34 mas wires on the suspended large ones — and neither is renderable: the dust pattern is a property of one particular October 2014, and the wires' position angle is not published (§7.52).
 66. **Wind speed is a constant, 4 m/s.** The atmospheric speckle lifetime is 0.6 D/v and the pipeline has no wind model to read v from, so it uses the speed Milli et al. (2016) report for the very sequence their decorrelation timescales were measured under. The model therefore runs at the conditions its own numbers were taken at rather than at an invented default, but it does not vary with the weather (§7.522).
 71. **The photometric zero point carries no colour term.** A filter's effective wavelength depends on the spectrum behind it, so a real zero point is a function of colour; fitting one needs standard stars of known colour and a second passband, and what is fitted here is an uncertainty-weighted mean offset (§7.517).
+73. **The uncertainty does not model centroid jitter.** At low signal-to-noise the refitted centroid wanders between realisations, so the aperture moves and captures a varying fraction of the flux. The harness measures the resulting excess at +3.5 % in sigma at 3000 electrons, falling to nothing by 10^5 (§7.517).
 72. **Source detection is the simplest thing that works.** Local maxima above a sigma-clipped threshold, with a one-resolution-element exclusion. No deblending, no PSF fitting, no moving-object rejection. Detection is not what §7.517 exists to validate, and anything cleverer would be a second algorithm needing its own validation (§7.517).
 70. **Mount pointing error is not modelled.** Periodic error from a worm gear, guiding residual and flexure are all real and all instrument-specific, and no mount model is published for any tube on this roster - the catalogue names optics and cameras, not mounts. Dithering (§7.516) is modelled because it is an observer's choice needing no instrument parameter; the errors it partly mitigates are not (§7.516).
 68. **The fringe map's realisation is drawn, not measured.** Its amplitude and its spatial scale are both Walsh et al.'s measurements; the particular pattern of thickness variation across one piece of silicon is not published for any detector and is drawn from the sensor's serial seed, exactly as the photo-response and defect maps are (§7.515).

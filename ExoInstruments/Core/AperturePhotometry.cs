@@ -132,15 +132,21 @@ namespace ExoInstruments.Core
         ///
         /// THE UNCERTAINTY, written out because its last term is the one that is usually missing:
         ///
-        ///     sigma^2 = F + n_ap * (B + sigma_read^2 + sigma_bkg^2) + (n_ap^2 / n_ann) * sigma_bkg^2
+        ///     sigma^2 = F + n_ap * sigma_bkg^2 + (n_ap^2 / n_ann) * sigma_bkg^2
         ///
-        /// F is the source's own shot noise; the middle group is what the aperture's own pixels
-        /// contribute from sky, read noise and dark; and the last term is the noise on the
-        /// BACKGROUND ESTIMATE, which is subtracted from every aperture pixel and therefore enters
-        /// n_ap times, reduced by however many annulus pixels went into estimating it. Leaving it
-        /// out understates the error on a faint source measured against a small annulus, which is
-        /// exactly the regime where an error bar matters. This is the standard form given by
-        /// Merline and Howell (1995) and by Howell's "Handbook of CCD Astronomy".
+        /// F is the source's own shot noise; the middle term is what the aperture's own pixels
+        /// contribute; and the last is the noise on the BACKGROUND ESTIMATE, which is subtracted
+        /// from every aperture pixel and therefore enters n_ap times, reduced by however many
+        /// annulus pixels went into estimating it. Leaving that last term out understates the error
+        /// on a faint source measured against a small annulus, which is exactly the regime where an
+        /// error bar matters. This is the standard form given by Merline and Howell (1995) and by
+        /// Howell's "Handbook of CCD Astronomy".
+        ///
+        /// sigma_bkg here is MEASURED from the annulus, so it already carries the sky's shot noise,
+        /// the dark current's and the amplifier's read noise. The textbook writes read noise as its
+        /// own term because it is written for a background that is KNOWN rather than measured;
+        /// carrying both against a measured one counts the amplifier twice, which is what this code
+        /// did until the harness caught it (see the call site).
         ///
         /// Everything is in ELECTRONS, so the caller multiplies ADU by the conversion factor first;
         /// the CCD equation is a statement about counted charges and only holds in those units.
@@ -221,10 +227,23 @@ namespace ExoInstruments.Core
             s.Saturated = saturated;
 
             // The CCD equation on the pixels this aperture actually summed.
+            //
+            // THE READ NOISE IS ALREADY IN HERE, AND ADDING IT AGAIN IS A DOUBLE COUNT. The
+            // background scatter is MEASURED from the annulus, and those pixels carry everything an
+            // aperture pixel carries: the sky's own shot noise, the dark current's, and the
+            // amplifier's read noise. A separate n_ap * sigma_read^2 term therefore counts the
+            // amplifier twice. The textbook form of this equation lists that term separately
+            // because it is written for a background level that is KNOWN rather than measured, and
+            // transcribing it against a measured background inflates the error bar by a few
+            // percent - which is a bug even though it errs on the safe side, because an error bar
+            // that is wrong in the conservative direction still makes every detection significance
+            // downstream wrong by the same factor.
+            //
+            // This was caught by the harness in tools/photometry-tests, which measures the scatter
+            // of 400 repeats against the predicted sigma: the double count showed up as a ratio
+            // sitting consistently at 0.97 to 0.99 instead of at 1.
             double backgroundVariancePerPixel = Math.Max(0.0, s.BackgroundRms * s.BackgroundRms);
-            double variance = Math.Max(0.0, flux)
-                            + nAp * backgroundVariancePerPixel
-                            + nAp * readNoiseElectrons * readNoiseElectrons;
+            double variance = Math.Max(0.0, flux) + nAp * backgroundVariancePerPixel;
             if (s.AnnulusPixels > 0)
                 variance += (double)nAp * nAp / s.AnnulusPixels * backgroundVariancePerPixel;
             s.FluxUncertainty = Math.Sqrt(variance);
