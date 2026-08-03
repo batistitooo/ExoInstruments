@@ -647,3 +647,149 @@ Then in game:
       structure at its own 0.86 arcmin cells, and the empty field must still show the faint diffuse
       glow rather than nothing: the skipped work is empty *tiles of the convolution*, never a map
       sample.
+
+## 24. The orbital telescope
+
+`tools/spacecraft-tests` covers the physics of §13 headlessly: the visibility geometry, the
+zodiacal grid, the earthshine relation, the delivered-PSF table, the limit cycle and the frame
+volume, each against a published figure rather than against current behaviour. None of it can
+exercise a vessel. Everything below needs KSP, a launch, and in most cases the player standing in
+the observatory while the telescope is somewhere else entirely.
+
+Build the **Orbital Astrophysics Observatory** part (Science category, `experimentalScience` node)
+onto a probe with an antenna and power, and put it in orbit. Its reaction wheels are part of the
+part; nothing else about attitude needs adding, which is deliberate (see the part config).
+
+### The vehicle
+
+- [ ] **24.1** **The part's info panel** in the VAB reads the catalogue, not the config: aperture
+      2.40 m, plate scale **0.0396"/px**, pointing stability **0.008" rms**, solar avoidance
+      **62.5 deg**, bright-limb avoidance **20.0 deg**, and a frame volume of **268.8 Mbit**. If
+      any of those is zero the catalogue lookup failed and the part will not observe at all.
+
+- [ ] **24.2** **The door is a gate, not an animation.** `Open aperture door` in the PAW, and the
+      status line goes from `aperture door closed` to `ready, fine pointing`. Watch it *during*
+      the clip: the state must stay closed for the whole transit and flip only when the clip
+      finishes. A door part way across the pupil is an obstruction of unknown shape, which is
+      precisely what the pipeline cannot model.
+
+- [ ] **24.3** **The obstruction check names the part.** Bolt a solar panel, a battery, anything,
+      in front of the tube. The status line must read `blocked NN% by <part title>`, and it must
+      name the part covering the *most* pupil rather than the first one the rays hit. Move it and
+      the reading must return to clear within a second — the check runs at 1 Hz, not per frame.
+      The telescope's own tube and door must never count: a correctly built telescope reads 0%.
+
+- [ ] **24.4** **Attitude authority comes from what you built.** With the wheels active the mode
+      is `ready, fine pointing`. Disable them and enable RCS: `ready, thruster pointing`. Disable
+      both: `no attitude control`, and no observation is possible at all — not a degraded one.
+
+### From the ground
+
+- [ ] **24.5** **The unloaded path.** This is the one that has already been wrong once. Go to the
+      space centre with the telescope in orbit and open the observatory: *Orbital Observatory
+      (Space Telescope)* must be **selectable**, and the spacecraft picker must list the vessel by
+      name with `ready` beside it. A vessel is unloaded whenever you are not flying it, which is
+      the whole point of this mode, so a telescope that only appears while you fly it means the
+      protovessel read failed. Check `saves/<save>/persistent.sfs`: the
+      `ModuleExoSpaceTelescope` node must carry `instrumentName`, `apertureDoorOpen` and
+      `controlModeCached`. Without `instrumentName` the registry cannot tell which instrument the
+      vessel carries and finds nothing.
+
+- [ ] **24.6** **The two permissions are different.** Fly the telescope: it is commandable with no
+      antenna at all. Return to the space centre: it must now read
+      `no antenna link: fly the spacecraft, or give it an antenna`. Give it an antenna and the
+      readout must show the frame volume and the downlink time — **538 s** on a 500 kbit/s
+      Communotron 16, **134 s** on a 2 Mbit/s relay, and twice that at 50% signal.
+
+- [ ] **24.7** **Switching spacecraft discards the photograph**, exactly as switching between two
+      ground telescopes does; switching to the *same* one must not. Hold a stack, wait through
+      several of the two-second rescans, and confirm the stack survives: the list is rebuilt from
+      the save each time and the comparison is by vessel id, not by object reference.
+
+### What the sky allows
+
+- [ ] **24.8** **The avoidance angles refuse, they do not degrade.** Point within **62.5 deg** of
+      the Sun, then within **20 deg** of the sunlit limb, then within **9 deg** of a moon. Each
+      must block the observation and name the constraint. Then point within 10 deg of the **dark**
+      limb: that one must be *allowed*, down to **7.6 deg**. The asymmetry is the whole model —
+      scattered sunlight on one side, guidance margin on the other.
+
+- [ ] **24.9** **The orbital window.** The panel reports the occulted fraction of each orbit and
+      the longest uninterrupted exposure. Dial an exposure longer than that window: it must warn
+      that the planet will cut it off. This is the only orbital constraint that silently ruins a
+      frame instead of refusing it.
+
+- [ ] **24.10** **The continuous viewing zone.** Point at something within ~22 deg of your orbit's
+      own pole: `Continuous viewing zone: never occulted from this orbit.` An equatorial target
+      from the same orbit must report a non-zero occulted fraction. Geometry alone, so a target
+      that is never occulted from a low orbit at *any* declination is a sign the orbit normal came
+      back zero.
+
+### What the frame looks like
+
+- [ ] **24.11** **The PSF is identical in every frame ever taken.** Photograph the same star twice,
+      hours apart, and measure the FWHM. It must not move — there is no atmosphere to vary. On the
+      ground the same test gives a different number every time.
+
+- [ ] **24.12** **And it is not the diffraction limit.** WFC3 IHB Table 6.7: **0.067"** at 500 and
+      600 nm, rising to **0.070"** at 400 nm and **0.083"** at 200 nm. The climb back into the UV
+      is real — it is the primary's mid-frequency polishing figure, and it is why HST is
+      diffraction-limited nowhere in this band. A 2.4 m aperture at 500 nm would give 0.044".
+
+- [ ] **24.13** **The near-ultraviolet exists only here.** The Blue filter is **F438W**. No ground
+      instrument in this roster carries a filter below 420 nm, so this is the only part of the mod
+      where that light is collected at all.
+
+- [ ] **24.14** **The sky is about 1.6 magnitudes darker**, and for a different reason: airglow is
+      something an atmosphere does. The readout's sky figure must be zodiacal plus scattered
+      planet light, and the zodiacal term must say whether it is published or extrapolated.
+
+- [ ] **24.15** **Cosmic rays, which look like a bug and are not.** The white worms across a long
+      exposure are real and there are supposed to be a lot of them. The detector is 4096 x 4102 px
+      at 15 um, i.e. **37.8 cm^2**, and the catalogue carries **110 events/min/cm^2** against 1.0
+      at Haute-Provence and 7.7 at Paranal — that factor of a hundred is what having no atmosphere
+      costs. So 69 events/s, and a **200 s** exposure lays down about 13 900 tracks of 2-13 px,
+      touching **~0.6%** of the frame. Each deposits 0.85 of a 63 000 e- well, which is why they
+      read out saturated.
+
+      The check that matters is at **1800 s**, where the same arithmetic gives **5.6%** against
+      the WFC3 IHB's published "5% to 9% per chip in SAA-free orbits" (Sect. 5.4.10). The event
+      rate was derived backwards from that figure, so this is the figure it has to return.
+
+- [ ] **24.16** **They are cosmic rays and not something else.** Three discriminators, because
+      three different bugs would also draw bright marks. A **dark** at the same exposure must show
+      them too, since the shutter has nothing to do with it. Their orientation must be **random**:
+      tracks that all run the same way are pointing drift, which is a different fault entirely.
+      And two exposures with nothing changed must place them on **exactly the same pixels**, since
+      they are drawn from the exposure's own recorded seed; change the exposure or the target and
+      they must redistribute. Moving when nothing changed means the seeding is broken.
+
+- [ ] **24.17** **Stacking is the answer, the same as it is in reality.** Shoot 5 x 200 s rather
+      than 1 x 1000 s and compose. The worms must be gone: they fall in different pixels in each
+      sub, which is exactly what the sigma-clipped combine rejects. This is why real HST programmes
+      split their orbits, and it is the most satisfying single demonstration that the detector
+      chain is being simulated rather than decorated.
+
+- [ ] **24.18** **The limit cycle, on thrusters.** Disable the reaction wheels, enable RCS, and
+      expose. The pointing readout must switch to `thruster limit cycle`, the rms must rise far
+      above the 0.008" the wheels give, and the equivalent PSF blur must grow with it. Stars must
+      visibly streak. This is the least-exercised model in §13: the deadband and minimum pulse are
+      declared design values with nothing to source them to, so what is being checked here is that
+      the regime is *visible at the instrument's own plate scale* — neither invisible nor
+      catastrophic.
+
+## 24b. Known open items
+
+Three things are declared and not wired, and none of them will fail a check above because nothing
+checks them. They are listed so they are not mistaken for working:
+
+- **Electric charge is never consumed.** `ExposureElectricChargePerSecond` and
+  `IdleElectricChargePerSecond` exist on `SpacePlatformSpec` and are read by nothing. An exposure
+  is gated on the vessel having *some* charge and costs none of it, so there is no power budget to
+  manage and an eclipse costs nothing.
+- **The downlink is a readout only.** The frame volume and the transfer time are computed and
+  displayed correctly; nothing waits for them, queues behind them, or is prevented by them.
+- **The pointing hold cannot be engaged.** `ModuleExoSpaceTelescope.CommandPointing` and
+  `DrivePointing` are written and correct, and nothing calls them. The PAW exposes only
+  `Release pointing hold`, so the telescope does not slew itself to the selected target: the
+  player aims the vehicle.
