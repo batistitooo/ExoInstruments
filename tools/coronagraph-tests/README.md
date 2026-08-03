@@ -70,8 +70,8 @@ VIP (`vip_hci`) is the package high-contrast papers compute their detection limi
 | Small-sample threshold | **equal** | our Student t quantile, built on a continued-fraction incomplete beta, reproduces SciPy's `t.ppf` at a tail probability of 2.87e-7 to **4.4e-8 relative** |
 | Annulus noise estimator | **equal** | median ratio **1.029** over 14 annuli, scatter 0.027 — same construction, different aperture phase |
 | Contrast curve end to end | **equal** | agrees to **0.095 mag at worst** over 14 separations |
-| ADI throughput calibration | worse | VIP measures throughput by injecting and recovering fake companions; ours is analytic with declared limits |
-| Post-processing algorithms | worse | VIP implements PCA/KLIP, LOCI, LLSG, NMF, ANDROMEDA; this models median-subtraction ADI only |
+| ADI throughput calibration | **equal** | both inject a companion at fixed S/N and recover it after the reduction; ours is §D3 below, and it is what bounded the analytic form |
+| Post-processing algorithms | worse | VIP implements PCA/KLIP, LOCI, LLSG, NMF, ANDROMEDA; this runs median-subtraction ADI and nothing else |
 | Forward instrument model | better | VIP starts from a cube it is given; this produces the cube |
 
 ## Why the small-sample penalty is the headline

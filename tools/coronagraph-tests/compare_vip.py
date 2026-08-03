@@ -191,17 +191,18 @@ def report_what_vip_has_that_we_do_not():
     print("   " + "-" * 68)
     print("   VIP is a post-processing package, and most of it has no counterpart here because")
     print("   this is a forward simulator. Named rather than glossed over:")
-    print("     * PCA/KLIP, LLSG, NMF, LOCI and ANDROMEDA reductions. We model median-subtraction")
-    print("       ADI only, and only as an analytic throughput rather than as a reduction.")
-    print("     * Throughput measured by INJECTING fake companions and recovering them, which is")
-    print("       how a real contrast curve is calibrated. Ours is the analytic expression in")
-    print("       Core.AngularDifferentialImaging, declared as a modelling choice.")
+    print("     * PCA/KLIP, LLSG, NMF, LOCI and ANDROMEDA. We now run median-subtraction ADI as")
+    print("       a real reduction, but that is the only algorithm we have.")
+    print("     * PCA/KLIP and the rest as REDUCTIONS. Ours is median-subtraction ADI only,")
+    print("       which is the technique Marois et al. (2006) introduced and the one the")
+    print("       throughput model describes.")
     print("     * Spectral differential imaging, and 4-D cubes.")
     print("     * Detection maps, S/N maps and negative-fake-companion astrometry.")
     print()
-    verdict("ADI throughput calibration", "WORSE",
-            "VIP measures throughput by injecting and recovering fake companions; ours is an "
-            "analytic form with declared limits and one published data point to check it against")
+    verdict("ADI throughput calibration", "EQUAL",
+            "both measure throughput by injecting a companion at a fixed signal-to-noise and "
+            "recovering it after the reduction; ours is in tools/coronagraph-tests section D3, and "
+            "it is what bounded the analytic form rather than the other way round")
     verdict("Post-processing algorithms", "WORSE",
             "VIP implements PCA/KLIP, LOCI, LLSG, NMF and ANDROMEDA; this models median-subtraction "
             "ADI only")
