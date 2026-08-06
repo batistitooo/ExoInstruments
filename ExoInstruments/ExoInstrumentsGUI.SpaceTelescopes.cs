@@ -183,6 +183,23 @@ namespace ExoInstruments
             // The link object itself is always refreshed even when the vessel is unchanged: it
             // carries the position, power and link state, all of which move.
             ObservingPlatform.SetSpaceTelescope(link);
+
+            // THE SPACECRAFT DECIDES WHICH INSTRUMENT IS IMAGING, NOT THE DROPDOWN.
+            //
+            // Two selections used to set this independently and nothing reconciled them. The
+            // observatory row set SolarSystemCameraTexture.Spec, and it is hardwired to
+            // HubbleWfc3Uvis; the part config set SpaceTelescopeLink.Instrument, from its own
+            // instrumentName. They agree only as long as the roster holds one orbital row, which
+            // is an accident of the current catalogue and not a fact anything checked. Fly a part
+            // declaring "Hubble Space Telescope (OTA/IR)" and the frame was still computed with
+            // the UVIS CCDs' QE curve, read noise, full well and cosmic-ray rate, silently: the
+            // whole point of carrying a second entry for the IR channel is that everything from
+            // the detector inwards differs, so the wrong one is not a small error.
+            //
+            // The hardware in orbit is the authority. SetActiveTelescope early-returns on an
+            // unchanged spec, so this stays safe to call from the draw loop.
+            if (link != null && link.Instrument != null)
+                solarSystemCamera.SetActiveTelescope(link.Instrument);
         }
 
         /// <summary>

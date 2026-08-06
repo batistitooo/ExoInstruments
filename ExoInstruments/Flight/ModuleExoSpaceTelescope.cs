@@ -126,6 +126,14 @@ namespace ExoInstruments.Flight
         [KSPField(isPersistant = true)]
         public string pointingTarget = "";
 
+        /// <summary>
+        /// Name of the solar-system body being followed, when the target is one, so the direction
+        /// can be recomputed rather than frozen. Empty for a catalogue position; see
+        /// TryResolvePointingDirection for why the two cases cannot share one stored vector.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public string pointingTargetBody = "";
+
         [KSPField(guiActive = true, guiName = "Telescope", guiActiveEditor = false)]
         public string statusLine = "";
 
@@ -233,6 +241,7 @@ namespace ExoInstruments.Flight
             if (boresight == null) boresight = CreateBoresightTransform();
 
             doorAnimation = FindDoorAnimation();
+            ApplyDoorPoseImmediately();
             UpdateDoorEvents();
             SyncDoorState();
 
@@ -310,6 +319,66 @@ namespace ExoInstruments.Flight
             if (doorAnimation == null) { apertureDoorOpen = true; return; }
             if (doorAnimation.isPlaying) { apertureDoorOpen = false; return; }
             apertureDoorOpen = doorCommandedOpen;
+        }
+
+        /// <summary>
+        /// Snaps the door mesh to the pose doorCommandedOpen says it is already in, playing nothing.
+        ///
+        /// WHY THIS HAS TO EXIST. Nothing else in the module ever writes the door's pose; the clips
+        /// are only ever played in response to a player command. So at OnStart the mesh sits in
+        /// whatever pose it was exported in, which is right exactly once: a freshly placed part
+        /// whose door was authored closed. Every other entry into a scene got it wrong.
+        ///
+        ///   a vessel loaded from a save with the door open   came back visually shut, and the next
+        ///                                                    "Close" would play the shut animation
+        ///                                                    on an already-shut door
+        ///   an Animation component with Play Automatically   ran its clip on load and left the door
+        ///                                                    open while this module still believed
+        ///                                                    it closed, so the first "Open" snapped
+        ///                                                    it shut for one frame before animating
+        ///
+        /// Both are the same omission and this fixes both. It also makes the module independent of
+        /// how the model was authored: whatever pose the mesh arrives in, the saved state wins.
+        ///
+        /// Sample() rather than letting the clip run, because this is a correction of the model's
+        /// pose and not a door movement; the player must never see it happen.
+        /// </summary>
+        private void ApplyDoorPoseImmediately()
+        {
+            if (doorAnimation == null) return;
+
+            // Kill anything Play Automatically started before this ran, or Sample() below would be
+            // overwritten on the very next frame by a clip still advancing.
+            doorAnimation.Stop();
+
+            // A two-clip model states each pose as the END of its own clip, so the pose wanted is
+            // that clip at normalizedTime 1. A one-clip model states both poses as the two ends of
+            // the single clip, which is the same convention PlayDoorClip reads.
+            string named = doorCommandedOpen ? animationClipNameOpen : animationClipNameClose;
+            string clipName = null;
+            float time;
+
+            if (!string.IsNullOrEmpty(named) && doorAnimation.GetClip(named) != null)
+            {
+                clipName = named;
+                time = 1f;
+            }
+            else
+            {
+                clipName = doorAnimation.clip != null ? doorAnimation.clip.name : null;
+                time = doorCommandedOpen ? 1f : 0f;
+            }
+
+            if (string.IsNullOrEmpty(clipName)) return;
+
+            AnimationState st = doorAnimation[clipName];
+            if (st == null) return;
+
+            st.enabled = true;
+            st.speed = 0f;
+            st.normalizedTime = time;
+            doorAnimation.Sample();
+            st.enabled = false;
         }
 
         /// <summary>What the player last commanded, which is what the door settles to once its clip finishes.</summary>
@@ -571,7 +640,7 @@ namespace ExoInstruments.Flight
         private void DrivePointing()
         {
             if (vessel == null || vessel.Autopilot == null) return;
-            if (!TryParseDirection(pointingTarget, out Vector3d targetDirection)) return;
+            if (!TryResolvePointingDirection(out Vector3d targetDirection)) return;
 
             Vector3d bore = BoresightWorldDirection;
             if (bore.sqrMagnitude < 1e-9 || targetDirection.sqrMagnitude < 1e-9) return;
@@ -586,10 +655,40 @@ namespace ExoInstruments.Flight
         /// <summary>Angle between the boresight and the commanded target, degrees. NaN when nothing is commanded.</summary>
         public double PointingErrorDeg()
         {
-            if (!pointingHoldEnabled || !TryParseDirection(pointingTarget, out Vector3d target)) return double.NaN;
+            if (!pointingHoldEnabled || !TryResolvePointingDirection(out Vector3d target)) return double.NaN;
             Vector3d bore = BoresightWorldDirection;
             if (bore.sqrMagnitude < 1e-9) return double.NaN;
             return Vector3d.Angle(bore, target);
+        }
+
+        /// <summary>
+        /// The world direction to hold on this tick.
+        ///
+        /// A BODY IS RE-RESOLVED, A CATALOGUE POSITION IS NOT, and the difference is parallax. A
+        /// star is at infinity: the direction to it does not change as the telescope goes round its
+        /// orbit, so the vector commanded at the moment the player clicked is still the right one
+        /// an orbit later. A planet is not: hold the vector that pointed at Jupiter half an orbit
+        /// ago and Jupiter is no longer in the field. Freezing both would have made solar-system
+        /// photography quietly drift off target while the readout claimed the hold was good.
+        /// </summary>
+        private bool TryResolvePointingDirection(out Vector3d direction)
+        {
+            direction = Vector3d.zero;
+
+            if (!string.IsNullOrEmpty(pointingTargetBody))
+            {
+                if (vessel == null || FlightGlobals.Bodies == null) return false;
+                CelestialBody body = FlightGlobals.Bodies.Find(b => b != null && b.bodyName == pointingTargetBody);
+                if (body == null) return false;
+                Vector3d toBody = body.position - vessel.CoMD;
+                if (toBody.sqrMagnitude < 1e-6) return false;
+                direction = toBody.normalized;
+                return true;
+            }
+
+            if (!TryParseDirection(pointingTarget, out direction)) return false;
+            direction = direction.normalized;
+            return true;
         }
 
         /// <summary>Commands the telescope to hold a world-space direction. Persisted, so the hold survives a scene change.</summary>
@@ -598,6 +697,16 @@ namespace ExoInstruments.Flight
             Vector3d d = worldDirection.normalized;
             pointingTarget = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                                            "{0:R},{1:R},{2:R}", d.x, d.y, d.z);
+            pointingTargetBody = "";
+            pointingHoldEnabled = true;
+        }
+
+        /// <summary>Commands the telescope to follow a solar-system body, whose direction moves with the orbit.</summary>
+        public void CommandPointingAtBody(CelestialBody body)
+        {
+            if (body == null) return;
+            pointingTargetBody = body.bodyName;
+            pointingTarget = "";
             pointingHoldEnabled = true;
         }
 

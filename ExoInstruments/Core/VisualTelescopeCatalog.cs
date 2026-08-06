@@ -11,6 +11,20 @@ namespace ExoInstruments.Core
     /// entry in VisualTelescopeCatalog below, not a change to the rendering code.
     /// </summary>
     /// <summary>
+    /// Which detector technology an instrument carries, and therefore which physics its frames go
+    /// through. This is not a label: the two branches differ by which effects EXIST, not by which
+    /// numbers are plugged into one chain. See VisualTelescopeSpec.Technology.
+    /// </summary>
+    public enum DetectorTechnology
+    {
+        /// <summary>Charge is clocked to a shared output: charge-transfer inefficiency, blooming along the column, one destructive read.</summary>
+        Ccd,
+
+        /// <summary>Each pixel is read where it sits through its own amplifier: no transfer, no bleeding, sampled non-destructively up the ramp.</summary>
+        HgCdTeArray,
+    }
+
+    /// <summary>
     /// One narrowband filter on an instrument's wheel: the line it sits on, its FWHM and its peak
     /// transmission. See VisualTelescopeSpec.NarrowbandFilters for why this is a table.
     /// </summary>
@@ -327,6 +341,18 @@ namespace ExoInstruments.Core
         public double CosmicRayEventsPerMinutePerCm2;
 
         /// <summary>
+        /// Charge one cosmic-ray EVENT deposits in total, electrons, spread along its track.
+        ///
+        /// Separate from the rate above because the two are separately measured and separately
+        /// published: how OFTEN the silicon is struck and how MUCH charge a strike leaves are
+        /// different quantities, and a pipeline that gets the first right can still draw the
+        /// second as a saturated streak. Zero means the instrument's maker publishes no figure,
+        /// in which case ApplyCosmicRays keeps its old full-well behaviour rather than inventing
+        /// one; this file's usual convention for an unmodelled quantity.
+        /// </summary>
+        public double CosmicRayElectronsPerEvent;
+
+        /// <summary>
         /// How many pixels of the underlying silicon, along one axis, are summed into one pixel of
         /// the format this entry quotes above.
         ///
@@ -427,6 +453,107 @@ namespace ExoInstruments.Core
             !double.IsNaN(BrighterFatterHorizontalCorrelation)
             && !double.IsNaN(BrighterFatterReferenceSignalElectrons)
             && BrighterFatterReferenceSignalElectrons > 0.0;
+
+        /// <summary>
+        /// Residual surface image: the charge this detector holds at the silicon-oxide interface
+        /// after a saturated exposure, and the timescale on which it comes back. NaN means not
+        /// published, which is every instrument on this roster whose detector has not been tested.
+        ///
+        /// The threshold is a fraction of full well, because every published measurement reports
+        /// residual images following saturated sources and none below that. The trap density is per
+        /// pixel and bounds what an arbitrarily overexposed pixel can hold. The two decay constants
+        /// and the share between them are the two-exponential fit that arXiv:2502.05418 measures on
+        /// an e2v CCD250, carried as two separate populations so the release stays exact under any
+        /// sequence of exposure times. See Core.DetectorPersistence for all of it.
+        /// </summary>
+        public double PersistenceThresholdFractionOfFullWell = double.NaN;
+        public double PersistenceTrappedFraction = double.NaN;
+        public double PersistenceTrapDensityElectrons = double.NaN;
+        public double PersistenceFastDecaySeconds = double.NaN;
+        public double PersistenceSlowDecaySeconds = double.NaN;
+        public double PersistenceFastShare = double.NaN;
+
+        /// <summary>
+        /// True when this detector has been TESTED for image persistence and found not to show it,
+        /// which is a different fact from an unmeasured one and is why it is not another NaN.
+        ///
+        /// Set on WFC3/UVIS alone: ISR WFC3 2005-10 took dark images following highly saturated PSF
+        /// images specifically to look for it and found no significant image persistence,
+        /// consistent with previous ambient testing. The report states the null qualitatively and
+        /// gives no numerical upper limit, so none is recorded. HST's much-cited persistence is
+        /// WFC3/IR's HgCdTe array, a different technology on a different channel, and does not
+        /// transfer to these CCDs.
+        /// </summary>
+        public bool PersistenceMeasuredAbsent;
+
+        /// <summary>
+        /// True when this CCD has a published residual-surface-image amplitude to simulate. False
+        /// for every CCD on the roster: measured absent on WFC3/UVIS, and unpublished for the
+        /// IMX492, for FORS2's CCID-20 and for ZIMPOL's CCDs.
+        ///
+        /// This gates the CCD model alone (Core.DetectorPersistence). The infrared array's
+        /// persistence is a different measured law with its own gate, HasHgCdTePersistence below.
+        /// </summary>
+        public bool HasPersistence =>
+            !PersistenceMeasuredAbsent
+            && !double.IsNaN(PersistenceTrappedFraction)
+            && !double.IsNaN(PersistenceThresholdFractionOfFullWell)
+            && !double.IsNaN(PersistenceTrapDensityElectrons)
+            && PersistenceTrapDensityElectrons > 0.0;
+
+        /// <summary>
+        /// What kind of detector this is, which decides WHICH CHAIN the frame goes through rather
+        /// than merely which numbers it carries.
+        ///
+        /// A CCD clocks charge to one output, so it has charge-transfer inefficiency and it blooms
+        /// along the column when a well overflows. An HgCdTe array reads every pixel where it sits
+        /// through the pixel's own amplifier, so it has neither - the WFC3 handbook states both
+        /// absences outright, "no charge bleeding at saturation" and "minimal long-term on-orbit CTE
+        /// degradation" - and instead has interpixel capacitance, count-rate non-linearity, a read
+        /// noise set by how far up the ramp it was sampled, and persistence that follows a power law
+        /// rather than a sum of exponentials. See Core.InfraredArray and Core.HgCdTePersistence.
+        /// </summary>
+        public DetectorTechnology Technology = DetectorTechnology.Ccd;
+
+        /// <summary>
+        /// The array's interpixel-capacitance kernel, or null where the detector has none published
+        /// or is not an array at all. Applied at readout, because IPC is capacitive crosstalk
+        /// between sense nodes rather than anything that moves charge (Core.InfraredArray).
+        /// </summary>
+        public double[,] InterpixelCapacitanceKernel;
+
+        /// <summary>
+        /// Count-rate non-linearity: the fractional loss of measured flux per decade of true flux
+        /// below the level the photometric zero point was anchored at, and that anchor in electrons
+        /// per second. NaN where unmeasured, which is every detector here but WFC3/IR.
+        ///
+        /// The SLOPE is measured to sub-percent accuracy (ISR 2019-01). The ANCHOR is a convention
+        /// rather than a measurement and is declared in section 12 as this chain's one unpinned
+        /// constant; it sets where the correction is zero and nothing about the effect's shape.
+        /// </summary>
+        public double CountRateNonLinearityPerDex = double.NaN;
+        public double CountRateNonLinearityReferenceElectronsPerSecond = double.NaN;
+
+        /// <summary>
+        /// MULTIACCUM ramp sampling: how many non-destructive reads the ramp is fitted to, and the
+        /// two published read-noise anchors that number is interpolated between. NSAMP on WFC3/IR
+        /// runs 1 to 15.
+        /// </summary>
+        public int RampReads;
+        public double RampReadNoiseAtFewReadsElectrons = double.NaN;
+        public int RampFewReads;
+        public double RampReadNoiseAtManyReadsElectrons = double.NaN;
+        public int RampManyReads;
+
+        /// <summary>
+        /// True when this detector carries the published HgCdTe persistence model, whose parameters
+        /// are Core.HgCdTePersistence's transcription of WFC3 ISR 2015-15 Table 2.
+        ///
+        /// Unlike every other persistence gate on this roster, this one is TRUE on the instrument
+        /// that has it: WFC3/IR's persistence is measured, fitted, and published with its own
+        /// error budget, so the effect runs rather than waiting for a number.
+        /// </summary>
+        public bool HasHgCdTePersistence;
 
         /// <summary>
         /// Thickness of the detector's silicon in microns, for instruments whose is published, or
@@ -716,10 +843,20 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 0.51,
             FocalLengthMeters = 0.51 * 6.8,
-            // The RC20 has a real vane spider, but PlaneWave publishes no vane width and spike
-            // brightness goes as the vane area squared. Declared rather than guessed (section 12).
-            SpiderVaneCount = 0,
-            SpiderVaneWidthMeters = 0.0,
+            // ESTIMATED, NOT PUBLISHED. This is the one number in this file that no source backs,
+            // and it is marked so deliberately. PlaneWave publishes no vane width; the telescope
+            // plainly has a four-vane spider, and leaving it at zero drew no spikes at all, which
+            // is a worse error than a bracketed estimate. The derivation, including the two
+            // methods that were tried and rejected, is TECHNICAL_REFERENCE section 7.113.
+            //
+            // Short version: stiffness demands only 0.17 mm here, so the blade is set by buckling
+            // and handling, not by optics or by the secondary's weight. 1.5 mm is ordinary
+            // commercial blade stock, ~9x the stiffness floor, and it obscures 0.54 % of the pupil
+            // against 1.1-2.1 % for the two professional spiders in this file. Spike brightness
+            // goes as the vane AREA SQUARED, so treat the resulting spikes as good to a factor of
+            // a few, not as photometry.
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.0015,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.39,
             // A Ritchey-Chretien is two mirrors, and both are in the imaging path. Aluminium at
@@ -1063,9 +1200,13 @@ namespace ExoInstruments.Core
 
             ApertureMeters = 1.000,
             FocalLengthMeters = 6.000,
-            // Same as the RC20: real spider, no published vane width (section 12).
-            SpiderVaneCount = 0,
-            SpiderVaneWidthMeters = 0.0,
+            // ESTIMATED, NOT PUBLISHED, exactly as for the RC20 and by the same method; see
+            // TECHNICAL_REFERENCE section 7.113. The heavier 47 cm secondary raises the stiffness
+            // floor to 0.79 mm, so 2.5 mm is a smaller margin over it than the RC20's, which is
+            // the right direction: a bigger secondary needs a stouter blade. It obscures 0.43 %
+            // of the pupil. Same caveat: the spikes are good to a factor of a few.
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.0025,
             BarlowFactor = 4.0,
             SecondaryObstructionFraction = 0.47,
             // Two mirrors, same aluminium figure as the RC20. The CDK's defining third element is
@@ -1784,6 +1925,19 @@ namespace ExoInstruments.Core
             // Table 5.1: "~7 e-/hr/pixel (median, Dec. 2015)". Per second.
             DarkCurrentElectronsPerSecond = 7.0 / 3600.0,
 
+            // The one detector on this roster tested for image persistence and found not to show
+            // it. ISR WFC3 2005-10 ("WFC3 UVIS PSF Evaluation") obtained dark images following
+            // highly saturated PSF images specifically to evaluate image persistence in the CCDs,
+            // and found no significant image persistence, consistent with previous ambient
+            // testing. Recorded as a measured absence rather than as another NaN, because the two
+            // are different facts: everything else on this roster is untested, this is tested.
+            //
+            // NOT to be confused with HST's famous persistence, which is WFC3/IR's HgCdTe array on
+            // the other channel of the same instrument. That literature is extensive and none of
+            // it transfers: a CCD and an infrared array trap charge in different places for
+            // different reasons.
+            PersistenceMeasuredAbsent = true,
+
             // Table 5.1: "ADC Maximum 65,535 DN", i.e. 16 bits, and "Gain 1.55 e-/DN". Table 5.3
             // gives the four amplifiers as 1.56, 1.55, 1.58, 1.57; 1.55 is the handbook's own
             // summary figure and the only supported setting.
@@ -1800,6 +1954,21 @@ namespace ExoInstruments.Core
             // tools/spacecraft-tests asserts that a simulated 1800 s frame lands back inside the
             // published 5-9 per cent. See TECHNICAL_REFERENCE for the derivation.
             CosmicRayEventsPerMinutePerCm2 = 110.0,
+
+            // HOW MUCH CHARGE ONE EVENT LEAVES, which is a separate measurement from the rate
+            // above and was previously not modelled at all: every track was drawn at 0.85 of full
+            // well, i.e. 53,550 e- in EVERY pixel it crossed, which is why a raw frame came back
+            // covered in saturated white worms. WFC3 IHB Sect. 5.4.10 gives the real
+            // distribution, measured on ACS/WFC: "negligible events of less than 500 e- and a
+            // median of ~1000 e-", and quotes Miles et al. (2021) for "a typical hit corresponds
+            // to ~2200 e-". The median is used, being the handbook's own primary figure, and
+            // ApplyCosmicRays spreads it along the track rather than putting it in each pixel.
+            //
+            // Real HST frames DO show cosmic rays plainly; they are simply not saturated, and the
+            // handbook's own remedy for them is combination, not shorter exposures: "at least 4-5
+            // images will be needed to ensure that fewer than 100 pixels will be hit in all
+            // images of the combination".
+            CosmicRayElectronsPerEvent = 1000.0,
 
             // WFC3 IHB Sect. 6.7: UVIS exposure times run from 0.5 s to 3600 s. There is no
             // shorter setting; the shutter is a rotating disk and 0.5 s is its floor.
@@ -1890,6 +2059,270 @@ namespace ExoInstruments.Core
         };
 
         /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI; see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
-        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis };
+        /// <summary>
+        /// The SECOND CHANNEL OF THE SAME INSTRUMENT ON THE SAME TELESCOPE. Not a second telescope:
+        /// WFC3 has a Channel Select Mechanism, and light goes to the UVIS CCDs or to the IR array,
+        /// never to both at once. Everything upstream of the detector is therefore identical to
+        /// HubbleWfc3Uvis above and is repeated here rather than shared, because a spec is a flat
+        /// record and cross-referencing one field of it would hide which numbers are the same by
+        /// physics and which merely happen to agree.
+        ///
+        /// WHAT IS GENUINELY THE SAME: the 2.4 m primary, the 0.330 obstruction, the four spider
+        /// vanes and their width, the three primary-mirror pads, the orbit, and every avoidance
+        /// angle and jitter figure on the platform.
+        ///
+        /// WHAT IS NOT: everything from the detector inwards, and not by degree. This is an HgCdTe
+        /// photovoltaic array, not a CCD, so it has no charge transfer and no blooming, it is read
+        /// non-destructively up a ramp, and it carries interpixel capacitance, count-rate
+        /// non-linearity and a measured persistence law. See Core.InfraredArray,
+        /// Core.HgCdTePersistence, and TECHNICAL_REFERENCE section 13.8.
+        ///
+        /// Sources throughout: WFC3 Instrument Handbook (IHB) chapters 5 and 7, WFC3 Data Handbook
+        /// (DHB) chapters 1 and 7, and the three Instrument Science Reports named at each number.
+        /// </summary>
+        public static readonly VisualTelescopeSpec HubbleWfc3Ir = new VisualTelescopeSpec
+        {
+            // A DISTINCT Name, because Name is the key ModuleExoSpaceTelescope resolves a saved
+            // telescope through, and two entries sharing one would make the second unreachable.
+            // The platform is the same telescope and says so; the channel is what differs.
+            Name = "Hubble Space Telescope (OTA/IR)",
+            CameraName = "WFC3/IR",
+            SiteName = "Low Earth orbit",
+
+            Technology = DetectorTechnology.HgCdTeArray,
+
+            // IHB Table 5.1 equivalent for the IR channel: nominal operating temperature 145 K,
+            // held by a six-stage thermoelectric cooler. Far colder than any CCD here, which is
+            // what a 1.7 um cutoff costs in dark current.
+            DetectorTemperatureCelsius = 145.0 - 273.15,
+
+            // ---- The OTA. Identical to WFC3/UVIS because it IS the same telescope. ----
+            ApertureMeters = 2.4,
+            SecondaryObstructionFraction = 0.330,
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.022 * 1.2,
+            PrimaryMirrorPads = new[]
+            {
+                new PupilPad(0.8921,  0.0000, 0.065),
+                new PupilPad(-0.4615, 0.7555, 0.065),
+                new PupilPad(-0.4564, -0.7606, 0.065),
+            },
+
+            // THE EFFECTIVE FOCAL LENGTH AT WFC3/IR, from its own plate scale and its own 18 um
+            // pixel, exactly as the UVIS entry derives its own from 15 um and 0.0396.
+            //
+            // The scale is ANISOTROPIC and measured: IHB 7.4 gives pixels "covering approximately
+            // 0.135 x 0.121 arcsec", and the same section's 136 x 123 arcsec field over 1014
+            // pixels reproduces both to three figures. The anisotropy is not a defect, it is the
+            // IR focal plane being tilted with respect to the incoming beam, which the handbook
+            // gives as 24 degrees (IHB 7.4) where the Data Handbook says 22 (DHB 1.3); that
+            // disagreement between the two handbooks is recorded in section 12 and is not resolved
+            // here, because neither is derivable from the other's numbers.
+            //
+            // This pipeline carries ONE plate scale, so one has to be chosen. The GEOMETRIC MEAN
+            // is used rather than either axis, because the quantity that matters most to a frame
+            // is the SOLID ANGLE per pixel - it sets the sky background, which dominates every
+            // deep near-infrared exposure - and the geometric mean is the scale that preserves it
+            // exactly. (The UVIS entry chose one axis instead, because there the two axes belong
+            // to two different chips and picking the aperture most programmes use was the more
+            // meaningful choice. Here both axes are the same chip.)
+            FocalLengthMeters = 206265.0 * 18.0e-6 / System.Math.Sqrt(0.135 * 0.121),
+
+            // Measured end to end by STScI, so nothing is multiplied on top: IHB 7.5 states that
+            // "The throughput calculations include the HST OTA, WFC3 IR-channel internal
+            // throughput, filter transmittance, and the QE of the IR detector." The whole of that
+            // product is carried in the per-filter peak transmission below, which is why the
+            // QuantumEfficiency field is 1.0 and the mirrors are not counted: putting a QE or a
+            // reflectivity here as well would square a loss that was measured once.
+            MirrorCount = 0,
+            RelayOpticsTransmission = 1.0,
+            QuantumEfficiency = 1.0,
+
+            // No atmosphere, same as UVIS.
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            HasAtmosphericDispersionCorrector = false,
+            AdaptiveOpticsFwhmArcsec = 0.0,
+
+            // IHB 7.3: "HgCdTe 1024 x 1024 array, with 18 micron pixels, bonded to a silicon
+            // multiplexer, with 1014 x 1014 pixels sensitive to incoming light".
+            //
+            // 1014, NOT 1024. The outer 5-pixel rim is REFERENCE PIXELS: light-insensitive cells
+            // read out with the array so the pipeline can track bias and thermal drift. They are
+            // part of the detector and not part of the image, and carrying 1024 here would hand
+            // the imaging path 20 rows and columns that never see sky.
+            NativeSensorWidthPx = 1014,
+            NativeSensorHeightPx = 1014,
+            NativePixelSizeMeters = 18.0e-6,
+
+            // IHB 5.7: saturation limit "~78,000 electrons". Two other figures appear in the
+            // literature for two other purposes and neither is wrong: DHB 7.2 gives the full well
+            // as "approximately 80,000 electrons", and ISR 2015-15's Table 1 footnote uses 70,000
+            // as "the nominal saturation level" when counting saturated pixels for the persistence
+            // fit. The IHB's saturation figure is used here because it is the one tied to the
+            // handbook's own 5% departure-from-linearity criterion; the persistence model carries
+            // ISR 2015-15's 70,000 separately, against which its own parameters were measured.
+            FullWellElectrons = 78000.0,
+
+            // The FULL RAMP's effective read noise. IHB 5.7 gives a SPARS200 ramp at "~20.0 e-"
+            // with 2 reads plus the zeroth and "~12.0 e-" with 15 reads plus the zeroth, and
+            // correlated double sampling alone at 20.2-21.4 e-. There is no single read noise for
+            // this detector: it depends on how far up the ramp it was sampled, which is what
+            // RampReads and Core.InfraredArray.EffectiveReadNoiseElectrons carry. This field holds
+            // the deepest ramp's value so that a caller which ignores the ramp gets the
+            // configuration this instrument is flown in rather than a worst case.
+            ReadNoiseElectrons = 12.0,
+            RampReads = 15,
+            RampReadNoiseAtFewReadsElectrons = InfraredArray.Wfc3IrReadNoiseTwoReadsElectrons,
+            RampFewReads = InfraredArray.Wfc3IrTwoReads,
+            RampReadNoiseAtManyReadsElectrons = InfraredArray.Wfc3IrReadNoiseFifteenReadsElectrons,
+            RampManyReads = InfraredArray.Wfc3IrFifteenReads,
+
+            // IHB 5.7: dark current mode 0.045, median 0.048, mean 0.048 e-/s/pixel. The median and
+            // mean agree, so 0.048 is used. ISR 2015-15 quotes 0.046 from Hilbert & Petro (2012)
+            // and notes it varies by 20-30% for reasons that are not understood; that variation is
+            // a real property of this detector and is larger than the difference between the two
+            // published means, which is why no attempt is made to split them.
+            DarkCurrentElectronsPerSecond = 0.048,
+
+            // DHB 7.2: "the Analog to Digital Converter (ADC) outputs a 16-bit number, allowing
+            // output signal values ranging from 0 to 65535", and "only a gain setting of 2.5 e-/DN
+            // is supported".
+            //
+            // THE MEASURED FOUR-QUADRANT MEAN IS USED, NOT THE COMMANDED 2.5. DHB 7.2's own table
+            // of effective gains averaged over all epochs gives 2.28, 2.221, 2.24 and 2.265 e-/DN
+            // for quadrants 1-4, monitored twice yearly. The frame is read through all four, so no
+            // single quadrant's figure describes it, and their mean 2.2515 is what actually
+            // converts a DN back to electrons. This is the same reasoning the UVIS entry applies to
+            // its four amplifiers, with one difference worth stating: there the measured values sat
+            // within 2% of the handbook's summary figure, here they sit 10% below the commanded
+            // setting, so the choice changes the answer.
+            AdcBits = 16,
+            ElectronsPerAduAtUnityGain = (2.28 + 2.221 + 2.24 + 2.265) / 4.0,
+
+            // Same orbit as UVIS, so the same rate; see the UVIS entry for the derivation from the
+            // handbook's measured impacted-pixel fraction.
+            CosmicRayEventsPerMinutePerCm2 = 110.0,
+
+            // HOW MUCH CHARGE ONE EVENT LEAVES, which is a separate measurement from the rate
+            // above and was previously not modelled at all: every track was drawn at 0.85 of full
+            // well, i.e. 53,550 e- in EVERY pixel it crossed, which is why a raw frame came back
+            // covered in saturated white worms. WFC3 IHB Sect. 5.4.10 gives the real
+            // distribution, measured on ACS/WFC: "negligible events of less than 500 e- and a
+            // median of ~1000 e-", and quotes Miles et al. (2021) for "a typical hit corresponds
+            // to ~2200 e-". The median is used, being the handbook's own primary figure, and
+            // ApplyCosmicRays spreads it along the track rather than putting it in each pixel.
+            //
+            // Real HST frames DO show cosmic rays plainly; they are simply not saturated, and the
+            // handbook's own remedy for them is combination, not shorter exposures: "at least 4-5
+            // images will be needed to ensure that fewer than 100 pixels will be hit in all
+            // images of the combination".
+            CosmicRayElectronsPerEvent = 1000.0,
+
+            // ---- HgCdTe-specific physics, each measured and each cited ----
+
+            // Hilbert & McCullough (2011, WFC3 ISR 2011-10) Table 2, measured on orbit from hot
+            // pixels in the SPARS200 dark reference file. Anisotropic and NOT renormalised; see
+            // Core.InfraredArray for why the published 0.9985 sum is left alone.
+            InterpixelCapacitanceKernel = InfraredArray.Wfc3IrKernel,
+
+            // Riess, Narayan & Calamida (2019, WFC3 ISR 2019-01): 0.75% +/- 0.06% per dex, with no
+            // apparent wavelength dependence, measured across 16 astronomical magnitudes.
+            CountRateNonLinearityPerDex = InfraredArray.Wfc3IrCountRateNonLinearityPerDex,
+
+            // THE ANCHOR, and it is the one unpinned constant in this chain, declared in section 12
+            // rather than dressed up. The slope above is measured to sub-percent accuracy; the flux
+            // level it is measured RELATIVE to is wherever the photometric zero point was
+            // established, and ISR 2019-01 states the convention without giving a number: "flux
+            // zeropoints are established from standard stars which are about ten astronomical
+            // magnitudes (4 dex) brighter than faint, sky-dominated targets."
+            //
+            // 100 e-/s is used, which is a bright-standard-star count rate on this detector and
+            // sits 4 dex above the ~0.01 e-/s of a sky-dominated faint source, reproducing exactly
+            // the span that sentence describes. Nothing about the effect's SHAPE depends on it; it
+            // sets where the correction passes through zero.
+            CountRateNonLinearityReferenceElectronsPerSecond = 100.0,
+
+            // Long, Baggett & MacKenty (2015, WFC3 ISR 2015-15). The one instrument on this roster
+            // whose persistence is measured, fitted and published with its own error budget, so the
+            // effect RUNS rather than waiting for a number. Parameters in Core.HgCdTePersistence.
+            HasHgCdTePersistence = true,
+
+            // ---- Filters: IHB Table 7.2, "WFC3 IR Channel Filters and Grisms" ----
+            //
+            // THE FOUR WIDE FILTERS ONTO THE FOUR BROADBAND SLOTS, in wavelength order. As with the
+            // UVIS entry, the slot is a position on a wheel and the real filter is what it is; the
+            // pivot wavelength and width below carry the truth. Peak throughput is the INTEGRATED
+            // SYSTEM throughput per IHB 7.5, which is why QuantumEfficiency above is 1.0.
+            //
+            // Values are in nm in the handbook and are converted to this catalogue's units:
+            // central wavelength in nm, bandwidth in angstrom.
+            LuminanceCentralWavelengthNm = 1153.4,      // F110W, the widest
+            LuminanceBandwidthAngstrom = 4430.0,
+            LuminanceFilterPeakTransmission = 0.56,
+            RedCentralWavelengthNm = 1536.9,            // F160W
+            RedBandwidthAngstrom = 2683.0,
+            RedFilterPeakTransmission = 0.56,
+            GreenCentralWavelengthNm = 1248.6,          // F125W
+            GreenBandwidthAngstrom = 2845.0,
+            GreenFilterPeakTransmission = 0.56,
+            BlueCentralWavelengthNm = 1055.2,           // F105W, the shortest wide filter
+            BlueBandwidthAngstrom = 2650.0,
+            BlueFilterPeakTransmission = 0.52,
+
+            // NO H-ALPHA SLOT, and this is a physical statement rather than an omission. H-alpha is
+            // at 656 nm and this detector's filter set starts above 900 nm, so the line is not
+            // merely unavailable, it is outside the channel entirely. Offering a slot labelled
+            // H-alpha and putting a 1.28 um Paschen-beta filter in it would be the mislabelling
+            // that section 12 already refuses for SPHERE's absent blue.
+            AvailableFilters = new[]
+            {
+                CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue,
+            },
+
+            // IHB 7.6: exposure times reachable by the MULTIACCUM sequences. RAPID reaches 2.932 s
+            // at NSAMP=1 and 43.984 s at NSAMP=15; the SPARS and STEP sequences extend from there.
+            MinExposureSeconds = 2.932f,
+            MaxExposureSeconds = 3600.0f,
+
+            // A hardware conversion factor, not a player control, same as FORS2 and UVIS.
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Hubble Space Telescope",
+
+                // Identical to the UVIS entry: these are properties of the spacecraft and its
+                // orbit, not of which channel the light is sent to.
+                SunAvoidanceAngleDeg = 62.5,
+                BrightLimbAvoidanceAngleDeg = 20.0,
+                DarkLimbAvoidanceAngleDeg = 7.6,
+                MoonAvoidanceAngleDeg = 9.0,
+                PointingJitterArcsecRms = 0.008,
+
+                // IHB Table 7.5, "WFC3/IR PSF FWHM ... vs. wavelength", arcsec column, transcribed
+                // whole from 800 to 1700 nm. Unlike UVIS's, this curve rises monotonically across
+                // the whole band, and the handbook names the reason: "The monotonic increase in
+                // FWHM and decrease in sharpness with wavelength is due to diffraction." The IR
+                // channel, unlike the UV, is genuinely diffraction-limited.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(
+                    new[] { 800.0, 900.0, 1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, 1700.0 },
+                    new[] { 0.124, 0.126, 0.128, 0.130, 0.133, 0.137, 0.141, 0.145, 0.151, 0.156 }),
+
+                HasApertureDoor = true,
+
+                // The true readout is the whole 1024 x 1024 multiplexer, reference pixels included:
+                // they are read out and they are downlinked, even though they carry no sky. The
+                // imaging path works on the 1014 x 1014 light-sensitive area above.
+                FullFramePixels = 1024L * 1024L,
+                DownlinkBitsPerPixel = 16,
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }

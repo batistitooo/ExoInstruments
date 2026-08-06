@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>persistence</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219;CS0414;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PersistenceTests.cs" />
+    <Compile Include="Stub.cs" />
+    <!-- ALL of Core, minus the one file in it that touches Unity.
+         Every other harness in tools/ names its Core files one by one, which works while the file
+         under test has a shallow dependency chain. Section D reads the SHIPPED instrument
+         catalogue rather than a restatement of it, and the catalogue reaches most of Core, so
+         naming them individually here would mean transcribing a dependency graph by hand and
+         re-transcribing it on every change. The exclusion is the interesting line: Core is 112
+         files and exactly one of them is not portable, which is the fact this harness relies on. -->
+    <Compile Include="$(Core)/*.cs" Exclude="$(Core)/SkyChartTexture.cs" />
+  </ItemGroup>
+</Project>

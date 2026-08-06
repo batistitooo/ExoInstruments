@@ -77,6 +77,33 @@ namespace ExoInstruments.Visualization
                 return cachedCalibration;
             }
 
+            // AN INSTRUMENT WHOSE BANDS ARE NOT VISIBLE LIGHT CANNOT HAVE A COLORIMETRIC TRANSFORM,
+            // and refusing to fit one is the whole of the difference between a false-colour image
+            // labelled as such and a false claim of true colour.
+            //
+            // The CIE 1931 observer is defined over 360-830 nm and is identically zero outside it,
+            // so a least-squares fit of bands lying beyond 830 nm is a fit to a matrix of zeros: it
+            // returns something, and that something means nothing. WFC3/IR is the instrument this
+            // is written for - its shortest filter pivots at 986 nm, a full 156 nm past the red end
+            // of human vision - but the test is on the wavelengths rather than on the instrument,
+            // so any future infrared or ultraviolet band is caught by the same line.
+            //
+            // Returning null puts the composite onto the labelled-palette path, which makes no
+            // colorimetric claim. That is what a real WFC3/IR colour image is.
+            foreach (CameraFilter f in new[] { CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue })
+            {
+                double centreNm = SolarSystemCameraTexture.CentralWavelengthNmOf(f);
+                if (centreNm < CieColourMatchingTable.MinWavelengthNm
+                    || centreNm > CieColourMatchingTable.MaxWavelengthNm)
+                {
+                    report = "no colorimetric transform: this instrument's "
+                           + f + " band is centred at " + centreNm.ToString("F0")
+                           + " nm, outside the CIE 1931 observer's 360-830 nm support. "
+                           + "Composites are labelled false colour.";
+                    return null;
+                }
+            }
+
             var bands = new List<SystemResponse>();
             foreach (CameraFilter f in new[] { CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue })
             {

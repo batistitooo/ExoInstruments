@@ -30,6 +30,10 @@
     <Compile Include="$(Core)/SkyCoordinates.cs" />
     <Compile Include="$(Core)/StarTarget.cs" />
     <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <!-- VisualTelescopeCatalog gained Lyot-stop and infrared-array entries, so this harness no
+         longer compiles the catalogue without the two types they reference. -->
+    <Compile Include="$(Core)/Coronagraph.cs" />
+    <Compile Include="$(Core)/InfraredArray.cs" />
     <!-- InstrumentSpec gained a PhotometricDetector field with the CCD-equation work; without this
          the harness stopped building, which is how it was found. -->
     <Compile Include="$(Core)/PhotometricDetector.cs" />

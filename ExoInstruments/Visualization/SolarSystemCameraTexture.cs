@@ -798,6 +798,43 @@ namespace ExoInstruments.Visualization
         private ushort[] offsetFpnMap;
         private int[] deadPixelIndices;
 
+        /// <summary>
+        /// Charge held in the detector's surface traps, carried FROM ONE EXPOSURE TO THE NEXT.
+        ///
+        /// The only state in this class that is not a property of the instrument or of the frame
+        /// being built: it is a property of the observing SEQUENCE, and it exists because a
+        /// residual image is the one detector effect that depends on what was observed before (see
+        /// Core.DetectorPersistence). Full precision rather than the half-float packing the flat
+        /// and offset maps use, because unlike those two this one is read, decremented and written
+        /// back on every exposure, and a rounding error there would accumulate over a sequence
+        /// instead of staying put.
+        ///
+        /// Two arrays because the two trap populations empty at different rates and have to be
+        /// tracked apart; one array with a two-term decay law has no defined state after a partial
+        /// decay. Both are null on every instrument currently on the roster, since none has a
+        /// published amplitude to simulate.
+        /// </summary>
+        private float[] persistenceFastTrapped;
+        private float[] persistenceSlowTrapped;
+
+        /// <summary>
+        /// The infrared array's persistence state, which is a different quantity from the CCD's.
+        ///
+        /// The CCD model holds TRAPPED CHARGE and decrements it. The published HgCdTe model is not
+        /// written that way: it is a function of the FLUENCE the pixel reached in an earlier
+        /// exposure, how long that exposure lasted, and how long ago it ended, so those three are
+        /// what have to be carried. Storing an equivalent trapped charge instead would mean
+        /// inverting a fit that was never published in that form.
+        ///
+        /// ONE STIMULUS PER PIXEL, NOT A SUM, because that is what the published pipeline does:
+        /// where several earlier exposures could each cause persistence, it counts only the one
+        /// that would cause the most in the current image. The fitted parameters were derived under
+        /// that rule and using them under another would apply them outside their own calibration.
+        /// </summary>
+        private float[] hgcdtePersistenceFluence;
+        private float[] hgcdtePersistenceStimulusSeconds;
+        private float[] hgcdtePersistenceElapsedSeconds;
+
         /// <summary>Real continuous gain control range; see VisualTelescopeCatalog for sourcing.</summary>
         public static float MinGain => Spec.MinGain;
         public static float MaxGain => Spec.MaxGain;
@@ -1380,29 +1417,44 @@ namespace ExoInstruments.Visualization
 
         public void UpdateAim(SkyTarget target)
         {
-            if (!target.HasTarget) return;
+            if (!TryResolveWorldDirection(target, out Vector3d direction)) return;
 
-            CelestialBody home = FlightGlobals.GetHomeBody();
-            Vector3 camPos = ResolveScaledSpaceObserverPosition(home);
+            lockedCamPos = ResolveScaledSpaceObserverPosition(FlightGlobals.GetHomeBody());
+            lockedLook = Quaternion.LookRotation((Vector3)direction, Vector3.up);
+            hasLockedAim = true;
+        }
 
-            Vector3 direction;
+        /// <summary>
+        /// Unit world direction toward a target, WITHOUT touching the camera's own aim.
+        ///
+        /// Split out of UpdateAim because an orbiting telescope has to be slewed onto the same
+        /// direction the camera looks along, and asking for that direction must not re-centre the
+        /// frame as a side effect: with autoguiding off, when the frame re-centres is the player's
+        /// decision and nothing else may make it for them.
+        ///
+        /// Scaled space is a uniform scaling of the world about a moving origin, so a DIRECTION is
+        /// the same vector in both and needs no conversion, the same fact TryBuildFieldGeometry
+        /// relies on.
+        /// </summary>
+        public bool TryResolveWorldDirection(SkyTarget target, out Vector3d direction)
+        {
+            direction = Vector3d.zero;
+            if (!target.HasTarget) return false;
+
             if (target.IsBody)
             {
-                if (target.Body.scaledBody == null) return;
+                if (target.Body == null || target.Body.scaledBody == null) return false;
+                Vector3 camPos = ResolveScaledSpaceObserverPosition(FlightGlobals.GetHomeBody());
                 Vector3 toTarget = target.Body.scaledBody.transform.position - camPos;
-                if (toTarget.sqrMagnitude < 1e-6f) return; // observer coincides with the target's scaled position
-                direction = toTarget.normalized;
-            }
-            else
-            {
-                if (!TryEquatorialDirection(target.RaDeg, target.DecDeg, Planetarium.GetUniversalTime(),
-                                            out Vector3d skyDirection)) return;
-                direction = (Vector3)skyDirection;
+                if (toTarget.sqrMagnitude < 1e-6f) return false; // observer coincides with the target's scaled position
+                direction = (Vector3d)toTarget.normalized;
+                return true;
             }
 
-            lockedCamPos = camPos;
-            lockedLook = Quaternion.LookRotation(direction, Vector3.up);
-            hasLockedAim = true;
+            if (!TryEquatorialDirection(target.RaDeg, target.DecDeg, Planetarium.GetUniversalTime(),
+                                        out Vector3d skyDirection)) return false;
+            direction = skyDirection;
+            return true;
         }
 
         /// <summary>
@@ -4119,6 +4171,21 @@ namespace ExoInstruments.Visualization
             // afterwards, it collects 1% fewer, and its shot noise is the square root of what it
             // actually collected. Scaling after the draw would leave the frame carrying the shot
             // noise of a signal it does not have.
+            // COUNT-RATE NON-LINEARITY, on the detectors that have one. An HgCdTe array's measured
+            // flux is not a linear function of the true flux: a source a decade fainter than where
+            // the photometric zero point was anchored is measured a fixed fraction low. It is
+            // applied HERE, to the mean collected rate and ahead of the Poisson draw, because it is
+            // a change in the detector's SENSITIVITY rather than a loss applied afterwards - the
+            // pixel really does convert fewer of the photons it was sent, and the shot noise it
+            // carries is the square root of what it actually collected.
+            //
+            // Hoisted out of the loop as a flag rather than tested per pixel; NaN on every CCD here.
+            bool countRateNonLinear = !double.IsNaN(Spec.CountRateNonLinearityPerDex)
+                                   && !double.IsNaN(Spec.CountRateNonLinearityReferenceElectronsPerSecond)
+                                   && exposureSeconds > 0f;
+            double crnlSlope = Spec.CountRateNonLinearityPerDex;
+            double crnlReference = Spec.CountRateNonLinearityReferenceElectronsPerSecond;
+
             for (int i = 0; i < n; i++)
             {
                 double sceneElectrons = signal != null ? signal[i] : 0.0;
@@ -4126,6 +4193,13 @@ namespace ExoInstruments.Visualization
                 // depth depends on the source's spectrum, and the sky's line forest fringes where a
                 // stellar continuum does not (see EnsureFringeMap).
                 double collected = (sceneElectrons + skyElectrons * FringeAt(i)) * FlatFieldAt(i);
+
+                if (countRateNonLinear && collected > 0.0)
+                {
+                    double rate = collected / exposureSeconds;
+                    collected = InfraredArray.MeasuredRate(rate, crnlReference, crnlSlope) * exposureSeconds;
+                }
+
                 double meanElectrons = Math.Max(0.0, collected + darkElectrons);
                 raw[i] = (float)SamplePoisson(rng, meanElectrons);
             }
@@ -4148,6 +4222,22 @@ namespace ExoInstruments.Visualization
             // no sky, but its silicon still generates dark charge like any other pixel. It reads
             // near the pedestal rather than at exactly zero, and a flat frame is what identifies it.
             DumpStage("poisson", raw);
+
+            // Charge the previous exposures left in the surface traps, coming back.
+            //
+            // It is added HERE, after the Poisson draw and NOT through the flat field, for the two
+            // reasons that already separate dark current from scene light a few lines above: these
+            // electrons never travelled through the optics, so no pixel's photo-response scales
+            // them, and they are not a fresh counting process, so drawing them from a Poisson mean
+            // would give them a variance they do not have. They are electrons that were already
+            // counted once, held, and released.
+            //
+            // Off on every instrument on this roster; see Core.DetectorPersistence for which
+            // detectors have been measured and which have simply never been published.
+            ApplyPersistenceRelease(raw, exposureSeconds);
+            ApplyHgCdTePersistenceRelease(raw, exposureSeconds);
+            DumpStage("persistence-release", raw);
+
             ApplyPixelDefects(raw, signal, skyElectrons, darkElectrons, isoGain, rng);
             DumpStage("defects", raw);
 
@@ -4155,10 +4245,46 @@ namespace ExoInstruments.Visualization
             // electron counts against a real well, so the thresholds mean something.
             ApplyCosmicRays(raw, exposureSeconds, rngCosmic);
             DumpStage("cosmic", raw);
-            ApplyBlooming(raw, (float)FullWellElectrons);
-            DumpStage("blooming", raw);
-            ApplyChargeTransferSmear(raw);
-            DumpStage("cti", raw);
+
+            // THE CHAIN FORKS HERE, and it forks on which effects EXIST rather than on which
+            // numbers apply. A CCD clocks its charge to a shared output, so a full well overflows
+            // along the column and the transfer is imperfect. An HgCdTe array reads every pixel
+            // where it sits: the WFC3 handbook records both consequences outright, "no charge
+            // bleeding at saturation" and "minimal long-term on-orbit CTE degradation". Running an
+            // infrared array through the CCD branch would add two effects the device does not have.
+            if (Spec.Technology == DetectorTechnology.HgCdTeArray)
+            {
+                // A full photodiode stops collecting. It does not spill, so the well is a ceiling
+                // and nothing is redistributed.
+                float ceiling = (float)FullWellElectrons;
+                for (int i = 0; i < n; i++) if (raw[i] > ceiling) raw[i] = ceiling;
+                DumpStage("saturation", raw);
+
+                // What this exposure leaves for the next: the fluence each pixel reached, and how
+                // long it sat there, which is the pair the published persistence model is a
+                // function of.
+                RecordHgCdTeStimulus(raw, exposureSeconds);
+            }
+            else
+            {
+                ApplyBlooming(raw, (float)FullWellElectrons);
+                DumpStage("blooming", raw);
+
+                // What this exposure leaves behind for the next one, taken from the well AFTER
+                // blooming and BEFORE transfer: blooming is what caps the charge a pixel actually
+                // held, and transfer is what happens to that charge on the way out. The traps see
+                // the charge that sat there, which is the post-blooming quantity.
+                //
+                // Reading the well and writing the trap state in the same pass is deliberate: the
+                // capture depends on how full the traps already are, so a pixel that has been
+                // saturated repeatedly takes less each time, which is what a finite density of
+                // interface states means and what the published behaviour after a gross
+                // overexposure requires.
+                ApplyPersistenceCapture(raw);
+
+                ApplyChargeTransferSmear(raw);
+                DumpStage("cti", raw);
+            }
 
             // The output amplifier's own departure from linearity, applied to the charge it is
             // handed and therefore AFTER transfer and BEFORE the noise it adds. It is the one
@@ -4174,6 +4300,22 @@ namespace ExoInstruments.Visualization
                 DumpStage("linearity", raw);
             }
 
+            // INTERPIXEL CAPACITANCE, applied at the readout because that is where it happens.
+            //
+            // IPC is a capacitive coupling between neighbouring pixels' sense nodes: a signal in one
+            // pixel raises the APPARENT signal in its neighbours without any charge moving. So it is
+            // neither charge diffusion nor brighter-fatter, both of which move real electrons, and
+            // it comes after everything in the charge domain and before the noise the amplifier
+            // adds. It is linear, which is why it is a fixed convolution.
+            //
+            // Off on every CCD here; the kernel is Core.InfraredArray's transcription of WFC3 ISR
+            // 2011-10's on-orbit measurement.
+            if (Spec.InterpixelCapacitanceKernel != null)
+            {
+                InfraredArray.ApplyCoupling(raw, TextureWidth, TextureHeight, Spec.InterpixelCapacitanceKernel);
+                DumpStage("ipc", raw);
+            }
+
             // Readout: the amplifier's own noise is added in electrons, ahead of the converter,
             // which is where it physically enters, and alongside it the part of the readout's zero
             // that does NOT change from frame to frame.
@@ -4184,7 +4326,18 @@ namespace ExoInstruments.Visualization
             // ever takes, so stacking does nothing to it and subtracting a master bias removes it
             // exactly. Adding them in the same loop is how a real readout produces them, and keeping
             // them distinct in the model is what makes a bias frame worth taking.
-            float readNoiseElectrons = (float)Spec.ReadNoiseElectrons;
+            // On a ramp-sampled array there is no single read noise: fitting the ramp to more
+            // non-destructive samples averages it down, so the number depends on how far up the
+            // ramp this exposure went. Interpolated between the two published anchors in
+            // 1/sqrt(N), which is how averaging N samples behaves; see Core.InfraredArray.
+            float readNoiseElectrons = Spec.RampReads > 0
+                                    && !double.IsNaN(Spec.RampReadNoiseAtFewReadsElectrons)
+                                    && !double.IsNaN(Spec.RampReadNoiseAtManyReadsElectrons)
+                ? (float)InfraredArray.EffectiveReadNoiseElectrons(
+                      Spec.RampReads,
+                      Spec.RampReadNoiseAtFewReadsElectrons, Spec.RampFewReads,
+                      Spec.RampReadNoiseAtManyReadsElectrons, Spec.RampManyReads)
+                : (float)Spec.ReadNoiseElectrons;
             for (int i = 0; i < n; i++)
                 raw[i] += NextGaussian(rngRead, readNoiseElectrons)
                         + SensorNonUniformity.OffsetElectrons(offsetFpnMap, i);
@@ -5010,6 +5163,169 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
+        /// Releases into this exposure whatever the surface traps have been holding, emptying each
+        /// of the two populations by its own exponential over the exposure's duration.
+        ///
+        /// THE ELAPSED TIME IS THE EXPOSURE'S OWN, and the dead time between subs is not part of
+        /// it. Charge released while the shutter is shut still ends up in the next frame read, so
+        /// nothing is lost; what is lost is the DISTINCTION between a sequence taken back to back
+        /// and one with gaps in it, and that distinction cannot be made because this pipeline has
+        /// no cadence model to read a gap from. Stated here rather than left implicit, and stated
+        /// in section 12. It biases in the safe direction: a residual is reported decaying no
+        /// faster than it really does.
+        /// </summary>
+        private void ApplyPersistenceRelease(float[] raw, float exposureSeconds)
+        {
+            if (!Spec.HasPersistence) return;
+            if (persistenceFastTrapped == null || persistenceSlowTrapped == null) return;
+            if (!(exposureSeconds > 0f)) return;
+
+            int n = raw.Length;
+            if (persistenceFastTrapped.Length != n || persistenceSlowTrapped.Length != n) return;
+
+            // The decay factors are the same for every pixel, so they are computed once rather
+            // than n times: only the trapped charge varies across the array.
+            double fastRemaining = Math.Exp(-exposureSeconds / Spec.PersistenceFastDecaySeconds);
+            double slowRemaining = Math.Exp(-exposureSeconds / Spec.PersistenceSlowDecaySeconds);
+
+            for (int i = 0; i < n; i++)
+            {
+                float fast = persistenceFastTrapped[i];
+                float slow = persistenceSlowTrapped[i];
+                if (fast <= 0f && slow <= 0f) continue;
+
+                float fastLeft = (float)(fast * fastRemaining);
+                float slowLeft = (float)(slow * slowRemaining);
+
+                raw[i] += (fast - fastLeft) + (slow - slowLeft);
+                persistenceFastTrapped[i] = fastLeft;
+                persistenceSlowTrapped[i] = slowLeft;
+            }
+        }
+
+        /// <summary>
+        /// Releases into this exposure the persistence the infrared array's earlier stimulus is
+        /// still producing, and ages that stimulus by the exposure's length.
+        ///
+        /// INTEGRATED OVER THE EXPOSURE, not sampled at its midpoint. The published model returns a
+        /// RATE that falls as a power law with index near 1, so over a long exposure taken soon
+        /// after a bright one the rate changes by a large factor from start to finish; taking the
+        /// value at the middle would be wrong by a percent or so in exactly the case that matters.
+        /// Core.HgCdTePersistence.IntegrateElectrons does the integral in closed form.
+        /// </summary>
+        private void ApplyHgCdTePersistenceRelease(float[] raw, float exposureSeconds)
+        {
+            if (!Spec.HasHgCdTePersistence) return;
+            if (hgcdtePersistenceFluence == null) return;
+            if (!(exposureSeconds > 0f)) return;
+
+            int n = raw.Length;
+            if (hgcdtePersistenceFluence.Length != n) return;
+
+            for (int i = 0; i < n; i++)
+            {
+                float fluence = hgcdtePersistenceFluence[i];
+                if (fluence <= 0f) continue;
+
+                double from = hgcdtePersistenceElapsedSeconds[i];
+                double to = from + exposureSeconds;
+
+                raw[i] += (float)HgCdTePersistence.IntegrateElectrons(
+                    fluence, from, to, hgcdtePersistenceStimulusSeconds[i]);
+
+                hgcdtePersistenceElapsedSeconds[i] = (float)to;
+            }
+        }
+
+        /// <summary>
+        /// Records what this exposure leaves behind for the next one: the fluence each pixel
+        /// reached and how long it sat there.
+        ///
+        /// THE NEW STIMULUS REPLACES THE OLD ONLY WHERE IT WOULD CAUSE MORE PERSISTENCE, which is
+        /// the published pipeline's own rule and the reason this is a comparison rather than an
+        /// assignment. Compared at a common reference delay rather than at each stimulus's own
+        /// elapsed time, because "which causes more persistence" has to be asked of the same moment
+        /// for the answer to mean anything; 1000 s is used, the delay the model's amplitude is
+        /// normalised at.
+        /// </summary>
+        private void RecordHgCdTeStimulus(float[] raw, float exposureSeconds)
+        {
+            if (!Spec.HasHgCdTePersistence) return;
+
+            int n = raw.Length;
+            if (hgcdtePersistenceFluence == null || hgcdtePersistenceFluence.Length != n)
+            {
+                hgcdtePersistenceFluence = new float[n];
+                hgcdtePersistenceStimulusSeconds = new float[n];
+                hgcdtePersistenceElapsedSeconds = new float[n];
+            }
+
+            const double ReferenceDelaySeconds = 1000.0;
+
+            for (int i = 0; i < n; i++)
+            {
+                double candidate = HgCdTePersistence.RateElectronsPerSecond(
+                    raw[i], ReferenceDelaySeconds, exposureSeconds);
+
+                double incumbent = hgcdtePersistenceFluence[i] > 0f
+                    ? HgCdTePersistence.RateElectronsPerSecond(
+                          hgcdtePersistenceFluence[i], ReferenceDelaySeconds,
+                          hgcdtePersistenceStimulusSeconds[i])
+                    : 0.0;
+
+                if (candidate <= incumbent) continue;
+
+                hgcdtePersistenceFluence[i] = raw[i];
+                hgcdtePersistenceStimulusSeconds[i] = exposureSeconds;
+                // The clock starts at the end of the stimulus exposure, so a following exposure
+                // beginning immediately sees the model at t = 0. The integral's lower limit guards
+                // the singularity there; see IntegrateElectrons.
+                hgcdtePersistenceElapsedSeconds[i] = 0f;
+            }
+        }
+
+        /// <summary>
+        /// Takes into the surface traps what this exposure's well charge leaves behind, splitting it
+        /// between the fast and the slow population in the ratio the device's two-exponential fit
+        /// gives.
+        ///
+        /// Allocates the state arrays on first use rather than with the other maps, so that an
+        /// instrument with no published amplitude carries no per-pixel cost at all: on this roster
+        /// that is every one of them.
+        /// </summary>
+        private void ApplyPersistenceCapture(float[] raw)
+        {
+            if (!Spec.HasPersistence) return;
+
+            int n = raw.Length;
+            if (persistenceFastTrapped == null || persistenceFastTrapped.Length != n)
+                persistenceFastTrapped = new float[n];
+            if (persistenceSlowTrapped == null || persistenceSlowTrapped.Length != n)
+                persistenceSlowTrapped = new float[n];
+
+            double fullWell = FullWellElectrons;
+            double threshold = Spec.PersistenceThresholdFractionOfFullWell;
+            double fraction = Spec.PersistenceTrappedFraction;
+            double density = Spec.PersistenceTrapDensityElectrons;
+            double fastShare = Spec.PersistenceFastShare;
+
+            for (int i = 0; i < n; i++)
+            {
+                double held = persistenceFastTrapped[i] + persistenceSlowTrapped[i];
+                double captured = DetectorPersistence.Capture(
+                    raw[i], fullWell, threshold, fraction, density, held);
+                if (captured <= 0.0) continue;
+
+                DetectorPersistence.Split(captured, fastShare, out double toFast, out double toSlow);
+                persistenceFastTrapped[i] += (float)toFast;
+                persistenceSlowTrapped[i] += (float)toSlow;
+
+                // The charge is held, not duplicated: it leaves the well it was captured from.
+                raw[i] -= (float)captured;
+            }
+        }
+
+        /// <summary>
         /// Cosmic ray hits: a flat Poisson process over the exposure deposits short, randomly
         /// angled bright tracks (Pyxel's CosmiX/TARS approach, minus the angle model; see
         /// CosmicRayHitsPerSecond), distinct from the fixed hot-pixel map since a real muon/proton
@@ -5029,14 +5345,36 @@ namespace ExoInstruments.Visualization
                 int length = CosmicRayMinTrackPx + rng.Next(CosmicRayMaxTrackPx - CosmicRayMinTrackPx);
                 double dx = Math.Cos(angle), dy = Math.Sin(angle);
 
+                // WHAT ONE EVENT DEPOSITS, and why it is not a fraction of full well.
+                //
+                // A cosmic ray leaves a measured amount of charge, and for these detectors it is
+                // published: WFC3 IHB Sect. 5.4.10, "negligible events of less than 500 e- and a
+                // median of ~1000 e-". Spread along a track of a few pixels that is a mark clearly
+                // above read noise and nowhere near saturation, which is what a raw HST frame
+                // actually looks like. The old full-well fraction put ~53,550 e- in every pixel of
+                // every track, some 350 times the published event total, and turned a real and
+                // correctly-counted population of cosmic rays into a screen of white worms.
+                //
+                // Instruments with no published figure keep the old behaviour rather than
+                // borrowing HST's: a sea-level muon through a different depletion depth is not the
+                // same event, and guessing it here would be inventing a measurement.
+                double perEvent = Spec.CosmicRayElectronsPerEvent;
+                float deposit = perEvent > 0.0
+                    ? (float)(perEvent / Math.Max(1, length))
+                    : CosmicRayDepositWellFraction * (float)FullWellElectrons;
+                bool additive = perEvent > 0.0;
+
                 for (int s = 0; s < length; s++)
                 {
                     int x = x0 + (int)Math.Round(dx * s);
                     int y = y0 + (int)Math.Round(dy * s);
                     if (x < 0 || x >= w || y < 0 || y >= h) break;
                     int i = y * w + x;
-                    float deposit = CosmicRayDepositWellFraction * (float)FullWellElectrons;
-                    if (raw[i] < deposit) raw[i] = deposit;
+                    // Charge ADDS to what the pixel already collected, and stops at full well:
+                    // a strike does not erase the sky under it, and it cannot hold more than the
+                    // well does. The old max() did neither.
+                    if (additive) raw[i] = (float)Math.Min(raw[i] + deposit, FullWellElectrons);
+                    else if (raw[i] < deposit) raw[i] = deposit;
                 }
             }
         }
@@ -5298,6 +5636,17 @@ namespace ExoInstruments.Visualization
             int n = width * height;
             if (n <= 0) return;
 
+            // A flat the observer actually took REPLACES the model rather than multiplying it.
+            //
+            // That is not a policy choice, it follows from what the two are. The parametric map
+            // below is the product of the illumination falloff and the photo-response spread, and
+            // the comment on this method says why they are stored as one: their product is
+            // precisely and only what a flat frame measures. A real flat therefore already contains
+            // both terms, plus the three that no model here can produce at all - tree rings, dust
+            // motes and accessory vignetting (see Core.MeasuredFlatField). Multiplying the two
+            // together would apply the modelled vignetting twice.
+            if (TryLoadMeasuredFlatField(width, height, n)) return;
+
             // The photo-response spread belongs to the sensor's own pixel, and the pixel this frame
             // is made of may be several of them: the display binning on top of whatever the camera
             // already sums internally (see VisualTelescopeSpec.SensorNativePixelsPerSide).
@@ -5446,6 +5795,105 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
+        /// Where a measured flat is looked for, and what it has to be called.
+        ///
+        /// A flat belongs to ONE optical train at ONE filter at ONE binning, so all three are in
+        /// the name. The dust that makes a real flat worth having sits on a filter or a window, so
+        /// a flat taken through Luminance does not describe the Hydrogen-alpha path; and the
+        /// binning has to match because the map is per frame pixel, not per sensor pixel.
+        /// </summary>
+        private string MeasuredFlatPath(int binning)
+        {
+            string camera = Sanitise(Spec.CameraName);
+            string filter = Sanitise(Filter.ToString());
+            return KSPUtil.ApplicationRootPath
+                 + "GameData/ExoInstruments/PluginData/Flat_"
+                 + camera + "_" + filter + "_bin" + binning + ".fits";
+        }
+
+        private static string Sanitise(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "unknown";
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (char c in s)
+                sb.Append(char.IsLetterOrDigit(c) ? c : '-');
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Loads the observer's own flat, if there is one, and turns it into this frame's response
+        /// map. Returns false when there is no file, which is the ordinary case and is silent.
+        ///
+        /// A FILE THAT EXISTS BUT CANNOT BE USED IS LOUD AND DOES NOT FALL BACK QUIETLY to the
+        /// modelled flat. Someone who put a file there meant to calibrate against it, and silently
+        /// substituting a parametric map would leave them reducing against a flat they think is
+        /// theirs and is not. The message names the measured reason, from Core.MeasuredFlatField.
+        /// </summary>
+        private bool TryLoadMeasuredFlatField(int width, int height, int n)
+        {
+            int binning = Math.Max(1, BinningFactor);
+            string path;
+            try { path = MeasuredFlatPath(binning); }
+            catch (Exception) { return false; }
+
+            if (!System.IO.File.Exists(path)) return false;
+
+            try
+            {
+                var image = FitsImageReader.Read(path);
+
+                // The pedestal. Preferred from the file's own header, because the number that
+                // matters is the one the OBSERVER's camera wrote and not this instrument's model:
+                // PEDESTAL is what SharpCap and NINA write, BLKLEVEL what the SBIG-derived
+                // vocabulary uses. Falling back on the modelled bias is stated in the log rather
+                // than assumed silently, since a wrong pedestal biases every response toward unity.
+                double k = Spec.ElectronsPerAduAtUnityGain;
+                double bias = Spec.EffectiveBiasLevelAdu(k);
+                string biasSource = "this instrument's modelled bias";
+                foreach (string keyword in new[] { "PEDESTAL", "BLKLEVEL" })
+                {
+                    string card = image.Card(keyword);
+                    if (card != null && double.TryParse(card.Trim(),
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out double v))
+                    {
+                        bias = v;
+                        biasSource = keyword + " from the file";
+                        break;
+                    }
+                }
+
+                var flat = MeasuredFlatField.Build(image, width, height, bias, AdcMaxCount, k);
+
+                var map = new ushort[n];
+                for (int i = 0; i < n; i++)
+                    map[i] = Float16.FromDouble(flat.Response[i] - 1.0);
+                flatFieldMap = map;
+
+                Debug.Log("[ExoInstruments] Measured flat loaded from " + path
+                        + " (" + flat.Summary + "; pedestal from " + biasSource
+                        + "). The modelled flat is not applied on top of it.");
+
+                if (flat.NoiseWarning)
+                    Debug.LogWarning("[ExoInstruments] This flat's pixel-to-pixel scatter ("
+                        + (100.0 * flat.ResponseSigma).ToString("F3") + " %) is close to its own"
+                        + " shot-noise floor (" + (100.0 * flat.ShotNoiseFloor).ToString("F3")
+                        + " %), so most of what it will stamp into every frame is this one file's"
+                        + " random noise rather than the detector's response. Stack a master flat"
+                        + " from several subs.");
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[ExoInstruments] The flat at " + path + " exists but cannot be"
+                    + " used, and the modelled flat is NOT being silently substituted for it: "
+                    + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
         /// The fraction of the array's mean response this pixel has: 1 where nothing is modelled,
         /// 0 outside a field stop, and 1 +/- a few parts in a thousand elsewhere.
         /// </summary>
@@ -5539,6 +5987,14 @@ namespace ExoInstruments.Visualization
             flatFieldMap = null;
             offsetFpnMap = null;
             fringeMap = null;
+            // Trapped charge belongs to one piece of silicon at one binning. Changing either means
+            // the pixel it was held in no longer exists, so the sequence's memory is discarded with
+            // the buffers rather than reinterpreted onto a different array.
+            persistenceFastTrapped = null;
+            persistenceSlowTrapped = null;
+            hgcdtePersistenceFluence = null;
+            hgcdtePersistenceStimulusSeconds = null;
+            hgcdtePersistenceElapsedSeconds = null;
             lastCaptureSnapshot = null;
             hasLockedAim = false;
         }

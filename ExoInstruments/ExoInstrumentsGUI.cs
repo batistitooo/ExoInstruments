@@ -3447,6 +3447,38 @@ namespace ExoInstruments
                 ExoObservatoryTelescopeTracker.TrackedAltDeg = null;
                 ExoObservatoryTelescopeTracker.TrackedAzDeg = null;
             }
+
+            ApplySpaceTelescopePointing();
+        }
+
+        /// <summary>
+        /// Slews the orbiting telescope's own attitude onto the selected target.
+        ///
+        /// WHY THIS IS NOT AUTOGUIDING. Autoguiding re-centres the CAMERA, and on the ground that
+        /// is the whole job because the mount is what tracks. In orbit the spacecraft IS the mount:
+        /// EvaluatePointing reads vessel.angularVelocity straight off the loaded vessel and smears
+        /// the frame by it, so a telescope nobody has commanded to hold an attitude images every
+        /// source as a streak no matter how well the camera is aimed at it. Choosing a target has
+        /// to move the vehicle, not just the view, and until this existed it only moved the view.
+        ///
+        /// A body is handed over as a body rather than as the direction it happens to lie in right
+        /// now, so the module can re-resolve it as the vehicle moves; see TryResolvePointingDirection.
+        /// </summary>
+        void ApplySpaceTelescopePointing()
+        {
+            SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
+            if (link == null || link.Module == null) return;
+            if (!selectedPhotographyTarget.HasTarget) return;
+
+            if (selectedPhotographyTarget.IsBody)
+            {
+                link.Module.CommandPointingAtBody(selectedPhotographyTarget.Body);
+                return;
+            }
+
+            if (solarSystemCamera == null) return;
+            if (solarSystemCamera.TryResolveWorldDirection(selectedPhotographyTarget, out Vector3d direction))
+                link.Module.CommandPointing(direction);
         }
 
         /// <summary>Altitude and azimuth of whatever the telescope is pointed at.</summary>

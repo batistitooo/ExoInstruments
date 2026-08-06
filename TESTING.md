@@ -121,6 +121,50 @@ dotnet run -p:Core=../../ExoInstruments/Core -- --out .
 The first must print `ALL CHECKS PASSED`; the second prints the model-by-model
 comparison against ESA's Pyxel.
 
+The FITS reader and the measured-flat path have their own harness, with an
+astropy cross-validation as the second half:
+
+```
+cd tools/flat-tests
+dotnet run -p:Core=../../ExoInstruments/Core -- --out .
+../env/bin/python compare_astropy.py
+```
+
+The first must print `ALL CHECKS PASSED`, the second `EVERY FILE AGREES WITH
+ASTROPY EXACTLY`. To check the in-game path, drop a flat at
+`GameData/ExoInstruments/PluginData/Flat_<camera>_<filter>_bin<N>.fits` and take
+a capture: the log must say the measured flat was loaded and that the modelled
+one is not applied on top of it. A deliberately corrupt file must produce an
+error naming the reason and must NOT silently fall back to the modelled flat.
+
+The infrared chain (WFC3/IR) has its own harness, which asserts the published
+models against the prose statements of the reports that published them:
+
+```
+cd tools/infrared-tests
+dotnet run -p:Core=../../ExoInstruments/Core
+```
+
+Must print `ALL CHECKS PASSED`. In-game, build the orbital telescope with
+`instrumentName = Hubble Space Telescope (OTA/IR)` in the part config and check
+that: the filter list offers Luminance/Red/Green/Blue and **no** H-alpha; a
+colour composite reports that no colorimetric transform is available and is
+labelled false colour; and a long exposure taken straight after a heavily
+saturated one shows a persistence afterglow that the same exposure taken cold
+does not. That last one is the only visible persistence on this roster.
+
+Persistence has its own headless harness, which also guards the sourcing of the
+roster's persistence parameters against a number arriving without a citation:
+
+```
+cd tools/persistence-tests
+dotnet run -p:Core=../../ExoInstruments/Core
+```
+
+Must print `ALL PASS`. There is no in-game check to pair with it: the effect is
+off on every instrument on the roster, none having a published amplitude
+(§7.5166), so the frame path is inert and nothing is visible to look at.
+
 ## 5. FITS header
 
 - [ ] **5.1** Export a raw sub and confirm the header carries `MAGZERO`,

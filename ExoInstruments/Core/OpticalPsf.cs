@@ -492,7 +492,21 @@ namespace ExoInstruments.Core
                 // Spikes and pad shadows reach far beyond the core, so the diffraction term is
                 // given the widest support the kernel budget allows rather than the core's own
                 // few pixels.
-                accR = Math.Min(MaxKernelRadiusPx, Math.Max(accR, (int)Math.Ceiling(8.0 * airyFwhm / plateScaleArcsecPerPixel)));
+                //
+                // THE SUPPORT MUST NOT BE SCALED BY THE CORE, which is what a multiple of the Airy
+                // FWHM does, and it is the reason Hubble's spikes were invisible. A spike is faint
+                // structure reaching far out; how far it can be SEEN is set by the source's
+                // brightness against the sky, not by the width of the core it comes from. Tying
+                // the two together fails hardest exactly where the optics are best: Hubble's Airy
+                // FWHM is 0.052 arcsec, so at the UVIS plate scale eight of them is 11 pixels, and
+                // binned 4x4 it is 3. The pupil sum was computed in full and then thrown away
+                // inside a kernel three pixels across.
+                //
+                // So the vaned case takes the whole budget. That is what the paragraph above
+                // always claimed and never did. It costs a 257x257 kernel where the radial path
+                // needs a handful of taps, which is why it is spent only when there is azimuthal
+                // structure to carry: vaneCount = 0 still takes the core-sized radial path.
+                accR = MaxKernelRadiusPx;
                 var pupil = new PupilDiffraction(apertureMeters, obstructionRatio, wavelengthMeters,
                                                  hasVanes ? vaneCount : 0,
                                                  hasVanes ? vaneWidthMeters : 0.0,
