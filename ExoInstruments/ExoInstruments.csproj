@@ -80,13 +80,25 @@
         GameData/ExoInstruments/Parts/ on every build. These are checked into the
         repo as binary assets, same as the icon in Textures/; there is no separate
         Unity/PartTools project tracked here to regenerate them from.
+
+        BUT IT MUST NEVER OVERWRITE A NEWER FILE, and that is not a nicety. PartTools
+        writes its .mu straight into GameData, so during modelling work GameData holds
+        the only copy of an export the repo has never seen. A plain mirror out of the
+        repo destroys that export on the next build, silently, and the loss looks like
+        the model "reverting" with nothing to point at. rsync's update flag makes the
+        copy refuse to go backwards in time, so the newest export always wins whichever
+        side made it, and PullParts below carries it back into the repo where it belongs.
+
+        The permanent fix is to point PartTools at Parts/OrbitalObservatory/ directly
+        and let the push be the only direction; until then this keeps both safe.
     -->
+    <Target Name="PullParts" BeforeTargets="Build" Condition="Exists('$(OutputPath)')">
+        <Exec Command="rsync -a --update &quot;$(OutputPath)../Parts/&quot; &quot;$(ProjectDir)Parts/&quot;"
+              ContinueOnError="true" />
+    </Target>
+
     <Target Name="CopyParts" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
-        <ItemGroup>
-            <PartsToCopy Include="$(ProjectDir)Parts\**\*.*" />
-        </ItemGroup>
-        <Copy SourceFiles="@(PartsToCopy)"
-              DestinationFolder="$(OutputPath)..\Parts\%(RecursiveDir)"
-              SkipUnchangedFiles="true" />
+        <Exec Command="rsync -a --update &quot;$(ProjectDir)Parts/&quot; &quot;$(OutputPath)../Parts/&quot;"
+              ContinueOnError="true" />
     </Target>
 </Project>
