@@ -45,17 +45,28 @@
     </ItemGroup>
 
     <!--
-        OutputPath points at GameData/ExoInstruments/Plugins/, so its parent directory
-        is GameData/ExoInstruments/ itself. Mirror the repo's Textures/ folder there on
-        every build so installing the built DLL also deploys the toolbar icon (and any
-        other texture) to the exact path GameDatabase.GetTexture expects.
+        OutputPath points at GameData/ExoInstruments/Plugins/, so GameData/ExoInstruments/
+        itself is its parent. Every deploy target below writes under this one directory,
+        so resolve it once and let them all say what they mean.
     -->
-    <Target Name="CopyTextures" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+    <Target Name="_ResolveModInstallDir">
+        <PropertyGroup>
+            <ModInstallDir>$([System.IO.Path]::GetFullPath('$(OutputPath)..'))\</ModInstallDir>
+        </PropertyGroup>
+    </Target>
+
+    <!--
+        Mirror the repo's Textures/ folder into the install on every build so installing the
+        built DLL also deploys the toolbar icon (and any other texture) to the exact path
+        GameDatabase.GetTexture expects.
+    -->
+    <Target Name="CopyTextures" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
+            Condition="Exists('$(OutputPath)')">
         <ItemGroup>
             <TexturesToCopy Include="$(ProjectDir)Textures\**\*.*" />
         </ItemGroup>
         <Copy SourceFiles="@(TexturesToCopy)"
-              DestinationFolder="$(OutputPath)..\Textures\%(RecursiveDir)"
+              DestinationFolder="$(ModInstallDir)Textures\%(RecursiveDir)"
               SkipUnchangedFiles="true" />
     </Target>
 
@@ -64,41 +75,138 @@
         background-star catalogs ExoplanetCsvLoader/BackgroundStarCatalogLoader read at
         runtime) to GameData/ExoInstruments/PluginData/ on every build. Without this the
         mod builds and loads but has zero targets to observe.
+
+        Only the two catalogues the repo carries move here. The packed sky products —
+        GaiaStarCatalog.starcat, DustMap.dustmap, HalphaMap.emission, GalaxyCatalog.galcat —
+        are built by tools/ straight into the install and are not in the repo, so this
+        never has an opinion about them and never removes them.
     -->
-    <Target Name="CopyPluginData" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
+    <Target Name="CopyPluginData" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
+            Condition="Exists('$(OutputPath)')">
         <ItemGroup>
             <PluginDataToCopy Include="$(ProjectDir)PluginData\**\*.*" />
         </ItemGroup>
         <Copy SourceFiles="@(PluginDataToCopy)"
-              DestinationFolder="$(OutputPath)..\PluginData\%(RecursiveDir)"
+              DestinationFolder="$(ModInstallDir)PluginData\%(RecursiveDir)"
               SkipUnchangedFiles="true" />
     </Target>
 
     <!--
-        Same idea again: mirrors the repo's Parts/ (the observatory's exported .mu
-        models, referenced by GameDatabase path in ExoObservatoryFacility.cs) to
-        GameData/ExoInstruments/Parts/ on every build. These are checked into the
-        repo as binary assets, same as the icon in Textures/; there is no separate
-        Unity/PartTools project tracked here to regenerate them from.
+        Parts/ holds the observatory's exported .mu models and the space telescope's part
+        config and textures. They are checked into the repo as binary assets, same as the
+        icon in Textures/; there is no Unity/PartTools project tracked here to rebuild them
+        from, so the copy in the repo is the only copy there is.
 
-        BUT IT MUST NEVER OVERWRITE A NEWER FILE, and that is not a nicety. PartTools
-        writes its .mu straight into GameData, so during modelling work GameData holds
-        the only copy of an export the repo has never seen. A plain mirror out of the
-        repo destroys that export on the next build, silently, and the loss looks like
-        the model "reverting" with nothing to point at. rsync's update flag makes the
-        copy refuse to go backwards in time, so the newest export always wins whichever
-        side made it, and PullParts below carries it back into the repo where it belongs.
+        THE COPY MUST NEVER OVERWRITE A NEWER FILE, and that is not a nicety. PartTools
+        writes its .mu straight into GameData, so during modelling work the install holds
+        the only copy of an export the repo has never seen. A plain mirror out of the repo
+        destroys that export on the next build, silently, and the loss looks like the model
+        "reverting" with nothing to point at. So each file is copied only when the side it
+        is coming from is strictly the newer one: PullParts carries a fresh export back into
+        the repo before the build, CopyParts pushes committed work out to the install after
+        it, and neither can move a file backwards in time.
 
-        The permanent fix is to point PartTools at Parts/OrbitalObservatory/ directly
-        and let the push be the only direction; until then this keeps both safe.
+        This used to be two rsync calls with the archive and update flags, which is exactly
+        the right semantics and exactly the wrong tool: Windows has no rsync, both Execs
+        failed with 9009, and
+        ContinueOnError turned that into a warning nobody reads. The install then sat on a
+        stale model for as long as it took someone to notice. The comparison below is the
+        same rule written in MSBuild, so it behaves the same on both machines and fails
+        loudly if it ever cannot.
+
+        %(ModifiedTime) on an item whose identity is the destination is empty when that
+        file does not exist yet, which is the "copy it, there is nothing there" case. When
+        it does exist, MSBuild's stamp format (yyyy-MM-dd HH:mm:ss.fffffff) is fixed-width,
+        so an ordinal string compare is a chronological compare.
+
+        @thumbs/ is skipped in both directions: KSP regenerates those part icons from the
+        models, they go stale the moment a model is re-exported, and .gitignore keeps them
+        out of the repo.
+
+        The permanent fix is still to point PartTools at Parts/OrbitalObservatory/ directly
+        and let the push be the only direction; until then this keeps both sides safe.
     -->
-    <Target Name="PullParts" BeforeTargets="Build" Condition="Exists('$(OutputPath)')">
-        <Exec Command="rsync -a --update &quot;$(OutputPath)../Parts/&quot; &quot;$(ProjectDir)Parts/&quot;"
-              ContinueOnError="true" />
+    <Target Name="PullParts" BeforeTargets="Build" DependsOnTargets="_ResolveModInstallDir"
+            Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <_PartsInInstall Include="$(ModInstallDir)Parts\**\*.*"
+                             Exclude="$(ModInstallDir)Parts\**\@thumbs\**\*.*" />
+            <_PartPull Include="@(_PartsInInstall->'$(ProjectDir)Parts\%(RecursiveDir)%(Filename)%(Extension)')">
+                <Source>%(_PartsInInstall.FullPath)</Source>
+                <SourceStamp>%(_PartsInInstall.ModifiedTime)</SourceStamp>
+            </_PartPull>
+        </ItemGroup>
+        <Copy SourceFiles="%(_PartPull.Source)"
+              DestinationFiles="%(_PartPull.Identity)"
+              Condition="'%(_PartPull.ModifiedTime)' == '' Or $([System.String]::CompareOrdinal('%(_PartPull.SourceStamp)', '%(_PartPull.ModifiedTime)')) &gt; 0" />
     </Target>
 
-    <Target Name="CopyParts" AfterTargets="Build" Condition="Exists('$(OutputPath)')">
-        <Exec Command="rsync -a --update &quot;$(ProjectDir)Parts/&quot; &quot;$(OutputPath)../Parts/&quot;"
-              ContinueOnError="true" />
+    <Target Name="CopyParts" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
+            Condition="Exists('$(OutputPath)')">
+        <ItemGroup>
+            <_PartsInRepo Include="$(ProjectDir)Parts\**\*.*"
+                          Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*" />
+            <_PartPush Include="@(_PartsInRepo->'$(ModInstallDir)Parts\%(RecursiveDir)%(Filename)%(Extension)')">
+                <Source>%(_PartsInRepo.FullPath)</Source>
+                <SourceStamp>%(_PartsInRepo.ModifiedTime)</SourceStamp>
+            </_PartPush>
+        </ItemGroup>
+        <Copy SourceFiles="%(_PartPush.Source)"
+              DestinationFiles="%(_PartPush.Identity)"
+              Condition="'%(_PartPush.ModifiedTime)' == '' Or $([System.String]::CompareOrdinal('%(_PartPush.SourceStamp)', '%(_PartPush.ModifiedTime)')) &gt; 0" />
+    </Target>
+
+    <!--
+        `dotnet build -t:Package` builds the release a player downloads. Everything above
+        deploys into one developer's own KSP install, which does nothing for anybody else;
+        this target is the only thing that produces an artefact someone can be handed.
+
+        The layout is what both audiences already expect. A player unzips and drags GameData
+        onto the KSP folder — no file to move, no folder to create, no step to get wrong.
+        CKAN reads ExoInstruments.netkan, which says `find: ExoInstruments, install_to:
+        GameData`, and finds that directory at GameData/ExoInstruments/ inside the zip.
+
+        Staged from the repo and from $(TargetPath), never from the local install, so a
+        developer's half-finished export or hand-copied file cannot leak into a release.
+
+        What deliberately does NOT ship: the four packed sky products. They are 138 MB of
+        someone else's published survey data, every one of them optional, and README.md —
+        included in the zip for this reason — has the script and the command for each. The
+        mod loads and photographs the solar system without them and says in the log which
+        ones it did not find.
+
+        The staging directory is deleted first so a file dropped from the repo cannot
+        survive in the zip from a previous run.
+    -->
+    <Target Name="Package" DependsOnTargets="Build">
+        <PropertyGroup>
+            <DistDir>$(ProjectDir)..\dist\</DistDir>
+            <PackageStageDir>$(DistDir)stage\</PackageStageDir>
+            <PackageModDir>$(PackageStageDir)GameData\ExoInstruments\</PackageModDir>
+            <PackageZipName Condition="'$(ReleaseVersion)' == ''">ExoInstruments.zip</PackageZipName>
+            <PackageZipName Condition="'$(ReleaseVersion)' != ''">ExoInstruments-$(ReleaseVersion).zip</PackageZipName>
+        </PropertyGroup>
+
+        <RemoveDir Directories="$(PackageStageDir)" />
+
+        <ItemGroup>
+            <_ShipParts Include="$(ProjectDir)Parts\**\*.*"
+                        Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*" />
+            <_ShipTextures Include="$(ProjectDir)Textures\**\*.*" />
+            <_ShipPluginData Include="$(ProjectDir)PluginData\**\*.*" />
+            <_ShipDocs Include="$(ProjectDir)..\LICENSE;$(ProjectDir)..\README.md" />
+        </ItemGroup>
+
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PackageModDir)Plugins\" />
+        <Copy SourceFiles="@(_ShipParts)" DestinationFolder="$(PackageModDir)Parts\%(RecursiveDir)" />
+        <Copy SourceFiles="@(_ShipTextures)" DestinationFolder="$(PackageModDir)Textures\%(RecursiveDir)" />
+        <Copy SourceFiles="@(_ShipPluginData)" DestinationFolder="$(PackageModDir)PluginData\%(RecursiveDir)" />
+        <Copy SourceFiles="@(_ShipDocs)" DestinationFolder="$(PackageModDir)" />
+
+        <ZipDirectory SourceDirectory="$(PackageStageDir)"
+                      DestinationFile="$(DistDir)$(PackageZipName)"
+                      Overwrite="true" />
+
+        <Message Importance="high" Text="Packaged $(DistDir)$(PackageZipName) — unzip over the KSP folder, or feed it to a GitHub release for CKAN." />
     </Target>
 </Project>

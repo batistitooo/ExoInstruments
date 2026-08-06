@@ -43,3 +43,7 @@ tools/*.log
 # KSP regenerates the part icons in Parts/@thumbs/ on first load. They are a cache keyed to
 # the models, not source, and they go stale the moment a model is re-exported.
 ExoInstruments/Parts/@thumbs/
+
+# The release zip and the tree it is staged from, both rebuilt from the repo and the built DLL
+# by `dotnet build -t:Package`. The artefact belongs on a GitHub release, not in history.
+dist/
