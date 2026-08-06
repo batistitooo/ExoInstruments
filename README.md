@@ -8,12 +8,12 @@
 
 This project uses a proprietary license. It is not a Creative Commons license: redistribution of copies (even unmodified ones) is not permitted here, only personal use of the original. Full legal terms are in [LICENSE](./LICENSE).
 
-**Bundled third-party assets.** `ExoInstruments/Parts/OrbitalObservatory/model.mu` and
-`texture001.dds` are not covered by the above. They are Tarsier Space Technology's, Copyright (c)
-2013 tobyb121, under the **MIT licence**, whose text ships beside them in `TARSIER-LICENSE.txt`. MIT
-permits this bundling and does not require the rest of the project to change licence, but it also
-cannot be overridden by it: anyone who receives those two files keeps their MIT rights over them,
-whatever the terms above say about the rest. None of Tarsier's source code is used.
+**Bundled assets.** The orbital telescope's model, `ExoInstruments/Parts/OrbitalObservatory/model.mu`,
+is this project's own: modelled in Fusion, exported through PartTools, and covered by the terms above
+like everything else. It replaced a placeholder — Tarsier Space Technology's Deep Space Telescope,
+Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licence text beside it —
+and neither that model, its texture, nor its licence file is part of this mod any more. None of
+Tarsier's source code was ever used.
 
 ## Overview
 
@@ -121,9 +121,9 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 Every other instrument above is somebody else's telescope, whose time you buy. This one does not
 exist until you launch it.
 
-**The part.** *Orbital Astrophysics Observatory*, in the Science category. Its model is Tarsier Space
-Technology's Deep Space Telescope, used under that mod's MIT licence and shipped with the licence
-text beside it; none of Tarsier's code is used, and it is a placeholder until a bespoke mesh exists.
+**The part.** *Orbital Astrophysics Observatory*, in the Science category. Its model is the mod's own:
+a bare optical-tube assembly modelled for this part, which replaced the Tarsier Space Technology
+placeholder that stood in for it while there was no bespoke mesh.
 It carries the telescope, its aperture door, and its own reaction wheels. It appears in the observatory's instrument list only
 once you have one in orbit; there is no Funds price, because the cost is the part, the launch, and
 building a spacecraft that can actually hold a target still.

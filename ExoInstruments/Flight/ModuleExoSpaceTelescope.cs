@@ -70,12 +70,12 @@ namespace ExoInstruments.Flight
         /// Transform carrying the aperture door's Animation component, and the two clip names on
         /// it.
         ///
-        /// TWO NAMED CLIPS RATHER THAN ONE PLAYED BACKWARDS, which is how the shipped model was
-        /// authored and how Tarsier Space Technology's own module drives it. A door is not
-        /// necessarily symmetric in time: closing can take a different path from opening, and a
-        /// model that supplies two clips is telling you that. Leave the names empty to play the
-        /// component's default clip forwards and backwards instead, which is what a model with
-        /// only one clip wants.
+        /// TWO NAMED CLIPS RATHER THAN ONE PLAYED BACKWARDS, when the model supplies them. A door
+        /// is not necessarily symmetric in time: closing can take a different path from opening,
+        /// and a model that supplies two clips is telling you that. A model with only one clip
+        /// wants the component's default clip played forwards and backwards instead, and gets it
+        /// either by leaving these names empty or simply by not carrying a clip under either name
+        /// — the lookup falls back on its own. The shipped model is a one-clip model.
         ///
         /// A part with no animation at all counts as permanently open. That is a telescope
         /// without a door, not a door stuck shut, and it is the right reading for a bare optical

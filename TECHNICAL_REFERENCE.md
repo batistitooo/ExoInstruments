@@ -2132,34 +2132,38 @@ attitude motion, so the real body rate is sampled and used instead of the analyt
 is nothing to model when the answer is observable. On an unloaded vessel the attitude is frozen and
 unobservable, and the analytic path runs from the authority measured the last time it *was* loaded.
 
-### 13.5 The part (`Flight/ModuleExoSpaceTelescope.cs`, `Parts/ExoSpaceTelescope.cfg`)
+### 13.5 The part (`Flight/ModuleExoSpaceTelescope.cs`, `Parts/OrbitalObservatory/ExoSpaceTelescope.cfg`)
 
-**The model is Tarsier Space Technology's, under its MIT licence** (Copyright (c) 2013 tobyb121),
-redistributed with the licence text beside it as that licence requires. None of Tarsier's *code* is
-used. It is a placeholder for a purpose-built mesh and a good one, because reading the binary with
-`tools/dump_mu.py` shows its transform tree already carries the three things a telescope part needs:
+**The model is this project's own**: a bare OTA tube modelled in Fusion, exported through Unity and
+PartTools. It replaced Tarsier Space Technology's Deep Space Telescope, which stood in as a
+placeholder under that mod's MIT licence; nothing of Tarsier's, model or code, is in the part now.
 
-```
-TelescopeContainer
-  Telescope          <- Animation component, clips "open" and "close": the aperture door
-    Telescope 1      <- tube mesh and collider
-    CameraTransform
-    LookTransform    <- at (0, 0, 0.666), +Z along the tube: the optical boresight
-```
+The bespoke mesh is deliberately sparser than the placeholder was, and the config is shorter for it.
+Where the Tarsier model carried a named boresight transform and two named door clips, this one
+carries a tube and one animation, so the module supplies the rest:
 
-`LookTransform`'s convention (+Z is the optical axis, origin at the entrance pupil) is exactly what
-the module wants, so `boresightTransformName = LookTransform` and no transform has to be generated.
-Swapping in a bespoke mesh later means matching those three names and nothing else. `tools/dump_mu.py`
-exists so that claim can be checked against the binary rather than assumed: a part config naming a
+| What the model provides | What the config therefore does not name |
+|---|---|
+| Exactly one `Animation` component | `animationTransformName` — `FindDoorAnimation` falls back to `part.FindModelAnimators()[0]` |
+| One door clip, not two | `animationClipNameOpen`/`Close` — the default clip is played forwards to open, backwards to close |
+| No boresight transform | `boresightTransformName` — `CreateBoresightTransform` builds one along the part's **+Y** |
+
+That last row is why the tube has to be exported lying along +Y with its base on the origin, and why
+`apertureOffsetMeters = 13.24` is a measurement off the export rather than off the CAD: the Body mesh
+runs y = 0.00 to 13.24 in part space, so the open end — where the occlusion rays have to start — is
+at 13.24. Re-export the tube at a different scale and that number moves with it.
+
+All of it is checkable without launching the game, which is the point of `tools/dump_mu.py`: the dump
+must show exactly one `ANIMATION` and a mesh running +Y from the origin. A part config naming a
 transform the model does not have produces a part which loads, renders and silently does not work.
 
 **Aperture door.** A hard gate on observing, not an animation. HST's exists as bright-object
 protection of last resort — to close over the optics if attitude control is ever lost with the Sun
 in reach. The module drives the model's own `Animation` directly, playing the named clip for each
-direction, which is how the shipped model was authored and how Tarsier's own module drives it: a
-door is not necessarily symmetric in time, and a model supplying two clips is saying so. A model
-with one clip is played forwards to open and backwards to close instead, and a model with no
-animation counts as permanently open — a telescope without a door, not a door stuck shut.
+direction when the model supplies two: a door is not necessarily symmetric in time, and a model
+supplying two clips is saying so. The shipped model supplies one, which is played forwards to open
+and backwards to close instead, and a model with no animation counts as permanently open — a
+telescope without a door, not a door stuck shut.
 
 **Open means FULLY open.** The state is false for the whole of the transit and becomes true when the
 clip finishes. A door part way across the pupil is an obstruction of unknown outline, which is
