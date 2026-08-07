@@ -39,6 +39,7 @@ tools/*.patchset
 tools/*.dustmap
 tools/galaxy_image_cache/
 tools/*.log
+tools/*.err
 
 # KSP regenerates the part icons in Parts/@thumbs/ on first load. They are a cache keyed to
 # the models, not source, and they go stale the moment a model is re-exported.
