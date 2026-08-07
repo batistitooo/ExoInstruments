@@ -41,6 +41,13 @@ tools/galaxy_image_cache/
 tools/*.log
 tools/*.err
 
+# setup_data.py's own scratch space when it is run out of a clone rather than out of an install:
+# the virtualenv it builds (deliberately not tools/env, which is committed) and the source files
+# it downloads. Run from an installed mod instead, both of these live in
+# <KSP>/ExoInstruments-data-build/ and never come near the repository.
+tools/setup_env/
+tools/downloads/
+
 # KSP regenerates the part icons in Parts/@thumbs/ on first load. They are a cache keyed to
 # the models, not source, and they go stale the moment a model is re-exported.
 ExoInstruments/Parts/@thumbs/
@@ -48,3 +55,11 @@ ExoInstruments/Parts/@thumbs/
 # The release zip and the tree it is staged from, both rebuilt from the repo and the built DLL
 # by `dotnet build -t:Package`. The artefact belongs on a GitHub release, not in history.
 dist/
+
+# The player guide's LaTeX source stays local; only the compiled PDF is tracked.
+ExoInstruments-Getting-Started.tex
+
+# PartTools writes straight into GameData, so a re-export is sometimes staged by hand-copying the
+# previous .mu aside first. Those backups are scratch, and a stale multi-megabyte binary is the
+# last thing that should end up in history.
+*.mu.bak

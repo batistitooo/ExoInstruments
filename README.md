@@ -15,9 +15,35 @@ Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licen
 and neither that model, its texture, nor its licence file is part of this mod any more. None of
 Tarsier's source code was ever used.
 
+## Installation
+
+**Through CKAN**, search for ExoInstruments and install it. That is everything: the mod has no hard
+dependencies, ships every file it needs to run, and works the moment KSP restarts.
+
+**By hand**, download the release zip and unzip it over your KSP folder, so that the `GameData`
+inside the zip merges with the one already there. Nothing to move, no folder to create.
+
+Two mods are worth having alongside it and CKAN offers both:
+[BetterTimeWarpContinued](https://github.com/linuxgurugamer/BetterTimeWarpContinued), which lifts
+stock KSP's silent 100,000x warp cap so scheduled observations do not crawl, and
+[EnvironmentalVisualEnhancements](https://github.com/LGhassen/EnvironmentalVisualEnhancements),
+whose clouds are read live by the imaging weather model. Both are detected at runtime by
+reflection; with neither installed, everything falls back to stock behaviour untouched.
+
+**Then, optionally, the sky surveys.** The real star field, dust map, Hα map and galaxy catalogues
+are not in the download, for the reasons in [Data files](#data-files-one-command) below. They are
+one command:
+
+```bash
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py"
+```
+
+The mod is fully playable without ever running it, and says in the log which surveys it did not
+find rather than failing.
+
 ## Overview
 
-**ExoInstruments** is an independent mod for *Kerbal Space Program 1* that replaces the game's fictional science-experiment loop with a ground-based exoplanet survey built on real observational astrophysics. Rather than abstracting "science points" from generic biome scans, the mod asks the player to run an actual survey program: select a star from a real catalog, choose an instrument appropriate to its brightness and the physics of the detection method, and extract a signal from simulated, noise-limited data exactly the way an observational astronomer would.
+**ExoInstruments** is an independent mod for *Kerbal Space Program 1* that adds a working observatory to the game, alongside the stock science system rather than in place of it: nothing in the base game is removed or changed. It has two halves. One is observational astronomy: real, named telescopes, from a backyard astrograph to the VLT to a space telescope you launch yourself, taking genuine photographs of planets, moons, star fields, nebulae and galaxies through real optics onto real detector models, down to FITS files that open in real astronomy software. The other is an exoplanet survey built on real observational astrophysics: select a star from a real catalog, choose an instrument appropriate to its brightness and the physics of the detection method, and extract a signal from simulated, noise-limited data exactly the way an observational astronomer would.
 
 
 ## Key Features
@@ -93,7 +119,7 @@ Tarsier's source code was ever used.
 
 - **Decluttered sky chart.** A density-aware thinning pass caps how many real hosts survive per sky cell, so a single dense survey field (Kepler-style) can't give away "something's here" before it's ever been scanned. Solar-system bodies get their own decluttering too: a planet and its own moons often land on nearly the same point of sky from Kerbin, so overlapping markers are nudged apart into a small ring, just far enough that each one stays individually clickable at any zoom level.
 
-- **A real, upgradeable KSC Observatory building.** Not a toolbar button bolted onto stock scenery, but a genuine facility built on the same stock systems the VAB or Astronaut Complex use; real hover highlighting, a real right-click facility dialog, and a real funds-gated upgrade path. Its telescope continuously points at whatever target is currently being observed, using the same real altitude/azimuth conversion the rest of the mod already relies on, so the rig's orientation reflects the target's actual position in Kerbin's sky, not a cosmetic animation.
+- **A real, upgradeable KSC Observatory building.** Not a toolbar button bolted onto stock scenery, but a genuine facility built on the same stock systems the VAB or Astronaut Complex use; real hover highlighting, a real right-click facility dialog, and a real facility level (a second, funds-gated level is modelled but not yet wired in). Its telescope continuously points at whatever target is currently being observed, using the same real altitude/azimuth conversion the rest of the mod already relies on, so the rig's orientation reflects the target's actual position in Kerbin's sky, not a cosmetic animation.
 
 ## The Telescope Fleet
 
@@ -103,13 +129,13 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 
 | Instrument | Type | Detection Method | Relative Noise Level | Academic Role |
 |---|---|---|---|---|
-| **WASP** | Wide-field, small-aperture (200 mm lens) survey camera | Transit Photometry | High (~1000 ppm) | Entry-level, low-cost fog clearing on bright, easy targets |
+| **WASP** | Wide-field, small-aperture (200 mm lens) survey camera | Transit Photometry | High (~1000 ppm) | **The instrument a career starts with.** Entry-level, low-cost fog clearing on bright, easy targets |
 | **SPECULOOS** | Four 1 m robotic telescopes (Paranal) | Transit Photometry | Low (~150 ppm) | The survey's photometric workhorse; tuned for small planets around ultra-cool dwarfs |
 | **TESS** | Space-based, 10.5 cm aperture, all-sky survey | Transit Photometry | High (~1095 ppm) | Space-based photometry immune to atmospheric noise, gated behind a real capital threshold |
 | **SOPHIE** | 1.93 m spectrograph (Observatoire de Haute-Provence) | Radial Velocity | Moderate (~2.0 m/s) | Entry point into spectroscopic RV detection |
 | **HARPS** | 3.6 m ESO telescope (La Silla) | Radial Velocity | Low (~1.0 m/s) | Long-baseline RV workhorse; the field's historical benchmark |
 | **ESPRESSO** | VLT-fed ultra-stable spectrograph | Radial Velocity | Ultra-Low (~0.15 m/s) | The RV path's capstone; sub-10 cm/s, resolving Earth-mass reflex signals |
-| **ELT** | 39.3 m Extremely Large Telescope (Cerro Armazones) | Direct Imaging | Contrast-limited (~10⁻⁴ at 1 λ/D) | Flagship direct-imaging capability, independent of transit or RV geometry |
+| **ELT** | 39.3 m Extremely Large Telescope (Cerro Armazones) | Direct Imaging | *Not offered: under construction* | The direct-imaging path is listed but not selectable; its physics is not yet at the standard of the rest of the pipeline (TECHNICAL_REFERENCE section 12.3) |
 | **RC20** | PlaneWave 20" astrograph | Solar-System Photography | N/A; not an exoplanet detector | A real backyard-class scope: point-and-shoot photos of planets and moons in the Kerbol system |
 | **CDK1000** | PlaneWave CDK1000, 1.0 m Corrected Dall-Kirkham (Palomar-class) | Solar-System Photography | N/A; not an exoplanet detector | Research-grade step up from the RC20: nearly four times the light-collecting area |
 | **VLT FORS2** | Real VLT Unit Telescope 1, 8.2 m, real FORS2 imager | Solar-System Photography | N/A; not an exoplanet detector | The actual Very Large Telescope, pointed at the neighborhood instead of a distant galaxy |
@@ -238,76 +264,103 @@ A capture is monochrome — one value per pixel — but the pipeline currently s
 
 **2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
-## Data files: what to install
+## Data files: one command
 
 **Nothing but the plugin ships.** Every sky survey this mod reads is someone else's published data,
 often hundreds of megabytes, and vendoring it would be both a licensing question and a download
 nobody asked for. Each one is optional and independent: with none of them installed the instruments
 work and photograph the solar system, and each file you add turns on one more thing.
 
-All of them are built by a script in `tools/` and copied to
-`<KSP>/GameData/ExoInstruments/PluginData/`.
+So they are built on your machine instead, by one script that came with the mod.
 
-| File | Size | Source | What it turns on | Section |
+### Before you start
+
+1. **Python 3.9 or newer.** The script needs it; KSP does not. Windows: install it from
+   <https://www.python.org/downloads/> and tick **"Add python.exe to PATH"** in the installer.
+   macOS and Linux already have it.
+2. **A free ESA archive account**, only if you want the star field. Register at
+   <https://cosmos.esa.int/web/gaia-users/register> and **click the link in the confirmation
+   mail**, because an unactivated account fails to log in. Skip this and everything else still
+   builds.
+3. **Disk space**: about 150 MB for the defaults, plus a few GB of scratch that you can delete
+   afterwards. The script tells you where.
+
+### Run it
+
+Wherever `<KSP>` appears below, put the folder that contains `GameData`. On Windows that is
+usually `C:\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program`; on macOS,
+`~/Library/Application Support/Steam/steamapps/common/Kerbal Space Program`.
+
+```bash
+# macOS and Linux
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py"
+```
+
+```bat
+REM Windows, in Command Prompt or PowerShell
+py "<KSP>\GameData\ExoInstruments\tools\setup_data.py"
+```
+
+That is the whole install, and it takes no arguments: it finds KSP from its own location, builds
+its own virtualenv, downloads what has to be downloaded, runs each packer, checks each result and
+copies it into `PluginData/`. It is safe to interrupt and rerun, since anything already installed
+is skipped and every packer resumes from its own cache.
+
+It asks you two things and nothing else: your ESA username (blank to skip the star field) and
+your ESA password, which is never echoed and never passed on the command line. Both are asked
+**at the start**, so a run you walk away from is not found blocked on a prompt an hour later.
+
+| Product | File | Size | Source | What it turns on |
 |---|---|---|---|---|
-| `GaiaStarCatalog.starcat` | 88 MB at G ≤ 13 | Gaia DR3, via the ESA archive | The star field in every photograph | [below](#the-star-field-is-user-supplied-build-it-from-gaia-dr3) |
-| `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout | [below](#optional-the-interstellar-dust-map) |
-| `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband | [below](#optional-the-h-alpha-emission-map) |
-| `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape | [below](#optional-the-galaxy-catalogue) |
+| `stars` | `GaiaStarCatalog.starcat` | 103 MB at G < 13, 236 MB at G < 14 | Gaia DR3, via the ESA archive | The star field in every photograph |
+| `dust` | `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout |
+| `halpha` | `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband |
+| `galaxies` | `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape |
+| `patches` | `HalphaPatches.patchset` | 1.1 MB | SHASSA | High-resolution Hα where SHASSA covers the sky |
+| `images` | `GalaxyImages.galimg` | 273 MB at B ≤ 11 | DSS/SDSS cutouts | Real imagery instead of a smooth Sérsic ellipse |
 
-Each script prints named sanity checks as it runs — M31 must come out 3.2° across at B_T 4.4, Sgr A*
-must land at Galactic (0, 0) — so a units error or a wrong file fails loudly instead of producing a
-plausible sky. If a script says nothing looks familiar, stop and check the input.
+**The first four are built by default**, the star field at `--gmax 13`, which is 7.4 M stars and
+103 MB. `patches` and `images` are opt-in, not because they are worth less but because they cost a
+different order of magnitude: `patches` downloads about 2.3 GB of SHASSA fields, and `images`
+fetches a cutout per galaxy and runs for hours.
 
-### All four, in order
+### How deep a star field
 
-Set `KSP` to your install and run these from the repository root. The sections further down explain
-what each one is and why; this is the whole install.
+The faint limit is yours to pick, and it is also the RAM the catalogue occupies while you play.
+These are counts measured against the Gaia archive, not estimates:
 
-```bash
-KSP="$HOME/Library/Application Support/Steam/steamapps/common/Kerbal Space Program"
-cd tools
-python3 -m venv env
-./env/bin/pip install numpy scipy astropy healpy requests dustmaps
-```
-
-**1. The star field.** Needs a free ESA archive account
-(<https://cosmos.esa.int/web/gaia-users/register>); the password is prompted for, never taken on the
-command line. No packages needed — the archive speaks plain HTTP. Hours, but it resumes if
-interrupted. Try the one-minute cone first:
-
-```bash
-python3 pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
-python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
-cp GaiaStarCatalog.starcat "$KSP/GameData/ExoInstruments/PluginData/"
-```
-
-**2. The dust map.** Fetches SFD98 (~150 MB) on first run.
+| `--gmax` | Stars | File and RAM |
+|---|---|---|
+| none | no star field at all, honestly empty | 0 |
+| 12 | 3.09 M | 43 MB |
+| **13** (default) | **7.37 M** | **103 MB** |
+| 14 | 16.8 M | 236 MB |
+| 15 | 36.9 M | 517 MB |
 
 ```bash
-./env/bin/python pack_dust_map.py --out DustMap.dustmap
-cp DustMap.dustmap "$KSP/GameData/ExoInstruments/PluginData/"
+# everything, including the two expensive ones
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --with all
+
+# everything EXCEPT the star field, if you do not want an ESA account
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --skip stars
+
+# just one product
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only dust
+
+# a deeper star field. --force is only needed to REPLACE a catalogue you already have;
+# on a fresh install you can leave it off.
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only stars --gmax 14 --force
 ```
 
-**3. The Hα map.** The 49 MB source file is downloaded by hand on purpose: the archive's URLs move,
-and a wrong file silently producing a plausible sky is worse than an error. **Take the nside 1024
-file, not the 512** — see the section below for why.
+Each packer prints named sanity checks as it runs (M31 must come out 3.2° across at B_T 4.4, Sgr A*
+must land at Galactic (0, 0)), so a units error or a wrong file fails loudly instead of producing a
+plausible sky. On top of that, `setup_data.py` refuses to install a file that does not start with
+its format's magic number, so a truncated download is caught before it reaches the game.
 
-```bash
-curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits
-./env/bin/python pack_halpha_map.py --input Halpha_fwhm06_1024.fits --out HalphaMap.emission
-cp HalphaMap.emission "$KSP/GameData/ExoInstruments/PluginData/"
-```
+The sections further down explain what each product is, where every pixel came from, and how to run
+its packer by hand. None of that is needed to install them; it is there because a survey you cannot
+trace is a survey you cannot trust.
 
-**4. The galaxies.** Queries HyperLEDA directly and takes about a minute. `--bmax 13` gives 1454
-galaxies in 82 KB and is plenty for the RedCat; `--bmax 15` gives 15 732 in 0.9 MB. It prints M31,
-M33, M87, M51 and M77 with their parameters as it finishes — M31 must come out at **B_T 4.29, D25
-177.8′, b/a 0.392, PA 35°**, and if it does not, stop rather than install the result.
-
-```bash
-./env/bin/python pack_galaxy_catalog.py --bmax 13.0 --out GalaxyCatalog.galcat
-cp GalaxyCatalog.galcat "$KSP/GameData/ExoInstruments/PluginData/"
-```
 
 Then start KSP and check the log. Every file that loaded says so, with its own provenance:
 
@@ -487,18 +540,23 @@ measured", a zero would say "no dust", and only one of those is true.
 
 Diffuse ionised gas, which is what the narrowband filters exist for. **Nothing ships.**
 
-Download the composite from NASA's LAMBDA archive — the script deliberately does not fetch it, since
-the archive's URLs move and a wrong file silently producing a plausible sky is worse than an error:
+`setup_data.py` fetches the composite from NASA's LAMBDA archive and **verifies its SHA-256 before
+using it**. That check is the point: the archive's URLs move, and the nside 512 map sitting next to
+this one in the same directory is a plausible-looking wrong answer that would silently produce a
+plausible-looking wrong sky. A digest turns both failure modes into an error instead.
 
-<https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html>
+To do it by hand, from <https://lambda.gsfc.nasa.gov/product/foreground/fg_halpha_get.html>:
 
-```
+```bash
 curl -O https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits
 cd tools
-python3 -m venv env && ./env/bin/pip install healpy numpy
+python3 -m venv env && ./env/bin/pip install numpy astropy astropy-healpix
 ./env/bin/python pack_halpha_map.py --input ../Halpha_fwhm06_1024.fits --out HalphaMap.emission
 cp HalphaMap.emission "<KSP>/GameData/ExoInstruments/PluginData/"
 ```
+
+Note `astropy-healpix`, which is **not** `healpy`: this packer imports `astropy_healpix`, and
+installing only `healpy` gets you an `ImportError` several minutes in.
 
 That file is 49 MB, HEALPix nside 1024, and is the **Finkbeiner (2003, ApJS 146, 407)** composite of
 WHAM, VTSS and SHASSA, already published in rayleighs — the unit the photometry converts from, so
@@ -601,7 +659,7 @@ at **0.8 arcmin** — 7.5× finer, at which the Horsehead spans 10 elements inst
 
 ```
 cd tools
-python3 -m venv env && ./env/bin/pip install numpy scipy astropy healpy requests
+python3 -m venv env && ./env/bin/pip install numpy scipy astropy astropy-healpix requests
 ./env/bin/python pack_shassa_patches.py \
     --composite "<KSP>/GameData/ExoInstruments/PluginData/HalphaMap.emission" \
     --out HalphaPatches.patchset
@@ -803,12 +861,15 @@ Three things the packer does that are worth knowing about:
 
 * **It measures each service's linearity instead of trusting it.** The Pan-STARRS *r* and *i* HiPS
   turn out to be asinh-scaled, with nothing in the header saying so; packed as shape maps they would
-  have flattened every nucleus and still looked like galaxies. `galaxy-images/check_transfer.py`
-  measures the transfer curve against the survey's own stack, and those two bands are not used.
-* **Foreground stars are removed by Gaia DR3 astrometry**, not by how they look, because Gaia also
-  detects a nearby galaxy's own clusters and H II regions — deleting those would delete the
-  structure the whole layer exists for. Only sources with parallax or proper motion significant at
-  3σ are cut, and the holes are filled from their surroundings.
+  have flattened every nucleus and still looked like galaxies. `galaxy-images/check_linearity.py`
+  does aperture photometry on each service's own cutouts against the Gaia DR3 synthetic photometry
+  catalogue, with a colour term; those two bands fail it at slope 0.42-0.51 where a linear image
+  gives 1.0, and are not used. The same test admits SDSS DR9 *g/r/i/z* (four measured-linear bands)
+  and DES DR2 *g/r*, and excludes SDSS *u* and DES *i*.
+* **Foreground stars are left in.** A star in the map costs a second draw from the star catalogue
+  and a bounded slice of the galaxy's flux budget; masking it costs an inpainted patch, and no
+  inpainting can invent the galaxy behind a mask: the patches read as grey discs stamped on the
+  image. `--max-stars N` restores the old Gaia-astrometry cut for anyone who wants it.
 * **A close companion is kept, not masked.** M51 and NGC 5195 arrive as the survey saw them, bridge
   included, normalised to the sum of their catalogued fluxes, and the companion is not drawn twice.
 

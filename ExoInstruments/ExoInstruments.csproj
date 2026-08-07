@@ -9,6 +9,22 @@
     <PropertyGroup>
         <TargetFramework>net472</TargetFramework>
     </PropertyGroup>
+
+    <!--
+        The one place the release version and the KSP compatibility range are written.
+        Everything downstream is generated from these: the assembly version, the
+        ExoInstruments.version file KSP-AVC reads, and (through that file's $vref)
+        the ksp_version fields CKAN indexes. Bump ModVersion here and nowhere else.
+    -->
+    <PropertyGroup>
+        <ModVersion>0.3.0</ModVersion>
+        <KspVersionMin>1.8.0</KspVersionMin>
+        <KspVersionMax>1.12.5</KspVersionMax>
+        <Version>$(ModVersion)</Version>
+        <AssemblyVersion>$(ModVersion).0</AssemblyVersion>
+        <FileVersion>$(ModVersion).0</FileVersion>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
             <PrivateAssets>all</PrivateAssets>
@@ -52,7 +68,57 @@
     <Target Name="_ResolveModInstallDir">
         <PropertyGroup>
             <ModInstallDir>$([System.IO.Path]::GetFullPath('$(OutputPath)..'))\</ModInstallDir>
+            <!-- Set here, not at the top of the file: ModInstallDir only exists once this target has run. -->
+            <InstallJunk>$(ModInstallDir)**\.DS_Store;$(ModInstallDir)**\Thumbs.db;$(ModInstallDir)**\desktop.ini;$(ModInstallDir)**\*.bak;$(ModInstallDir)**\*.orig</InstallJunk>
         </PropertyGroup>
+    </Target>
+
+    <!--
+        Junk that lives in the source folders but must never reach a player's GameData.
+        macOS writes .DS_Store into every folder it has ever opened in Finder, and both
+        of those plus a stale model.mu.bak were shipping in the release zip: 3.6 MB of
+        dead weight and two files KSP would try to parse. Anything matching this is
+        excluded from every copy in both directions, so it cannot leak into the release
+        and cannot be pulled back out of a developer's install either.
+    -->
+    <PropertyGroup>
+        <RepoJunk>$(ProjectDir)**\.DS_Store;$(ProjectDir)**\Thumbs.db;$(ProjectDir)**\desktop.ini;$(ProjectDir)**\*.bak;$(ProjectDir)**\*.orig</RepoJunk>
+    </PropertyGroup>
+
+    <!--
+        The KSP-AVC version file, generated from the ModVersion/KspVersion properties above
+        rather than checked in, so there is exactly one place a version number is written and
+        nothing to drift. KSP-AVC and MiniAVC read it in game; CKAN reads it out of the release
+        zip through the netkan's $vref, which is why the mod's compatibility range does not have
+        to be repeated in ExoInstruments.netkan.
+
+        URL is deliberately absent: it is KSP-AVC's remote-update-check pointer, and pointing it
+        at a file that is generated (so is not in the repository to be fetched raw) would make
+        every player's game report a failed check.
+    -->
+    <Target Name="_WriteVersionFile">
+        <PropertyGroup>
+            <GeneratedVersionFile>$(IntermediateOutputPath)ExoInstruments.version</GeneratedVersionFile>
+        </PropertyGroup>
+        <ItemGroup>
+            <_VersionFileLines Include="{" />
+            <_VersionFileLines Include="  &quot;NAME&quot;: &quot;ExoInstruments&quot;," />
+            <_VersionFileLines Include="  &quot;DOWNLOAD&quot;: &quot;https://github.com/batistitooo/ExoInstruments/releases&quot;," />
+            <_VersionFileLines Include="  &quot;VERSION&quot;: &quot;$(ModVersion)&quot;," />
+            <_VersionFileLines Include="  &quot;KSP_VERSION_MIN&quot;: &quot;$(KspVersionMin)&quot;," />
+            <_VersionFileLines Include="  &quot;KSP_VERSION_MAX&quot;: &quot;$(KspVersionMax)&quot;" />
+            <_VersionFileLines Include="}" />
+        </ItemGroup>
+        <WriteLinesToFile File="$(GeneratedVersionFile)" Lines="@(_VersionFileLines)"
+                          Overwrite="true" WriteOnlyWhenDifferent="true" />
+    </Target>
+
+    <!-- Same file into the developer's own install, so MiniAVC reports the real version there too. -->
+    <Target Name="CopyVersionFile" AfterTargets="Build"
+            DependsOnTargets="_ResolveModInstallDir;_WriteVersionFile"
+            Condition="Exists('$(OutputPath)')">
+        <Copy SourceFiles="$(GeneratedVersionFile)" DestinationFolder="$(ModInstallDir)"
+              SkipUnchangedFiles="true" />
     </Target>
 
     <!--
@@ -63,7 +129,7 @@
     <Target Name="CopyTextures" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
             Condition="Exists('$(OutputPath)')">
         <ItemGroup>
-            <TexturesToCopy Include="$(ProjectDir)Textures\**\*.*" />
+            <TexturesToCopy Include="$(ProjectDir)Textures\**\*.*" Exclude="$(RepoJunk)" />
         </ItemGroup>
         <Copy SourceFiles="@(TexturesToCopy)"
               DestinationFolder="$(ModInstallDir)Textures\%(RecursiveDir)"
@@ -84,7 +150,7 @@
     <Target Name="CopyPluginData" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
             Condition="Exists('$(OutputPath)')">
         <ItemGroup>
-            <PluginDataToCopy Include="$(ProjectDir)PluginData\**\*.*" />
+            <PluginDataToCopy Include="$(ProjectDir)PluginData\**\*.*" Exclude="$(RepoJunk)" />
         </ItemGroup>
         <Copy SourceFiles="@(PluginDataToCopy)"
               DestinationFolder="$(ModInstallDir)PluginData\%(RecursiveDir)"
@@ -130,7 +196,7 @@
             Condition="Exists('$(OutputPath)')">
         <ItemGroup>
             <_PartsInInstall Include="$(ModInstallDir)Parts\**\*.*"
-                             Exclude="$(ModInstallDir)Parts\**\@thumbs\**\*.*" />
+                             Exclude="$(ModInstallDir)Parts\**\@thumbs\**\*.*;$(InstallJunk)" />
             <_PartPull Include="@(_PartsInInstall->'$(ProjectDir)Parts\%(RecursiveDir)%(Filename)%(Extension)')">
                 <Source>%(_PartsInInstall.FullPath)</Source>
                 <SourceStamp>%(_PartsInInstall.ModifiedTime)</SourceStamp>
@@ -145,7 +211,7 @@
             Condition="Exists('$(OutputPath)')">
         <ItemGroup>
             <_PartsInRepo Include="$(ProjectDir)Parts\**\*.*"
-                          Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*" />
+                          Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*;$(RepoJunk)" />
             <_PartPush Include="@(_PartsInRepo->'$(ModInstallDir)Parts\%(RecursiveDir)%(Filename)%(Extension)')">
                 <Source>%(_PartsInRepo.FullPath)</Source>
                 <SourceStamp>%(_PartsInRepo.ModifiedTime)</SourceStamp>
@@ -178,7 +244,7 @@
         The staging directory is deleted first so a file dropped from the repo cannot
         survive in the zip from a previous run.
     -->
-    <Target Name="Package" DependsOnTargets="Build">
+    <Target Name="Package" DependsOnTargets="Build;_WriteVersionFile">
         <PropertyGroup>
             <DistDir>$(ProjectDir)..\dist\</DistDir>
             <PackageStageDir>$(DistDir)stage\</PackageStageDir>
@@ -191,17 +257,36 @@
 
         <ItemGroup>
             <_ShipParts Include="$(ProjectDir)Parts\**\*.*"
-                        Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*" />
-            <_ShipTextures Include="$(ProjectDir)Textures\**\*.*" />
-            <_ShipPluginData Include="$(ProjectDir)PluginData\**\*.*" />
-            <_ShipDocs Include="$(ProjectDir)..\LICENSE;$(ProjectDir)..\README.md" />
+                        Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*;$(RepoJunk)" />
+            <_ShipTextures Include="$(ProjectDir)Textures\**\*.*" Exclude="$(RepoJunk)" />
+            <_ShipPluginData Include="$(ProjectDir)PluginData\**\*.*" Exclude="$(RepoJunk)" />
+            <_ShipDocs Include="$(ProjectDir)..\LICENSE;$(ProjectDir)..\README.md;$(ProjectDir)..\ExoInstruments-Getting-Started.pdf" />
+            <!--
+                The data-file scripts have to be IN the installed mod, not just in the repository.
+                CKAN installs exactly GameData/ExoInstruments/ and nothing else, so a player who
+                installs through CKAN never sees the repository at all; shipping setup_data.py
+                anywhere outside that directory means the README tells them to run a file they do
+                not have. Inside it, `python3 GameData/ExoInstruments/tools/setup_data.py` works
+                for every player by the same path, and the script finds KSP from its own location
+                with nothing to configure.
+
+                KSP's GameData scan only picks up .cfg, .dll and asset files, so .py files sitting
+                here are inert as far as the game is concerned.
+
+                Only the packers and the one entry point ship. The test harnesses, the checked-in
+                virtualenvs and the download caches in tools/ are development apparatus and would
+                multiply the download for no player-visible gain.
+            -->
+            <_ShipTools Include="$(ProjectDir)..\tools\setup_data.py;$(ProjectDir)..\tools\pack_*.py" />
         </ItemGroup>
 
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PackageModDir)Plugins\" />
+        <Copy SourceFiles="$(GeneratedVersionFile)" DestinationFolder="$(PackageModDir)" />
         <Copy SourceFiles="@(_ShipParts)" DestinationFolder="$(PackageModDir)Parts\%(RecursiveDir)" />
         <Copy SourceFiles="@(_ShipTextures)" DestinationFolder="$(PackageModDir)Textures\%(RecursiveDir)" />
         <Copy SourceFiles="@(_ShipPluginData)" DestinationFolder="$(PackageModDir)PluginData\%(RecursiveDir)" />
         <Copy SourceFiles="@(_ShipDocs)" DestinationFolder="$(PackageModDir)" />
+        <Copy SourceFiles="@(_ShipTools)" DestinationFolder="$(PackageModDir)tools\" />
 
         <ZipDirectory SourceDirectory="$(PackageStageDir)"
                       DestinationFile="$(DistDir)$(PackageZipName)"

@@ -37,14 +37,30 @@ fetch at 0.25″.
 
 ## `check_linearity.py` — the same question against a catalogue
 
-Aperture photometry on the image against Pan-STARRS catalogue magnitudes in the same band. A linear
-image gives a straight line of slope one. This is the weaker of the two — with a few dozen stars the
-scatter is a few tenths of a magnitude and a mild compression hides in it — but it needs no
-reference image, so it is the one to reach for over a survey the stack service does not cover.
+Aperture photometry on the service's own cutouts against the Gaia DR3 Synthetic Photometry
+Catalogue (I/360): all-sky, star-only, SDSS-system ugriz. A linear image gives a straight line of
+slope one; an asinh transfer fails on slope alone (0.42-0.59). It needs no reference image, so it
+is the one that works over surveys the stack service does not cover, and it is what admitted SDSS
+DR9 g/r/i/z and DES DR2 g/r into the packer and kept SDSS u and DES i out.
 
 ```
-./env/bin/python check_linearity.py --ra 195.0 --dec 20.0 --fov 0.25 --gmin 16 --gmax 20
+./env/bin/python check_linearity.py --ra 130 --dec 10 --fov 0.3 --gmin 16
 ```
+
+Three lessons paid for while rebuilding it, kept so they are not paid again:
+
+* The old reference (the Pan-STARRS catalogue) stopped at Dec -30 and included galaxies, which
+  buried every verdict under a magnitude of scatter. A reference for this job must be star-only.
+* The fit must carry a colour term (g-r for blue bands, r-i for red). The reference is SDSS-system;
+  DECam and Pan-STARRS bands differ from it by a colour-dependent offset, faint field stars are
+  systematically redder, and without the term the offset masquerades as curvature: every non-SDSS
+  survey failed, including the two the packer demonstrably relies on.
+* At forty stars a fixed curvature threshold flags noise. Verdicts are bootstrap-sigma-aware; the
+  photographic DSS2 still fails everywhere, which is the control that says the test kept its teeth.
+
+One ADQL trap: I/360 carries both "rmag" (SDSS) and "Rmag" (Johnson), and unquoted ADQL column
+names are case-insensitive, so a bare rmag is ambiguous and the server answers HTTP 400. Quote the
+identifiers.
 
 ## What is NOT tested here
 

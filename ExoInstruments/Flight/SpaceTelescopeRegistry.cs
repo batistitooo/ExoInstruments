@@ -23,6 +23,13 @@ namespace ExoInstruments.Flight
         /// <summary>The live module, or null when the vessel is unloaded. Everything below works either way.</summary>
         public ModuleExoSpaceTelescope Module;
 
+        /// <summary>
+        /// The saved module node when the vessel is unloaded; null when Module is the authority
+        /// instead. Carried because the ground station WRITES this state as well as reading it: a
+        /// repoint commanded at an unloaded telescope has to persist across the scene change.
+        /// </summary>
+        public ProtoPartModuleSnapshot ProtoModule;
+
         public bool ApertureDoorOpen;
         public double BlockedApertureFraction;
         public string BlockingPartTitle;
@@ -32,6 +39,9 @@ namespace ExoInstruments.Flight
 
         /// <summary>Electric charge available on the vessel, in KSP's units.</summary>
         public double ElectricCharge;
+
+        /// <summary>Total battery capacity, same units. What the charge is a fraction of, for the panel's readout and the ledger's ceiling.</summary>
+        public double ElectricChargeCapacity;
 
         /// <summary>True when the vessel has a working CommNet link back to the space centre.</summary>
         public bool HasCommLink;
@@ -222,6 +232,7 @@ namespace ExoInstruments.Flight
                         VesselName = v.vesselName,
                         Instrument = spec,
                         Module = null,
+                        ProtoModule = m,
                         ApertureDoorOpen = ReadBool(node, "apertureDoorOpen", false),
                         BlockedApertureFraction = ReadDouble(node, "blockedApertureFractionCached", 0.0),
                         BlockingPartTitle = node.GetValue("blockingPartCached"),
@@ -258,7 +269,9 @@ namespace ExoInstruments.Flight
         /// </summary>
         private static void FillVesselState(SpaceTelescopeLink link, Vessel v)
         {
-            link.ElectricCharge = TotalElectricCharge(v);
+            GroundStation.TotalElectricCharge(v, out double charge, out double capacity);
+            link.ElectricCharge = charge;
+            link.ElectricChargeCapacity = capacity;
 
             if (v.Connection != null)
             {
@@ -266,40 +279,6 @@ namespace ExoInstruments.Flight
                 link.SignalStrength = v.Connection.SignalStrength;
                 link.DownlinkBitsPerSecond = AntennaBitsPerSecond(v);
             }
-        }
-
-        /// <summary>
-        /// Electric charge on the vessel, loaded or not. An unloaded vessel's resources live in
-        /// its protovessel's part snapshots, which is where KSP keeps them and where they are
-        /// still correct.
-        /// </summary>
-        private static double TotalElectricCharge(Vessel v)
-        {
-            double total = 0.0;
-            if (v.loaded)
-            {
-                for (int i = 0; i < v.parts.Count; i++)
-                {
-                    Part p = v.parts[i];
-                    if (p == null || p.Resources == null) continue;
-                    for (int r = 0; r < p.Resources.Count; r++)
-                        if (p.Resources[r].resourceName == "ElectricCharge") total += p.Resources[r].amount;
-                }
-                return total;
-            }
-
-            if (v.protoVessel == null || v.protoVessel.protoPartSnapshots == null) return 0.0;
-            for (int i = 0; i < v.protoVessel.protoPartSnapshots.Count; i++)
-            {
-                ProtoPartSnapshot p = v.protoVessel.protoPartSnapshots[i];
-                if (p == null || p.resources == null) continue;
-                for (int r = 0; r < p.resources.Count; r++)
-                {
-                    ProtoPartResourceSnapshot res = p.resources[r];
-                    if (res != null && res.resourceName == "ElectricCharge") total += res.amount;
-                }
-            }
-            return total;
         }
 
         /// <summary>

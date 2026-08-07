@@ -68,19 +68,26 @@ edge-on galaxy really does hide its core in the blue, and at a factor of 2.5 it 
 whose 2.65 is 1.06 mag of differential extinction across a real dust lane.
 
 WHAT IS REMOVED FROM THE IMAGE, AND WHY EACH REMOVAL IS SAFE.
-  * Foreground stars. The mod draws stars from its own star catalogue, so a star left in the map
-    would be drawn twice AND would steal flux from the galaxy, which is normalised to the
-    catalogued total. They are identified from Gaia DR3 ASTROMETRY, not from the image: a source is
-    treated as foreground only if its parallax or its proper motion is significant at 3 sigma. That
-    matters here, because Gaia detects the bright star clusters and H II regions of a nearby galaxy
-    too, and those belong to the galaxy. Their astrometry is consistent with zero.
+  * NOT foreground stars, by default. A star left in costs a second draw from the star catalogue
+    and its own flux out of the normalised budget, both bounded and point-like; masking it costs
+    an inpainted patch, and no inpainting can invent the galaxy behind a big mask. The patches
+    read as discs drawn on the image, which is worse than every star. --max-stars N restores the
+    old behaviour (Gaia DR3 astrometry, 3 sigma parallax or proper motion, so a galaxy's own
+    H II regions are never touched).
   * Other CATALOGUED galaxies whose disc falls in the box, since each is drawn from its own entry.
   * A residual sky pedestal, measured well outside the D25 isophote.
-Everything removed is inpainted with the galaxy's own elliptical azimuthal median at that radius,
-never with zero, so a mask cannot open a hole in the disc. The flux fraction each removal accounts
+Everything removed is inpainted from what surrounds it, never with zero, so a mask cannot open a
+hole in the disc: a Gaussian-weighted average of the surviving neighbours, widened until the hole is
+covered, plus the image's own noise so the patch does not read as a flat disc; the elliptical
+azimuthal median answers only where nothing local survives. The flux fraction each removal accounts
 for is measured and written into the file.
 
-Run:
+Every survey band here is MEASURED LINEAR before being trusted, by
+galaxy-images/check_linearity.py: aperture photometry on the service's own cutouts against the
+Gaia DR3 synthetic photometry catalogue, with a colour term. That is what excludes the Pan-STARRS
+r/i HiPS (asinh, slope 0.42-0.51 where a linear image gives 1.0), SDSS u and DES i.
+
+Run (the defaults are the shipped configuration; setup_data.py calls this with no extra flags):
     python3 -m venv env && ./env/bin/pip install numpy scipy astropy photutils requests
     ./env/bin/python pack_galaxy_images.py --catalog GalaxyCatalog.galcat --bmax 11 \
         --out GalaxyImages.galimg
@@ -133,6 +140,30 @@ SURVEYS = [
         "provider": "ps1",
         "bands": [("g", 481.0, "PS1 g"), ("r", 617.0, "PS1 r")],
         "max_fov_deg": PS1_MAX_PIXELS * PS1_PIXEL_ARCSEC / 3600.0,
+    },
+    {
+        # Both measured linear by galaxy-images/check_linearity.py against the Gaia DR3 synthetic
+        # photometry reference, with the colour term (slopes 1.010/1.004). The i band is excluded:
+        # slope 0.930 on 25 stars establishes nothing. Southern: catches DECam holes below PS1's
+        # Dec -30 limit, NGC1566 among them.
+        "id": "des-dr2",
+        "name": "Dark Energy Survey DR2 (Abbott et al. 2021)",
+        "provider": "hips",
+        "bands": [("CDS/P/DES-DR2/g", 473.0, "DES g"),
+                  ("CDS/P/DES-DR2/r", 642.0, "DES r")],
+        "max_fov_deg": 90.0,
+    },
+    {
+        # Four measured-linear bands (same protocol; slopes 0.991-1.014, u fails and is excluded),
+        # so the colour structure is sampled at four wavelengths instead of two. Northern.
+        "id": "sdss9",
+        "name": "SDSS DR9 (Ahn et al. 2012)",
+        "provider": "hips",
+        "bands": [("CDS/P/SDSS9/g", 477.0, "SDSS g"),
+                  ("CDS/P/SDSS9/r", 623.1, "SDSS r"),
+                  ("CDS/P/SDSS9/i", 762.5, "SDSS i"),
+                  ("CDS/P/SDSS9/z", 913.4, "SDSS z")],
+        "max_fov_deg": 90.0,
     },
     {
         # One band, and deliberately so. The stack service serves 0.25" pixels and nothing coarser,
@@ -501,7 +532,19 @@ def measure_star_radius(image, model, cx, cy, max_radius, noise):
         excess = np.median(sub[sel] - submodel[sel])
         if excess < noise:
             return float(r)
-    return float(max_radius)
+
+    # THE EDGE WAS NEVER FOUND, WHICH IS NOT THE SAME AS A STAR THIS BIG, and returning max_radius
+    # said it was. The walk stops when the annulus median falls to the galaxy's own level, and on a
+    # structured galaxy it often never does: a spiral arm, a dust lane or a bright knot keeps the
+    # median above the smooth azimuthal model all the way out. The star then masked the full
+    # max-star-radius disc, 30 arcsec by default, which on a 1 arcsec/px map is a 60 arcsec hole
+    # punched through the galaxy and filled flat. Those are the big smooth discs visible either
+    # side of NGC5247 in game.
+    #
+    # Declining is the safe answer. A star left in the map costs its own flux out of the galaxy's
+    # budget and a second draw from the star catalogue, both bounded and both local to a point
+    # source; masking a 60 arcsec disc of real galaxy and inpainting it is neither.
+    return 0.0
 
 
 def process_band(image, header, galaxy, others, companions, stars, args, report):
@@ -633,16 +676,18 @@ def process_band(image, header, galaxy, others, companions, stars, args, report)
     #    and that is wrong on a spiral: the median at a given radius is the INTERARM level, so a
     #    star sitting on an arm was replaced by a disc of interarm sky and the map came out with
     #    black holes punched through its arms. The fill is now local, a Gaussian-weighted average
-    #    of the unmasked pixels around the hole, widened until the hole is covered; the azimuthal
-    #    model only answers where nothing local survives, which is a missing skycell corner.
+    #    of the unmasked pixels around the hole, widened until the hole is covered. The azimuthal
+    #    model answers where nothing local survives, and is blended in toward the MIDDLE of a large
+    #    hole, where the widened average has degenerated into a flat plateau; see below.
     model = azimuthal_median(image, radius, ~masked & finite, args.profile_bins)
     holes = masked | ~finite
     filled = np.where(holes, np.nan, image)
     if holes.any():
-        from scipy.ndimage import gaussian_filter
+        from scipy.ndimage import gaussian_filter, distance_transform_edt
         known = (~holes).astype(np.float64)
         values = np.where(holes, 0.0, image)
-        sigma = max(1.0, args.max_star_radius / scale_arcsec / 4.0)
+        sigma0 = max(1.0, args.max_star_radius / scale_arcsec / 4.0)
+        sigma = sigma0
         for _ in range(6):
             num = gaussian_filter(values, sigma)
             den = gaussian_filter(known, sigma)
@@ -653,6 +698,34 @@ def process_band(image, header, galaxy, others, companions, stars, args, report)
                 break
             sigma *= 2.0
         filled = np.where(np.isfinite(filled), filled, model)
+
+        # DEEP INSIDE A BIG HOLE THE LOCAL AVERAGE KNOWS NOTHING, so it is blended out there in
+        # favour of the galaxy's own elliptical profile.
+        #
+        # Each doubling above widens the average over four times the area, so by the time a mask
+        # tens of arcseconds across has closed, every pixel in its middle has been handed the same
+        # mean of a large annulus: a flat plateau with an arc for an edge, which is what a bright
+        # star on NGC5247's outskirts left behind. The azimuthal model has no local detail either,
+        # but it does have the one thing that matters at that size, the radial falloff, so the patch
+        # sits on the galaxy's own gradient instead of cutting a step across it.
+        #
+        # This is NOT a return to filling everything with the model, which is the version the
+        # comment above records as wrong: near the rim of a hole the local average carries the arm
+        # or dust lane the star was sitting on, and that is exactly where it is kept. The weight is
+        # the distance to the nearest surviving pixel, so a small mask is filled locally end to end
+        # and only the middle of a large one reaches the model.
+        depth = distance_transform_edt(holes)
+        blend = np.clip(depth / max(3.0 * sigma0, 1e-9), 0.0, 1.0)
+        filled = np.where(holes, (1.0 - blend) * filled + blend * model, filled)
+
+        # AND THE FILL CARRIES THE SURVEY'S OWN SCATTER, because a hole that is merely smooth is
+        # still a visible hole. Each doubling above widens the average over four times the area, so
+        # a mask that only closes after several of them comes back flat to a part in tens, and a
+        # flat patch on a galaxy full of structure reads as a disc drawn on the image whatever its
+        # level. The noise is zero-mean, so it costs the map nothing in flux, and it is the noise
+        # measured off this very image rather than an invented amplitude.
+        rng = np.random.default_rng(0)
+        filled = np.where(holes, filled + rng.normal(0.0, noise, filled.shape), filled)
 
     # 5. The survey's OWN NOISE is not this galaxy's light, and it must not be packed as if it
     #    were. A unit-total map spreads whatever is in the box over a million pixels, so a sky that
@@ -771,7 +844,7 @@ def main():
     p.add_argument("--only", default="", help="comma-separated names, for testing one object")
     p.add_argument("--box-factor", type=float, default=2.0,
                    help="box side in units of D25; 2 puts the isophote at half the half-width")
-    p.add_argument("--target-pixel-arcsec", type=float, default=0.5,
+    p.add_argument("--target-pixel-arcsec", type=float, default=1.0,
                    help="stored sampling where the size cap allows it")
     p.add_argument("--max-pixels", type=int, default=1024, help="cap on the stored grid per side")
     p.add_argument("--min-pixels", type=int, default=128)
@@ -783,8 +856,9 @@ def main():
     p.add_argument("--star-mag-limit", type=float, default=19.0,
                    help="faintest Gaia G a foreground star is removed at")
     p.add_argument("--max-star-radius", type=float, default=30.0, help="arcsec")
-    p.add_argument("--max-stars", type=int, default=3000,
-                   help="most foreground stars removed from one map, brightest first")
+    p.add_argument("--max-stars", type=int, default=0,
+                   help="most foreground stars removed from one map, brightest first; "
+                        "0 masks none and leaves the survey's own pixels alone")
     p.add_argument("--nucleus-protect", type=float, default=0.05,
                    help="fraction of the semi-major axis around the centre no star mask may touch")
     p.add_argument("--sky-inner", type=float, default=1.4,
@@ -804,7 +878,7 @@ def main():
                    help="reject a band with more than this fraction of the GALAXY not observed")
     p.add_argument("--coverage-radii", type=float, default=1.2,
                    help="semi-major axes out to which coverage has to be complete")
-    p.add_argument("--ps1-native-max-arcmin", type=float, default=12.0,
+    p.add_argument("--ps1-native-max-arcmin", type=float, default=16.0,
                    help="largest box fetched from the Pan-STARRS stack service, which serves only "
                         "0.25 arcsec pixels; larger boxes fall back to its g-band HiPS")
     p.add_argument("--cache", default="galaxy_image_cache")
@@ -887,8 +961,16 @@ def main():
             inside = abs(dd) < half * 0.9 and abs(dr) < half * 0.9
             (companions if inside else others).append(o)
 
+        # NO STARS MASKED AT ALL when --max-stars is 0, and that is a supported choice rather than
+        # a degenerate one. Masking a star means inpainting the hole, and no inpainting can invent
+        # the galaxy that was behind it: on a big mask the fill is a smooth patch, which reads as a
+        # disc drawn on the image and is far more obviously wrong than the star would have been.
+        # Left in, a star costs its own flux out of the galaxy's normalised budget and a second
+        # draw from the star catalogue. Both are bounded, both are point-like, and both look like
+        # a star rather than like a defect.
         stars = fetch_gaia_foreground(session, g["ra"], g["dec"], side_deg * 0.75,
-                                      args.star_mag_limit, args.max_stars, gaia_cache)
+                                      args.star_mag_limit, args.max_stars, gaia_cache) \
+                if args.max_stars > 0 else []
 
         chosen = None
         for survey in SURVEYS:
@@ -956,12 +1038,19 @@ def main():
                     reports = [reports[keep]]
 
             if ok:
-                if len(planes) < len(survey["bands"]):
-                    print("      %s: keeping %d band of %d, so the same shape answers at every "
-                          "wavelength" % (survey["id"], len(planes), len(survey["bands"])))
-                chosen = (survey, planes, reports)
-                break
+                # A full set of bands settles it. A PARTIAL survey is remembered but the later
+                # ones still get their turn: NGC1566's Legacy g is clipped while DES right behind
+                # it has both bands clean, and stopping at the first partial answer would keep the
+                # worse map. Ties in band count go to the earlier survey.
+                if len(planes) == len(survey["bands"]):
+                    chosen = (survey, planes, reports)
+                    break
+                if chosen is None or len(planes) > len(chosen[1]):
+                    chosen = (survey, planes, reports)
 
+        if chosen is not None and len(chosen[1]) < len(chosen[0]["bands"]):
+            print("      %s: keeping %d band of %d, so the same shape answers at every "
+                  "wavelength" % (chosen[0]["id"], len(chosen[1]), len(chosen[0]["bands"])))
         if chosen is None:
             print("      no survey covers it; the analytic profile stays in charge")
             continue

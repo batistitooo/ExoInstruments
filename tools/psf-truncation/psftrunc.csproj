@@ -39,5 +39,7 @@
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
     <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/Coronagraph.cs" />
+    <Compile Include="$(Core)/InfraredArray.cs" />
   </ItemGroup>
 </Project>

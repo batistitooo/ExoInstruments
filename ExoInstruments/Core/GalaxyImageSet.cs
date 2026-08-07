@@ -143,7 +143,11 @@ namespace ExoInstruments.Core
             return top + (bottom - top) * fy;
         }
 
-        /// <summary>The two maps a wavelength falls between, and how far between them it is.</summary>
+        /// <summary>
+        /// The two maps a wavelength falls between, and how far between them it is. Handles any
+        /// number of bands (SDSS entries carry four); outside the measured range the nearest map
+        /// is used unchanged rather than extrapolated.
+        /// </summary>
         public void ResolveBands(GalaxyImageBand[] bands, double wavelengthNm,
                                  out GalaxyImageBand lower, out GalaxyImageBand upper, out double t)
         {
@@ -152,15 +156,19 @@ namespace ExoInstruments.Core
             t = 0.0;
             if (bands.Length < 2) return;
 
-            GalaxyImageBand b0 = bands[0], b1 = bands[1];
-            if (b1.WavelengthNm < b0.WavelengthNm) { var swap = b0; b0 = b1; b1 = swap; }
+            GalaxyImageBand lo = null, hi = null;
+            for (int i = 0; i < bands.Length; i++)
+            {
+                GalaxyImageBand b = bands[i];
+                if (b.WavelengthNm <= wavelengthNm && (lo == null || b.WavelengthNm > lo.WavelengthNm)) lo = b;
+                if (b.WavelengthNm >= wavelengthNm && (hi == null || b.WavelengthNm < hi.WavelengthNm)) hi = b;
+            }
+            if (lo == null) { lower = hi; return; }
+            if (hi == null || ReferenceEquals(hi, lo)) { lower = lo; return; }
 
-            if (wavelengthNm <= b0.WavelengthNm) { lower = b0; return; }
-            if (wavelengthNm >= b1.WavelengthNm) { lower = b1; return; }
-
-            lower = b0;
-            upper = b1;
-            t = (wavelengthNm - b0.WavelengthNm) / (b1.WavelengthNm - b0.WavelengthNm);
+            lower = lo;
+            upper = hi;
+            t = (wavelengthNm - lo.WavelengthNm) / (hi.WavelengthNm - lo.WavelengthNm);
         }
     }
 

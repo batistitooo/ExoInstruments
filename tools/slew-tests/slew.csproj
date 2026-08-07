@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>slew</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="$(Core)/SlewDynamics.cs" />
+    <Compile Include="$(Core)/OrbitalPowerBudget.cs" />
+    <Compile Include="$(Core)/OrbitalVisibility.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+  </ItemGroup>
+</Project>

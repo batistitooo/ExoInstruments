@@ -134,6 +134,61 @@ namespace ExoInstruments.Flight
         [KSPField(isPersistant = true)]
         public string pointingTargetBody = "";
 
+        /// <summary>
+        /// A catalogue target's own coordinates, when that is what was commanded. NaN otherwise.
+        ///
+        /// Each kind of target is kept in the frame it is invariant in: a body by NAME because it
+        /// moves, a catalogue position by RA/DEC because that is what does not. Storing a star as
+        /// the world vector its coordinates mapped to at the click made the commanded chart marker
+        /// visibly drift off the star, which is redrawn from RA/Dec every frame.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public double pointingTargetRaDeg = double.NaN;
+        [KSPField(isPersistant = true)]
+        public double pointingTargetDecDeg = double.NaN;
+
+        // The slew clock. All four are persistent and all four are read and written by
+        // GroundStation, which is the only thing that owns them: a repoint commanded from the
+        // observatory is a manoeuvre with a start, a duration and an origin, and none of that can
+        // live in a PartModule's memory because the vessel it belongs to is unloaded while it runs.
+
+        /// <summary>Boresight direction the current manoeuvre started from, as a world unit vector.</summary>
+        [KSPField(isPersistant = true)]
+        public string slewFromDirection = "";
+
+        /// <summary>
+        /// Where the boresight was really pointing, recorded while the vessel is loaded.
+        ///
+        /// A repoint is priced and timed on the angle from where the telescope is now, and an
+        /// unloaded vessel has nothing to ask. Without this the first command after launch was a
+        /// zero-degree slew however far it asked to go. Legitimate to persist for the same reason
+        /// the cached geometry above is: an unloaded vessel's attitude does not change.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public string lastBoresightDirection = "";
+
+        /// <summary>Universal time the manoeuvre was commanded at.</summary>
+        [KSPField(isPersistant = true)]
+        public double slewStartUt;
+
+        /// <summary>Planned rest-to-rest rotation time, seconds (see SlewDynamics).</summary>
+        [KSPField(isPersistant = true)]
+        public double slewManoeuvreSeconds;
+
+        /// <summary>Guide-star acquisition after it, seconds.</summary>
+        [KSPField(isPersistant = true)]
+        public double slewAcquisitionSeconds;
+
+        /// <summary>
+        /// Universal time this vessel's power ledger was last brought up to.
+        ///
+        /// Persisted because the gap it measures is a gap in which the game itself simulated
+        /// nothing: an unloaded vessel's batteries do not move in stock KSP, so the only record of
+        /// how long they have been left alone is this timestamp. See GroundStation.Advance.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public double powerLedgerUt;
+
         [KSPField(guiActive = true, guiName = "Telescope", guiActiveEditor = false)]
         public string statusLine = "";
 
@@ -300,6 +355,41 @@ namespace ExoInstruments.Flight
             if (pointingHoldEnabled) DrivePointing();
 
             statusLine = BuildStatusLine();
+        }
+
+        /// <summary>
+        /// The instrument's standing load, drawn while the vessel is loaded.
+        ///
+        /// Bills for the instrument being powered, which nothing charged for until now. It does NOT
+        /// bill for rotation: KSP's own ModuleReactionWheel already debits its RESOURCE rate in
+        /// proportion to the torque commanded. GroundStation charges the same rate for a slew at an
+        /// UNLOADED vessel, where nothing else would. The exposure is debited whole at the shutter
+        /// by TryBillExposure.
+        ///
+        /// FixedUpdate, not Update: this is a rate against game time, and under warp a frame's
+        /// worth of real time would make the load vanish exactly when the player uses it most.
+        /// </summary>
+        public void FixedUpdate()
+        {
+            if (!HighLogic.LoadedSceneIsFlight || Instrument == null || Platform == null) return;
+            if (vessel == null || !vessel.loaded || vessel.packed) return;
+
+            double draw = Platform.IdleElectricChargePerSecond * TimeWarp.fixedDeltaTime;
+            if (draw > 0.0) part.RequestResource(ElectricChargeId, draw);
+
+            // Keeps the ground ledger's clock current while the game is doing the accounting.
+            // Advance bills whatever universal time has passed since this stamp, on the premise
+            // that KSP simulated nothing across it, which holds only while unloaded. Without this,
+            // an hour flown by hand was billed a second time on the next visit to the observatory.
+            powerLedgerUt = Planetarium.GetUniversalTime();
+
+            Vector3d bore = BoresightWorldDirection;
+            if (bore.sqrMagnitude > 1e-12)
+            {
+                Vector3d u = bore.normalized;
+                lastBoresightDirection = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                                       "{0:R},{1:R},{2:R}", u.x, u.y, u.z);
+            }
         }
 
         // ------------------------------------------------------------------ aperture door
@@ -639,17 +729,90 @@ namespace ExoInstruments.Flight
         /// </summary>
         private void DrivePointing()
         {
-            if (vessel == null || vessel.Autopilot == null) return;
+            if (vessel == null || vessel.Autopilot == null || vessel.Autopilot.SAS == null) return;
+
+            // A PACKED VESSEL CANNOT BE TURNED. KSP stops integrating attitude on rails, which is
+            // where the active vessel goes above 4x warp, so SAS does nothing and the manoeuvre
+            // would never finish: warping through a slew from inside the spacecraft stalled it
+            // forever. The ground station's clock is still running, so the honest thing is to let
+            // the modelled manoeuvre carry it and take the attitude back when physics resumes.
+            if (!vessel.loaded || vessel.packed)
+            {
+                hasCommandedRotation = false;   // whatever was locked is stale by the time we return
+                return;
+            }
             if (!TryResolvePointingDirection(out Vector3d targetDirection)) return;
 
-            Vector3d bore = BoresightWorldDirection;
-            if (bore.sqrMagnitude < 1e-9 || targetDirection.sqrMagnitude < 1e-9) return;
+            Transform reference = vessel.ReferenceTransform;
+            Transform bore = boresight;
+            if (reference == null || bore == null || targetDirection.sqrMagnitude < 1e-9) return;
 
-            if (!vessel.Autopilot.Enabled)
+            // The player's hands win. Holding an attitude against someone actively steering is a
+            // fight neither side can win, and from the cockpit it reads as the spacecraft refusing
+            // to respond.
+            if (PlayerIsSteering()) return;
+
+            // STABILITY ASSIST SPECIFICALLY, and re-asserted rather than only switched on when the
+            // autopilot is off. VesselAutopilot.Enable sets sas.lockedMode = (mode == StabilityAssist),
+            // and VesselSAS only drives toward lockedRotation while lockedMode is true. A player who
+            // boards with SAS already on in Prograde or Target leaves the autopilot Enabled, so the
+            // old check skipped the call, lockedMode stayed false, and every LockRotation below was
+            // written to a field nothing read: the telescope sat there doing nothing.
+            if (!vessel.Autopilot.Enabled || vessel.Autopilot.Mode != VesselAutopilot.AutopilotMode.StabilityAssist)
+            {
                 vessel.Autopilot.Enable(VesselAutopilot.AutopilotMode.StabilityAssist);
+                hasCommandedRotation = false;   // Enable resets the lock; re-issue it below
+            }
 
-            Quaternion align = Quaternion.FromToRotation((Vector3)bore.normalized, (Vector3)targetDirection.normalized);
-            vessel.Autopilot.SAS.LockRotation(align * vessel.transform.rotation);
+            // WHAT SAS ACTUALLY COMPARES AGAINST: VesselSAS holds lockedRotation against
+            // vessel.ReferenceTransform.rotation, the control point, not against
+            // vessel.transform.rotation, the root part. The two differ by whatever fixed rotation
+            // sits between them, so on a satellite whose probe core is not the root and not aligned
+            // with it, SAS drove to an offset attitude, this method recomputed from that wrong
+            // attitude next frame, and the vessel chased its own error in circles.
+            Quaternion boresightRelativeToControl = Quaternion.Inverse(reference.rotation) * bore.rotation;
+
+            // AND THE ROLL HAS TO BE DEFINED. Quaternion.FromToRotation(boresight, target) is *a*
+            // rotation carrying one vector onto the other and says nothing about roll: its axis is
+            // boresight x target, so the attitude depends on where the boresight is at this instant,
+            // and recomputing per frame moved the commanded attitude every frame. That cross product
+            // also VANISHES when the two are antiparallel, leaving a repoint near 180 degrees with a
+            // numerically arbitrary axis free to flip between frames: the vessel tumbled.
+            //
+            // Planetarium.Zup.Z is the celestial pole, which rotates with neither the planet nor the
+            // vehicle, so the command is a function of the target alone and holds still. It also
+            // comes out north-up, the convention the frames state their position angles in.
+            Vector3d up = Planetarium.Zup.Z;
+            Vector3d t = targetDirection.normalized;
+            if (Math.Abs(Vector3d.Dot(up, t)) > 0.999) up = Planetarium.Zup.X;   // target on the pole
+
+            Quaternion boresightTarget = Quaternion.LookRotation((Vector3)t, (Vector3)up);
+            Quaternion commanded = boresightTarget * Quaternion.Inverse(boresightRelativeToControl);
+
+            // Re-issued only when it has really moved. The command is stable by construction now,
+            // so for a catalogue target this settles to one value and stops; a body target drifts
+            // slowly and re-issues as it does.
+            if (hasCommandedRotation && Quaternion.Angle(commandedRotation, commanded) < 0.01f) return;
+
+            commandedRotation = commanded;
+            hasCommandedRotation = true;
+            vessel.Autopilot.SAS.LockRotation(commanded);
+        }
+
+        private Quaternion commandedRotation = Quaternion.identity;
+        private bool hasCommandedRotation;
+
+        /// <summary>
+        /// True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on
+        /// its control-detection, and this matches it rather than inventing a second one.
+        /// </summary>
+        private bool PlayerIsSteering()
+        {
+            if (vessel == null || vessel.ctrlState == null) return false;
+            const float Threshold = 0.05f;
+            return Math.Abs(vessel.ctrlState.pitch) > Threshold
+                || Math.Abs(vessel.ctrlState.yaw) > Threshold
+                || Math.Abs(vessel.ctrlState.roll) > Threshold;
         }
 
         /// <summary>Angle between the boresight and the commanded target, degrees. NaN when nothing is commanded.</summary>
@@ -686,29 +849,27 @@ namespace ExoInstruments.Flight
                 return true;
             }
 
+            // A catalogue position, resolved through the camera's own equatorial chain rather than
+            // from a stored vector, so the direction the vehicle is driven to and the place the
+            // chart draws the target are one computation. See pointingTargetRaDeg.
+            if (!double.IsNaN(pointingTargetRaDeg) && !double.IsNaN(pointingTargetDecDeg))
+            {
+                return Visualization.SolarSystemCameraTexture.TryEquatorialDirection(
+                    pointingTargetRaDeg, pointingTargetDecDeg, Planetarium.GetUniversalTime(), out direction);
+            }
+
             if (!TryParseDirection(pointingTarget, out direction)) return false;
             direction = direction.normalized;
             return true;
         }
 
-        /// <summary>Commands the telescope to hold a world-space direction. Persisted, so the hold survives a scene change.</summary>
-        public void CommandPointing(Vector3d worldDirection)
-        {
-            Vector3d d = worldDirection.normalized;
-            pointingTarget = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                                           "{0:R},{1:R},{2:R}", d.x, d.y, d.z);
-            pointingTargetBody = "";
-            pointingHoldEnabled = true;
-        }
-
-        /// <summary>Commands the telescope to follow a solar-system body, whose direction moves with the orbit.</summary>
-        public void CommandPointingAtBody(CelestialBody body)
-        {
-            if (body == null) return;
-            pointingTargetBody = body.bodyName;
-            pointingTarget = "";
-            pointingHoldEnabled = true;
-        }
+        // NO CommandPointing HERE ANY MORE, deliberately. There used to be two of them on this
+        // module, and they wrote pointingHoldEnabled and pointingTarget without touching the slew
+        // clock beside them, so a repoint issued through one arrived with slewStartUt still
+        // holding the previous manoeuvre's timestamp: an arbitrarily large slew that GroundStation
+        // then read as long finished, free, and instantaneous. The whole point of
+        // TelescopeCommandState is that these fields are one record with one writer, and
+        // GroundStation.CommandDirection / CommandBody are it.
 
         [KSPEvent(guiActive = true, guiName = "Release pointing hold", active = true)]
         public void ReleasePointing()
@@ -740,10 +901,11 @@ namespace ExoInstruments.Flight
         /// system achieved is observable. On an unloaded vessel the attitude is frozen and
         /// unobservable, so the analytic path runs instead.
         /// </summary>
-        public PointingBudget EvaluatePointing(double exposureSeconds)
+        public PointingBudget EvaluatePointing(double exposureSeconds, double slewRateArcsecPerSecond = 0.0)
         {
             var inputs = new PointingInputs
             {
+                ResidualDriftArcsecPerSecond = slewRateArcsecPerSecond,
                 Mode = controlMode,
                 ExposureSeconds = exposureSeconds,
                 InstrumentJitterArcsecRms = Platform != null ? Platform.PointingJitterArcsecRms : 0.0,

@@ -67,6 +67,28 @@ The timings report the **fastest** of the repeats, not the mean. This machine no
 itself running while a capture is timed, so a slow run measures how much of the machine the game
 happened to be holding; the mean of a contended benchmark measures the contention.
 
+## A correction, 2026-08-07
+
+**This harness was timing a kernel the mod does not build.** It passed `vaneCount = 0` to
+`BuildChromaticKernel`, which takes `OpticalPsf`'s radial path — and the shipped RC20 has not taken
+that path since the visual roster's PSF learned about spiders. The stage this harness exists to
+time was the one stage it got wrong, and the difference is not small: with the RC20's real four
+1.5 mm vanes the diffraction term is sampled in two dimensions over the whole 257x257 support and
+then convolved with the atmospheric profile, which was **8855 ms of a 9502 ms reduction**.
+
+Fixed here, and the cost fixed in `Core` — see `tools/psf-cost`, which exists because of it. This
+harness's own numbers, once it is asking for the right kernel:
+
+| RC20, M51 from OHP | before | after |
+|---|---:|---:|
+| PSF kernel, 4x4 | 8855 ms | **251 ms** |
+| whole reduction, 4x4 | 9502 ms | **809 ms** |
+| PSF kernel, 1x1 | 13916 ms | **260 ms** |
+| whole reduction, 1x1 | 15736 ms | **1293 ms** |
+
+The lesson is the one this directory was built on and had to learn twice: a harness that
+reproduces the pipeline "call for call" is only worth what its arguments are, and those drift.
+
 ## What this does NOT establish
 
 - **It is not the whole capture.** The Unity render, the readback, the display stretch and the

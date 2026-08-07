@@ -41,6 +41,15 @@ internal static class Program
     private const int NativeW = 4144, NativeH = 2822;
     private const double ZenithSeeing = 2.5;          // OHP median, Schmitt et al. 2024
 
+    // The RC20's spider, from the same catalogue entry. It is here because leaving it out was a
+    // real defect in this harness: with vaneCount 0 the kernel takes OpticalPsf's radial path,
+    // and the shipped capture has not done that since the visual roster's PSF learned about
+    // spiders. The stage this harness exists to time was therefore timing a kernel the mod does
+    // not build - and the one it does build is the expensive one, because a vaned pupil is
+    // sampled in two dimensions over the whole support.
+    private const int VaneCount = 4;
+    private const double VaneWidthMeters = 0.0015;
+
     // ---- Pointed at M51 from OHP, an hour east of the meridian -----------------------------
     // --target ra,dec moves it. The Horsehead (85.24,-2.46) is the field to check the
     // high-resolution patch layer on, because that path carries a per-worker run cursor and is
@@ -352,7 +361,7 @@ internal static class Program
 
     private static float[] BuildPsf(out int radius)
         => OpticalPsf.BuildChromaticKernel(plateScale, Aperture, Obstruction, seeing, 552.5e-9,
-                                           0.0, 0, 0.0, null, subBands, out radius);
+                                           0.0, VaneCount, VaneWidthMeters, null, subBands, out radius);
 
     private static void Poisson(float[] signal)
     {

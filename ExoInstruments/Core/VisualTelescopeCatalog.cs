@@ -2050,6 +2050,20 @@ namespace ExoInstruments.Core
 
                 HasApertureDoor = true,
 
+                // HST Primer, "Pointing, Orientation, and Roll Constraints": "The slew rate of
+                // HST is limited to approximately 6 degrees per minute of time." The same
+                // paragraph states the consequence, "about one hour is needed to go full circle
+                // in pitch, yaw, or roll", which is the same figure read the other way round and
+                // is the cross-check the harness runs: 360 deg at 6 deg/min is 60 minutes exactly.
+                MaxSlewRateDegPerSecond = 6.0 / 60.0,
+
+                // HST Primer, "Orbital Visibility, Acquisition Times, and Overheads": "A normal
+                // guide star acquisition, required in the first orbit of every visit, takes 6.5
+                // minutes." Charged on every repoint, because this model has no notion of staying
+                // within a visit; the reacquisition figure the Primer gives for later orbits of a
+                // multi-orbit visit is the same 6.5 minutes in Cycle 34, so nothing is lost by it.
+                GuideStarAcquisitionSeconds = 6.5 * 60.0,
+
                 // The true readout: two 2051 x 4096 CCDs. Used for the downlink volume, where the
                 // 31-pixel gap between them genuinely does not travel and the imaging pipeline's
                 // rectangular approximation does not apply.
@@ -2098,6 +2112,11 @@ namespace ExoInstruments.Core
 
             // ---- The OTA. Identical to WFC3/UVIS because it IS the same telescope. ----
             ApertureMeters = 2.4,
+            // As on UVIS, and it must be stated rather than left to default to zero: MinFovDeg is
+            // MaxFovDeg / BarlowFactor, so a zero here makes the narrow end of the zoom infinite
+            // and Mathf.Clamp then pins every capture's field of view to it. Found by
+            // tools/psf-truncation, which reported this channel's plate scale as infinite.
+            BarlowFactor = 1.0,
             SecondaryObstructionFraction = 0.330,
             SpiderVaneCount = 4,
             SpiderVaneWidthMeters = 0.022 * 1.2,
@@ -2314,6 +2333,20 @@ namespace ExoInstruments.Core
                     new[] { 0.124, 0.126, 0.128, 0.130, 0.133, 0.137, 0.141, 0.145, 0.151, 0.156 }),
 
                 HasApertureDoor = true,
+
+                // HST Primer, "Pointing, Orientation, and Roll Constraints": "The slew rate of
+                // HST is limited to approximately 6 degrees per minute of time." The same
+                // paragraph states the consequence, "about one hour is needed to go full circle
+                // in pitch, yaw, or roll", which is the same figure read the other way round and
+                // is the cross-check the harness runs: 360 deg at 6 deg/min is 60 minutes exactly.
+                MaxSlewRateDegPerSecond = 6.0 / 60.0,
+
+                // HST Primer, "Orbital Visibility, Acquisition Times, and Overheads": "A normal
+                // guide star acquisition, required in the first orbit of every visit, takes 6.5
+                // minutes." Charged on every repoint, because this model has no notion of staying
+                // within a visit; the reacquisition figure the Primer gives for later orbits of a
+                // multi-orbit visit is the same 6.5 minutes in Cycle 34, so nothing is lost by it.
+                GuideStarAcquisitionSeconds = 6.5 * 60.0,
 
                 // The true readout is the whole 1024 x 1024 multiplexer, reference pixels included:
                 // they are read out and they are downlinked, even though they carry no sky. The

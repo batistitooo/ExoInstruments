@@ -68,6 +68,7 @@ namespace ExoInstruments.Core
         private readonly double[] _padY;
         private readonly double[] _padRadius;
         private readonly bool _hasPads;
+        private readonly bool _padRadiiEqual;
 
         /// <summary>Aperture diameter (m).</summary>
         public double ApertureMeters => 2.0 * _outerRadius;
@@ -166,6 +167,21 @@ namespace ExoInstruments.Core
                 }
             }
 
+            _padRadiiEqual = true;
+            for (int i = 1; i < _padRadius.Length; i++)
+                if (_padRadius[i] != _padRadius[0]) _padRadiiEqual = false;
+
+            // Which reflections of the sampling grid this pupil is invariant under. Read off the
+            // geometry rather than assumed: a sampler that folds a grid on the strength of a
+            // symmetry the pupil does not have would silently mirror the spikes into the wrong
+            // quadrants, and the failure would look like structure.
+            var vaneAngles = new double[_vanePairs];
+            for (int k = 0; k < _vanePairs; k++) vaneAngles[k] = vaneRotationRad + Math.PI * k / _vanePairs;
+
+            AxisMirrorSymmetric = !_hasPads && LineSetInvariant(vaneAngles, a => -a);
+            DiagonalMirrorSymmetric = AxisMirrorSymmetric
+                                   && LineSetInvariant(vaneAngles, a => 0.5 * Math.PI - a);
+
             double annulusArea = Math.PI * (_outerRadius * _outerRadius - _innerRadius * _innerRadius);
             double vaneArea = 2.0 * _vanePairs * _vaneWidth * _vaneLength;
             _onAxisAmplitude = annulusArea - vaneArea - padArea;
@@ -178,6 +194,25 @@ namespace ExoInstruments.Core
 
         /// <summary>Fraction of the pupil's open area the mirror support pads remove.</summary>
         public double PadObscurationFraction { get; }
+
+        /// <summary>
+        /// True when the far field is unchanged by reflecting the angular offset in either
+        /// coordinate axis, so one QUADRANT of a sampling grid determines the whole pattern.
+        ///
+        /// The pattern always has central symmetry, I(-theta) = I(theta), because the pupil is
+        /// real. This is the stronger statement, and it holds when the pupil ITSELF is symmetric
+        /// about both axes: the annulus is symmetric about everything, so what decides it is
+        /// whether the set of vane lines survives being reflected, and whether there are pads -
+        /// three pads at 120 degrees do not, which is why Hubble gets only the central symmetry.
+        /// </summary>
+        public bool AxisMirrorSymmetric { get; }
+
+        /// <summary>
+        /// True when the far field is additionally unchanged by swapping the two axes, so one
+        /// OCTANT determines the pattern. Four vanes at 0 and 90 degrees have it, which is every
+        /// ground instrument in the roster; six at 60 degrees would not.
+        /// </summary>
+        public bool DiagonalMirrorSymmetric { get; }
 
         /// <summary>
         /// Normalised intensity (1.0 on axis) at an angular offset, in radians, resolved into two
@@ -238,9 +273,13 @@ namespace ExoInstruments.Core
 
             if (!_hasPads) return;
 
+            // The pads on a real telescope are one part repeated, so their radii are equal and
+            // their disc transform is one Bessel evaluation rather than one each. HST's three
+            // are; the general case still pays per pad.
+            double shared = _padRadiiEqual ? DiscTransform(_padRadius[0], u) : 0.0;
             for (int k = 0; k < _padRadius.Length; k++)
             {
-                double a = DiscTransform(_padRadius[k], u);
+                double a = _padRadiiEqual ? shared : DiscTransform(_padRadius[k], u);
                 if (a == 0.0) continue;
                 double phase = 2.0 * Math.PI * (ux * _padX[k] + uy * _padY[k]);
                 re -= a * Math.Cos(phase);
@@ -258,10 +297,18 @@ namespace ExoInstruments.Core
         /// vaned pupil is the ring period lambda/D and not the much broader spike envelope.
         /// </summary>
         public double PixelAveragedIntensity(double thetaXRad, double thetaYRad, double pixelScaleRad)
+            => PixelAveragedIntensity(thetaXRad, thetaYRad, pixelScaleRad, NodeCount(pixelScaleRad));
+
+        /// <summary>
+        /// The same average with the node count named by the caller, for a caller that knows
+        /// something about WHERE in the pattern it is sampling. NodeCount answers for the worst
+        /// case, the core, where a pixel spans several rings and every one of them has to be
+        /// integrated; the far wings of a broadband kernel do not need that and OpticalPsf's
+        /// sampler says so explicitly rather than paying the core's price everywhere.
+        /// </summary>
+        public double PixelAveragedIntensity(double thetaXRad, double thetaYRad, double pixelScaleRad, int n)
         {
             if (pixelScaleRad <= 0.0) return Intensity(thetaXRad, thetaYRad);
-
-            int n = NodeCount(pixelScaleRad);
             if (n <= 1) return Intensity(thetaXRad, thetaYRad);
 
             double step = pixelScaleRad / n;
@@ -280,11 +327,52 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>Midpoint nodes per pixel axis, from how many ring periods the pixel straddles. Capped, since cost grows as its square.</summary>
-        public int NodeCount(double pixelScaleRad)
+        public int NodeCount(double pixelScaleRad) => NodeCount(pixelScaleRad, 4, 12);
+
+        /// <summary>
+        /// The same, with the caller naming both the density and the ceiling.
+        ///
+        /// A caller sampling only a HANDFUL of pixels can afford what the whole grid cannot, and
+        /// the default answer above is visibly not enough for either kind of pixel at the ends of
+        /// the roster: at the coarsest plate scale here (FORS2 binned 4x4) a pixel spans eighteen
+        /// ring periods, so the ceiling of twelve is less than one node per period and the pixel
+        /// holding the core comes out wrong by 8 per cent of the peak; at the finest (SPHERE)
+        /// four nodes per period is the midpoint rule on half a period and is worth 1.6 per cent.
+        /// Both are paid on the few dozen pixels that hold the light, so OpticalPsf's sampler
+        /// buys them back there and nowhere else.
+        /// </summary>
+        public int NodeCount(double pixelScaleRad, int nodesPerRingPeriod, int cap)
         {
-            const int NodesPerRingPeriod = 4;
-            int n = (int)Math.Ceiling(NodesPerRingPeriod * pixelScaleRad / LambdaOverDRad);
-            return Math.Max(1, Math.Min(12, n));
+            int n = (int)Math.Ceiling(nodesPerRingPeriod * pixelScaleRad / LambdaOverDRad);
+            return Math.Max(1, Math.Min(cap, n));
+        }
+
+        /// <summary>
+        /// Whether a set of vane LINES maps onto itself under an angular map. Lines, not
+        /// directions, so angles compare modulo pi: a vane pair lies along one line and its two
+        /// ends are the same obscuration. An empty set (no vanes) is invariant under everything,
+        /// which is the correct answer for a bare annulus.
+        /// </summary>
+        private static bool LineSetInvariant(double[] angles, Func<double, double> map)
+        {
+            for (int i = 0; i < angles.Length; i++)
+            {
+                double image = Mod(map(angles[i]), Math.PI);
+                bool found = false;
+                for (int j = 0; j < angles.Length && !found; j++)
+                {
+                    double d = Math.Abs(image - Mod(angles[j], Math.PI));
+                    if (d < 1e-12 || Math.Abs(d - Math.PI) < 1e-12) found = true;
+                }
+                if (!found) return false;
+            }
+            return true;
+        }
+
+        private static double Mod(double x, double m)
+        {
+            double r = x - m * Math.Floor(x / m);
+            return r < 0.0 ? r + m : r;
         }
 
         /// <summary>Fourier transform of a filled disc of radius a, evaluated at spatial frequency u. Equals the disc's area at u = 0.</summary>
@@ -310,6 +398,10 @@ namespace ExoInstruments.Core
         /// <summary>Convenience: pixel-averaged intensity addressed in arcsec.</summary>
         public double PixelAveragedIntensityArcsec(double thetaXArcsec, double thetaYArcsec, double pixelScaleArcsec)
             => PixelAveragedIntensity(thetaXArcsec * ArcsecToRad, thetaYArcsec * ArcsecToRad, pixelScaleArcsec * ArcsecToRad);
+
+        /// <summary>Convenience: the same, in arcsec, at a node count the caller chooses.</summary>
+        public double PixelAveragedIntensityArcsec(double thetaXArcsec, double thetaYArcsec, double pixelScaleArcsec, int nodes)
+            => PixelAveragedIntensity(thetaXArcsec * ArcsecToRad, thetaYArcsec * ArcsecToRad, pixelScaleArcsec * ArcsecToRad, nodes);
     }
 
     /// <summary>

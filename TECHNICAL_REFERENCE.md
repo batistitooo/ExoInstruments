@@ -170,6 +170,8 @@ Fits `v(t) = A·cos(ωt) + B·sin(ωt) + C` per trial period via 3×3 normal equ
 
 ## 4. Detection physics — Direct imaging
 
+**The ELT is not offered to the player.** It carries `InstrumentSpec.UnderConstruction`, so it is listed in the observatory selector as "ELT: under construction" and cannot be selected in any game mode; no Funds, no Science and no sandbox shortcut reaches it. The reason is §12.3: this path is the one place in the mod whose physics is weaker than the sources available to it, and shipping it selectable would put numbers in front of a player, and in front of a reader, that the rest of the pipeline's standards do not support. Everything below is still an accurate description of the code, which is unchanged and stays in place for the day the model is wired to the high-contrast chain the mod already has.
+
 ### 4.1 Feasibility & contrast (`DirectImagingSimulator.cs`)
 
 Modeled at H-band (1.6 μm) on a 39.3m aperture (ELT-class).
@@ -190,6 +192,8 @@ Modeled at H-band (1.6 μm) on a 39.3m aperture (ELT-class).
 - **Detection threshold**: SNR ≥ 5.0 (`DetectionSnrThreshold`).
 
 **Citation**: order-of-magnitude figures per **Kasper et al. 2021 (PCS/ELT)** — raw ~1e-4 at small separations, deep post-processed limits approaching 1e-8; the game uses the single representative `1e-4` as the modeled floor, not the deeper post-processed number. Telescope facts: Gilmozzi & Spyromilio (2007).
+
+**Read §12.3 before quoting anything from this section.** The four steps above are an ordering heuristic with a physical vocabulary, not a performance model: the planet's flux, the magnitude scaling of the floor, its radial law and its behaviour with integration time are each a chosen shape, and each has a published alternative, several of which are already implemented in this codebase for the SPHERE instrument (§7.52). §12 items 112 to 120 list them individually and §12.3 explains why they are one problem.
 
 ### 4.2 Simulated detector frame (`Visualization/DirectImagingTexture.cs`)
 
@@ -807,6 +811,25 @@ The VLT spider also removes only **1.1 %** of the open pupil against the ELT's 3
 What that support was, however, was **eight Airy FWHM**, and that is a rule scaled by the *core*. A spike is faint structure reaching far out, and how far it can be seen is set by the source's brightness against the sky, not by the width of the core it came from. Tying the two together fails hardest exactly where the optics are best. Hubble's Airy FWHM is 0.052″, so at the UVIS plate scale eight of them is **11 px**, and binned 4×4 it is **3 px**: the pupil sum was computed in full over the annulus, four vanes and three mirror pads, and then discarded inside a kernel three pixels across. Hubble drew no visible spikes at all, and the reason was never in `PupilDiffraction`.
 
 The vaned and padded case now takes the whole budget instead, which is what this section always claimed. `vaneCount = 0` still takes the core-sized radial path, so the cost is spent only where there is azimuthal structure to carry, and `BuildChromaticKernel` inherits it because it builds each sub-band through `BuildKernel`. It costs a 257×257 kernel on the three vaned research instruments, built once per capture and cached.
+
+**"Built once per capture" was doing a great deal of work in that sentence.** A galaxy photograph through the orbital Hubble at 4×4 took **424 s on a Mac, of which 411 s — 96.7 % — was building this kernel**, and the shipped per-stage log said so outright. 257×257 is 66049 pixels, each a midpoint average over up to 12×12 nodes, so one sub-band is **9.5 M evaluations of `PupilDiffraction.Intensity`**, and a capture built twelve for the passband plus twelve more thrown away inside `GaussianFwhmForDelivered` — three hundred of those at 1×1, where the bisection does not exit early. The cost also ran the wrong way with binning, because a coarser pixel spans more ring periods and needs more nodes.
+
+Four changes — three of them exact, the fourth a deliberate *increase* in accuracy — took the PSF stage from **9480 ms to 1969 ms at 4×4 and from 16204 ms to 406 ms at 1×1** (.NET 10, 9 workers, idle machine):
+
+- **The FWHM solvers build only the support they read.** They measure a half-power crossing on one row; normalisation is one scale factor and divides out of that ratio, and the convolutions after the diffraction term reach only their own radius, so the row is complete once the support passes the crossing by that reach. Sized from the width being solved for and *checked* — if the crossing fell outside, the full kernel is built.
+- **The sampler folds the grid on symmetries the pupil proves.** `|A|²` is even for any real pupil, so half the grid is always a copy; a pupil symmetric about both axes and both diagonals — four vanes at 0°/90°, no pads, i.e. every ground instrument — leaves one **octant** determining the pattern. `PupilDiffraction` derives which reflections it has from its own vane angles and pad positions. Hubble's three pads sit at 120° and break all of them, so it keeps the central symmetry alone.
+- **Kernel terms are composed through a transform above a work budget**, the convolution theorem in place of a direct sum, agreeing with it to 3.4e-14 of the peak. The largest single saving, and only the ground instruments pay it; see below.
+- **The few dozen pixels holding the light are sampled far better than before** — sixteen nodes per ring period and a ceiling of 48, against four and 12. This is not a saving; it is a cost taken deliberately, and it is why **the kernel is now more accurate than it was**: against a converged reference, the largest per-pixel error fell from 1.27e-3 to 9.30e-5 of the peak on WFC3/UVIS and from **8.23e-2 to 2.39e-3 on FORS2**, whose 4×4 pixel spans eighteen ring periods and whose core pixel the old ceiling of 12 nodes got wrong by 8 % of itself.
+
+**Nothing was traded.** Against the converged reference, every measured column is better than or equal to the one it replaces, on every instrument: peak error, spike-arm error and between-spike error alike. FORS2's spike arms at 4×4 remain sampling noise, and were before — recovering them honestly needs about 72 nodes per axis over the whole grid, thirty-six times the work, for structure carrying 1e-8 of the light — but even there the between-spike error fell from 405 % to 13 %. All of it is re-measured by `tools/psf-cost`, which also checks the symmetries the fold rests on and replays every bounded solve against a full-support bisection.
+
+**One saving was measured and rejected, and is recorded because the number is tempting.** Halving the node count beyond 16 px is worth 5.6× on Hubble's kernel and leaves the peak error where it was (9.3e-5 against 9.6e-5), because the far wings carry almost none of the weight; the argument for it — the twelve-sub-band sum has already averaged the far rings away — is sound as far as it goes. What it costs is the **diffraction spikes**, whose relative error goes from 0.4 % to 1.8 % on WFC3/UVIS and 0.2 % to 4.9 % on WFC3/IR. That bound is empirical rather than derived, and the spikes are the reason this support was widened to 257×257 in the first place, so the wings keep their full node count and Hubble's kernel costs 2268 ms rather than 405 ms at 4×4.
+
+**The ground instruments pay a second cost, and it was larger.** Hubble has no atmosphere, so its kernel is the diffraction grid and a small Gaussian. A ground instrument's is that grid **convolved with a Kolmogorov profile**, and `OpticalPsf.Convolve` did that as a direct sum, `O(ra²·rb²)` — fine while the diffraction term was a handful of taps, and 2.2 billion multiply-adds per sub-band once it took the whole budget: a 257×257 grid against a 183×183 profile, twelve times per capture. `tools/capture-profile` had not caught it because it was passing `vaneCount = 0`, timing a radial kernel the shipped RC20 has not built since §7.113 gave the roster its spiders; that is fixed.
+
+The fix is `FourierConvolution.ConvolveKernels`, a linear convolution of two kernels through a zero-padded transform, taken above a work budget of 16 M multiply-adds and left as the direct sum below it — so the compact kernels (the RedCat's whole PSF spans two pixels) keep an exactly-summed answer, and the large ones get the only practical route. The two agree to **3.4e-14 of the peak** at the largest size, which is double precision rather than a tolerance; `tools/psf-cost --convolve` measures it, and `capture-profile --determinism` still reports every parallel stage identical at one worker and at nine. With the RC20's real spider the whole reduction is **809 ms where it was 9502 ms** at 4×4, and 1293 ms where it was 15736 ms at 1×1.
+
+**Tabulating the pupil transform was also measured and rejected**: replacing the disc transforms, the sinc factors and the pad phases with linearly interpolated tables is worth 1.82× (185 ns → 94 ns per evaluation) for 5.3 MB of tables and a 0.155 % error on the pattern. That error is five orders of magnitude above the 6.7e-16 at which the vaneless pupil currently reproduces the closed form (§7.112), and the reducibility standard is worth more than 1.8×. What was kept is the exact part: Hubble's three pads share a radius, so they share one disc transform. Two **exact** speedups remain unspent if the time is ever wanted without giving anything up — flattening the sub-band parallelism from one band per worker to (band, row) work items, worth about 1.5× at nine workers, and tabulating the radial part of the amplitude with *cubic* interpolation at ~80 samples per ring period, whose ~1e-9 error would clear the reducibility check the linear table failed.
 
 ### 7.12 Display transfer function (`SolarSystemCameraTexture.DisplayStretch`)
 
@@ -1556,11 +1579,27 @@ Finally, `THROUGHP` (the grey optical throughput) and `PHOTWIDT` (the effective 
 
 ## 8. Visualization layer
 
-### 8.1 Sky chart (`Core/SkyChartTexture.cs`)
+### 8.1 Sky chart (`Core/SkyChartTexture.cs`, `Core/SkyChartFrame.cs`, `Core/SkyChartOverlay.cs`)
 
-Zenith-centered planisphere: `r = Rmax·(90-alt)/90` (linear zenith-distance projection, not true stereographic/gnomonic), `x=cx+r·sinAz`, `y=cy+r·cosAz` (north up). Marker brightness ramps from mag -1.5 (Sirius-bright, full) to mag 12 (display floor, 16% minimum) via linear interpolation on magnitude. Star color from `StellarColor.BlackbodyRgb` alpha-blended toward background by brightness; non-highlighted stars desaturated 55% toward gray and dimmed 40% during an active search. Reference altitude rings at 0/20/40/60°, cardinal cross overlay. Both stars and solar-system bodies share the same `0°` horizon gate, matching the live camera's own capture gate.
+**Full-sky equatorial chart, inertial, as the classic all-sky oval.** The chart draws the whole celestial sphere in the catalogue's own frame on the Hammer projection (Snyder, "Map Projections - A Working Manual", USGS PP 1395, p. 160): the 2:1 ellipse of the familiar full-galaxy maps, equal-area, so a patch of sky covers the same chart area wherever it sits and the star field keeps its true density with nothing piling up at a pole. RA 12h runs down the central meridian, the celestial equator along the long axis (the bright line), the poles at the top and bottom, RA 0h on both rims; the buffer is 640x360. The RA direction is not a convention picked by taste: a chart of the sky is viewed from inside the sphere, and matching the local handedness of the horizontal dome chart this replaced (verified in game: east 90° clockwise from north in raw y-up space) forces RA to increase toward +x. `tools/skychart-tests` checks that parity numerically against the old dome formulas at both hemispheres' worth of sites and sky points, along with the oval's landmark points, the closed-form projection inverse (round trip to 1e-9 deg, the rim meridian included) and the closed-form local Jacobian against finite differences.
 
-**Body-marker decluttering** (`ExoInstrumentsGUI.DeclutterBodyPositions`, called from `BuildChartBodyPoints`): a moon and its parent planet routinely project to nearly the same screen point in KSP's compressed-scale solar system, stacking their dots and making them impossible to click apart. Overlapping markers (detected via the *unzoomed* raw projection, so the fix holds at any zoom level: the projection scales linearly with zoom, so a separation wide enough to click at zoom=1 only gets easier at higher zoom) are grouped by a union-find over disc-overlap distance, then arranged evenly on a small circle around their shared position, sized so adjacent markers clear each other's click radius (target spacing 18px at zoom=1, capped at a 40px ring radius for a large cluster). The adjustment is baked into real alt/az via `SkyChartTexture.UnprojectRawPixel` (the inverse of the forward projection), so the rendered dot and the click hit-test always agree — every other use of a body's real position (capture aim, tracking, physics) is untouched.
+The frame is the mod's fictional equatorial frame (§6), so star and deep-sky points NEVER move: they are built once per catalogue (`BuildStaticChartPoints`) and only their display flags change afterwards. The per-second re-transform of the whole ~16k-target catalogue that the horizontal chart needed is gone with the horizontal frame itself; a refresh now touches the solar-system bodies, the occlusion flags and the overlay, and re-rasters. Zoom/pan stays the affine map over fixed raw positions it already was.
+
+**The observer is whatever platform is selected** (`ObservingPlatform`): the KSC site, or the selected orbital telescope at its true instantaneous position. Body directions are computed from that position (the Mun seen from LKO sits degrees away from where KSC sees it) and converted world-to-equatorial by the exact inverse of the camera's own `TryEquatorialDirection` chain (`ObservingPlatform.EquatorialFrameSnapshot`), so a marker on the chart and the direction the camera slews to on click agree by construction.
+
+**Bodies at their real angular size.** Each body carries its true angular radius `asin(R/d)` from the observer; the raster draws the real disc whenever `asin(R/d)·(Rmax/180)·zoom` beats the star-sized marker (2.5 px, a bright star's own size: below chart resolution a body is only saying "I am here"; the search list carries the rest). The real disc is drawn as the exact local footprint of the spherical cap: each pixel offset is pulled back to arc coordinates through the inverse of the projection's closed-form local Jacobian (`SkyChartProjection.LocalBasis`, checked against finite differences; Hammer scales and shears anisotropically off-centre), sub-pixel-exact for anything a few degrees across anywhere on the map. It is shaded by ray-sphere intersection with the Sun's true direction: the terminator on the chart is the body's real terminator. Overlapping discs paint far-to-near.
+
+**Occlusion is geometry, not a UI mask.** `SkyOcclusion.Classify` runs the exact segment test of a sight line against a sphere at finite distance: Full below `alpha_occ - alpha_target` of separation, Partial out to `alpha_occ + alpha_target`, Clear beyond, and in every case only if the occluding surface actually lies in front of the target along the line (`t_near < d_target`); a moon transiting IN FRONT of its planet overlaps the planet's disc in angle and is correctly Clear, and is drawn above the overlay (`BodyInFront`). Every plotted point is classified against every body each refresh; a fully hidden star or body is not drawn and not clickable (the search list still reaches it, and the orbital status panel then says when it comes back). A chart click on empty sky inside the host's disc is a click on the planet: from orbit it selects the host body itself, from the ground it is the ground and does nothing.
+
+**The overlay: the planet is the mask.** The old "which sky is reachable" question is answered by drawing the host body itself at its true angular size, since the cap it occults IS its apparent disc. `SkyChartOverlayRenderer` renders, per raw pixel on the background refresh task: the host disc shaded with its real terminator (same ray-sphere construction, scale-free with observer distance 1 and radius `sin(alpha)`); a glow hugging the limb out to the platform's own published avoidance angle, wider and warmer on the sunlit limb (HST bright/dark limb avoidance, §13), the sunlit-ness of the nearest limb point found by the same tangent-point construction as `OrbitalVisibility.NearestLimbIsSunlit`, so the glow blends from warm to cool exactly across the terminator; the solar avoidance cone as a halo around the Sun from its angular radius out to the platform's `SunAvoidanceAngleDeg`; and moon-avoidance rings. The glow angles are the same numbers the exposure gate enforces: the visual and the gate cannot disagree. A ground site has no published avoidance angles and draws no glow, just its planet: the same code path with `d = R + 100 m` gives a cap of `asin(R/(R+h)) = 90° - dip`, `dip = acos(R/(R+h))` (1.05° on Kerbin from the site's 100 m elevation) - the horizon, with the day/night ground under it. NOTE the deliberate 1°-band mismatch this exposes: the chart shows geometric visibility from the elevated site while the RC20 capture gate keeps its `alt > 0` definition (airmass diverges there anyway), so a star can be visible on the chart for about a degree of altitude at which the gate still refuses the exposure.
+
+**Cost, measured against the budget that matters (the drag path).** The overlay is rendered at 1 Hz on the refresh task: per-pixel sky directions for the fixed raw grid are cached once (640x360 x 3 floats, 2.8 MB), leaving the render as a handful of dot products per pixel. The raster composites it through the view's affine transform with a bilinear fetch per screen pixel: two multiplies and four table reads, zero trigonometry, which is the invariant the drag path's `Prepare` hoisting established and keeps. Bilinear sampling is also what keeps the limb readable at zoom 15, where one raw pixel spans 15 screen pixels. Overlay and occlusion-flag buffers are double-buffered (task writes back, rasters read front, swapped on completion), so the drag raster never races the refresh; the static point list is shared, with in-place writes restricted to the display-flag bytes (see `SkyChartPoint`'s threading contract). Net memory: ~2 MB of persistent points (previously churned every second), 2 x 0.9 MB overlay, 2 x 16 kB flags, 2.8 MB direction cache.
+
+**Marker brightness/colour** are unchanged: ramp from mag -1.5 (full) to mag 12 (16% floor), `StellarColor.BlackbodyRgb` tint blended toward background, non-matching points desaturated 55% and dimmed 40% during a search.
+
+**Body-marker decluttering** (`ExoInstrumentsGUI.DeclutterBodyPositions`): unchanged in mechanism (union-find over disc overlap in the unzoomed raw projection, cluster arranged on a ring, 18 px spacing, 40 px cap), with one new rule: only MARKER-mode dots participate. A body drawn at its real angular size is at its true position and is never moved; the declutter exists to make stacked dots clickable, and a real disc is its own click target (the body hit test accepts the whole disc). The nudge is baked through `UnprojectRawToEquatorial` so the rendered dot and the hit test still agree.
+
+**Next-window countdown** (`ExoInstrumentsGUI.SpaceTelescopes.TryComputeVisibilityChangeSeconds`): when the orbit is what blocks (or will block) the selected target, the status panel states when that flips, found on the exact geometry: the observer propagated along its own Keplerian orbit (`getRelativePositionAtUT`, the same propagation the game uses between SOI changes), host/Sun/moons propagated with `GetBodyPositionAtUt`, the same occultation + limb-avoidance + moon-avoidance predicate as the live gate, sampled 192 times over one orbit and bisected to the second. The instant is cached and counted down rather than recomputed per IMGUI pass; the solar avoidance cone is excluded on purpose (it moves with the season, not the orbit, and the panel says so instead). In space mode the ground forecast heatmaps are hidden: their model is airmass and night, neither of which exists in orbit, and the status panel's window arithmetic is the replacement. The search list's `alt:` column and filter likewise switch meaning in orbit to degrees of clearance off the host's limb (negative while occulted), the honest analogue of the same physical question.
 
 ### 8.2 Light curve / RV curve textures (`Visualization/LightCurveTexture.cs`, `RvCurveTexture.cs`)
 
@@ -1588,7 +1627,7 @@ All `PrecisionExponent = 0.2`. Career-economy fields (unlock cost, science thres
 | HARPS | RV | 9.5 | 1.0 m/s | 6h | 3.6m | 2400m (La Silla) | 200,000 | 120 | 3,500 | 2.5
 | ESPRESSO | RV | 8.0 | 0.15 m/s | 8h | 8.2m | 2635m (Paranal) | 900,000 | 400 | 8,000 | 4.0
 | SOPHIE | RV | 8.0 | 2.0 m/s | 6h | 1.93m | 650m (OHP) | 60,000 | 30 | 1,500 | 1.5
-| ELT | DirectImaging | 6.0 | 1e-4 contrast | 3600s | 39.3m | 3046m (Cerro Armazones) | 4,000,000 | 900 | 25,000 | 6.0
+| ELT | DirectImaging | 6.0 | 1e-4 contrast | 3600s | 39.3m | 3046m (Cerro Armazones) | not offered (`UnderConstruction`, §4, §12.3) | | | 
 | RedCat51 | SolarSystemPhotography | n/a | n/a | n/a | 0.051m | 650m (OHP) | 0 (default) | 0 | 20 | 0.0 (no science economy)
 | RC20 | SolarSystemPhotography | n/a | n/a | n/a | 0.51m | 650m (OHP) | 15,000 | 5 | 50 | 0.0 (no science economy)
 | CDK1000 | SolarSystemPhotography | n/a | n/a | n/a | 1.0m | 1712m (Palomar) | 60,000 | 20 | 120 | 0.0 (no science economy)
@@ -1727,6 +1766,64 @@ Numbered items are referenced elsewhere as "§12 item N". The subsections **§12
 87. **WFC3's Channel Select Mechanism is not modelled.** The real instrument can send the beam to the UVIS CCDs or the IR array and switch between them on orbit; here the channel is a persistent field on the part, so a telescope keeps the detector it was built with. Both channels exist and carry the same telescope (§13.75); what is missing is switching between them after launch.
 88. **WFC3/IR's plate scale is anisotropic and one number is carried.** IHB 7.4 measures 0.135 × 0.121 arcsec/pixel, the IR focal plane being tilted with respect to the incoming beam, and this pipeline carries one scale per instrument. The geometric mean is used, which preserves the solid angle per pixel exactly and therefore the sky background; what it does not preserve is the field's real 136 × 123 arcsec shape, which comes out square at 129.6 arcsec. The same limitation as UVIS's item 45, reached by a different route and resolved by a different criterion, for the reason §13.75 gives.
 89. **The two handbooks disagree on the IR focal plane's tilt and neither is derivable from the other.** IHB 7.4 gives 24°, DHB 1.3 gives 22°. Nothing in this pipeline reads the tilt — it enters only through the plate-scale anisotropy, which is measured directly and used directly (item 88) — so the disagreement is recorded rather than resolved, and would have to be resolved before any model of the field's geometric distortion could be built on it.
+94. **The published slew rate and acquisition time are transplanted through a universe time scale, not used literally.** 6 deg/min and 6.5 minutes are HST's real figures, and on a body a tenth of Earth's size they make a ninety-degree repoint cost half an orbit rather than a fifth of one, so a target clear of the limb at the click is occulted on arrival. What is preserved instead is the quantity the constraint exists to represent, the fraction of an orbit spent turning, through the ratio of grazing-orbit periods √(R³/μ) between this universe's home body and Earth. The scale is exactly 1 on a real-scale install, where every figure is then used as published. The literal figures are the sourced ones; the transplant is a stated modelling choice on top of them (§13.65).
+90. **The unloaded telescope's illumination is orbit-averaged, not resolved to where it is in its own eclipse.** A vessel KSP is not simulating has no meaningful instant, and the ledger is advanced across gaps that at high time warp are many orbits, so the sunlit *fraction* is the physically meaningful quantity over any interval longer than one orbit and the only thing about the illumination that is exactly computable from the geometry. It is wrong for intervals shorter than an orbit, in a direction that averages out (§13.65).
+91. **Solar panel output ignores the incidence angle on the panel itself.** The 1/r² falloff against the distance KSP rates panels at is applied; the cosine of the angle between the panel normal and the Sun is not, so a fixed panel bolted at an unhelpful angle produces its full rated output whenever the spacecraft is in sunlight. The panel's orientation is a property of one particular build and of the attitude the telescope is currently holding, and the attitude is exactly what the ground-operations mode is changing (§13.65).
+92. **The eclipse fraction is the circular-orbit expression, evaluated at the semi-major axis.** The relation is exact for a circular orbit and used with `a` rather than the instantaneous radius deliberately, because the quantity is orbit-averaged and feeding it a radius from one point of an eccentric orbit would make the answer depend on when the ledger happened to run. It understates the sunlit fraction for an eccentric orbit, whose apoapsis is eclipsed less than the mean (§13.65).
+93. **A commanded attitude is not written back to an unloaded vessel's saved rotation.** The slew clock and the commanded direction are persisted and the boresight is interpolated along the profile for the readout, but the protovessel's own rotation is left alone, so flying out to a telescope mid-slew loads it at whatever attitude it was frozen in and its autopilot re-flies the remaining rotation. The readout switches to the measured boresight at that moment (§13.4's "measured beats modelled" rule) and the shutter stays gated until it really arrives, so nothing reports a frame it did not take; what is lost is the time already spent turning (§13.65).
+
+95. **The transit dip is Mandel & Agol's small-planet approximation, not their exact solution.** The occulted flux is evaluated as the planet's area times the local intensity at the chord's own radius, which assumes the intensity does not vary across the planet's disc. That is the approximation the 2002 paper states is good to about `p^2` in relative depth; it is excellent for an Earth-sized body and it is worth a few percent of the depth for a hot Jupiter at `p = 0.15`, worst near the limb where the intensity gradient is steepest. The exact quadratic-law solution is analytic (Mandel & Agol 2002, in complete elliptic integrals; Giménez 2006 in Jacobi polynomials; Agol, Luger & Foreman-Mackey 2020 in a numerically stable form valid for any polynomial law), so this is a transcription rather than a research problem, and it removes the only place where the injected depth and the recovered depth differ for a reason that is not noise (§2.2).
+
+96. **The limb-darkening coefficients are one six-point table in Teff, and they do not know which instrument is observing.** `u1, u2` are interpolated from a coarse digitisation of Claret & Bloemen (2011) on Teff alone, with no `log g` and no metallicity axis, and above all with no bandpass axis: the same pair is used for SuperWASP's broad visual response, TESS's 600 to 1000 nm band and SPECULOOS's `I+z`, where the real coefficients differ by more than a factor of two in `u1`. Since the mod already carries each of those instruments' real passbands (§7.02, `SystemBandpass`), the honest closure is to ship the published coefficient grids in Teff, log g and [Fe/H] per band (Claret & Bloemen 2011 for Johnson-Cousins and Sloan; Claret 2017 and 2018 for TESS and Kepler; the ATLAS and PHOENIX grids distributed with EXOFAST, Eastman et al. 2013) and interpolate on the instrument's own band. Kipping (2013)'s `q1, q2` triangular parametrisation is the standard way to keep the pair physical while fitting. Until then, the depth of a given planet is band-independent in this pipeline, which real transit photometry never is (§2.2).
+
+97. **Finite integration time is not integrated over.** Each light-curve point is the model evaluated at one instant, while a real point is the average of the model over the open shutter. Kipping (2010) quantifies the distortion: the ingress and egress are smeared, the depth is reduced and the light-curve-derived stellar density is systematically underestimated, with the error becoming serious once the integration reaches a few percent of the transit duration. It is negligible for TESS's 2-minute points on a several-hour transit and it is not negligible for a 30-minute cadence or for a short-duration event, and the fix is the standard one, Simpson or midpoint resampling of the model across the exposure before comparison (§2.2).
+
+98. **The light curve's noise is white, and no real light curve is.** The three terms added in quadrature (photometric, scintillation, moonlight) are all uncorrelated point to point, so binning always averages them down as `1/sqrt(n)`. Real ground-based photometry is dominated at transit timescales by correlated systematics, and this is the single reason transit surveys under-delivered against their own predicted yields; Pont, Zucker & Queloz (2006, MNRAS 373, 231) measure the residual red-noise term `sigma_r` at typical survey sites to be a few times `10^-3` in relative flux over hours, and show that the detection statistic to use is the signal-to-pink-noise ratio rather than the white one. Carter & Winn (2009) give the wavelet treatment for a `1/f` component. Closing it means injecting a correlated component with a published amplitude and correlation time and then reporting the pink-noise statistic; both halves are needed, since injecting red noise without changing the statistic would simply make every detection look worse for no stated reason (§2.2, §2.4).
+
+99. **Nothing dilutes a transit.** The depth reaching the detector is `(Rp/R*)^2` exactly, with no third light in the aperture. A real photometric aperture almost always contains other stars, and the observed depth is the true depth divided by `1 + F_contaminating / F_target`; the effect is severe exactly for the wide-field instruments in this roster, SuperWASP at 13.7 arcsec/pixel and TESS at 21 arcsec/pixel, where the correction is routinely tens of percent and occasionally a factor of several (Ciardi et al. 2015 for the Kepler statistics; the TESS Input Catalog's own contamination ratio, Stassun et al. 2019). This one is unusual among the open items in that the pipeline already holds everything needed to close it: a real background star catalogue (§6.1), a real aperture radius per instrument (`PhotometricDetector.PhotometricApertureRadiusPixels`) and a real per-band flux model (§7.0). It is arithmetic over the neighbours inside the aperture, not new physics (§2.2).
+
+100. **There are no astrophysical false positives.** Every periodic dip in this pipeline is a planet, because the only thing that produces one is a planet. Real transit surveys spend most of their vetting effort on the alternatives, and the alternatives dominate the raw candidate list: grazing and diluted eclipsing binaries, background eclipsing binaries inside the aperture, and hierarchical triples. The published rates are large and instrument-specific (Fressin et al. 2013 for the Kepler false-positive rate as a function of candidate size; Santerne et al. 2012 measuring roughly a third of giant-planet candidates to be false positives under RV follow-up), and the standard vetting products are the odd-even depth difference, the secondary eclipse, the centroid shift and the V-shape of the ingress. The frameworks for computing a false-positive probability are published and implementable (Torres et al. 2011, BLENDER; Morton 2012, `vespa`). Nothing in this pipeline can currently return a wrong answer for an astrophysical reason, which is the largest single distance between it and a real survey's experience (§2.4).
+
+101. **The BLS statistic is a local signal-to-noise, not the calibrated statistic the algorithm's own paper defines.** Kovacs, Zucker & Mazeh (2002) report the Signal Detection Efficiency, the peak of the signal-residue spectrum measured in units of the spectrum's own standard deviation, precisely because it is comparable across stars and across periodograms while a raw depth over sigma is not. Computing the SDE is free here: the periodogram is already built, so the mean and standard deviation of it are already available. A false-alarm probability on top of that needs either the bootstrap over scrambled residuals or an analytic effective-independent-trials count, and either is a stated method rather than an invention. This is item 7 restated with the specific closure named (§2.4).
+
+102. **The transit probability ignores both the planet's own radius and the orbit's eccentricity.** `R*/a` is the point-planet circular result; the correct expression is `(R* + Rp)/a` times `(1 + e sin omega)/(1 - e^2)` for a grazing-inclusive transit (Winn 2010, eq. 9; Barnes 2007 for the eccentricity factor and its consequence, that eccentric planets are over-represented among transit detections). Both corrections are one line each and both use quantities already on `StarTarget`. Related to item 20, which is the same omission in the duration rather than in the probability (§2.5).
+
+103. **Radial-velocity precision has no spectroscopic content.** `EstimatePrecision` gives one number per instrument scaled by `10^(0.2 dm)`, so an M dwarf and an F star of the same apparent magnitude are measured to the same precision by the same spectrograph. Real photon-limited RV precision depends on the Doppler information in the spectrum, which is the derivative of the flux with respect to wavelength summed over the band: `sigma_RV = c / (Q sqrt(Ne))` with `Q` the spectral quality factor (Bouchy, Pepe & Queloz 2001, A&A 374, 733). `Q` varies by more than an order of magnitude across spectral type, band and rotational broadening, which is why an early F rotator is a poor RV target at any brightness and a slowly rotating K dwarf is a good one. Reiners & Zechmeister (2020, ApJS 247, 52) publish exactly the table this needs: the photon-limited RV precision per spectral class from F to M, per wavelength band, referred to a stated telescope aperture and exposure, computed from both empirical HARPS and CARMENES spectra and from models. Closing it makes target selection a real decision rather than a brightness ranking (§3.1).
+
+104. **No radial-velocity instrument has a noise floor.** With `10^(0.2 dm)` and nothing else, precision improves without limit toward bright stars, so ESPRESSO reaches a few centimetres per second on a naked-eye star and HARPS follows it down. Real spectrographs stop at their own systematic floor: instrumental drift, wavelength-calibration residuals, detector-level effects and telluric contamination together set a floor of order 1 m/s for HARPS and of order a few tens of centimetres per second for ESPRESSO on the best-behaved targets (Pepe et al. 2021; the state-of-the-field review in Fischer et al. 2016). The closure is one published number per instrument added in quadrature, and it changes the answer to the question the career mode is built around, which is what a given instrument can and cannot reach (§3.1, §9.1).
+
+105. **Stellar RV jitter is white, banded by Teff, and disconnected from the star's own spots.** The same star carries a photometric spot modulation (§2.3) with a rotation period and an amplitude, and an RV jitter term drawn independently of both; the two are related only through a shared `ActivityFactor`. In a real star they are the same physical surface: the spots that dim the photometry displace the line centroid, so the activity RV signal is quasi-periodic at the rotation period and its harmonics rather than white, and it is predictable from the light curve. Aigrain, Pont & Zucker (2012, MNRAS 419, 3147) give the standard closed form, the `FF'` method, which estimates the activity RV from the photometric light curve and its time derivative with two free parameters, and reproduces the observed variation of HD 189733 at the 2 to 3 m/s level. Adopting it would make this pipeline's two activity models one model, and would make the RV residual correlate with the photometry the way a real dataset's does, which is the thing that makes activity hard to distinguish from a planet in the first place. The amplitude scale itself has measured calibrations against activity indicators (Isaacson & Fischer 2010; Luhn et al. 2020), which the catalogue could carry per star rather than hashing (§2.3, §3.1, item 22).
+
+106. **Oscillations and granulation are absent.** Solar-type RV noise has three distinct timescales and only the slowest is represented here: p-mode oscillations at minutes, granulation at minutes to hours, and activity at the rotation period. The first two have published scaling relations, `v_osc` proportional to `L/M` normalised at the Sun's 23.4 cm/s (Kjeldsen & Bedding 1995) and the granulation amplitude and timescale following from the same scalings, and Dumusque et al. (2011) show how the observing strategy that averages them down works, which is the practical reason to model them: they set the minimum useful exposure and the value of multiple exposures per night, both of which are decisions this mod's session layer already exposes (§2.3, §3.1).
+
+107. **The RV periodogram is a single sinusoid with no false-alarm probability and no Keplerian refit.** The three-parameter fit per trial period is the generalised Lomb-Scargle statistic in all but name (Zechmeister & Kürster 2009 derive it with the same floating offset), so citing it as such makes its normalisation and its power definition standard rather than local. Two things are then missing on top: a false-alarm probability, for which the analytic treatment for the GLS periodogram is published (Baluev 2008) and the bootstrap is the fallback; and a Keplerian refit of the best candidate, which is what removes the known eccentric-orbit amplitude bias recorded as item 6 rather than merely declaring it. A Levenberg-Marquardt refit of `(K, P, e, omega, T0, gamma)` seeded from the sinusoid is the standard next step in every real RV pipeline (§3.2).
+
+108. **The radial-velocity dataset has no instrumental reality.** There is no zero-point offset between instruments, so a campaign that observes the same star with HARPS and SOPHIE can combine them without the offset every real joint fit must include; no long-term instrumental drift; no nightly zero-point correction; no telluric contamination, which is a real and wavelength-dependent RV systematic (Cunha et al. 2014); and no secular acceleration, the slow perspective drift of a high-proper-motion star's RV that is a measurable trend on nearby M dwarfs (Kurster et al. 2003). Nor is there a barycentric time scale: times are KSP universe seconds, whereas a real ephemeris is in BJD_TDB and errors in that conversion are a known source of spurious timing signals (Eastman, Siverd & Gaudi 2010). The offsets and the drift are the two that change what a player can conclude, and both are one parameter per instrument (§3.1).
+
+109. **The Rossiter-McLaughlin anomaly is the flux-weighted approximation, and a spectrograph does not measure that.** `dV = -dip x vsini` is the velocity of the occulted surface element weighted by the flux it removed; what a cross-correlation or template-matching pipeline actually reports is the centroid of a distorted line profile, and the two differ by a factor that depends on the ratio of `vsini` to the total line width from macroturbulence, thermal, pressure and instrumental broadening. Hirano et al. (2011, ApJ 742, 69) derive the correction explicitly and show it matters most for rapid rotators, which are exactly the stars whose RM signal is large enough to measure. Since the fit here is a linear regression against the same approximate regressors, the bias partly cancels in the recovered `lambda` and does not cancel in the recovered `vsini`. Ohta, Taruya & Suto (2005) remains the right citation for the effect; Hirano et al. is the one that makes it a measurement (§2.7).
+
+110. **The spin-orbit angle distribution is a shape chosen by hand.** 70 percent within 20 degrees of aligned and 30 percent uniform is a plausible sketch of the observed hot-Jupiter distribution and it is not any published distribution. The measured one has structure the sketch does not: the obliquity depends on the host's effective temperature, with stars above roughly 6250 K showing a broad spread and cooler stars being predominantly aligned (Winn et al. 2010; Albrecht et al. 2012), which is a real, citable and easily implemented dependence on a quantity every target already carries (§2.7, item 22).
+
+111. **The TTV amplitude is a dimensional estimate, and the exact first-order resonant result is published in closed form.** `A = P (m/M*) / (pi j^(2/3) |Delta|)` has the right scalings and no derivation behind its coefficient. Lithwick, Xie & Wu (2012, ApJ 761, 122) give the analytic first-order mean-motion-resonance TTV for both members of a pair as a complex amplitude, separating the free and forced eccentricities, and it is the expression the Kepler TTV mass measurements were made with; it supplies the phase as well as the amplitude, which the sinusoid here does not, and the phase is what distinguishes a resonant TTV from anything else. Agol & Deck (2016) give the general first-order-in-eccentricity treatment, and Deck & Agol (2015) the chopping signal, the short-period component that breaks the mass-eccentricity degeneracy and is entirely absent here. Also absent: the light-travel-time contribution, which for a massive outer companion is a real and separable term (Agol et al. 2005). This is item 8 with the closure named; the analytic form is not more expensive than the estimate it replaces (§2.6).
+
+112. **A directly imaged planet radiates as a blackbody at its equilibrium temperature, and the planets that are directly imaged do not.** This is the largest error in the detection pipeline and it is discussed at length in §12.3.
+
+113. **Reflected light is not modelled at all in the direct-imaging path.** The contrast is thermal emission only, so a cool planet is invisible no matter how close in it sits, while its reflected-light contrast `Ag (Rp/a)^2` times a phase function would be of order `10^-9` for an Earth analogue and `10^-8` to `10^-7` for a close-in giant, which is the regime the ELT's own reflected-light case is written around. The pipeline already carries a Lambertian phase law for the solar-system astrograph (Russell 1916, §7.0) and geometric albedos are published per planet class as a function of separation and metallicity (Cahoy, Marley & Fortney 2010). Adding the term is a sum of two contrasts, not a new model (§4.1, §12.3).
+
+114. **The contrast floor scales with the target's apparent magnitude as `10^(0.2 dm)`, which is the photon-noise law in a regime that is not photon-limited.** High-contrast imaging at small separations is limited by quasi-static speckles, whose brightness relative to the star does not depend on how bright the star is; the target's magnitude enters through a completely different door, the signal-to-noise of the adaptive-optics wavefront sensor, which degrades the Strehl ratio and therefore raises the halo once the guide star is faint enough, with a threshold and a shape that are properties of the AO system rather than a power law in magnitude. Using the photon-noise exponent here makes a bright star's achievable contrast better than any instrument has ever reached and a faint star's worse than the AO limit. The correct treatment is a floor that is flat in magnitude over the AO system's guiding range and then degrades, and the published performance curves for the relevant instruments are the input (§4.1, §12.3).
+
+115. **The speckle floor falls as the inverse square of the separation, and an adaptive-optics halo does not.** `floor(theta) = base (lambda/D / theta)^2` is a chosen shape. The residual halo left by a partially corrected wavefront follows the spatial power spectrum of the uncorrected turbulence, which for Kolmogorov statistics gives an intensity falling as `theta^(-11/3)` outside the correction radius (Racine et al. 1999; Sivaramakrishnan et al. 2001; Perrin et al. 2003, ApJ 596, 702 for the full expansion), and inside the correction radius the floor is set by the deformable mirror's actuator count, giving the control radius at `(N/2) lambda/D` and the sharp rise of the halo just beyond it. The mod already computes exactly this control radius from actuator count for SPHERE (`SpeckleField`), so the ELT path is using a worse model than the one already in the codebase (§4.1, §12.3).
+
+116. **The direct-imaging signal-to-noise improves as the square root of time without limit, and the static speckle field does not average down at all.** `SNR = 5 (C/floor) sqrt(hours)` lets any contrast be reached by integrating longer, so the deep post-processed floor is a clamp rather than a consequence. Milli et al. (2016), already transcribed into `Core/SpeckleField` for the astrograph path, measure the decomposition directly: about 71 percent of the speckle correlation is static over an hour and averages down not at all, about 6 percent decorrelates in 3.5 seconds and the rest is already decorrelated at 0.63 seconds. Only the last two average as `sqrt(t)`. What removes the static part is angular or reference differential imaging, whose own throughput and its self-subtraction penalty this codebase also already models and has measured by injection and recovery (§7.5205, item 65). The ELT path uses none of it (§4.1, §12.3).
+
+117. **The angular separation is the semi-major axis over the distance, with no projection.** A real companion is seen at a projected separation that varies over its orbit between zero and the apparent semi-major axis, depending on inclination, eccentricity and orbital phase, and whether it is currently resolvable is therefore a function of when it is observed. `Resolvable` here is a fixed property of the system. For a research-grade completeness statement this matters directly: survey completeness is computed by drawing orbital phases, not by assuming maximum elongation, and the correction is substantial for a low-inclination or eccentric orbit (§4.1).
+
+118. **The direct-imaging integration is normalised as `dt / X^2`, which is a convention rather than a measured law.** The session accumulates zenith-equivalent seconds by dividing by the square of the airmass. Real high-contrast performance degrades with airmass through the AO correction (a longer path means a smaller `r0` and a lower Strehl) and through anisoplanatism and atmospheric dispersion, none of which is an inverse-square in airmass. The mod already carries the Kolmogorov `X^(3/5)` seeing scaling for its photometric path and a real atmospheric dispersion model (§7.1); this term is not connected to either (§4.1).
+
+119. **The direct-imaging path is modelled at H band only, and the ELT's own planet-imaging instruments are not all H-band instruments.** The 1.6 micron choice fixes the diffraction limit, the Planck ratio and the speckle scale together. METIS observes in L, M and N bands, where a young planet's contrast is far more favourable and where the sky and telescope thermal background, which this pipeline has no term for at all, dominates the noise budget instead of the read noise. Modelling a second band would need the thermal background term with it; stating the band and its consequences is the current treatment (§4.1).
+
+120. **The mod contains two high-contrast imaging pipelines of very different quality, and the exoplanet one is the poorer.** `Core/Coronagraph`, `SpeckleField`, `AngularDifferentialImaging` and `ContrastCurve` together implement a coronagraph, modified-Rician speckle statistics with measured decorrelation timescales, an ADI reduction with a measured self-subtraction throughput, and a contrast curve with Mawet et al. (2014)'s small-sample correction, all cross-validated against VIP; they are wired to the solar-system astrograph's SPHERE instrument alone. `DirectImagingSimulator`, which is what the exoplanet campaign actually runs on, has none of them. Item 9 records this for the rendered frame's speckle field; it is true of the entire physics chain, and it is why §12.3 treats the direct-imaging path as one problem rather than as a list (§4.1, §7.52).
+
 
 ### 12.1 The nebula-morphology limit, and the layer built for it
 
@@ -1848,6 +1945,28 @@ unconditional clip had introduced on the RedCat.
 stdout; the skycalc client prints an informational note on stdout, and shell redirection silently
 made it the first line of a .cs file.
 
+### 12.3 The direct-imaging path, and why it is treated as one problem
+
+**This is the largest known limitation of the detection pipeline, and unlike §12.1 it is not a data-availability limit.** Everything below is published, and most of it is already implemented elsewhere in this same codebase for a different instrument. §4 is the one place in the mod where the physics is weaker than the sources available to it, and it is the section a reader of the paper will test first, because direct imaging is the method whose numbers are easiest to check against a real published contrast curve.
+
+The path is four multiplications: an equilibrium temperature, a Planck ratio, a radius ratio squared, and a floor that falls as the inverse square of the separation and improves as the square root of time. It was written to give the career mode a plausible ordering of targets, and for that it works. What it cannot do is answer the question a research simulator is asked, which is whether a given instrument, pointed at a given star for a given time, would have seen a given companion.
+
+**The planet's own light.** `EquilibriumTempK` is applied whenever the catalogue carries no measured temperature, which is the normal case. Two things are wrong with using it here. The first is terminology and is trivially fixed: the expression `Teff sqrt(R*/2a) (1-A)^(1/4)` is the FULL-redistribution equilibrium temperature, the one that assumes the absorbed flux is spread over the whole sphere, and the comment in `DirectImagingSimulator` calls it a zero-redistribution estimate, which would carry a further factor of `(2/3)^(1/4)` and use `sqrt(R*/a)`. The second is physical and is not fixable by choosing a different redistribution factor. The planets direct imaging actually detects are young, massive and far from their stars, and their emission is not reprocessed starlight at all: it is the heat of formation still leaking out of a body that has not finished contracting. HR 8799 b has an equilibrium temperature near 50 K and an effective temperature near 1000 K; beta Pic b has an equilibrium temperature near 150 K and an effective temperature near 1700 K. At 1.6 microns, `hc/(lambda k)` is 8996 K, so a blackbody at 50 K contributes `exp(-180)`, which is to say nothing at all, while the real planet sits at a contrast near `10^-5` and was photographed from the ground with an 8-metre telescope. A pipeline built on the equilibrium temperature does not merely mis-estimate these objects; it reports the entire class of real direct-imaging detections as undetectable, while reporting close-in hot planets, which no coronagraph can resolve, as the favourable targets. The ordering is inverted with respect to the real discovery space.
+
+The closure is the standard one and the tables are public. Giant-planet cooling tracks give luminosity, radius and effective temperature as functions of mass and age (Baraffe et al. 2003, the COND models, and Baraffe et al. 2015; Marley et al. 2007 for the hot-start against cold-start distinction, which is a factor of order 100 in luminosity at young ages and is itself a scientific question worth exposing rather than hiding; Spiegel & Burrows 2012 for the intermediate range). Atmosphere models then give the band-integrated flux rather than a blackbody, which matters at H band specifically because water and methane absorption carve the spectrum of a cool giant into peaks and troughs that a blackbody does not have (Allard et al. 2012, BT-Settl; Marley et al. 2021, Sonora Bobcat; Phillips et al. 2020, ATMO 2020). The required new input is the system's age, which is not in the exoplanet catalogue for every host and is published for the young moving-group members that dominate imaging samples; where it is unknown, the honest treatment is the one this codebase already uses everywhere else, which is to decline to compute rather than to invent, and to fall back to the measured temperature when the catalogue has one.
+
+Reflected light is the other half of the planet's flux and is absent entirely (item 113). For the ELT's own science case it is the half that matters for rocky planets.
+
+**What limits the observation.** The floor is `EstimatePrecision(mag)` at one `lambda/D`, falling as `theta^-2` and clamped at `10^-8`, improving as `sqrt(t)`. Every one of those four choices is a shape rather than a measurement, and each has a published alternative (items 114 to 116). The magnitude scaling uses the photon-noise exponent in a speckle-limited regime; the radial law is an inverse square where a partially corrected Kolmogorov halo falls as `theta^(-11/3)` outside the AO control radius and is flat-ish inside it; the temporal law lets integration reach any contrast, when the measured decomposition of a real extreme-AO speckle field puts about 71 percent of the correlation in a component that does not average down at all.
+
+The uncomfortable part is that the codebase already contains the better model. `Core/SpeckleField` implements the modified Rician statistics of Soummer et al. (2007) with Milli et al. (2016)'s three measured decorrelation components and computes the AO control radius from the deformable mirror's actuator count. `Core/Coronagraph` implements a focal-plane mask and Lyot stop. `Core/AngularDifferentialImaging` implements the reduction, with a self-subtraction throughput that has been measured by injection and recovery rather than assumed. `Core/ContrastCurve` produces the deliverable, with Mawet et al. (2014)'s small-sample correction, cross-validated against VIP. All four are wired to the solar-system astrograph's SPHERE instrument and none of them is reachable from the exoplanet direct-imaging campaign, which instead runs the four multiplications above. Closing this is therefore mostly not a research task: it is giving the ELT an `InstrumentSpec`-level optical description in the same terms SPHERE already has (aperture and obstruction, which are already there; actuator count for the control radius; coronagraph inner working angle; the AO Strehl and guide-star limit), then routing the campaign through the existing chain and reporting the existing contrast curve.
+
+**What that would buy.** Three things a research user would ask for and cannot currently get. A contrast curve as the campaign's output, which is what every direct-imaging paper publishes and what any completeness calculation consumes. A detection threshold that is correct at small separations, where the naive five sigma is not five sigma and the correction is more than a magnitude at 2 `lambda/D`. And an honest statement of what integration time does and does not buy, which is the single most consequential thing a player or a reader learns from a high-contrast simulator.
+
+Until then the instrument is withdrawn rather than described away: the ELT carries `InstrumentSpec.UnderConstruction`, `IsInstrumentUnlocked` refuses it before any economy check, and the observatory selector lists it as "ELT: under construction". That is a deliberate departure from how the rest of §12 is handled, where a limitation is declared and the code still runs; the difference is that everywhere else the declared limitation bounds a number that is otherwise right, and here it inverts the ordering of which targets are reachable. The code itself is untouched and stays in place, since the closure is largely a matter of routing it through `Core/SpeckleField`, `Coronagraph`, `AngularDifferentialImaging` and `ContrastCurve`.
+
+---
+
 ## 13. Orbital telescopes
 
 The observatory's instruments up to this point are all somebody else's: real facilities on real
@@ -1890,6 +2009,15 @@ as published, or a closed-form consequence of one.
 | Aperture sampling | r = √(r_in² + t(r_out² − r_in²)), θ = i·2π(1−1/φ) | equal-area mapping; Vogel spiral |
 | Frame volume | pixels × ADC bits | WFC3 IHB Table 5.1 format and ADC depth |
 | Effective focal length | f = 206265 × pixel / plate scale | WFC3 IHB; cross-checked against the Primer's 3.58″/mm |
+| Rest-to-rest slew, torque-limited | t = 2√(θ/α), α = τ/J | Euler's equation; standard eigenaxis manoeuvre (Wertz 1978) |
+| Rest-to-rest slew, rate-limited | t = θ/ω_max + ω_max/α | same; the two branches meet at θ = ω_max²/α |
+| Slew rate ceiling | 6°/min × universe time scale | HST Primer, Pointing/Orientation/Roll; cross-checked against its own "about one hour" full circle |
+| Guide-star acquisition | 390 s ÷ universe time scale, independent of the angle | HST Primer, Orbital Visibility, Acquisition Times, and Overheads |
+| Universe time scale | √(R³/μ)⊕ ÷ √(R³/μ)home | preserves repoint time as a fraction of an orbit; exactly 1 on a real-scale install |
+| Slew charge | wheels' own published EC rate × manoeuvre time | KSP's own `ModuleReactionWheel` billing rule; game balance, labelled as such |
+| Thruster slew impulse | I = 2Jω_peak/r, m = I/(Isp g₀) | conservation of angular momentum; definition of specific impulse |
+| Eclipsed fraction of an orbit | acos(√(a²−R²)/(a cos β))/π | Vallado; identical term for term to the occultation relation above |
+| Battery ledger | ΔQ = (G·f_sun − D)Δt, clamped to [0, capacity] | conservation; catch-up integration over unsimulated time |
 
 `VisualTelescopeSpec.SpacePlatform` is the single field the whole branch turns on. It is a
 `SpacePlatformSpec`, not a boolean, because every replacement term above is a property of a
@@ -2228,6 +2356,163 @@ a network shared with other spacecraft (HST Primer: Data Storage and Transmissio
 counterpart here and is not modelled. Electric charge is a KSP resource with no conversion to watts
 anywhere in the game, so those numbers are game balance and are labelled as such where declared.
 
+### 13.65 Commanding it from the ground (`Flight/GroundStation.cs`, `Core/SlewDynamics.cs`, `Core/OrbitalPowerBudget.cs`)
+
+§13.6 above establishes that the telescope is unloaded whenever the player uses it, and that reading
+its state therefore has to go through the protovessel. The same fact applies to *writing* it, and
+for a long time nothing did: `ApplySpaceTelescopePointing` opened with a null check on the
+`PartModule` and returned. From the observatory, choosing a target moved the camera and moved
+nothing else. The spacecraft never turned, the repoint took no time, and the battery never moved.
+
+Three costs are now enforced, and each is the answer to a different question.
+
+**Time: the manoeuvre (`SlewDynamics`).** A three-axis vehicle does not slew in pitch and then in
+yaw; it rotates once about the eigenaxis joining the two attitudes. Accelerating at α = τ/J and
+decelerating symmetrically gives the triangular profile t = 2√(θ/α) with a peak rate √(αθ); when
+that peak exceeds the vehicle's published ceiling the profile is trapezoidal, t = θ/ω_max + ω_max/α.
+The two are continuous at θ = ω_max²/α, where both give 2ω_max/α, and the harness asserts it.
+
+The rate ceiling is **published, not derived**, and that is the point. A real observatory's limit
+has nothing to do with how hard its wheels can push: it is set by the range its rate gyroscopes
+measure over and by the guidance system's ability to track its own attitude while moving, which is
+why STScI states it as one number. The HST Primer gives 6°/min and, in the same paragraph, its
+consequence, "about one hour is needed to go full circle", which is the same figure read back and
+is used as a transcription check.
+
+Arriving at the attitude is not arriving on target: the fine guidance sensors have to acquire, and
+the Primer's figure for that is 6.5 minutes. It is carried separately because **it does not scale
+with the angle**. A one-degree offset and a hundred-degree repoint pay identical acquisitions, which
+is precisely why real programmes are built out of clusters of nearby targets rather than out of the
+shortest tour of the sky.
+
+*Transplanting a published rate into a scaled universe.* 6 deg/min is a real number and copying it
+across unchanged made the feature unplayable, which is a modelling error and not a reason to fudge
+it. The rate alone is not the meaningful quantity: what shapes an observing programme is the
+**fraction of an orbit spent turning**, and for HST that is 15 minutes of slew plus 6.5 of
+acquisition against a 96 minute orbit, about 22 %. Kerbin is a tenth of Earth's size, so a low orbit
+takes about 29 minutes rather than 96, and the literal figure made the same repoint cost **51 % of
+an orbit**: a target clear of the limb when the player clicked it was behind the planet on arrival,
+which is what happened in play. So the ratio is what is preserved, through the one factor that sets
+it, the grazing-orbit period √(R³/μ) of this universe's home body against Earth's (no reference
+altitude is needed, since the ratio of two grazing periods is independent of any altitude one might
+pick). Stock Kerbin gives 3.257, putting the repoint back at 4.6 minutes plus 2.0 of acquisition,
+22.6 % of its orbit. **On a real-scale install the factor is exactly 1 and every published figure is
+used as published**, that is the check which makes this a scale transplant rather than a difficulty
+slider, and `tools/slew-tests` section 1b asserts it.
+
+*Where the shipped part sits.* Its wheels are 12 kN m an axis against ≈79 000 kg m² (the module's own
+⅖MR² estimate), i.e. 8.7 deg/s²: some three orders of magnitude more angular acceleration than HST's real wheels manage, because KSP's reaction wheels are balanced for flying rockets. The crossover between
+the two branches therefore falls at **4.1 arcsec**, well inside one field of view, so every repoint
+a player will ever command is rate-limited and the published ceiling governs, exactly as it does on
+the real spacecraft. The torque figure in the part config cannot make repointing free.
+
+**Energy: the wheels (`SlewDynamics.ReactionWheelChargeUnits`).** Billed at the vessel's own
+reaction wheels' published draw, read off their `ModuleReactionWheel` RESOURCE nodes, over the
+manoeuvre. There is no step through watts, because `ElectricCharge` has no conversion to watts
+anywhere in KSP.
+
+The first version of this billed only the *ramps*, on the correct-sounding grounds that a wheel
+coasting at constant momentum draws no torque current. It was wrong twice, and the harness is what caught it: with ramps lasting twenty milliseconds, a ninety-degree repoint came to **0.017 EC out of
+a 400 EC battery**, which is a rounding error rather than a constraint. And the argument itself does not hold: KSP's own `ModuleReactionWheel` bills for the whole time the autopilot is commanding it,
+so a slew ordered from the observatory would have been *cheaper* than the identical slew flown by
+hand, and a real reaction wheel assembly draws tens of watts continuously whether or not it is
+accelerating. Under thruster control there is no charge at all and a propellant cost instead:
+I = 2Jω_peak/r for the momentum in and back out again, m = I/(Isp g₀).
+
+**Energy: the ledger (`OrbitalPowerBudget`).** The two above are a trap rather than a constraint
+without this one, because **KSP does not simulate an unloaded vessel's resources at all**. Its
+batteries hold whatever they held when the player last looked away, its panels produce nothing, and
+its consumers consume nothing. Charging a slew against a battery that never discharges is not a
+constraint; discharging one that never recharges is a telescope that works twice and is then scrap.
+So `GroundStation.Advance` runs the whole ledger over however much universal time has passed since
+it last ran: the panels' output (prefab `chargeRate`, scaled 1/r² against the home body's orbit,
+which is the distance KSP rates them at) times the sunlit fraction of the orbit, against the bus
+load, plus the wheels for whatever part of the interval overlaps a manoeuvre in progress. Clamped at
+both ends, which is what makes an arbitrarily long catch-up safe.
+
+The illumination is **orbit-averaged on purpose**. A vessel the game is not simulating has no
+meaningful instant, and the ledger is advanced across gaps that at high warp are many orbits.
+
+*The eclipse fraction is the occultation relation again.* Vallado's circular-orbit cylindrical-shadow
+fraction is acos(√(a²−R²)/(a cos β))/π, and §13.2's occulted fraction is acos(cos ρ / cos β)/π with
+ρ = asin(R/a), so cos ρ = √(a²−R²)/a and the two are identical term for term. They are one question, a cone of half-angle ρ blocking a great circle tilted by β, asked about a star in one case and the
+Sun in the other. `OrbitalPowerBudget.EclipsedOrbitFraction` therefore delegates rather than
+restating the formula, and `tools/slew-tests` carries Vallado's form written out independently and
+asserts the identity, which is the check the duplication would otherwise have been there to earn.
+Two consequences fall out and are both checked: HST's in-plane eclipse comes to 35.8 min of its
+96 min orbit against the Primer's ~36, and full sunlight begins at exactly the beta angle where
+`ContinuousViewingHalfWidthDeg` says a target enters the continuous viewing zone.
+
+**Affordability is whether it can finish, not whether it can pay up front.** A fifteen-minute
+repoint is fifteen minutes of sunlight as well as fifteen minutes of wheels, so the test is
+`EnduranceSeconds` at the net rate against the manoeuvre duration, and the charge itself is taken by
+the ledger as the slew runs. A reserve is held back (the idle draw over the published acquisition time) because a spacecraft that spends its last charge slewing arrives pointed perfectly at a
+target it has no power left to photograph.
+
+**Each target is stored in the frame it is invariant in.** A body by NAME, because it moves and has
+to be re-resolved; a catalogue position by RA/DEC, because that is what does not; a bare direction as
+a vector, which is now the fallback rather than the normal path. Storing a star as the world vector
+its coordinates happened to map to at the moment of the click was visibly wrong in game: the chart
+redraws the star from its RA/Dec every frame while the commanded marker was drawn from the frozen
+vector, so any imperfection in the world-to-equatorial round trip put the two apart and the gap grew with time: **the target marker drifted off the star it had been placed on.** The chart now projects
+the commanded RA/Dec through the identical call it makes for the star itself, so the marker and the
+star are the same two numbers and cannot come apart, and `TryEquatorialDirection` is shared with the
+flight side so that where the vehicle is driven and where the chart draws are one computation.
+
+**Where the state lives, and why there is exactly one writer.** In the telescope's own module node:
+the live `PartModule`'s persistent fields when the vessel is loaded, the protovessel's saved
+`ConfigNode` when it is not. `TelescopeCommandState` is the single struct that reads and writes
+both, rather than a field-by-field branch at every call site, because there are two backends and
+eight fields and writing that branch sixteen times is how one of them ends up forgotten in the path
+nobody tests, which for an unloaded vessel means a command that appears to work and is gone at the
+next scene change. `ModuleExoSpaceTelescope.CommandPointing` was removed for the same reason: it
+wrote the pointing fields without touching the slew clock beside them, leaving `slewStartUt` on the
+previous manoeuvre's timestamp, so an arbitrarily large repoint read back as long finished, free and
+instantaneous.
+
+**Driving the vehicle when somebody IS flying it** (`ModuleExoSpaceTelescope.DrivePointing`). Handing
+KSP's SAS a target attitude has two traps and the first version fell into both, which in play looked
+like the spacecraft tumbling at random the moment the player boarded it mid-slew.
+
+*The frame.* `VesselSAS` holds its `lockedRotation` against `vessel.ReferenceTransform.rotation`, the control point, i.e. the probe core or pod, oriented however it was mounted. The command was
+being composed against `vessel.transform.rotation`, the ROOT part. The two differ by whatever fixed
+rotation sits between them, so on any satellite whose probe core is not the root and not aligned
+with it, SAS drove to an attitude offset from the intended one, the module recomputed from that
+wrong attitude next frame, and the vehicle chased its own error round in circles. Established by
+disassembling `VesselSAS.GetRotationDelta`, not by inference.
+
+*The roll.* The command was built with `Quaternion.FromToRotation(boresight, target)`, which is *a*
+rotation carrying one vector onto the other and says nothing about roll: its axis is
+boresight × target, so the attitude it produces depends on where the boresight happens to be at that
+instant, and recomputing it every frame while the vessel turned moved the commanded attitude every
+frame too. Worse, that cross product **vanishes when the two are antiparallel**, so a repoint near
+180° left the axis numerically arbitrary and free to flip between frames. `Quaternion.LookRotation`
+against `Planetarium.Zup.Z` has neither problem: the celestial pole does not rotate with the planet
+or the vehicle, so the commanded attitude is a function of the target alone, holds still while the
+spacecraft flies to it, and comes out north-up, which is the convention the frames are stated in.
+It is re-issued only when it has really moved, and it yields to the player's own control input.
+
+**The shutter is not locked during a repoint.** Gating it until the telescope arrived is what a real
+observatory would do, and it made the interesting failure unreachable: an exposure taken while the
+vehicle is turning is a legitimate exposure of whatever the boresight is sweeping across, and it
+comes out as streaks. What it must not do is quietly produce a clean frame of a target the telescope
+has not reached, so two things happen instead. The exposure re-aims at a synthetic target built from
+the boresight's own RA/Dec, putting the whole pipeline (star field, occlusion, WCS) on the patch of
+sky really in front of the optics with no special case downstream; and the manoeuvre's instantaneous
+rate (`SlewDynamics.RateDegPerSecondAt`) goes into the pointing budget as the drift the control
+system is failing to null, which is exactly what it is, so §13.4's existing machinery turns it into
+a streak. The panel states the streak length before the player commits.
+
+**What the player sees.** The boresight's current direction and its commanded one, both as RA/Dec,
+the angle between them against the instrument's own half-field, the phase (slewing / acquiring /
+on target) with a countdown, and on the sky chart a crosshair at the boresight, an open box at the
+target, and the great-circle arc between them. The current direction is **measured** when the vessel is loaded and interpolated along the profile when it is not, the same "measured beats modelled" rule §13.4 applies to the body rate, and the interpolation is not a fudge, because during a real
+slew the boresight genuinely is between the two attitudes.
+
+Everything is keyed on **universal time**, never on real time: the player operates this thing through
+the time warp, and a repoint that took fifteen minutes of wall clock rather than of mission time
+would be a different feature.
+
 ### 13.7 The instrument (`VisualTelescopeCatalog.HubbleWfc3Uvis`)
 
 Every figure and its source is in the catalogue entry's own comment. Three points worth surfacing:
@@ -2340,14 +2625,24 @@ Every band on this instrument lies beyond **830 nm**, the red end of the CIE 193
 
 62 checks. The persistence model is asserted against ISR 2015-15's *own prose statements* rather than against itself: the four trends the report reads out of Table 2 (A rises with exposure time, x₀ and α and γ all fall), the handbook's ~0.3 e⁻/s at 1000 s for a 10⁵ e⁻ fluence and ~0.03 e⁻/s at 10⁴ s, the stated decay slope of about −1 measured at −0.98, and the "< 0.05 e⁻/s below 30 000 e⁻ beyond 500 s" bound. Note that trend 1 is checked at the endpoints and not as monotonicity, because the published fit itself wobbles by 0.001 twice. The IPC kernel is checked cell by cell, for its published sum, for its anisotropy, against Seshadri's independent device, and for a uniform frame staying uniform (which is what proves the edges replicate rather than zero-pad). The catalogue entry is checked against the shipped UVIS one for everything upstream of the channel-select mechanism, and no CCD on the roster may carry infrared-array physics.
 
-### 13.8 Validation (`tools/spacecraft-tests/`)
+### 13.8 Validation (`tools/spacecraft-tests/`, `tools/slew-tests/`)
 
-80 checks, none of which test that the code does what the code says. Every assertion is against a
+92 checks in the first, 58 in the second, none of which test that the code does what the code says. Every assertion is against a
 published figure or a self-consistency identity between two independently published quantities.
 Run with:
 
 ```
 cd tools/spacecraft-tests
+dotnet run -c Release -p:Core=../../ExoInstruments/Core
+```
+
+The repointing and power models have their own harness beside it, whose README records the two
+findings that came out of writing it (the shipped part is rate-limited for every repoint a player
+will make, and billing the wheels for the ramps rather than the manoeuvre made the constraint
+vanish into a rounding error):
+
+```
+cd tools/slew-tests
 dotnet run -c Release -p:Core=../../ExoInstruments/Core
 ```
 
@@ -2368,6 +2663,7 @@ equal-area aperture sampling; frame volume and downlink; and the cosmic-ray deri
 - Biretta, J. et al. (2003). "ACS Background Light vs. Bright Earth Limb Angle." *STScI Instrument Science Report* ACS 2003-05. — Independent measurement of the same effect on ACS; the bound on how far the STIS slope understates it below 16 degrees.
 - Krist, J. & Hook, R. *The Tiny Tim User's Guide*, version 6.3 (2004); Krist, J., Hook, R. & Stoehr, F. (2011). "20 years of Hubble Space Telescope optical modeling using Tiny Tim." *Proc. SPIE* 8127, 81270J. — HST's obscuration set (primary edge, secondary and spider, three mirror support pads) and the `wfc3_uvis1.pup` pupil table: secondary radius 0.330, spider width 0.022, pad radii 0.065 and positions, in pupil-radius units.
 - Leinert, Ch. et al. (1998). "The 1997 reference of diffuse night sky brightness." *A&AS* 127, 1. — **Table 16**, zodiacal light brightness observed from the Earth in S10sun at 500 nm on a grid of helioecliptic longitude against ecliptic latitude, with the ecliptic-pole value in its caption and its own interpolation rule; Sect. 8.4 and Fig. 39 for the reddening relative to the Sun, which is not modelled.
+- Vallado, D. A. *Fundamentals of Astrodynamics and Applications*. — The circular-orbit cylindrical-shadow fraction against the beta angle, used for the orbit-averaged solar power budget and shown in section 13.65 to be term for term the occultation relation of section 13.2.
 - Wertz, J. R., ed. (1978). *Spacecraft Attitude Determination and Control*, Reidel, Sect. 18.3; Sidi, M. J. (1997). *Spacecraft Dynamics and Control*, Cambridge University Press, ch. 7. — The on-off thruster limit cycle: rate increment per minimum impulse, deadband traversal, and cycle period.
 - Abramowitz, M. & Stegun, I. A. (1964). *Handbook of Mathematical Functions*, Eq. 7.1.26. — Rational approximation to the error function, for the exact pixel integral of the Gaussian PSF component.
 
@@ -2460,6 +2756,75 @@ equal-area aperture sampling; frame volume and downlink; and the cosmic-ray deri
 - Schmid, H. M. et al. (2018). *A&A* 619, A9. "SPHERE/ZIMPOL high resolution polarimetric imager. I. System overview, PSF parameters, coronagraphy, and polarimetry." Real ZIMPOL detector Table 4 (full well, read noise, dark current, minimum exposure), plate scale, filter set, and achieved adaptive-optics resolution.
 - Standard V-band photometric zero point (Vega calibration): 948 photons/cm²/s/Å — a standard reference value in observational photometry/exposure-time-calculator literature.
 - Real Sun apparent V-band magnitude at 1 AU (-26.74) — standard astronomical constant.
+
+### Detection pipeline (§2, §3, §4): the closure references for §12 items 95 to 120 and §12.3
+
+*This subsection breaks the rule the rest of §14 follows. Everything above is a paper cited in the source; everything here is a paper that is NOT yet cited in the source, listed because the item it closes names it. It is kept separate for exactly that reason, and an entry moves up into the sections above on the day the code uses it. Volume and page are given only where they have been verified.*
+
+**Transit light curve and geometry (§2.2, §2.5).**
+
+- Mandel, K. & Agol, E. (2002). "Analytic Light Curves for Planetary Transit Searches." *ApJ* 580, L171. Already cited above for the small-planet approximation in use; listed again for the EXACT quadratic-law solution in the same paper, which is what item 95 closes.
+- Giménez, A. (2006). "Equations for the analysis of the light curves of extra-solar planetary transits." *A&A*. The same occultation integral in Jacobi polynomials.
+- Agol, E., Luger, R. & Foreman-Mackey, D. (2020). "Analytic Planetary Transit Light Curves and Derivatives for Stars with Polynomial Limb Darkening." *AJ* 159, 123. Numerically stable exact evaluation, and the derivatives a fit needs.
+- Claret, A. & Bloemen, S. (2011). *A&A* 529, A75. Limb-darkening coefficient grids in Teff, log g and metallicity, PER PASSBAND; the mod currently uses a six-point Teff digitisation of these with no band axis (item 96).
+- Claret, A. (2017) and (2018). Limb-darkening coefficients computed for the TESS and Kepler passbands specifically.
+- Eastman, J., Gaudi, B. S. & Agol, E. (2013). "EXOFAST: A Fast Exoplanetary Fitting Suite in IDL." *PASP*. The ATLAS and PHOENIX limb-darkening interpolation this pipeline would reuse rather than reimplement.
+- Kipping, D. M. (2013). "Efficient, uninformative sampling of limb darkening coefficients for two-parameter limb darkening laws." *MNRAS*. The `q1, q2` triangular parametrisation that keeps a quadratic pair physical.
+- Kipping, D. M. (2010). "Binning is sinning: morphological light-curve distortions due to finite integration time." *MNRAS* 408, 1758. The distortion from evaluating a transit model at an instant rather than integrating it over the exposure, and the resampling that removes it (item 97).
+- Seager, S. & Mallen-Ornelas, G. (2003). "A Unique Solution of Planet and Star Parameters from an Extrasolar Planet Transit Light Curve." *ApJ* 585, 1038. The analytic geometry relating depth, duration, period and stellar density.
+- Winn, J. N. (2010). "Transits and Occultations," in *Exoplanets*, ed. S. Seager. The transit duration WITH the eccentricity and argument-of-periastron factor, the transit probability including the planet's radius, and the relation fixing the transit epoch's phase within the Keplerian orbit (items 20, 102).
+- Barnes, J. W. (2007). "Effects of Orbital Eccentricity on Extrasolar Planet Transit Detectability and Light Curves." *PASP*. Why eccentric planets are over-represented in transit samples.
+
+**Transit noise, dilution and false positives (§2.2, §2.4).**
+
+- Pont, F., Zucker, S. & Queloz, D. (2006). "The effect of red noise on planetary transit detection." *MNRAS* 373, 231. The measured amplitude of correlated systematics in ground-based survey photometry, and the signal-to-pink-noise detection statistic that accounts for it (item 98).
+- Carter, J. A. & Winn, J. N. (2009). "Parameter Estimation from Time-series Data with Correlated Errors: A Wavelet-based Method and its Application to Transit Light Curves." *ApJ*. The `1/f` treatment.
+- Ciardi, D. R. et al. (2015). "Understanding the Effects of Stellar Multiplicity on the Derived Planet Radii from Transit Surveys." *ApJ*. The statistics of transit-depth dilution and the radius correction it implies (item 99).
+- Stassun, K. G. et al. (2019). "The Revised TESS Input Catalog and Candidate Target List." *AJ*. The published per-target contamination ratio, which is the quantity item 99 would compute from this mod's own background catalogue.
+- Kovacs, G., Zucker, S. & Mazeh, T. (2002). *A&A* 391, 369. Already cited for BLS; listed again for the Signal Detection Efficiency, the normalised statistic the mod does not currently compute (item 101).
+- Fressin, F. et al. (2013). "The False Positive Rate of Kepler and the Occurrence of Planets." *ApJ*. False-positive rates as a function of candidate radius (item 100).
+- Santerne, A. et al. (2012). "SOPHIE velocimetry of Kepler transit candidates. VII. A false-positive rate of 35% for Kepler close-in giant candidates." *A&A*. The measured rate under spectroscopic follow-up.
+- Torres, G. et al. (2011). "Modeling Kepler Transit Light Curves as False Positives: Rejection of Blend Scenarios for Kepler-9, and Validation of Kepler-9 d." *ApJ*. BLENDER.
+- Morton, T. D. (2012). "An Efficient Automated Validation Procedure for Exoplanet Transit Candidates." *ApJ*. The false-positive probability framework distributed as `vespa`.
+
+**Radial velocity (§3).**
+
+- Bouchy, F., Pepe, F. & Queloz, D. (2001). "Fundamental photon noise limit to radial velocity measurements." *A&A* 374, 733. The spectral quality factor `Q` and `sigma_RV = c / (Q sqrt(Ne))`, the relation that makes RV precision depend on the star's spectrum rather than only on its brightness (item 103).
+- Reiners, A. & Zechmeister, M. (2020). "Radial Velocity Photon Limits for the Dwarf Stars of Spectral Classes F-M." *ApJS* 247, 52. The tabulated photon-limited precision per spectral class and per band, from empirical HARPS and CARMENES spectra and from models; the direct input for item 103.
+- Fischer, D. A. et al. (2016). "State of the Field: Extreme Precision Radial Velocities." *PASP*. The systematic error budget that sets a real spectrograph's floor (item 104).
+- Zechmeister, M. & Kurster, M. (2009). "The generalised Lomb-Scargle periodogram. A new formalism for the floating-mean and Keplerian periodograms." *A&A* 496, 577. The statistic this mod's RV search already computes, and the Keplerian extension it does not (item 107).
+- Baluev, R. V. (2008). "Assessing the statistical significance of periodogram peaks." *MNRAS*. The analytic false-alarm probability for that periodogram.
+- Kjeldsen, H. & Bedding, T. R. (1995). "Amplitudes of stellar oscillations: the implications for asteroseismology." *A&A*. The `L/M` scaling of p-mode velocity amplitude, normalised at the Sun (item 106).
+- Dumusque, X. et al. (2011). "Planetary detection limits taking into account stellar noise." *A&A*. Oscillation, granulation and activity as three separated timescales, and the observing strategies that average the first two down.
+- Aigrain, S., Pont, F. & Zucker, S. (2012). "A simple method to estimate radial velocity variations due to stellar activity using photometry." *MNRAS* 419, 3147. The `FF'` method: activity RV predicted from the light curve and its derivative, which is what would make this mod's spot model and its RV jitter model the same model (item 105).
+- Isaacson, H. & Fischer, D. (2010). "Chromospheric Activity and Jitter Measurements for 2630 Stars on the California Planet Search." *ApJ*. Measured jitter against colour and the S index.
+- Luhn, J. K. et al. (2020). "Radial Velocity Jitter of Stars as a Function of Observational Timescale and Stellar Type." *AJ*. Jitter against activity level and evolutionary state.
+- McQuillan, A., Mazeh, T. & Aigrain, S. (2014). "Rotation Periods of 34,030 Kepler Main-sequence Stars." *ApJS*. The measured rotation-period and photometric-amplitude distributions that would replace the banded uniform draws of §2.3 (item 22).
+- Cunha, D. et al. (2014). "Impact of micro-telluric lines on precise radial velocities and their correction." *A&A*. A real RV systematic with no counterpart here (item 108).
+- Kurster, M. et al. (2003). "The low-level radial velocity variability in Barnard's star." *A&A*. Secular acceleration as a measurable RV trend.
+- Eastman, J., Siverd, R. & Gaudi, B. S. (2010). "Achieving Better Than 1 Minute Accuracy in the Heliocentric and Barycentric Julian Dates." *PASP*. Why a real ephemeris is in BJD_TDB, and what happens when it is not.
+
+**Rossiter-McLaughlin and transit timing (§2.6, §2.7).**
+
+- Hirano, T. et al. (2011). "Improved Modeling of the Rossiter-McLaughlin Effect for Transiting Exoplanets." *ApJ* 742, 69. The difference between the flux-weighted anomaly and what a cross-correlation RV pipeline actually measures, as a function of `vsini` against the total line width (item 109).
+- Winn, J. N. et al. (2010). "Hot Stars with Hot Jupiters Have High Obliquities." *ApJL*; Albrecht, S. et al. (2012). "Obliquities of Hot Jupiter Host Stars: Evidence for Tidal Interactions and Primordial Misalignments." *ApJ*. The measured obliquity distribution and its dependence on host effective temperature (item 110).
+- Lithwick, Y., Xie, J. & Wu, Y. (2012). "Extracting Planet Mass and Eccentricity from TTV Data." *ApJ* 761, 122. The analytic first-order mean-motion-resonance TTV, amplitude and phase, with free and forced eccentricity separated (item 111).
+- Agol, E. & Deck, K. (2016). "Transit Timing to First Order in Eccentricity." *ApJ*; Deck, K. & Agol, E. (2015). "Measurement of Planet Masses with Transit Timing Variations Due to Synodic Chopping Effects." *ApJ*. The general first-order treatment and the chopping signal.
+- Agol, E. et al. (2005). "On detecting terrestrial planets with timing of giant planet transits." *MNRAS*; Holman, M. & Murray, N. (2005). "The Use of Transit Timing to Detect Terrestrial-Mass Extrasolar Planets." *Science*. The original formulations, including the light-travel-time term.
+
+**Direct imaging (§4, §12.3).**
+
+- Baraffe, I. et al. (2003). "Evolutionary models for cool brown dwarfs and extrasolar giant planets. The case of HD 209458." *A&A* 402, 701 (the COND models); Baraffe, I. et al. (2015). *A&A* (BHAC15). Luminosity, radius and effective temperature against mass and age.
+- Marley, M. S. et al. (2007). "On the Luminosity of Young Jupiters." *ApJ* 655, 541. The hot-start against cold-start distinction, a factor of order 100 in young-planet luminosity, and therefore the largest single uncertainty in any imaging yield calculation (§12.3).
+- Spiegel, D. S. & Burrows, A. (2012). "Spectral and Photometric Diagnostics of Giant Planet Formation Scenarios." *ApJ*. The continuum between the two.
+- Allard, F. et al. (2012). BT-Settl model atmospheres; Marley, M. S. et al. (2021). "The Sonora Brown Dwarf Atmosphere and Evolution Models I." *ApJ*; Phillips, M. W. et al. (2020). "A new set of atmosphere and evolution models for cool T-Y brown dwarfs and giant exoplanets." *A&A* (ATMO 2020). Band-integrated planet fluxes, in place of a blackbody, at the wavelengths where water and methane absorption make a blackbody wrong (§12.3).
+- Cahoy, K. L., Marley, M. S. & Fortney, J. J. (2010). "Exoplanet Albedo Spectra and Colors as a Function of Planet Phase, Separation, and Metallicity." *ApJ*. Geometric albedos for the reflected-light term the pipeline has no counterpart for (item 113).
+- Racine, R. et al. (1999). "Speckle Noise and the Detection of Faint Companions." *PASP*; Sivaramakrishnan, A. et al. (2001). "Ground-based Coronagraphy with High-order Adaptive Optics." *ApJ*; Perrin, M. D. et al. (2003). "The Structure of High Strehl Ratio Point-Spread Functions." *ApJ* 596, 702. The residual halo of a partially corrected wavefront, its power-law falloff and the AO control radius, in place of the inverse-square shape (item 115).
+- Guyon, O. (2005). "Limits of Adaptive Optics for High-Contrast Imaging." *ApJ*. What sets the achievable contrast as a function of separation, guide-star magnitude and wavefront-sensing scheme; the reference for item 114's replacement of the photon-noise magnitude law.
+- Milli, J. et al. (2016). *SPIE* 9909, arXiv:1608.02149. Already cited above and already implemented in `Core/SpeckleField`: the measured static, slow and fast components of a real extreme-AO speckle field, and therefore what does and does not average down with integration time (item 116).
+- Mawet, D. et al. (2014). *ApJ* 792, 97. Already cited and already implemented in `Core/ContrastCurve`: the small-sample statistics correction that makes a five-sigma threshold mean five sigma at small separations.
+- Bowler, B. P. (2016). "Imaging Extrasolar Giant Planets." *PASP*. The survey review, and the form in which contrast curves and completeness are reported.
+- Kasper, M. et al. (2021). PCS/ELT; Brandl, B. et al. METIS/ELT; Houlle, M. et al. (2021). "Direct imaging and spectroscopy of exoplanets with the ELT/HARMONI high-contrast module." *A&A*. Instrument-specific predicted contrast curves; the published performance this path should be anchored to rather than to a single representative number (items 114, 119).
 
 Cosmetic (bad-pixel-map) correction before registration/stacking follows the standard professional calibration workflow used by PixInsight's `CosmeticCorrection` process, IRAF/ccdproc's `fixpix`, and ESO Reflex pipeline bad-pixel handling. FITS export (§7.7) follows the FITS standard's own conventions (80-byte cards, 2880-byte blocks, BZERO/BSCALE unsigned-16-bit representation) and real acquisition-software header keyword conventions (SharpCap, NINA, MaximDL).
 

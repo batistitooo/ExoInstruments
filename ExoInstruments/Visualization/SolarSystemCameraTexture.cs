@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 using ExoInstruments.Core;
+using ExoInstruments.Flight;
 
 namespace ExoInstruments.Visualization
 {
@@ -1466,7 +1467,13 @@ namespace ExoInstruments.Visualization
         /// scaling of the world about a moving origin, so a DIRECTION is the same vector in both
         /// and no conversion is needed, the same fact TryBuildFieldGeometry relies on.
         /// </summary>
-        private static bool TryEquatorialDirection(double raDeg, double decDeg, double ut, out Vector3d direction)
+        /// <remarks>
+        /// Internal rather than private because the flight side needs the same chain: a telescope
+        /// commanded at a catalogue position stores the RA/Dec, not a frozen world vector, and has
+        /// to resolve it through THIS composition so that where the spacecraft is told to point and
+        /// where the chart draws the target are the same computation. See GroundStation.
+        /// </remarks>
+        internal static bool TryEquatorialDirection(double raDeg, double decDeg, double ut, out Vector3d direction)
         {
             direction = Vector3d.zero;
             if (double.IsNaN(raDeg) || double.IsNaN(decDeg)) return false;
@@ -1494,8 +1501,8 @@ namespace ExoInstruments.Visualization
         /// rotation axis: Unity's left-handed frame makes the sign of such a product easy to get
         /// backwards and impossible to notice, and this form simply cannot be wrong about east.
         /// </summary>
-        private static bool TryBuildSiteBasis(out Vector3d north, out Vector3d east, out Vector3d up,
-                                              out double latitudeDeg, out double longitudeDeg)
+        internal static bool TryBuildSiteBasis(out Vector3d north, out Vector3d east, out Vector3d up,
+                                               out double latitudeDeg, out double longitudeDeg)
         {
             north = east = up = Vector3d.zero;
             latitudeDeg = longitudeDeg = 0.0;
@@ -2075,9 +2082,17 @@ namespace ExoInstruments.Visualization
             if (platform == null) return;
 
             var link = ObservingPlatform.ActiveSpaceTelescope;
+
+            // A vehicle mid-repoint is turning, and that dominates every other term in the budget.
+            // Handing the rate in as the drift the control system is failing to null is not a
+            // special case: it is exactly what it is, and PointingStability already turns a rate
+            // and an exposure into a streak.
+            double slewRateArcsecPerSecond = link != null
+                ? GroundStation.Readout(link).SlewRateDegPerSecond * 3600.0 : 0.0;
+
             if (link != null && link.Module != null)
             {
-                inputs.Pointing = link.Module.EvaluatePointing(exposureSeconds);
+                inputs.Pointing = link.Module.EvaluatePointing(exposureSeconds, slewRateArcsecPerSecond);
             }
             else
             {
@@ -2092,6 +2107,7 @@ namespace ExoInstruments.Visualization
                     MinimumPulseSeconds = platform.MinimumControlPulseSeconds,
                     ControlTorqueNm = link != null ? link.ControlTorqueNm : 0.0,
                     InertiaKgM2 = link != null ? link.InertiaKgM2 : 0.0,
+                    ResidualDriftArcsecPerSecond = slewRateArcsecPerSecond,
                 };
                 inputs.Pointing = PointingStability.Evaluate(in pointingInputs);
             }

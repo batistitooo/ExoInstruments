@@ -254,6 +254,76 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>Transform size for a given kernel width: a power of two large enough that each tile carries a useful span of real pixels, within the bounds above.</summary>
+        /// <summary>
+        /// Linear convolution of two square kernels, returning the central (2*rOut+1)^2 of the
+        /// result. Both inputs are (2r+1)^2, row-major, centre at the middle.
+        ///
+        /// WHY THIS EXISTS SEPARATELY FROM Convolve ABOVE. That one convolves a FRAME with a
+        /// kernel and tiles the frame. This one convolves two KERNELS, which is what OpticalPsf
+        /// does when it composes the terms of a PSF, and the two are different problems: there is
+        /// no frame to tile, both operands are of comparable size, and the answer wanted is only
+        /// the middle of the support.
+        ///
+        /// It matters because the direct sum is O(ra^2 * rb^2) and both radii grew. A ground
+        /// instrument's kernel is the 257x257 diffraction grid convolved with a 183x183
+        /// atmospheric profile: 2.2 billion multiply-adds per sub-band, twelve sub-bands per
+        /// capture. Through the transform it is three 512x512 transforms, about seven million
+        /// operations, and the answer agrees to the last few bits of double precision.
+        ///
+        /// Returns null when the padded transform would exceed MaxTransformSize, so the caller
+        /// keeps the direct sum for the cases where it is both cheap and exact.
+        /// </summary>
+        public static double[] ConvolveKernels(double[] a, int ra, double[] b, int rb, int rOut)
+        {
+            if (a == null || b == null || ra < 0 || rb < 0 || rOut < 0) return null;
+            int sizeA = 2 * ra + 1, sizeB = 2 * rb + 1, sizeOut = 2 * rOut + 1;
+            if (a.Length != sizeA * sizeA || b.Length != sizeB * sizeB) return null;
+
+            // Linear, not circular: the padded transform must hold the whole support, or the
+            // tails wrap round and land back on the middle of the answer.
+            int needed = sizeA + sizeB - 1;
+            int n = MinTransformSize;
+            while (n < needed) n <<= 1;
+            if (n > MaxTransformSize) return null;
+
+            var re = new double[n * n];
+            var im = new double[n * n];
+            for (int y = 0; y < sizeA; y++)
+                for (int x = 0; x < sizeA; x++) re[y * n + x] = a[y * sizeA + x];
+            Transform2D(re, im, n, false);
+
+            var kre = new double[n * n];
+            var kim = new double[n * n];
+            for (int y = 0; y < sizeB; y++)
+                for (int x = 0; x < sizeB; x++) kre[y * n + x] = b[y * sizeB + x];
+            Transform2D(kre, kim, n, false);
+
+            for (int i = 0; i < re.Length; i++)
+            {
+                double ar = re[i], ai = im[i], br = kre[i], bi = kim[i];
+                re[i] = ar * br - ai * bi;
+                im[i] = ar * bi + ai * br;
+            }
+            Transform2D(re, im, n, true);
+
+            // The full support is (needed x needed) with its centre at (ra + rb, ra + rb),
+            // because each input was laid down with its own centre at its own (r, r).
+            var result = new double[sizeOut * sizeOut];
+            int centre = ra + rb;
+            for (int dy = -rOut; dy <= rOut; dy++)
+            {
+                int sy = centre + dy;
+                if (sy < 0 || sy >= needed) continue;
+                for (int dx = -rOut; dx <= rOut; dx++)
+                {
+                    int sx = centre + dx;
+                    if (sx < 0 || sx >= needed) continue;
+                    result[(dy + rOut) * sizeOut + dx + rOut] = re[sy * n + sx];
+                }
+            }
+            return result;
+        }
+
         private static int TransformSizeFor(int kernelWidth)
         {
             int target = Math.Max(MinTransformSize, 4 * kernelWidth);

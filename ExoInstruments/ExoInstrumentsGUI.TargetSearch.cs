@@ -242,6 +242,40 @@ namespace ExoInstruments
 
             CelestialBody home = FlightGlobals.GetHomeBody();
             if (home == null) return;
+
+            // From orbit there is no horizon; the analogue of "degrees up" is degrees of
+            // clearance off the host body's limb, negative while occulted. Same column, same
+            // alt: filter, the honest replacement of the same physical question.
+            if (ObservingPlatform.IsSpaceBased)
+            {
+                if (!TryBuildChartObserver(out ChartObserverSnapshot snap) || snap.HostOccluderIndex < 0) return;
+                SkyOccluder host = snap.Occluders[snap.HostOccluderIndex];
+
+                foreach (SearchTarget entry in targetIndex.Entries)
+                {
+                    var orbBody = entry.Payload as CelestialBody;
+                    if (orbBody != null)
+                    {
+                        if (orbBody == snap.Host) { entry.AltitudeDeg = double.NaN; continue; }
+                        Vector3d toBody = orbBody.position - snap.ObserverPos;
+                        if (toBody.magnitude < 1.0) { entry.AltitudeDeg = double.NaN; continue; }
+                        SkyVector bodyDir = snap.Frame.WorldToEquatorialVector(toBody);
+                        entry.AltitudeDeg = OrbitalVisibility.SeparationDeg(bodyDir, host.Direction)
+                                          - host.AngularRadiusDeg;
+                        continue;
+                    }
+                    if (double.IsNaN(entry.RaDeg) || double.IsNaN(entry.DecDeg))
+                    {
+                        entry.AltitudeDeg = double.NaN;
+                        continue;
+                    }
+                    SkyVector dir = SkyChartProjection.DirectionFromEquatorial(entry.RaDeg, entry.DecDeg);
+                    entry.AltitudeDeg = OrbitalVisibility.SeparationDeg(dir, host.Direction)
+                                      - host.AngularRadiusDeg;
+                }
+                return;
+            }
+
             double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
                 Planetarium.GetUniversalTime(), home.rotationPeriod, home.initialRotation,
                 ObservatorySite.LongitudeDeg);
@@ -354,7 +388,9 @@ namespace ExoInstruments
             DrawQuickFilters();
 
             GUILayout.Label("Type a name or a designation: Andromeda, M31, NGC 224, Vega, 51 Peg, Duna. "
-                          + "Filters: type:galaxy, in:Ori, mag:<9, alt:>30.", smallCaptionStyle);
+                          + "Filters: type:galaxy, in:Ori, mag:<9, alt:>30"
+                          + (ObservingPlatform.IsSpaceBased ? " (alt = degrees off the host body's limb here)." : "."),
+                          smallCaptionStyle);
 
             foreach (string bad in targetSearchQuery.Unrecognised)
                 GUILayout.Label($"\"{bad}\" is not a filter this search understands, so it was ignored. "
@@ -491,6 +527,12 @@ namespace ExoInstruments
         string DescribeAltitude(SearchTarget target)
         {
             if (double.IsNaN(target.AltitudeDeg)) return "";
+            if (ObservingPlatform.IsSpaceBased)
+            {
+                return target.AltitudeDeg < 0.0
+                    ? string.Format(CultureInfo.InvariantCulture, "occulted, {0:F0} deg inside the limb", -target.AltitudeDeg)
+                    : string.Format(CultureInfo.InvariantCulture, "{0:F0} deg off the limb", target.AltitudeDeg);
+            }
             return target.AltitudeDeg < 0.0
                 ? string.Format(CultureInfo.InvariantCulture, "{0:F0} deg below horizon", -target.AltitudeDeg)
                 : string.Format(CultureInfo.InvariantCulture, "{0:F0} deg up", target.AltitudeDeg);

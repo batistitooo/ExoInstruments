@@ -48,5 +48,7 @@
     <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
     <Compile Include="$(Core)/EmissionLines.cs" />
     <Compile Include="$(Core)/NebularLineRatios.cs" />
+    <Compile Include="$(Core)/Coronagraph.cs" />
+    <Compile Include="$(Core)/InfraredArray.cs" />
   </ItemGroup>
 </Project>

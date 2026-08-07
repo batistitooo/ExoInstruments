@@ -155,6 +155,57 @@ namespace ExoInstruments.Visualization
             return moons.Count > 0 ? moons.ToArray() : null;
         }
 
+        /// <summary>
+        /// The frame the star catalogue lives in, snapshot at the current instant, for turning a
+        /// live world direction into RA/Dec. The exact inverse of the camera's
+        /// TryEquatorialDirection chain (equatorial to horizontal to the GROUND site's world
+        /// basis), so a body plotted on the chart through this lands exactly where the camera
+        /// will point when it is clicked, whatever platform is observing.
+        /// </summary>
+        public struct EquatorialFrameSnapshot
+        {
+            public Vector3d North, East, Up;
+            public double MeridianRaDeg;
+            public double LatitudeDeg;
+
+            public void WorldToEquatorial(Vector3d worldDirection, out double raDeg, out double decDeg)
+            {
+                Vector3d d = worldDirection.normalized;
+                double n = Vector3d.Dot(d, North);
+                double e = Vector3d.Dot(d, East);
+                double u = Vector3d.Dot(d, Up);
+                double altDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, u))) * (180.0 / Math.PI);
+                double azDeg = (Math.Atan2(e, n) * (180.0 / Math.PI) + 360.0) % 360.0;
+                SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, MeridianRaDeg, LatitudeDeg,
+                                                      out raDeg, out decDeg);
+            }
+
+            /// <summary>The same direction as a unit vector in the equatorial frame's own axes (x toward RA 0, z toward the pole).</summary>
+            public SkyVector WorldToEquatorialVector(Vector3d worldDirection)
+            {
+                WorldToEquatorial(worldDirection, out double raDeg, out double decDeg);
+                return SkyChartProjection.DirectionFromEquatorial(raDeg, decDeg);
+            }
+        }
+
+        public static bool TryGetEquatorialFrame(double ut, out EquatorialFrameSnapshot frame)
+        {
+            frame = default(EquatorialFrameSnapshot);
+            if (!SolarSystemCameraTexture.TryBuildSiteBasis(out Vector3d north, out Vector3d east,
+                    out Vector3d up, out double latitudeDeg, out double longitudeDeg)) return false;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            if (home == null) return false;
+
+            frame.North = north;
+            frame.East = east;
+            frame.Up = up;
+            frame.LatitudeDeg = latitudeDeg;
+            frame.MeridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
+                ut, home.rotationPeriod, home.initialRotation, longitudeDeg);
+            return true;
+        }
+
         /// <summary>A world vector as a Core SkyVector, normalised. Core carries no Unity types, which is what keeps the physics testable outside the game.</summary>
         public static SkyVector ToSky(Vector3d v) => SkyVector.Normalized(v.x, v.y, v.z);
 

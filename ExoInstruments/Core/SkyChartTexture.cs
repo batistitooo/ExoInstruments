@@ -6,55 +6,60 @@ using ExoInstruments.Core;
 namespace ExoInstruments.Visualization
 {
     /// <summary>
-    /// One catalog target plus its already-computed horizontal position and
-    /// highlight state, ready to render. Built by the GUI layer each refresh:
-    /// SkyCoordinates.ComputeLocalMeridianRaDeg once, then TryComputeHorizontal
-    /// per visible target, IsHighlighted set from the current search filter.
+    /// One chart point, ready to render. Star and deep-sky points are built ONCE per session
+    /// (their equatorial positions never change; the chart is inertial) and mutated only in
+    /// their display flags; solar-system body points are rebuilt each refresh from the active
+    /// observer's true position.
+    ///
+    /// THREADING CONTRACT. The persistent star/deep-sky list is read concurrently by the
+    /// background refresh raster and the main-thread drag raster. The main thread may rewrite a
+    /// point to change IsHighlighted/IsSelectedTarget while either raster reads: every other
+    /// field is rewritten with identical bytes, so a torn read can only mix old and new values
+    /// of the flag bytes themselves, which draws one marker one frame early or late and nothing
+    /// else. Occlusion flags deliberately live OUTSIDE the struct (a parallel byte array swapped
+    /// by reference) so the background task never writes the shared list at all.
     /// </summary>
     public struct SkyChartPoint
     {
         public StarTarget Target;
-        public double AltitudeDeg;
-        public double AzimuthDeg;
+        public double RaDeg;
+        public double DecDeg;
         public bool IsHighlighted; // matches the current search filter; only highlighted points are clickable
 
         // --- Solar-system body points -------------------------------------
-        // A body is plotted through the same pipeline as a star, just with a
-        // bigger marker sized to the body and its own color (bodies have no
-        // stellar effective temperature). Identity/selection is handled in the
-        // GUI layer, so nothing KSP-specific leaks into this struct.
         public bool IsBody;
+        /// <summary>Marker radius when the body's true disc is too small to draw, px at zoom 1. A star's own size: the body is only saying "I am here".</summary>
         public float BodyMarkerRadiusPx;
+        /// <summary>The body's true angular radius from the observer, degrees. Drawn as its real disc whenever that beats the marker.</summary>
+        public double BodyAngularRadiusDeg;
+        /// <summary>True when the body lies in front of the host body's disc (a transiting moon): drawn above the overlay instead of below it.</summary>
+        public bool BodyInFront;
+        /// <summary>Sun direction in the disc's local frame: x along +RA, y along +Dec, z toward the observer. Drives the terminator on a real-size disc.</summary>
+        public Vector3 BodySunLocal;
         public Color BodyColor;
-        /// <summary>True only for the body currently selected as the photography target, the sole condition that draws its ring, so bodies don't look "search-highlighted" by default.</summary>
+        /// <summary>True only for the body currently selected as the photography target, the sole condition that draws its ring.</summary>
         public bool IsSelectedTarget;
 
         // --- Deep-sky points ----------------------------------------------
-        // A nebula is not a point source and has no magnitude to size a disc
-        // by, so it gets a cross scaled to its own apparent extent instead.
         public bool IsDeepSky;
         public DeepSkyObject DeepSky;
 
         // --- Cached render data -------------------------------------------
-        // Everything below is a function of the point alone, NOT of zoom/pan,
-        // and is filled once by SkyChartTexture.Prepare. Panning re-rasters the
-        // whole chart on every drag event, so anything recomputed inside the
-        // raster is paid thousands of times a second; a star's colour alone is a
-        // 471-sample Planck integral, which is what used to make dragging crawl.
-        // See SkyChartTexture.Prepare.
-        internal Vector2 RawPos;          // dome projection before zoom/pan
+        // Function of the point alone, not of zoom/pan/time; filled once by Prepare. The raster
+        // pays an affine transform and a fill per point, nothing else.
+        internal Vector2 RawPos;          // full-sky projection before zoom/pan
         internal Color32 NormalColor;     // star: unemphasized. body/deep-sky: undimmed.
         internal Color32 AltColor;        // star: search-emphasized. body/deep-sky: search-dimmed.
         internal float BaseMarkerRadius;  // star disc radius at zoom 1
         internal float DeepSkyArmRaw;     // deep-sky cross arm in raw pixels, before zoom and clamping
+        internal Vector2 JDec;            // raw px per arc-degree of growing declination (local Jacobian column)
+        internal Vector2 JRa;             // raw px per arc-degree of growing right ascension
         internal bool Prepared;
     }
 
     /// <summary>
-    /// Camera state for the sky chart. Pan is expressed in the *raw* (unzoomed)
-    /// dome-projection pixel space, the raw-space point that should sit at the
-    /// center of the viewport. Zoom 1 = whole sky fits the texture (the old
-    /// fixed behavior); higher values zoom in, panning around at that scale.
+    /// Camera state for the sky chart. Pan is the raw-space point that should sit at the centre
+    /// of the viewport; zoom 1 fits the whole sky.
     /// </summary>
     public struct SkyChartView
     {
@@ -68,71 +73,59 @@ namespace ExoInstruments.Visualization
     }
 
     /// <summary>
-    /// Renders a zenith-centered dome/planisphere projection into a Texture2D
-    /// scatter plot, same pixel-buffer approach as LightCurveTexture. North up,
-    /// East right, zenith at center, horizon at the edge (before zoom/pan).
-    /// Unity-dependent by design — kept separate from Core.
+    /// Renders the full-sky equatorial chart into a pixel buffer: the classic 2:1 all-sky oval
+    /// (Hammer projection, see SkyChartProjection for the equations and the parity), equator
+    /// along the long axis, poles top and bottom. Star positions are inertial; what moves on
+    /// the chart is the observer's own geometry: the body markers and the occlusion overlay.
+    /// Unity-dependent by design - kept separate from Core.
     /// </summary>
     public static class SkyChartTexture
     {
         private static readonly Color BackgroundColor = new Color(0.05f, 0.05f, 0.08f, 1f);
-        private static readonly Color HorizonColor = new Color(0.3f, 0.3f, 0.35f, 0.8f);
+        private static readonly Color EquatorColor = new Color(0.3f, 0.3f, 0.35f, 0.8f);
         private static readonly Color GridColor = new Color(0.2f, 0.2f, 0.24f, 0.5f);
 
-        // Fallback tint for the rare star with no effective temperature on
-        // record at all (neither catalog star_teff nor a BSC B-V color),
-        // neutral blue-white rather than a color that implies a spectral class.
         private static readonly Color UnknownTeffTint = new Color(0.85f, 0.85f, 0.92f, 1f);
-
-        // Flat opaque ring (not alpha-blended): matches a real finder chart's ink circle rather
-        // than the soft HUD-glow look the old semi-transparent version had.
         private static readonly Color HighlightRingColor = new Color(0.72f, 0.72f, 0.76f, 1f);
 
-        // Brightness ramp: dim stars fade toward the sky rather than just shrinking, like the naked eye.
-        private const double BrightReferenceMagnitude = -1.5; // ~Sirius → full brightness
-        private const double FaintReferenceMagnitude = 12.0;  // display floor
+        private const double BrightReferenceMagnitude = -1.5;
+        private const double FaintReferenceMagnitude = 12.0;
         private const float MinBrightnessFraction = 0.16f;
 
-        // Unclickable stars desaturate toward gray — same intent as the old flat color but keeps a hint of real tint.
         private const float DimmedDesaturation = 0.55f;
         private const float DimmedBrightnessFactor = 0.6f;
         private const float MinHighlightedBrightnessFraction = 0.75f;
 
-        // Reference rings, in degrees of altitude. 0 = horizon (drawn brighter).
-        private static readonly double[] AltitudeRingsDeg = { 0.0, 20.0, 40.0, 60.0 };
+        // Declination rings; the celestial equator is drawn brighter, the anchor the eye needs.
+        private static readonly double[] DeclinationRingsDeg = { -60.0, -30.0, 0.0, 30.0, 60.0 };
+        private const double RaSpokeStepDeg = 30.0;
 
-        // The raster works in Color32, not Color: the buffer is a quarter of the size (4 bytes per
-        // pixel instead of 16) and SetPixels32 hands an RGBA32 texture its own layout with no
-        // per-pixel conversion. These are the same colours as above, converted once at class load
-        // rather than once per pixel. Alpha is preserved: the grid is deliberately semi-transparent
-        // and GUI.DrawTexture blends it against the panel behind.
         private static readonly Color32 BackgroundColor32 = BackgroundColor;
-        private static readonly Color32 HorizonColor32 = HorizonColor;
+        private static readonly Color32 EquatorColor32 = EquatorColor;
         private static readonly Color32 GridColor32 = GridColor;
         private static readonly Color32 HighlightRingColor32 = HighlightRingColor;
 
-        /// <summary>Largest marker any point can draw, in screen pixels; the cull margin has to be at least this or a marker whose centre is just off-screen would lose the part that belongs on it.</summary>
+        /// <summary>Cull margin for marker-sized points; real-size body discs carry their own extent.</summary>
         private const float MaxMarkerExtentPx = 48f;
 
-        public static float ComputeRMax(int width, int height)
+        /// <summary>Pulls a raw-space point inside the sky ellipse (with a small margin); identity when it already is. Used to keep pan and declutter nudges on the map.</summary>
+        public static Vector2 ClampToSkyEllipse(Vector2 raw, int width, int height, float marginPx)
         {
-            return (float)(Math.Min(width, height) / 2.0 - 4.0);
+            SkyChartProjection.EllipseHalfAxes(width, height, out double a, out double b);
+            a = Math.Max(1.0, a - marginPx);
+            b = Math.Max(1.0, b - marginPx);
+            double dx = raw.x - width / 2.0;
+            double dy = raw.y - height / 2.0;
+            double k = Math.Sqrt(dx * dx / (a * a) + dy * dy / (b * b));
+            if (k <= 1.0) return raw;
+            return new Vector2((float)(width / 2.0 + dx / k), (float)(height / 2.0 + dy / k));
         }
 
-        /// <summary>
-        /// Marker radius in screen pixels; grows with zoom so stars are visibly
-        /// bigger (not just further apart) at higher zoom. Capped so it never
-        /// becomes a blob.
-        /// </summary>
         private static float ComputeMarkerRadius(float baseRadius, float zoom)
         {
             return Mathf.Min(baseRadius + (zoom - 1f) * 0.9f, 9f);
         }
 
-        /// <summary>
-        /// Click/hover tolerance in screen pixels. Generous baseline (8px) for
-        /// cursor imprecision, growing with zoom to match the bigger markers.
-        /// </summary>
         private static double ComputeHitRadius(float zoom)
         {
             return Math.Max(8.0, 4.0 + (zoom - 1.0) * 1.2);
@@ -140,14 +133,9 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// A buffer of the right size for <see cref="ComputePixels"/>, reusing <paramref name="existing"/>
-        /// when it already fits.
-        ///
-        /// WHY THE CALLER OWNS THE BUFFER. Panning re-rasters the chart on every MouseDrag event, and
-        /// allocating a fresh 640x640 buffer each time was the dominant cost: 6.6 MB per event as
-        /// Color, which is hundreds of MB/s of garbage under a drag and shows up as GC hitches rather
-        /// than as steady slowness. Reusing one array removes the allocation entirely. Each caller
-        /// needs its OWN buffer, because the background refresh task and the main thread's drag
-        /// render can be in flight at the same time.
+        /// when it already fits. The caller owns the buffer: the background refresh task and the
+        /// main thread's drag render can be in flight at the same time, and each needs a buffer
+        /// nobody else is writing (allocating per render was measured as GC hitches under drag).
         /// </summary>
         public static Color32[] EnsureBuffer(Color32[] existing, int width, int height)
         {
@@ -156,31 +144,30 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Fills each point's cached render data (projection, colours, marker size), the parts that
-        /// do not depend on zoom or pan. Idempotent: a point already Prepared is skipped, so calling
-        /// it before every raster costs one branch per point.
-        ///
-        /// WHY THIS EXISTS. A pan re-rasters on every MouseDrag event, and the raster used to redo,
-        /// per star per event, a full dome projection (two trig calls) and a blackbody colour, which
-        /// is a 471-sample integral of Planck's law against the CIE observer. At ~5000 stars above
-        /// the horizon that is tens of milliseconds an event — the chart visibly stuttered while
-        /// being dragged. None of it depends on the view, so all of it is hoisted here, leaving the
-        /// raster with an affine transform and a disc fill per point.
-        ///
-        /// Runs on whichever thread rasters (the background refresh task, usually), so it must stay
-        /// free of UnityEngine.Object calls; Color/Color32 are plain structs and are fine.
+        /// Fills each point's cached render data (projection, colours, marker size, local axes),
+        /// none of which depends on zoom, pan or time. Idempotent; a Prepared point costs one
+        /// branch. Runs on whichever thread rasters first, so it stays free of
+        /// UnityEngine.Object calls.
         /// </summary>
         public static void Prepare(List<SkyChartPoint> points, int width, int height)
         {
             if (points == null) return;
-            double rMax = ComputeRMax(width, height);
+            double pxPerDeg = SkyChartProjection.RawPixelsPerDegree(width, height);
 
             for (int i = 0; i < points.Count; i++)
             {
                 var p = points[i];
                 if (p.Prepared) continue;
 
-                p.RawPos = ProjectRaw(p.AltitudeDeg, p.AzimuthDeg, width, height);
+                SkyChartProjection.ProjectRaw(p.RaDeg, p.DecDeg, width, height,
+                                              out double rx, out double ry);
+                p.RawPos = new Vector2((float)rx, (float)ry);
+
+                SkyChartProjection.LocalBasis(p.RaDeg, p.DecDeg, width, height,
+                                              out double jDecX, out double jDecY,
+                                              out double jRaX, out double jRaY);
+                p.JDec = new Vector2((float)jDecX, (float)jDecY);
+                p.JRa = new Vector2((float)jRaX, (float)jRaY);
 
                 if (p.IsBody)
                 {
@@ -194,9 +181,8 @@ namespace ExoInstruments.Visualization
                               : EmissionMarkerColor;
                     p.NormalColor = c;
                     p.AltColor = Dim(c);
-                    // The dome projection puts the horizon at rMax and the zenith at the centre, so
-                    // one degree of sky is rMax/90 raw pixels; the raster scales this by zoom.
-                    p.DeepSkyArmRaw = (float)(p.DeepSky.MajorArcmin / 60.0 * (rMax / 90.0) * 0.5);
+                    // Nominal (map-centre) scale; the cross is a glyph, clamped at raster time anyway.
+                    p.DeepSkyArmRaw = (float)(p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5);
                 }
                 else
                 {
@@ -211,69 +197,147 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Pure computation — safe to call from a background Task, as long as no other thread is
-        /// writing <paramref name="pixels"/> (see EnsureBuffer). Fills the full chart buffer
-        /// (background, rings, all catalog points). searchActive gates the highlight ring: without
-        /// it, an empty search box would draw a ring on every star — not the calm finder-chart look we want.
-        /// Click hit-testing is unaffected; every point stays clickable when no search is active.
+        /// Rasters the full chart. Pure computation, safe on a background Task while no other
+        /// thread writes <paramref name="pixels"/>.
+        ///
+        /// Draw order is the physical depth order: grid, then everything on the celestial sphere
+        /// (stars, deep sky), then body discs sitting BEHIND the host body's limb, then the
+        /// occlusion overlay (the host body itself, its glare), then bodies in front of it and
+        /// all marker-mode bodies. A star behind the host is not drawn at all
+        /// (<paramref name="staticOccluded"/>), which is also what makes it unclickable.
         /// </summary>
-        public static void ComputePixels(List<SkyChartPoint> points, int width, int height, SkyChartView view, bool searchActive, Color32[] pixels)
+        public static void ComputePixels(List<SkyChartPoint> staticPoints, byte[] staticOccluded,
+                                         List<SkyChartPoint> bodyPoints,
+                                         int width, int height, SkyChartView view, bool searchActive,
+                                         byte[] overlayRgba, Color32[] pixels)
         {
             FillBackground(pixels, width);
-
             DrawReferenceGrid(pixels, width, height, view);
 
-            if (points == null) return;
-
-            Prepare(points, width, height);
-
-            // The view transform is the same affine map for every point, so its terms are hoisted
-            // out of the loops: screen = (raw - pan) * zoom + centre.
             float zoom = view.Zoom;
             float offsetX = width / 2f - view.Pan.x * zoom;
             float offsetY = height / 2f - view.Pan.y * zoom;
 
-            bool ShouldEmphasize(SkyChartPoint p) => searchActive && p.IsHighlighted;
-            // de-emphasized stars first, then emphasized (search-matched)
-            // stars, then solar-system bodies on top so their bigger discs
-            // are never buried under the star field.
-            for (int i = 0; i < points.Count; i++)
+            if (staticPoints != null)
             {
-                var p = points[i];
-                if (!p.IsBody && !p.IsDeepSky && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, zoom, offsetX, offsetY, false);
-            }
-            for (int i = 0; i < points.Count; i++)
-            {
-                var p = points[i];
-                if (!p.IsBody && !p.IsDeepSky && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, zoom, offsetX, offsetY, true);
-            }
-            for (int i = 0; i < points.Count; i++)
-            {
-                var p = points[i];
-                if (p.IsDeepSky) PlotDeepSky(pixels, width, height, p, zoom, offsetX, offsetY, searchActive && !p.IsHighlighted);
-            }
-            for (int i = 0; i < points.Count; i++)
-            {
-                var p = points[i];
-                if (p.IsBody) PlotStar(pixels, width, height, p, zoom, offsetX, offsetY, false, searchActive && !p.IsHighlighted);
-            }
-        }
+                Prepare(staticPoints, width, height);
+                bool haveFlags = staticOccluded != null && staticOccluded.Length == staticPoints.Count;
 
-        /// <summary>Everything off the texture (plus a marker's worth of margin) is skipped before any per-pixel work. At zoom 15 that is most of the catalogue, which is exactly when the raster would otherwise be slowest.</summary>
-        private static bool IsOffScreen(float sx, float sy, int width, int height)
-        {
-            return sx < -MaxMarkerExtentPx || sx > width + MaxMarkerExtentPx
-                || sy < -MaxMarkerExtentPx || sy > height + MaxMarkerExtentPx;
+                bool ShouldEmphasize(SkyChartPoint q) => searchActive && q.IsHighlighted;
+                for (int i = 0; i < staticPoints.Count; i++)
+                {
+                    if (haveFlags && staticOccluded[i] != 0) continue;
+                    var p = staticPoints[i];
+                    if (!p.IsDeepSky && !ShouldEmphasize(p)) PlotStar(pixels, width, height, p, zoom, offsetX, offsetY, false);
+                }
+                for (int i = 0; i < staticPoints.Count; i++)
+                {
+                    if (haveFlags && staticOccluded[i] != 0) continue;
+                    var p = staticPoints[i];
+                    if (!p.IsDeepSky && ShouldEmphasize(p)) PlotStar(pixels, width, height, p, zoom, offsetX, offsetY, true);
+                }
+                for (int i = 0; i < staticPoints.Count; i++)
+                {
+                    if (haveFlags && staticOccluded[i] != 0) continue;
+                    var p = staticPoints[i];
+                    if (p.IsDeepSky) PlotDeepSky(pixels, width, height, p, zoom, offsetX, offsetY, searchActive && !p.IsHighlighted);
+                }
+            }
+
+            if (bodyPoints != null)
+            {
+                Prepare(bodyPoints, width, height);
+                for (int i = 0; i < bodyPoints.Count; i++)
+                {
+                    var p = bodyPoints[i];
+                    if (!p.BodyInFront)
+                        PlotBody(pixels, width, height, p, zoom, offsetX, offsetY, searchActive && !p.IsHighlighted);
+                }
+            }
+
+            CompositeOverlay(pixels, width, height, view, overlayRgba);
+
+            if (bodyPoints != null)
+            {
+                for (int i = 0; i < bodyPoints.Count; i++)
+                {
+                    var p = bodyPoints[i];
+                    if (p.BodyInFront)
+                        PlotBody(pixels, width, height, p, zoom, offsetX, offsetY, searchActive && !p.IsHighlighted);
+                }
+            }
         }
 
         /// <summary>
-        /// Main-thread-only: uploads an already-computed pixel buffer (see
-        /// ComputePixels) into a texture, reusing <paramref name="existing"/>
-        /// when its size already matches.
-        ///
-        /// SetPixels32 rather than SetPixels: the texture is RGBA32, so a Color32 buffer is already
-        /// in its layout and the upload is a copy instead of a per-pixel float-to-byte conversion.
+        /// Blends the raw-space occlusion overlay through the view's affine transform: per screen
+        /// pixel, an inverse affine (two multiplies), a bilinear fetch and a source-over blend.
+        /// No trigonometry: this runs on the main thread during a drag. Bilinear sampling is what
+        /// keeps the limb readable at zoom 15, where one raw pixel spans 15 screen pixels.
         /// </summary>
+        private static void CompositeOverlay(Color32[] pixels, int width, int height,
+                                             SkyChartView view, byte[] overlay)
+        {
+            if (overlay == null || overlay.Length != width * height * 4) return;
+
+            float zoom = Math.Max(1e-6f, view.Zoom);
+            float invZoom = 1f / zoom;
+            float baseX = -width / 2f * invZoom + view.Pan.x;
+            float baseY = -height / 2f * invZoom + view.Pan.y;
+
+            for (int y = 0; y < height; y++)
+            {
+                int row = y * width;
+                float ry = y * invZoom + baseY;
+                int iy0 = Mathf.FloorToInt(ry);
+                float fy = ry - iy0;
+                if (iy0 < -1 || iy0 >= height) continue;
+
+                for (int x = 0; x < width; x++)
+                {
+                    float rx = x * invZoom + baseX;
+                    int ix0 = Mathf.FloorToInt(rx);
+                    if (ix0 < -1 || ix0 >= width) continue;
+                    float fx = rx - ix0;
+
+                    int sr = 0, sg = 0, sb = 0, sa = 0;
+                    Accumulate(overlay, width, height, ix0, iy0, (1f - fx) * (1f - fy), ref sr, ref sg, ref sb, ref sa);
+                    Accumulate(overlay, width, height, ix0 + 1, iy0, fx * (1f - fy), ref sr, ref sg, ref sb, ref sa);
+                    Accumulate(overlay, width, height, ix0, iy0 + 1, (1f - fx) * fy, ref sr, ref sg, ref sb, ref sa);
+                    Accumulate(overlay, width, height, ix0 + 1, iy0 + 1, fx * fy, ref sr, ref sg, ref sb, ref sa);
+                    if (sa == 0) continue;
+
+                    Color32 dst = pixels[row + x];
+                    int inv = 255 - sa;
+                    pixels[row + x] = new Color32(
+                        (byte)((sr + dst.r * inv) / 255),
+                        (byte)((sg + dst.g * inv) / 255),
+                        (byte)((sb + dst.b * inv) / 255),
+                        (byte)Math.Min(255, sa + dst.a * inv / 255));
+                }
+            }
+        }
+
+        /// <summary>One bilinear tap, accumulated premultiplied so the weighted sum blends in one pass.</summary>
+        private static void Accumulate(byte[] overlay, int width, int height, int ix, int iy, float w,
+                                       ref int sr, ref int sg, ref int sb, ref int sa)
+        {
+            if (w <= 0f || ix < 0 || ix >= width || iy < 0 || iy >= height) return;
+            int o = (iy * width + ix) * 4;
+            byte a = overlay[o + 3];
+            if (a == 0) return;
+            float wa = w * a;
+            sr += (int)(overlay[o] * wa / 255f);
+            sg += (int)(overlay[o + 1] * wa / 255f);
+            sb += (int)(overlay[o + 2] * wa / 255f);
+            sa += (int)wa;
+        }
+
+        private static bool IsOffScreen(float sx, float sy, int width, int height, float extent)
+        {
+            return sx < -extent || sx > width + extent || sy < -extent || sy > height + extent;
+        }
+
+        /// <summary>Main-thread-only: uploads a computed pixel buffer into a texture (SetPixels32: the buffer is already in RGBA32 layout).</summary>
         public static Texture2D ApplyToTexture(Color32[] pixels, int width, int height, Texture2D existing)
         {
             Texture2D tex = existing;
@@ -284,17 +348,17 @@ namespace ExoInstruments.Visualization
                 tex.filterMode = FilterMode.Point;
             }
             tex.SetPixels32(pixels);
-            tex.Apply(false); // no mip chain on this texture, so skip the mipmap pass outright
+            tex.Apply(false);
             return tex;
         }
 
         /// <summary>
-        /// Nearest highlighted point within ComputeHitRadius. Dimmed (non-search-matching) points are
-        /// never clickable. O(n) loop, called every frame for hover preview — so it compares in RAW
-        /// space, transforming the one cursor position instead of every point, and reads each point's
-        /// cached projection rather than recomputing it.
+        /// Nearest highlighted, unoccluded point within ComputeHitRadius. A star behind the host
+        /// body is not drawn and is not clickable; the search list still reaches it. O(n) in raw
+        /// space, transforming the one cursor position instead of every point.
         /// </summary>
-        public static StarTarget HitTest(List<SkyChartPoint> points, int width, int height, SkyChartView view, int clickX, int clickY)
+        public static StarTarget HitTest(List<SkyChartPoint> points, byte[] occluded,
+                                         int width, int height, SkyChartView view, int clickX, int clickY)
         {
             if (points == null) return null;
             StarTarget best = null;
@@ -302,11 +366,13 @@ namespace ExoInstruments.Visualization
             Vector2 rawClick = ScreenToRaw(clickX, clickY, width, height, view);
             double rawTolerance = ComputeHitRadius(view.Zoom) / zoom;
             double bestDistSq = rawTolerance * rawTolerance;
+            bool haveFlags = occluded != null && occluded.Length == points.Count;
 
             for (int i = 0; i < points.Count; i++)
             {
                 var p = points[i];
                 if (!p.IsHighlighted) continue;
+                if (haveFlags && occluded[i] != 0) continue;
                 Vector2 raw = RawOf(p, width, height);
                 double dx = raw.x - rawClick.x;
                 double dy = raw.y - rawClick.y;
@@ -320,30 +386,20 @@ namespace ExoInstruments.Visualization
             return best;
         }
 
-        // Deep-sky markers: a cross rather than a disc, because a nebula is not a point source and
-        // a disc among the star discs would read as another star. Line emitters and reflection
-        // nebulae are tinted apart; one shows in a narrowband filter and the other cannot.
         private static readonly Color32 EmissionMarkerColor = new Color(0.95f, 0.42f, 0.45f, 1f);
         private static readonly Color32 ReflectionMarkerColor = new Color(0.55f, 0.68f, 0.95f, 1f);
         private static readonly Color32 GalaxyMarkerColor = new Color(0.95f, 0.86f, 0.55f, 1f);
 
-        /// <summary>
-        /// Cross sized to the object's own apparent extent, so the chart says how much sky it
-        /// covers as well as where it is, the difference between the 2 degree North America and
-        /// the 25 arcsec Cat's Eye is the difference between a wide-field target and one that needs
-        /// the CDK. Floored so the small ones stay clickable, capped so the big ones stay a marker.
-        /// </summary>
         private static void PlotDeepSky(Color32[] pixels, int width, int height, SkyChartPoint p,
                                         float zoom, float offsetX, float offsetY, bool dimmed)
         {
             float sx = p.RawPos.x * zoom + offsetX;
             float sy = p.RawPos.y * zoom + offsetY;
-            if (IsOffScreen(sx, sy, width, height)) return;
+            if (IsOffScreen(sx, sy, width, height, MaxMarkerExtentPx)) return;
 
             float arm = Mathf.Clamp(p.DeepSkyArmRaw * zoom, 4f, 40f);
             Color32 color = dimmed ? p.AltColor : p.NormalColor;
 
-            // A gap at the centre, so the cross frames the object instead of covering it.
             float gap = Math.Max(1.5f, arm * 0.35f);
             for (float d = gap; d <= arm; d += 0.5f)
             {
@@ -357,7 +413,6 @@ namespace ExoInstruments.Visualization
                 DrawHighlightRing(pixels, width, height, sx, sy, arm, zoom);
         }
 
-        /// <summary>The same desaturate-and-darken an unmatched star gets, so the chart reads consistently whatever kind of object is being searched for.</summary>
         private static Color32 Dim(Color32 color)
         {
             Color c = color;
@@ -375,8 +430,8 @@ namespace ExoInstruments.Visualization
             pixels[iy * width + ix] = color;
         }
 
-        /// <summary>Nearest deep-sky marker within its own arm length, so a big nebula is as easy to click as it is to see.</summary>
-        public static bool HitTestDeepSky(List<SkyChartPoint> points, int width, int height,
+        public static bool HitTestDeepSky(List<SkyChartPoint> points, byte[] occluded,
+                                          int width, int height,
                                           SkyChartView view, int clickX, int clickY, out DeepSkyObject hit)
         {
             hit = default(DeepSkyObject);
@@ -385,19 +440,19 @@ namespace ExoInstruments.Visualization
             double bestDistSq = double.MaxValue;
             float zoom = Math.Max(1e-6f, view.Zoom);
             Vector2 rawClick = ScreenToRaw(clickX, clickY, width, height, view);
-            double rMax = ComputeRMax(width, height);
+            double pxPerDeg = SkyChartProjection.RawPixelsPerDegree(width, height);
+            bool haveFlags = occluded != null && occluded.Length == points.Count;
 
             for (int i = 0; i < points.Count; i++)
             {
                 var p = points[i];
                 if (!p.IsDeepSky) continue;
+                if (haveFlags && occluded[i] != 0) continue;
                 Vector2 raw = RawOf(p, width, height);
                 double armRaw = p.Prepared
                     ? p.DeepSkyArmRaw
-                    : p.DeepSky.MajorArcmin / 60.0 * (rMax / 90.0) * 0.5;
+                    : p.DeepSky.MajorArcmin / 60.0 * pxPerDeg * 0.5;
                 double arm = Math.Max(4.0, Math.Min(40.0, armRaw * zoom));
-                // Screen-space tolerance, compared in raw space: the view transform is a uniform
-                // scale, so dividing by zoom is exact rather than an approximation.
                 double tolerance = Math.Max(ComputeHitRadius(view.Zoom), arm) / zoom;
                 double dx = raw.x - rawClick.x, dy = raw.y - rawClick.y;
                 double distSq = dx * dx + dy * dy;
@@ -412,26 +467,11 @@ namespace ExoInstruments.Visualization
         }
 
         private static void PlotStar(Color32[] pixels, int width, int height, SkyChartPoint p,
-                                     float zoom, float offsetX, float offsetY, bool emphasize, bool dimmed = false)
+                                     float zoom, float offsetX, float offsetY, bool emphasize)
         {
             float sx = p.RawPos.x * zoom + offsetX;
             float sy = p.RawPos.y * zoom + offsetY;
-            if (IsOffScreen(sx, sy, width, height)) return;
-
-            if (p.IsBody)
-            {
-                // Solar-system body: bigger disc, grows with zoom. Only the selected photography target gets the ring.
-                float bodyRadius = Mathf.Min(p.BodyMarkerRadiusPx + (zoom - 1f) * 0.9f, 20f);
-                // A running search that did not match this body steps its disc back, the same way
-                // an unmatched star's is stepped back. With no search running nothing is dimmed.
-                DrawFilledCircle(pixels, width, height, sx, sy, bodyRadius,
-                                 dimmed ? p.AltColor : p.NormalColor);
-                if (p.IsSelectedTarget)
-                {
-                    DrawHighlightRing(pixels, width, height, sx, sy, bodyRadius, zoom);
-                }
-                return;
-            }
+            if (IsOffScreen(sx, sy, width, height, MaxMarkerExtentPx)) return;
 
             float radius = ComputeMarkerRadius(p.BaseMarkerRadius, zoom);
             DrawFilledCircle(pixels, width, height, sx, sy, radius, emphasize ? p.AltColor : p.NormalColor);
@@ -442,11 +482,85 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Star color from blackbody temperature + apparent brightness, pre-composited against the sky
-        /// background. Pre-compositing is required: GUI.DrawTexture would otherwise blend against the
-        /// IMGUI panel box, not our own sky pixels. Called once per point per catalogue refresh (see
-        /// Prepare), never inside the raster: the blackbody term alone is a spectral integral.
+        /// A solar-system body: its real disc whenever the true angular size wins over the
+        /// marker at this zoom, a star-sized dot otherwise. The real disc is drawn as the exact
+        /// local footprint of the spherical cap: each pixel offset is pulled back to arc
+        /// coordinates through the inverse of the projection's local Jacobian
+        /// (SkyChartProjection.LocalBasis; Hammer shears and scales anisotropically off-centre),
+        /// and shaded with its real terminator from the Sun's direction.
         /// </summary>
+        private static void PlotBody(Color32[] pixels, int width, int height, SkyChartPoint p,
+                                     float zoom, float offsetX, float offsetY, bool dimmed)
+        {
+            float sx = p.RawPos.x * zoom + offsetX;
+            float sy = p.RawPos.y * zoom + offsetY;
+
+            // Screen-space Jacobian columns of one arc-degree along Dec and RA at this body.
+            float jdx = p.JDec.x * zoom, jdy = p.JDec.y * zoom;
+            float jrx = p.JRa.x * zoom, jry = p.JRa.y * zoom;
+            float alpha = (float)p.BodyAngularRadiusDeg;
+            // The disc's largest screen extent is bounded by alpha times the Jacobian's norm.
+            float jNorm = Mathf.Sqrt(jdx * jdx + jdy * jdy + jrx * jrx + jry * jry);
+            float realExtent = alpha * jNorm;
+            float markerRadius = Mathf.Min(ComputeMarkerRadius(p.BodyMarkerRadiusPx, zoom), 9f);
+
+            if (realExtent < markerRadius)
+            {
+                if (IsOffScreen(sx, sy, width, height, MaxMarkerExtentPx)) return;
+                DrawFilledCircle(pixels, width, height, sx, sy, markerRadius,
+                                 dimmed ? p.AltColor : p.NormalColor);
+                if (p.IsSelectedTarget)
+                    DrawHighlightRing(pixels, width, height, sx, sy, markerRadius, zoom);
+                return;
+            }
+
+            float extent = realExtent + 2f;
+            if (IsOffScreen(sx, sy, width, height, extent)) return;
+
+            float det = jdx * jry - jdy * jrx;
+            if (Mathf.Abs(det) < 1e-9f) return;
+            float invDet = 1f / det;
+
+            Color32 tint = dimmed ? p.AltColor : p.NormalColor;
+            Vector3 sun = p.BodySunLocal;
+
+            int minX = Math.Max(0, Mathf.FloorToInt(sx - extent));
+            int maxX = Math.Min(width - 1, Mathf.CeilToInt(sx + extent));
+            int minY = Math.Max(0, Mathf.FloorToInt(sy - extent));
+            int maxY = Math.Min(height - 1, Mathf.CeilToInt(sy + extent));
+            float invAlpha = 1f / alpha;
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                int rowOffset = y * width;
+                float oy = y - sy;
+                for (int x = minX; x <= maxX; x++)
+                {
+                    float ox = x - sx;
+                    // (ox,oy) = u*JDec + v*JRa solved for the arc offsets (u,v), in degrees;
+                    // u pairs with JDec so u is the Dec-arc offset.
+                    float u = (ox * jry - oy * jrx) * invDet;
+                    float v = (oy * jdx - ox * jdy) * invDet;
+                    float nDec = u * invAlpha;
+                    float nRa = v * invAlpha;
+                    float rho2 = nDec * nDec + nRa * nRa;
+                    if (rho2 > 1f) continue;
+
+                    float nLos = Mathf.Sqrt(1f - rho2);
+                    float lit = nRa * sun.x + nDec * sun.y + nLos * sun.z;
+                    float dayBlend = Mathf.SmoothStep(0f, 1f, (lit + 0.05f) / 0.20f);
+                    float lambert = 0.30f + 0.70f * Mathf.Max(0f, lit);
+                    float shade = 0.045f + (lambert - 0.045f) * dayBlend;
+
+                    pixels[rowOffset + x] = new Color32(
+                        (byte)(tint.r * shade), (byte)(tint.g * shade), (byte)(tint.b * shade), 255);
+                }
+            }
+
+            if (p.IsSelectedTarget)
+                DrawHighlightRing(pixels, width, height, sx, sy, extent, zoom);
+        }
+
         private static Color ComputeStarDisplayColor(StarTarget target, bool highlighted)
         {
             float r, g, b;
@@ -479,21 +593,8 @@ namespace ExoInstruments.Visualization
             return new Color(blended.r, blended.g, blended.b, 1f);
         }
 
-        // --- Blackbody tint memo ---------------------------------------------
-        // StellarColor.BlackbodyRgb integrates Planck's law against the CIE 1931 observer at 1 nm
-        // over 360-830 nm: 471 exponentials per call. The chart asks for it once per star per
-        // catalogue refresh — once a second, for thousands of stars whose temperatures never change.
-        // So each temperature's tint is integrated once for the session and read back after.
-        //
-        // The key is the temperature rounded to 1 K, which is what makes it a cache and not just a
-        // dictionary of every double that ever came out of a catalogue. That rounding is measured,
-        // not assumed: over 1000-40000 K it moves the peak-normalised sRGB tint by at most 0.13 of
-        // an 8-bit level (worst near 1940 K, where the locus is steepest), i.e. it is lost in the
-        // conversion to bytes and can change no displayed colour. 10 K would have cost 1.3 levels,
-        // which is a visible step.
-        //
-        // Locked because a refresh rasters on a background Task while the main thread can be
-        // preparing points of its own.
+        // Blackbody tint memo: one 471-sample Planck integral per distinct temperature per
+        // session, keyed at 1 K (measured to move the tint by at most 0.13 of an 8-bit level).
         private const double TintQuantumK = 1.0;
         private static readonly Dictionary<int, Color> blackbodyTintCache = new Dictionary<int, Color>();
 
@@ -520,7 +621,6 @@ namespace ExoInstruments.Visualization
             return (float)(MinBrightnessFraction + (1.0 - MinBrightnessFraction) * t);
         }
 
-        /// <summary>Thin flat outline just outside the star's fill, the interactivity cue now that fill color is the star's real hue, not a flat highlight color. Fully opaque (no alpha blend), matching a real finder chart's plain ink circle rather than a glowing HUD marker.</summary>
         private static void DrawHighlightRing(Color32[] pixels, int width, int height, float cx, float cy, float innerRadius, float zoom)
         {
             float thickness = Mathf.Max(1f, 0.6f + (zoom - 1f) * 0.12f);
@@ -529,8 +629,6 @@ namespace ExoInstruments.Visualization
             float innerSq = ringInner * ringInner;
             float outerSq = ringOuter * ringOuter;
 
-            // Clamped to the buffer up front, so the inner loop is a plain write with no bounds
-            // test and a marker hanging off the edge costs only the rows that are actually on it.
             int minX = Math.Max(0, Mathf.FloorToInt(cx - ringOuter));
             int maxX = Math.Min(width - 1, Mathf.CeilToInt(cx + ringOuter));
             int minY = Math.Max(0, Mathf.FloorToInt(cy - ringOuter));
@@ -576,49 +674,34 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
-        /// Public wrapper over the internal projection so overlays (e.g. the
-        /// photography-mode planet markers drawn in IMGUI on top of the chart)
-        /// land at exactly the same place as the baked star points, honoring the
-        /// same zoom/pan. Returns texture-pixel space (origin bottom-left, y up),
-        /// the same space HitTest / the GUI's local coords use.
+        /// Public wrapper over the projection + view transform, so overlays and hit lists land at
+        /// exactly the same place as the baked points. Texture-pixel space (origin bottom-left, y up).
         /// </summary>
-        public static Vector2 ProjectAltAzToScreen(double altDeg, double azDeg, int width, int height, SkyChartView view)
-            => ProjectToPixel(altDeg, azDeg, width, height, view);
-
-        /// <summary>
-        /// Inverse of ProjectToPixel's raw (pre pan/zoom) stage: given a raw pixel position, the
-        /// alt/az that would project there. Used by ExoInstrumentsGUI's marker decluttering (see
-        /// BuildChartBodyPoints/DeclutterBodyPositions) to convert a small on-screen nudge back
-        /// into real alt/az, so the same coordinates drive both rendering and hit-testing.
-        /// </summary>
-        public static void UnprojectRawPixel(double rawX, double rawY, int width, int height, out double altDeg, out double azDeg)
+        public static Vector2 ProjectEquatorialToScreen(double raDeg, double decDeg, int width, int height, SkyChartView view)
         {
-            double rMax = ComputeRMax(width, height);
-            double centerX = width / 2.0;
-            double centerY = height / 2.0;
-            double dx = rawX - centerX;
-            double dy = rawY - centerY;
-            double r = Math.Sqrt(dx * dx + dy * dy);
-            azDeg = (Math.Atan2(dx, dy) * 180.0 / Math.PI + 360.0) % 360.0;
-            altDeg = 90.0 * (1.0 - r / rMax);
+            SkyChartProjection.ProjectRaw(raDeg, decDeg, width, height, out double rx, out double ry);
+            return new Vector2(((float)rx - view.Pan.x) * view.Zoom + width / 2f,
+                               ((float)ry - view.Pan.y) * view.Zoom + height / 2f);
         }
 
-        /// <summary>r = Rmax*(90-alt)/90, the dome projection before any zoom or pan. The trig lives here and nowhere in the raster: see Prepare.</summary>
-        private static Vector2 ProjectRaw(double altDeg, double azDeg, int width, int height)
+        /// <summary>Raw pixel back to RA/Dec, for the marker decluttering that nudges in raw space.</summary>
+        public static void UnprojectRawToEquatorial(double rawX, double rawY, int width, int height,
+                                                    out double raDeg, out double decDeg)
         {
-            double rMax = ComputeRMax(width, height);
-            double r = rMax * (90.0 - altDeg) / 90.0;
-            double azRad = azDeg * Math.PI / 180.0;
-
-            return new Vector2((float)(width / 2.0 + r * Math.Sin(azRad)),
-                               (float)(height / 2.0 + r * Math.Cos(azRad))); // North (az=0) points up, in raw space
+            if (!SkyChartProjection.TryUnprojectRaw(rawX, rawY, width, height, out raDeg, out decDeg))
+            {
+                raDeg = 0.0;
+                decDeg = -90.0;
+            }
         }
 
-        /// <summary>A point's raw projection, cached when it has been through Prepare and computed on the spot when it hasn't (a hit-test can run against points from a list that was never rastered).</summary>
         private static Vector2 RawOf(SkyChartPoint p, int width, int height)
-            => p.Prepared ? p.RawPos : ProjectRaw(p.AltitudeDeg, p.AzimuthDeg, width, height);
+        {
+            if (p.Prepared) return p.RawPos;
+            SkyChartProjection.ProjectRaw(p.RaDeg, p.DecDeg, width, height, out double rx, out double ry);
+            return new Vector2((float)rx, (float)ry);
+        }
 
-        /// <summary>Screen (texture-pixel) position back to raw space: the inverse of the raster's affine view transform, used to hit-test in raw space.</summary>
         private static Vector2 ScreenToRaw(float screenX, float screenY, int width, int height, SkyChartView view)
         {
             float zoom = Math.Max(1e-6f, view.Zoom);
@@ -626,49 +709,20 @@ namespace ExoInstruments.Visualization
                                (screenY - height / 2f) / zoom + view.Pan.y);
         }
 
-        /// <summary>r = Rmax*(90-alt)/90 in raw space, then (raw - pan)*zoom + center for the view transform.</summary>
-        private static Vector2 ProjectToPixel(double altDeg, double azDeg, int width, int height, SkyChartView view)
-        {
-            Vector2 raw = ProjectRaw(altDeg, azDeg, width, height);
-            return new Vector2((raw.x - view.Pan.x) * view.Zoom + width / 2f,
-                               (raw.y - view.Pan.y) * view.Zoom + height / 2f);
-        }
-
         /// <summary>
-        /// The inverse: which altitude and azimuth a chart pixel sits at. Needed to point the
-        /// telescope at empty sky rather than only at a marker.
-        ///
-        /// Returns false above the horizon ring, where the projection has no sky to name.
+        /// Which RA/Dec a chart pixel sits at. Needed to point the telescope at empty sky rather
+        /// than only at a marker. False only outside the sky disc (past the south-pole rim).
         /// </summary>
-        public static bool TryScreenToAltAz(float screenX, float screenY, int width, int height,
-                                            SkyChartView view, out double altDeg, out double azDeg)
+        public static bool TryScreenToEquatorial(float screenX, float screenY, int width, int height,
+                                                 SkyChartView view, out double raDeg, out double decDeg)
         {
-            altDeg = azDeg = 0.0;
-            double centerX = width / 2.0;
-            double centerY = height / 2.0;
-
-            double rawX = (screenX - centerX) / Math.Max(1e-6f, view.Zoom) + view.Pan.x;
-            double rawY = (screenY - centerY) / Math.Max(1e-6f, view.Zoom) + view.Pan.y;
-
-            double dx = rawX - centerX;
-            double dy = rawY - centerY;
-            double r = Math.Sqrt(dx * dx + dy * dy);
-
-            double rMax = ComputeRMax(width, height);
-            if (rMax <= 0.0) return false;
-
-            altDeg = 90.0 - 90.0 * r / rMax;
-            if (altDeg < 0.0) return false;   // below the horizon ring: not sky
-
-            azDeg = Math.Atan2(dx, dy) * 180.0 / Math.PI;
-            if (azDeg < 0.0) azDeg += 360.0;
-            return true;
+            Vector2 raw = ScreenToRaw(screenX, screenY, width, height, view);
+            return SkyChartProjection.TryUnprojectRaw(raw.x, raw.y, width, height, out raDeg, out decDeg);
         }
 
         // --- Reference grid ---------------------------------------------------
-        // The rings and the cardinal cross are fixed in raw space: only the view transform moves
-        // them. Their ~3700 sample points are projected once per texture size and then reused, so a
-        // pan costs an affine transform each instead of two trig calls each.
+        // Declination rings and RA spokes, fixed in raw space; only the view transform moves
+        // them, so their sample points are projected once per texture size.
         private static int gridCacheWidth = -1, gridCacheHeight = -1;
         private static Vector2[] gridRawPoints;
         private static Color32[] gridColors;
@@ -683,27 +737,37 @@ namespace ExoInstruments.Visualization
                 var pts = new List<Vector2>();
                 var cols = new List<Color32>();
 
-                foreach (double altDeg in AltitudeRingsDeg)
+                foreach (double decDeg in DeclinationRingsDeg)
                 {
-                    Color32 color = altDeg <= 0.0 ? HorizonColor32 : GridColor32;
-                    for (double azDeg = 0; azDeg < 360.0; azDeg += 0.5)
+                    Color32 color = decDeg == 0.0 ? EquatorColor32 : GridColor32;
+                    for (double raDeg = 0; raDeg < 360.0; raDeg += 0.25)
                     {
-                        pts.Add(ProjectRaw(altDeg, azDeg, width, height));
+                        SkyChartProjection.ProjectRaw(raDeg, decDeg, width, height, out double x, out double y);
+                        pts.Add(new Vector2((float)x, (float)y));
                         cols.Add(color);
                     }
                 }
 
-                // Cardinal cross through the zenith: N-S (az 0/180) and E-W (az 90/270),
-                // each drawn from a bit below the horizon out to the zenith for a clean line.
-                foreach (double azDeg in new[] { 0.0, 90.0 })
+                // RA meridians, kept clear of the poles so they do not pile up into a blob.
+                for (double raDeg = 0.0; raDeg < 360.0; raDeg += RaSpokeStepDeg)
                 {
-                    for (double alt = -10.0; alt <= 90.0; alt += 0.5)
+                    for (double decDeg = -84.0; decDeg <= 84.0; decDeg += 0.5)
                     {
-                        pts.Add(ProjectRaw(alt, azDeg, width, height));
-                        cols.Add(GridColor32);
-                        pts.Add(ProjectRaw(alt, azDeg + 180.0, width, height));
+                        SkyChartProjection.ProjectRaw(raDeg, decDeg, width, height, out double x, out double y);
+                        pts.Add(new Vector2((float)x, (float)y));
                         cols.Add(GridColor32);
                     }
+                }
+
+                // The ellipse rim: the map's own edge (RA 0h on both sides), drawn like the old
+                // chart drew its horizon, so the sky visibly ends where it ends.
+                SkyChartProjection.EllipseHalfAxes(width, height, out double haw, out double hah);
+                for (double t = 0.0; t < 360.0; t += 0.2)
+                {
+                    double tr = t * Math.PI / 180.0;
+                    pts.Add(new Vector2((float)(width / 2.0 + haw * Math.Cos(tr)),
+                                        (float)(height / 2.0 + hah * Math.Sin(tr))));
+                    cols.Add(EquatorColor32);
                 }
 
                 gridRawPoints = pts.ToArray();
@@ -732,12 +796,6 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// Clears to the sky colour by filling one row and then doubling it, so the buffer is
-        /// cleared in log2(height) block copies (a memmove each, Color32 being blittable) instead of
-        /// one write per pixel. At 640x640 that is ten copies rather than 409,600 stores, and it
-        /// runs on every pan.
-        /// </summary>
         private static void FillBackground(Color32[] pixels, int width)
         {
             int seed = Math.Min(width, pixels.Length);
@@ -757,6 +815,5 @@ namespace ExoInstruments.Visualization
             if (x < 0 || x >= width || y < 0 || y >= height) return;
             pixels[y * width + x] = color;
         }
-
     }
 }

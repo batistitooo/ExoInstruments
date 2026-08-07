@@ -49,6 +49,11 @@ namespace ExoInstruments
                 {
                     cachedTelescopes = SpaceTelescopeRegistry.FindAll();
                     telescopeScanTime = Time.realtimeSinceStartup;
+
+                    // Every telescope, not only the selected one: a ledger that advanced only for
+                    // the one in use would make the way to keep a telescope charged be to stop
+                    // using it. Catch-up is by stored timestamp, so this stays cheap.
+                    for (int i = 0; i < cachedTelescopes.Count; i++) GroundStation.Advance(cachedTelescopes[i]);
                 }
                 return cachedTelescopes;
             }
@@ -96,7 +101,10 @@ namespace ExoInstruments
                          && FlightGlobals.ActiveVessel.id == link.Vessel.id;
             if (flyingIt) return true;
 
-            if (!link.HasCommLink)
+            // GroundStation, not link.HasCommLink, because a save with CommNet switched off has a
+            // null Connection on every vessel and would report every telescope as unreachable. The
+            // setting is the player's answer to whether radio range is a constraint at all.
+            if (!GroundStation.HasCommandPath(link))
             {
                 reason = "no antenna link: fly the spacecraft, or give it an antenna";
                 return false;
@@ -200,6 +208,13 @@ namespace ExoInstruments
             // unchanged spec, so this stays safe to call from the draw loop.
             if (link != null && link.Instrument != null)
                 solarSystemCamera.SetActiveTelescope(link.Instrument);
+
+            // Selecting a target commands whichever telescope was active then; switching leaves
+            // the new one pointed wherever it was last sent. Guarded on the vessel actually
+            // changing because this runs from the draw loop, and AlreadyCommanded makes it
+            // idempotent anyway.
+            if (currentId != newId && link != null && selectedPhotographyTarget.HasTarget)
+                ApplySpaceTelescopePointing();
         }
 
         /// <summary>
@@ -211,6 +226,11 @@ namespace ExoInstruments
             if (link == null || link.Instrument == null) return;
 
             GUILayout.Space(4);
+
+            // The power state comes first and is not gated on having a target: a telescope whose
+            // panels do not cover its bus load is one to fix rather than to plan with.
+            DrawPowerReadout(link);
+            DrawPointingReadout(link);
 
             if (!solarSystemCamera.TryBuildOrbitalConditions(selectedPhotographyTarget, out SpaceConditionsSnapshot c))
             {
@@ -242,6 +262,43 @@ namespace ExoInstruments
                     GUILayout.Label(string.Format(
                         "Occulted {0:P0} of each orbit; longest uninterrupted exposure {1}.",
                         c.OccultedOrbitFraction, FormatDuration(c.MaxContiguousExposureSeconds)));
+                }
+            }
+
+            // When the orbit is what blocks (or will block) the target, say when that changes:
+            // the exact predicate root-found along the vessel's own Keplerian orbit. The solar
+            // avoidance cone is excluded on purpose; it moves with the season, not the orbit.
+            if (c.InsideSunAvoidance)
+            {
+                GUILayout.Label("Inside solar avoidance: this clears with the season, not with the orbit.");
+            }
+            else
+            {
+                // Root-finding 192 samples along the orbit is not per-OnGUI-pass work: the
+                // change time is a physical instant, so it is computed once and counted down.
+                double nowUt = Planetarium.GetUniversalTime();
+                Guid vesselId = link.Vessel != null ? link.Vessel.id : Guid.Empty;
+                bool stale = double.IsNaN(visibilityChangeUt)
+                    || visibilityChangeTarget != selectedPhotographyTarget
+                    || visibilityChangeVesselId != vesselId
+                    || visibilityChangeWasObservable != c.Observable
+                    || nowUt >= visibilityChangeUt
+                    || nowUt < visibilityChangeComputedUt;
+                if (stale)
+                {
+                    visibilityChangeUt = TryComputeVisibilityChangeSeconds(link, selectedPhotographyTarget,
+                            c.Observable, out double secondsUntilChange)
+                        ? nowUt + secondsUntilChange : double.NaN;
+                    visibilityChangeComputedUt = nowUt;
+                    visibilityChangeTarget = selectedPhotographyTarget;
+                    visibilityChangeVesselId = vesselId;
+                    visibilityChangeWasObservable = c.Observable;
+                }
+                if (!double.IsNaN(visibilityChangeUt))
+                {
+                    GUILayout.Label(c.Observable
+                        ? string.Format("Window closes in {0}.", FormatDuration(visibilityChangeUt - nowUt))
+                        : string.Format("Next window in {0}.", FormatDuration(visibilityChangeUt - nowUt)));
                 }
             }
 
@@ -277,6 +334,285 @@ namespace ExoInstruments
             }
         }
 
+        /// <summary>
+        /// Where the telescope is looking, where it was told to look, and how long until the two
+        /// agree. Both coordinates rather than just the error, because "off by 43 degrees" says
+        /// nothing about which way the spacecraft is facing.
+        /// </summary>
+        private void DrawPointingReadout(SpaceTelescopeLink link)
+        {
+            PointingReadout r = GroundStation.Readout(link);
+            if (!r.HasCommand)
+            {
+                GUILayout.Label("Boresight: nothing commanded. Click a target to slew the spacecraft onto it.");
+                return;
+            }
+
+            if (ObservingPlatform.TryGetEquatorialFrame(Planetarium.GetUniversalTime(),
+                    out ObservingPlatform.EquatorialFrameSnapshot frame))
+            {
+                frame.WorldToEquatorial(r.CurrentDirection, out double raNow, out double decNow);
+                frame.WorldToEquatorial(r.CommandedDirection, out double raCmd, out double decCmd);
+                GUILayout.Label(string.Format("Boresight {0}   commanded {1}",
+                                              FormatRaDec(raNow, decNow), FormatRaDec(raCmd, decCmd)));
+            }
+
+            // The acquisition has to be unmistakable. It begins the moment the boresight ARRIVES,
+            // so the marker snaps onto the target and a countdown keeps running, which reads as a
+            // stuck timer unless the readout says in as many words that the turning is over and
+            // what is left is the guidance locking on.
+            string phase;
+            switch (r.Phase)
+            {
+                case GroundPointingPhase.Slewing:
+                    phase = string.Format("Slewing, {0} of turning left", FormatDuration(r.SecondsRemaining - r.AcquisitionRemaining));
+                    break;
+                case GroundPointingPhase.Acquiring:
+                    phase = string.Format("Pointed. Not turning any more: the fine guidance sensors are locking "
+                                        + "onto their guide stars, {0} left of the {1} that takes.",
+                                          FormatDuration(r.SecondsRemaining), FormatDuration(r.AcquisitionSeconds));
+                    break;
+                default:
+                    phase = "On target and guiding.";
+                    break;
+            }
+
+            GUILayout.Label(double.IsNaN(r.ErrorDeg)
+                ? phase
+                : string.Format("{0}  Off by {1}, field half-width {2}.",
+                                phase, FormatAngle(r.ErrorDeg), FormatAngle(r.ToleranceDeg)));
+
+            // The shutter is not locked during a repoint, so say what a frame taken now comes out
+            // as. The streak is exposure times rate, the same product the pipeline convolves with.
+            if (r.SlewRateDegPerSecond > 0.0)
+            {
+                double streakDeg = r.SlewRateDegPerSecond * solarSystemCamera.ExposureSeconds;
+                GUILayout.Label(string.Format(
+                    "Turning at {0}/s: you can still shoot, but a {1} exposure will streak {2}.",
+                    FormatAngle(r.SlewRateDegPerSecond), FormatExposure(solarSystemCamera.ExposureSeconds),
+                    FormatAngle(streakDeg)));
+            }
+
+            if (r.Phase != GroundPointingPhase.OnTarget) DrawProgressBar(r.SlewProgress);
+        }
+
+        /// <summary>
+        /// The battery, what the pending exposure would cost it, and how long it lasts. The panel
+        /// half that turns "the capture button is greyed out" into a number the player can act on.
+        /// </summary>
+        private void DrawPowerReadout(SpaceTelescopeLink link)
+        {
+            SpacePlatformSpec platform = link.Instrument.SpacePlatform;
+            if (platform == null) return;
+
+            double generation = GroundStation.ElectricChargeGenerationPerSecond(link.Vessel);
+            double sunlit = GroundStation.SunlitOrbitFraction(link);
+            double idle = GroundStation.IdleDrawPerSecond(link);
+            double slewDraw = GroundStation.SlewDrawPerSecond(link);
+            double net = generation * sunlit - idle;
+
+            GUILayout.Label(string.Format(
+                "Battery {0:F0}/{1:F0} EC. Panels {2:F2} EC/s over {3:P0} of the orbit in sunlight, "
+              + "bus draw {4:F2} EC/s: {5}{6:F2} EC/s net.",
+                link.ElectricCharge, link.ElectricChargeCapacity,
+                generation, sunlit, idle, net >= 0.0 ? "+" : "", net));
+
+            if (net < 0.0)
+            {
+                double endurance = OrbitalPowerBudget.EnduranceSeconds(
+                    link.ElectricCharge, 0.0, generation, sunlit, idle);
+                GUILayout.Label(string.Format(
+                    "Losing charge: flat in {0} unless it gets more panels.", FormatDuration(endurance)));
+            }
+
+            // Stated even when affordable: knowing a repoint across the sky is most of a battery
+            // is the difference between planning an observing run and finding out afterwards.
+            if (slewDraw > 0.0)
+            {
+                SlewProfile halfSky = GroundStation.Plan(link, 90.0);
+                GUILayout.Label(string.Format(
+                    "Slewing draws {0:F2} EC/s on top: a 90 deg repoint is {1} and {2:F0} EC.",
+                    slewDraw, FormatDuration(halfSky.ManoeuvreSeconds),
+                    GroundStation.SlewChargeUnits(link, in halfSky)));
+            }
+
+            double exposureCost = GroundStation.ExposureChargeUnits(link, solarSystemCamera.ExposureSeconds);
+            if (exposureCost > 0.0)
+            {
+                GUILayout.Label(string.Format(
+                    "This exposure costs {0:F1} EC{1}",
+                    exposureCost,
+                    exposureCost > link.ElectricCharge ? ", which the battery cannot cover." : "."));
+            }
+        }
+
+        /// <summary>
+        /// Draws the boresight and its target on the sky chart, with the arc between them.
+        ///
+        /// The chart is where the player picks the target, so it is where they look to see whether
+        /// the telescope got there. The arc is worth drawing because the shortest path across an
+        /// all-sky projection is not a straight line on screen.
+        ///
+        /// Orbital observers only: a ground telescope's mount is already tracked by the observatory
+        /// model in the scene behind the window.
+        /// </summary>
+        void DrawBoresightOverlay(Rect chartRect)
+        {
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;
+            if (!ObservingPlatform.IsSpaceBased) return;
+
+            SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
+            PointingReadout r = GroundStation.Readout(link);
+            if (!r.HasCommand) return;
+
+            if (!ObservingPlatform.TryGetEquatorialFrame(Planetarium.GetUniversalTime(),
+                    out ObservingPlatform.EquatorialFrameSnapshot frame)) return;
+
+            var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
+            Color previous = GUI.color;
+
+            // The arc first, so the markers sit on top of it.
+            if (r.Phase != GroundPointingPhase.OnTarget && r.CurrentDirection.sqrMagnitude > 1e-12)
+            {
+                GUI.color = new Color(1f, 0.85f, 0.35f, 0.55f);
+                const int ArcSamples = 24;
+                for (int i = 1; i < ArcSamples; i++)
+                {
+                    Vector3d p = GreatCircleSample(r.CurrentDirection, r.CommandedDirection, i / (double)ArcSamples);
+                    if (TryChartPoint(frame, view, chartRect, p, out Vector2 dot))
+                        GUI.DrawTexture(new Rect(dot.x - 1f, dot.y - 1f, 2f, 2f), Texture2D.whiteTexture);
+                }
+            }
+
+            // Where it should be: an open box, the same shape the chart already uses for a
+            // selection, in the cool colour the panel uses for commanded things.
+            //
+            // Plotted from the coordinates when there are any: projecting the commanded RA/Dec is
+            // the identical call the chart makes for the star, so the box lands exactly on it.
+            // Going through a world vector and back added a round trip that drifted.
+            bool haveCommanded = !double.IsNaN(r.CommandedRaDeg) && !double.IsNaN(r.CommandedDecDeg)
+                ? TryChartPointEquatorial(view, chartRect, r.CommandedRaDeg, r.CommandedDecDeg, out Vector2 commanded)
+                : TryChartPoint(frame, view, chartRect, r.CommandedDirection, out commanded);
+            if (haveCommanded)
+            {
+                GUI.color = new Color(0.45f, 0.85f, 1f, 0.95f);
+                DrawOpenBox(commanded, 9f);
+            }
+
+            // Where it is: a crosshair, warm while it is still moving and green once it is
+            // guiding, because "may I take the picture yet" is the question this answers.
+            if (r.CurrentDirection.sqrMagnitude > 1e-12
+                && TryChartPoint(frame, view, chartRect, r.CurrentDirection, out Vector2 current))
+            {
+                GUI.color = r.Phase == GroundPointingPhase.OnTarget
+                    ? new Color(0.45f, 1f, 0.55f, 0.95f)     // guiding
+                    : r.Phase == GroundPointingPhase.Acquiring
+                        ? new Color(1f, 0.95f, 0.55f, 0.95f) // arrived, locking on
+                        : new Color(1f, 0.75f, 0.25f, 0.95f);// still turning
+                DrawCrosshair(current, 7f);
+            }
+
+            GUI.color = previous;
+        }
+
+        /// <summary>A direction's place on the chart, in IMGUI screen coordinates, or false when it falls outside the drawn rect.</summary>
+        private static bool TryChartPoint(ObservingPlatform.EquatorialFrameSnapshot frame, SkyChartView view,
+                                          Rect chartRect, Vector3d worldDirection, out Vector2 point)
+        {
+            point = Vector2.zero;
+            if (worldDirection.sqrMagnitude < 1e-12) return false;
+
+            frame.WorldToEquatorial(worldDirection, out double raDeg, out double decDeg);
+            return TryChartPointEquatorial(view, chartRect, raDeg, decDeg, out point);
+        }
+
+        /// <summary>The same, for a position already in equatorial coordinates: the chart's own projection with nothing in front of it.</summary>
+        private static bool TryChartPointEquatorial(SkyChartView view, Rect chartRect,
+                                                    double raDeg, double decDeg, out Vector2 point)
+        {
+            Vector2 proj = SkyChartTexture.ProjectEquatorialToScreen(raDeg, decDeg, SkyChartWidth, SkyChartHeight, view);
+
+            // The texture's origin is bottom-left and IMGUI's is top-left, the same flip
+            // TryHitBodyMarker applies so that a click and a marker agree.
+            point = new Vector2(chartRect.x + proj.x, chartRect.y + (SkyChartHeight - proj.y));
+            return chartRect.Contains(point);
+        }
+
+        private static void DrawCrosshair(Vector2 c, float radius)
+        {
+            const float Thickness = 1.5f;
+            const float Gap = 2.5f;
+            GUI.DrawTexture(new Rect(c.x - radius, c.y - Thickness * 0.5f, radius - Gap, Thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x + Gap, c.y - Thickness * 0.5f, radius - Gap, Thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x - Thickness * 0.5f, c.y - radius, Thickness, radius - Gap), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x - Thickness * 0.5f, c.y + Gap, Thickness, radius - Gap), Texture2D.whiteTexture);
+        }
+
+        private static void DrawOpenBox(Vector2 c, float half)
+        {
+            const float T = 1.5f;
+            GUI.DrawTexture(new Rect(c.x - half, c.y - half, half * 2f, T), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x - half, c.y + half - T, half * 2f, T), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x - half, c.y - half, T, half * 2f), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(c.x + half - T, c.y - half, T, half * 2f), Texture2D.whiteTexture);
+        }
+
+        /// <summary>
+        /// A point along the great circle joining two directions: the same interpolation
+        /// GroundStation slews along, so the arc is the path the boresight really takes.
+        /// </summary>
+        private static Vector3d GreatCircleSample(Vector3d from, Vector3d to, double t)
+        {
+            Vector3d a = from.normalized, b = to.normalized;
+            double dot = Vector3d.Dot(a, b);
+            if (dot > 1.0) dot = 1.0; else if (dot < -1.0) dot = -1.0;
+            double omega = Math.Acos(dot);
+            if (omega < 1e-9) return b;
+            double sin = Math.Sin(omega);
+            Vector3d v = a * (Math.Sin((1.0 - t) * omega) / sin) + b * (Math.Sin(t * omega) / sin);
+            return v.sqrMagnitude > 1e-12 ? v.normalized : b;
+        }
+
+        /// <summary>A plain filled bar. IMGUI has no progress widget and the stacking panel draws its own the same way.</summary>
+        private static void DrawProgressBar(double fraction)
+        {
+            Rect r = GUILayoutUtility.GetRect(220f, 10f, GUILayout.Width(220), GUILayout.Height(10));
+            Color prev = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, 0.15f);
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = new Color(0.4f, 0.8f, 1f, 0.95f);
+            GUI.DrawTexture(new Rect(r.x, r.y, r.width * Mathf.Clamp01((float)fraction), r.height), Texture2D.whiteTexture);
+            GUI.color = prev;
+        }
+
+        /// <summary>Sexagesimal right ascension and degrees of declination, the way a finding chart states a position.</summary>
+        private static string FormatRaDec(double raDeg, double decDeg)
+        {
+            double raHours = ((raDeg % 360.0) + 360.0) % 360.0 / 15.0;
+            int h = (int)raHours;
+            double minutes = (raHours - h) * 60.0;
+            int m = (int)minutes;
+            double s = (minutes - m) * 60.0;
+
+            char sign = decDeg < 0.0 ? '-' : '+';
+            double ad = Math.Abs(decDeg);
+            int d = (int)ad;
+            double arcminutes = (ad - d) * 60.0;
+            int am = (int)arcminutes;
+            double asec = (arcminutes - am) * 60.0;
+
+            return string.Format("{0:00}h{1:00}m{2:00.0}s {3}{4:00}d{5:00}'{6:00}\"", h, m, s, sign, d, am, asec);
+        }
+
+        /// <summary>An angle in whichever unit keeps it readable: degrees down to arcminutes down to arcseconds.</summary>
+        private static string FormatAngle(double deg)
+        {
+            if (double.IsNaN(deg)) return "-";
+            if (deg >= 1.0) return string.Format("{0:F2} deg", deg);
+            if (deg >= 1.0 / 60.0) return string.Format("{0:F1}'", deg * 60.0);
+            return string.Format("{0:F1}\"", deg * 3600.0);
+        }
+
         private static string DescribeControlMode(AttitudeControlMode mode)
         {
             switch (mode)
@@ -285,6 +621,107 @@ namespace ExoInstruments
                 case AttitudeControlMode.ReactionControl: return "thruster limit cycle";
                 default: return "uncontrolled";
             }
+        }
+
+        // Cache for the visibility-change instant (see DrawOrbitalStatusPanel).
+        private double visibilityChangeUt = double.NaN;
+        private double visibilityChangeComputedUt = double.NaN;
+        private SkyTarget visibilityChangeTarget;
+        private Guid visibilityChangeVesselId;
+        private bool visibilityChangeWasObservable;
+
+        /// <summary>
+        /// Seconds until the target's orbital visibility flips, found on the exact geometry:
+        /// the observer propagated along its own Keplerian orbit (getRelativePositionAtUT, the
+        /// same propagation the game itself uses between SOI changes), the host, Sun and moons
+        /// propagated with GetBodyPositionAtUt, the same occultation/limb/moon predicate the
+        /// live gate applies, sampled over one orbit and bisected to the second.
+        /// </summary>
+        private bool TryComputeVisibilityChangeSeconds(SpaceTelescopeLink link, SkyTarget target,
+                                                       bool currentlyObservable, out double seconds)
+        {
+            seconds = 0.0;
+            if (link == null || link.Vessel == null || !target.HasTarget) return false;
+            Orbit orbit = link.Vessel.orbit;
+            CelestialBody host = link.Vessel.mainBody;
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+            if (orbit == null || host == null || sun == null) return false;
+            double period = orbit.period;
+            if (!(period > 0.0) || double.IsInfinity(period)) return false;
+
+            SpacePlatformSpec platform = link.Instrument != null ? link.Instrument.SpacePlatform : null;
+
+            Vector3d fixedTargetDir = Vector3d.zero;
+            if (!target.IsBody)
+            {
+                if (solarSystemCamera == null
+                    || !solarSystemCamera.TryResolveWorldDirection(target, out fixedTargetDir)) return false;
+            }
+            else if (target.Body == null || target.Body == host)
+            {
+                return false;
+            }
+
+            double nowUt = Planetarium.GetUniversalTime();
+
+            bool ObservableAt(double ut)
+            {
+                Vector3d hostPos = GetBodyPositionAtUt(host, ut);
+                Vector3d observer = hostPos + ConvertOrbitVectorToWorld(orbit.getRelativePositionAtUT(ut));
+                Vector3d dir = target.IsBody
+                    ? (GetBodyPositionAtUt(target.Body, ut) - observer).normalized
+                    : fixedTargetDir;
+
+                Vector3d sunPos = GetBodyPositionAtUt(sun, ut);
+                LimbGeometry limb = OrbitalVisibility.EvaluateLimb(
+                    ObservingPlatform.ToSkyPosition(observer - hostPos),
+                    ObservingPlatform.ToSky(dir), host.Radius,
+                    ObservingPlatform.ToSky(sunPos - hostPos));
+                if (limb.Occulted) return false;
+                if (platform != null)
+                {
+                    double avoidance = limb.LimbIsSunlit
+                        ? platform.BrightLimbAvoidanceAngleDeg : platform.DarkLimbAvoidanceAngleDeg;
+                    if (limb.LimbAngleDeg < avoidance) return false;
+
+                    if (platform.MoonAvoidanceAngleDeg > 0.0 && host.orbitingBodies != null)
+                    {
+                        foreach (CelestialBody moon in host.orbitingBodies)
+                        {
+                            if (target.IsBody && moon == target.Body) continue;
+                            Vector3d toMoon = GetBodyPositionAtUt(moon, ut) - observer;
+                            double dist = toMoon.magnitude;
+                            if (dist < 1.0) continue;
+                            double edge = OrbitalVisibility.SeparationDeg(
+                                    ObservingPlatform.ToSky(dir), ObservingPlatform.ToSky(toMoon))
+                                - OrbitalVisibility.AngularRadiusDeg(moon.Radius, dist);
+                            if (edge < platform.MoonAvoidanceAngleDeg) return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            const int Samples = 192;
+            double step = period / Samples;
+            double previousUt = nowUt;
+            for (int i = 1; i <= Samples; i++)
+            {
+                double ut = nowUt + i * step;
+                if (ObservableAt(ut) != currentlyObservable)
+                {
+                    double lo = previousUt, hi = ut;
+                    for (int k = 0; k < 24 && hi - lo > 1.0; k++)
+                    {
+                        double mid = 0.5 * (lo + hi);
+                        if (ObservableAt(mid) != currentlyObservable) hi = mid; else lo = mid;
+                    }
+                    seconds = hi - nowUt;
+                    return seconds > 0.0;
+                }
+                previousUt = ut;
+            }
+            return false;
         }
 
         private static string FormatDuration(double seconds)

@@ -86,6 +86,13 @@ namespace ExoInstruments
             if (Instance == this) Instance = null;
         }
 
+        /// <summary>
+        /// How many distinct stars the programme has surveyed. Drives the diminishing-returns
+        /// curve on the first-scan award (see ScienceRewards.FirstScanAward): it is the count of
+        /// stars, not of observations, so re-observing one target never moves it.
+        /// </summary>
+        public int ScannedCount => scannedStars.Count;
+
         public bool IsScanned(string catalogKey)
         {
             return catalogKey != null && scannedStars.Contains(catalogKey);

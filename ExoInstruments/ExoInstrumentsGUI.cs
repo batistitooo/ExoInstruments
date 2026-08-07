@@ -95,22 +95,52 @@ namespace ExoInstruments
         }
 
         private Texture2D skyChartTexture;
-        private List<SkyChartPoint> cachedSkyChartPoints = new List<SkyChartPoint>();
-        // Solar-system bodies currently plotted on the chart, kept for click
-        // hit-testing (the visible dots are baked into the chart texture; this
-        // list only carries identity + position so a click can resolve which
-        // body was hit). Rebuilt each refresh on the main thread.
-        private List<(CelestialBody Body, double AltDeg, double AzDeg)> cachedChartBodies
-            = new List<(CelestialBody, double, double)>();
+
+        // The chart is inertial: star and deep-sky points are built ONCE per catalogue (their
+        // RA/Dec never move) and only their display flags change afterwards. See SkyChartPoint's
+        // threading contract for why in-place flag writes are safe against a raster in flight.
+        private List<SkyChartPoint> staticSkyChartPoints;
+        private List<StarTarget> staticChartCatalog;      // which catalogue the static list was built from
+        private bool staticChartHasGalaxies;              // rebuilt once the galaxy catalogue finishes loading
+        // Which static points the active observer cannot see right now (occulted by a body),
+        // parallel to staticSkyChartPoints. Written by the background refresh into a back buffer
+        // and swapped by reference, so the shared point list is never mutated off the main thread.
+        private byte[] staticSkyOccludedFront;
+        private byte[] staticSkyOccludedBack;
+
+        // Solar-system bodies, rebuilt each refresh from the active observer's true position
+        // (parallax included: the Mun seen from LKO is degrees away from where KSC sees it).
+        private List<SkyChartPoint> cachedBodyPoints = new List<SkyChartPoint>();
+        private struct ChartBodyEntry
+        {
+            public CelestialBody Body;
+            public double RaDeg, DecDeg;
+            public double AngularRadiusDeg;
+        }
+        private List<ChartBodyEntry> cachedChartBodies = new List<ChartBodyEntry>();
+
+        // The occlusion overlay (host body disc, limb glare, avoidance halos), rendered in raw
+        // chart space by the refresh task into the back buffer and swapped on completion; the
+        // front buffer is what every raster samples.
+        private byte[] skyOverlayFront;
+        private byte[] skyOverlayBack;
+
+        // 2:1 all-sky oval plus margins: the Hammer ellipse fills 632x316 of this buffer.
         private const int SkyChartWidth = 640;
-        private const int SkyChartHeight = 640;
-        // Full refresh re-transforms the whole catalog (thousands of background
-        // stars once merged in) AND re-rasters a 640x640 canvas, same
-        // background-Task treatment as the imaging frame, for the same reason.
+        private const int SkyChartHeight = 360;
+        // Body positions and the occlusion overlay follow the observer's orbit, so the chart
+        // refreshes on a timer; the star field itself costs nothing after the first build.
         private const float SkyChartRefreshIntervalSeconds = 1f;
         private float nextSkyChartRefreshTime = 0f;
         private double lastSkyChartRefreshUt = double.NaN;
-        private Task<(List<SkyChartPoint> Points, Color32[] Pixels)> skyChartRenderTask;
+        private Task<SkyChartRefreshResult> skyChartRenderTask;
+        private struct SkyChartRefreshResult
+        {
+            public List<SkyChartPoint> StaticPoints;   // null when the existing list was reused
+            public byte[] StaticOccluded;
+            public byte[] Overlay;
+            public Color32[] Pixels;
+        }
         /// <summary>The zoom/pan the outstanding refresh is rasterising for, so a result that landed after the player kept panning can be spotted and re-rastered instead of snapping the view back.</summary>
         private SkyChartView skyChartRenderTaskView;
 
@@ -637,7 +667,7 @@ namespace ExoInstruments
                 {
                     if (CanExposePhotography())
                     {
-                        solarSystemCamera.BeginExposure(selectedPhotographyTarget);
+                        BeginPhotographyExposure();
                         stackBatchQueued++;
                     }
                     else
@@ -657,9 +687,9 @@ namespace ExoInstruments
                 // A pan lasts a second or two, so the sky it interrupts is at most that stale.
                 if (windowVisible && !skyChartDragging && Time.realtimeSinceStartup >= nextSkyChartRefreshTime)
                 {
-                    // Paused or time-warp-stalled: UT hasn't moved, so the whole
-                    // catalog would re-transform to the exact same Alt/Az it's
-                    // already showing. Skip starting a new refresh entirely.
+                    // Paused or time-warp-stalled: UT hasn't moved, so the bodies and the
+                    // occlusion overlay would land exactly where they already are. Skip
+                    // starting a new refresh entirely.
                     double skyUt = Planetarium.GetUniversalTime();
                     if (skyUt != lastSkyChartRefreshUt)
                     {
@@ -1003,9 +1033,13 @@ namespace ExoInstruments
                     DrawObservatorySelector();
                     DrawStartObservationButton();
                     if (SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography)
-                        DrawPhotographyForecastPanel();
+                    {
+                        if (!ObservingPlatform.IsSpaceBased) DrawPhotographyForecastPanel();
+                    }
                     else
+                    {
                         DrawForecastPanel();
+                    }
                 }
                 else if (selectedPhotographyTarget.HasTarget)
                 {
@@ -1014,7 +1048,7 @@ namespace ExoInstruments
                     GUILayout.Space(10);
                     DrawObservatorySelector();
                     DrawStartObservationButton();
-                    DrawPhotographyForecastPanel();
+                    if (!ObservingPlatform.IsSpaceBased) DrawPhotographyForecastPanel();
                 }
             }
             else if (photographySessionActive)
@@ -1558,39 +1592,178 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Builds the solar-system body markers for the sky chart, on the main
-        /// thread (reads KSP CelestialBody positions/radii). Each above-horizon
-        /// body becomes a SkyChartPoint with IsBody set and a marker radius sized
-        /// to the body's real physical radius (log-compressed), so a big planet
-        /// plots as a bigger dot than a small moon, just larger than any star.
-        /// Uses the same 0-deg geometric horizon as stars, matching the RC20
-        /// capture gate and the body forecast.
-        ///
-        /// Also emits the parallel identity list used for click hit-testing.
+        /// Everything the chart needs to know about the active observer, snapshot on the main
+        /// thread: the equatorial frame, the observer's true world position, every body as a
+        /// potential occluder, and the occlusion overlay's inputs (host body cap, limb glare,
+        /// avoidance halos). Plain data; the background refresh task reads it freely.
         /// </summary>
-        List<SkyChartPoint> BuildChartBodyPoints(out List<(CelestialBody, double, double)> hitList)
+        private struct ChartObserverSnapshot
         {
-            var points = new List<SkyChartPoint>();
-            hitList = new List<(CelestialBody, double, double)>();
+            public ObservingPlatform.EquatorialFrameSnapshot Frame;
+            public Vector3d ObserverPos;
+            public CelestialBody Host;
+            public CelestialBody[] OccluderBodies;
+            public SkyOccluder[] Occluders;
+            public int HostOccluderIndex;
+            public OverlayHost Overlay;
+            public OverlayGlow[] Glows;
+        }
 
+        /// <summary>Marker radius for a body whose true disc is below chart resolution: a bright star's own size. It only has to say "I am here"; the search list and dropdown carry the rest.</summary>
+        private const float BodyMarkerFloorPx = 2.5f;
+
+        bool TryBuildChartObserver(out ChartObserverSnapshot snap)
+        {
+            snap = default(ChartObserverSnapshot);
             CelestialBody home = FlightGlobals.GetHomeBody();
-            if (home == null) return points;
+            if (home == null) return false;
+            double ut = Planetarium.GetUniversalTime();
+            if (!ObservingPlatform.TryGetEquatorialFrame(ut, out snap.Frame)) return false;
 
-            var candidates = new List<(CelestialBody Body, double Alt, double Az, float Radius, Color Color)>();
-            foreach (CelestialBody body in FlightGlobals.Bodies)
+            snap.ObserverPos = ObservingPlatform.WorldPosition(home);
+            snap.Host = ObservingPlatform.HostBody;
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+
+            var bodies = FlightGlobals.Bodies;
+            var occluderBodies = new List<CelestialBody>(bodies.Count);
+            var occluders = new List<SkyOccluder>(bodies.Count);
+            snap.HostOccluderIndex = -1;
+            foreach (CelestialBody body in bodies)
             {
-                if (body == home) continue;
-
-                if (!TryComputeBodyAltAz(body, out double alt, out double az))
-                    continue;
-
-                // Must match the RC20 capture gate and ComputeBodyForecast:
-                // a body is observable as soon as it is geometrically above the horizon.
-                if (alt <= 0.0)
-                    continue;
-
-                candidates.Add((body, alt, az, BodyMarkerRadiusPx(body), BodyMarkerColor(body)));
+                Vector3d toBody = body.position - snap.ObserverPos;
+                double dist = toBody.magnitude;
+                if (dist < 1.0 || body.Radius <= 0.0) continue;
+                if (body == snap.Host) snap.HostOccluderIndex = occluders.Count;
+                occluderBodies.Add(body);
+                occluders.Add(SkyOccluder.From(snap.Frame.WorldToEquatorialVector(toBody), dist, body.Radius));
             }
+            snap.OccluderBodies = occluderBodies.ToArray();
+            snap.Occluders = occluders.ToArray();
+
+            // The overlay: the host body drawn at its true angular size, its limb glare sized by
+            // the platform's own published avoidance angles, and the solar/moon avoidance halos.
+            SpacePlatformSpec platform = ObservingPlatform.IsSpaceBased
+                && ObservingPlatform.ActiveSpaceTelescope.Instrument != null
+                ? ObservingPlatform.ActiveSpaceTelescope.Instrument.SpacePlatform : null;
+
+            if (snap.HostOccluderIndex >= 0 && sun != null)
+            {
+                SkyOccluder hostOcc = snap.Occluders[snap.HostOccluderIndex];
+                Color tint = BodyMarkerColor(snap.Host);
+                snap.Overlay = new OverlayHost
+                {
+                    HasBody = true,
+                    Direction = hostOcc.Direction,
+                    AngularRadiusDeg = hostOcc.AngularRadiusDeg,
+                    SunDirection = snap.Frame.WorldToEquatorialVector(sun.position - snap.Host.position),
+                    TintR = (byte)(tint.r * 255f), TintG = (byte)(tint.g * 255f), TintB = (byte)(tint.b * 255f),
+                    SunlitLimbGlowDeg = platform != null ? platform.BrightLimbAvoidanceAngleDeg : 0.0,
+                    DarkLimbGlowDeg = platform != null ? platform.DarkLimbAvoidanceAngleDeg : 0.0,
+                };
+            }
+
+            var glows = new List<OverlayGlow>();
+            if (platform != null && sun != null)
+            {
+                Vector3d toSun = sun.position - snap.ObserverPos;
+                double sunDist = toSun.magnitude;
+                if (platform.SunAvoidanceAngleDeg > 0.0 && sunDist > 1.0)
+                {
+                    glows.Add(new OverlayGlow
+                    {
+                        Direction = snap.Frame.WorldToEquatorialVector(toSun),
+                        InnerDeg = OrbitalVisibility.AngularRadiusDeg(sun.Radius, sunDist),
+                        OuterDeg = platform.SunAvoidanceAngleDeg,
+                        R = 255, G = 238, B = 200, PeakAlpha = 110,
+                    });
+                }
+                if (platform.MoonAvoidanceAngleDeg > 0.0 && snap.Host != null && snap.Host.orbitingBodies != null)
+                {
+                    foreach (CelestialBody moon in snap.Host.orbitingBodies)
+                    {
+                        Vector3d toMoon = moon.position - snap.ObserverPos;
+                        double moonDist = toMoon.magnitude;
+                        if (moonDist < 1.0) continue;
+                        double moonRadiusDeg = OrbitalVisibility.AngularRadiusDeg(moon.Radius, moonDist);
+                        glows.Add(new OverlayGlow
+                        {
+                            Direction = snap.Frame.WorldToEquatorialVector(toMoon),
+                            InnerDeg = moonRadiusDeg,
+                            OuterDeg = moonRadiusDeg + platform.MoonAvoidanceAngleDeg,
+                            R = 180, G = 190, B = 210, PeakAlpha = 55,
+                        });
+                    }
+                }
+            }
+            snap.Glows = glows.ToArray();
+            return true;
+        }
+
+        /// <summary>
+        /// Builds the solar-system body points from the active observer's true position, on the
+        /// main thread (reads KSP CelestialBody positions/radii). Each body carries its real
+        /// angular radius: the raster draws the true disc whenever it beats the star-sized
+        /// marker at the current zoom. A body fully hidden behind another (the exact segment
+        /// test, so a moon IN FRONT of its planet stays visible) is not plotted and not
+        /// clickable; the search list still reaches it. The host body itself is not a point:
+        /// it IS the overlay.
+        /// </summary>
+        void BuildChartBodyPoints(in ChartObserverSnapshot snap,
+                                  List<SkyChartPoint> points, List<ChartBodyEntry> entries)
+        {
+            points.Clear();
+            entries.Clear();
+
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+            SkyOccluder hostOcc = snap.HostOccluderIndex >= 0
+                ? snap.Occluders[snap.HostOccluderIndex] : default(SkyOccluder);
+
+            var candidates = new List<(CelestialBody Body, double Ra, double Dec, double AngRadiusDeg,
+                                       double Dist, bool InFront, Vector3 SunLocal, Color Color)>();
+
+            for (int i = 0; i < snap.OccluderBodies.Length; i++)
+            {
+                CelestialBody body = snap.OccluderBodies[i];
+                if (body == snap.Host) continue;
+
+                SkyOccluder self = snap.Occluders[i];
+                SkyVector dir = self.Direction;
+                double dist = self.DistanceMeters;
+                double angRadius = self.AngularRadiusDeg;
+
+                bool fullyHidden = false;
+                for (int j = 0; j < snap.Occluders.Length; j++)
+                {
+                    if (j == i) continue;
+                    if (SkyOcclusion.Classify(dir, dist, angRadius, in snap.Occluders[j]) == OcclusionState.Full)
+                    {
+                        fullyHidden = true;
+                        break;
+                    }
+                }
+                if (fullyHidden) continue;
+
+                // Overlapping the host's disc without being behind it = in front of the planet
+                // (a transiting moon): drawn above the overlay instead of truncated by it.
+                bool inFront = false;
+                if (snap.HostOccluderIndex >= 0)
+                {
+                    double hostSep = OrbitalVisibility.SeparationDeg(dir, hostOcc.Direction);
+                    inFront = hostSep < hostOcc.AngularRadiusDeg + angRadius
+                           && SkyOcclusion.Classify(dir, dist, angRadius, in hostOcc) == OcclusionState.Clear;
+                }
+
+                SkyChartProjection.EquatorialFromDirection(dir, out double ra, out double dec);
+
+                Vector3 sunLocal = new Vector3(0f, 0f, 1f); // the Sun itself: lit face-on
+                if (sun != null && body != sun)
+                    sunLocal = ComputeSunLocal(dir, snap.Frame.WorldToEquatorialVector(sun.position - body.position));
+
+                candidates.Add((body, ra, dec, angRadius, dist, inFront, sunLocal, BodyMarkerColor(body)));
+            }
+
+            // Farther bodies first, so where two real discs overlap the nearer one paints on top.
+            candidates.Sort((a, b) => b.Dist.CompareTo(a.Dist));
 
             DeclutterBodyPositions(candidates);
 
@@ -1599,56 +1772,77 @@ namespace ExoInstruments
                 points.Add(new SkyChartPoint
                 {
                     IsBody = true,
-                    AltitudeDeg = c.Alt,
-                    AzimuthDeg = c.Az,
-                    BodyMarkerRadiusPx = c.Radius,
+                    RaDeg = c.Ra,
+                    DecDeg = c.Dec,
+                    BodyMarkerRadiusPx = BodyMarkerFloorPx,
+                    BodyAngularRadiusDeg = c.AngRadiusDeg,
+                    BodyInFront = c.InFront,
+                    BodySunLocal = c.SunLocal,
                     BodyColor = c.Color,
-
-                    // Only the selected photography target gets a ring.
                     IsSelectedTarget = c.Body == selectedPhotographyBody,
-
-                    // A search running: a body the search did not match steps back with everything
-                    // else, so "type:nebula" does not leave the planets shouting over the answers.
                     IsHighlighted = IsSearchHighlightedBody(c.Body),
                 });
 
-                hitList.Add((c.Body, c.Alt, c.Az));
+                entries.Add(new ChartBodyEntry
+                {
+                    Body = c.Body,
+                    RaDeg = c.Ra,
+                    DecDeg = c.Dec,
+                    AngularRadiusDeg = c.AngRadiusDeg,
+                });
             }
-
-            return points;
         }
 
         /// <summary>
-        /// Nudges apart body markers whose real alt/az project to (nearly) the same screen
-        /// point; a moon and its parent planet routinely do this in KSP's compressed solar
-        /// system, stacking their dots on the chart and making them impossible to click apart.
-        /// Detects overlapping clusters using the UNZOOMED (raw) projection, so the fix holds at
-        /// any zoom level: SkyChartTexture's projection scales linearly with zoom, so a
-        /// separation wide enough to click at zoom=1 only gets easier at higher zoom, never
-        /// harder. Each cluster's members are then arranged evenly on a small circle around
-        /// their shared position, sized so adjacent markers clear each other's click radius.
+        /// The Sun's direction in a body's local disc frame (x along +RA, y along +Dec, z toward
+        /// the observer), which is what shades the real-size disc's terminator.
+        /// </summary>
+        static Vector3 ComputeSunLocal(SkyVector bodyDir, SkyVector sunDir)
+        {
+            // eRa = z-hat x bodyDir, the +RA tangent; degenerate at the poles, any azimuth serves there.
+            double rx = -bodyDir.Y, ry = bodyDir.X;
+            double m = Math.Sqrt(rx * rx + ry * ry);
+            double ex, ey, ez;
+            if (m < 1e-9) { ex = 0.0; ey = 1.0; ez = 0.0; }
+            else { ex = rx / m; ey = ry / m; ez = 0.0; }
+            // eDec = bodyDir x eRa
+            double dx = bodyDir.Y * ez - bodyDir.Z * ey;
+            double dy = bodyDir.Z * ex - bodyDir.X * ez;
+            double dz = bodyDir.X * ey - bodyDir.Y * ex;
+            return new Vector3(
+                (float)(sunDir.X * ex + sunDir.Y * ey + sunDir.Z * ez),
+                (float)(sunDir.X * dx + sunDir.Y * dy + sunDir.Z * dz),
+                (float)(-(sunDir.X * bodyDir.X + sunDir.Y * bodyDir.Y + sunDir.Z * bodyDir.Z)));
+        }
+
+        /// <summary>
+        /// Nudges apart MARKER-MODE body dots that project to (nearly) the same screen point; a
+        /// moon and its parent planet routinely stack in KSP's compressed system. Clusters are
+        /// found in the unzoomed raw projection (a separation clickable at zoom 1 only widens
+        /// with zoom) and arranged on a small ring. A body drawn at its REAL angular size never
+        /// participates: it is at its true position and must never be moved.
         ///
-        /// Chart display and hit-testing ONLY; BuildChartBodyPoints feeds these adjusted alt/az
-        /// into both the rendered SkyChartPoint and the hitList used for click hit-testing, so
-        /// the dot the player sees is always the dot they can click. Every other use of a body's
-        /// real position (capture aim, tracking, physics) calls TryComputeBodyAltAz or reads the
+        /// Chart display and hit-testing only; every physical use of a body's position reads the
         /// CelestialBody directly and never sees this adjustment.
         /// </summary>
-        void DeclutterBodyPositions(List<(CelestialBody Body, double Alt, double Az, float Radius, Color Color)> candidates)
+        void DeclutterBodyPositions(List<(CelestialBody Body, double Ra, double Dec, double AngRadiusDeg,
+                                          double Dist, bool InFront, Vector3 SunLocal, Color Color)> candidates)
         {
             if (candidates.Count < 2) return;
 
             int w = SkyChartWidth, h = SkyChartHeight;
+            float pxPerDeg = (float)SkyChartProjection.RawPixelsPerDegree(w, h);
             var rawView = SkyChartView.Default(w, h);
             var rawPos = new Vector2[candidates.Count];
+            var movable = new bool[candidates.Count];
             for (int i = 0; i < candidates.Count; i++)
             {
-                rawPos[i] = SkyChartTexture.ProjectAltAzToScreen(candidates[i].Alt, candidates[i].Az, w, h, rawView);
+                rawPos[i] = SkyChartTexture.ProjectEquatorialToScreen(candidates[i].Ra, candidates[i].Dec, w, h, rawView);
+                movable[i] = candidates[i].AngRadiusDeg * pxPerDeg < BodyMarkerFloorPx;
             }
 
             // Union-find: two markers join a cluster if their discs overlap (plus a little
-            // padding for comfortable clicking), transitively; so a short chain of moons all
-            // near the same spot ends up as one cluster, not several partially-overlapping pairs.
+            // padding for comfortable clicking), transitively.
             int[] parent = new int[candidates.Count];
             for (int i = 0; i < parent.Length; i++) parent[i] = i;
             int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
@@ -1657,9 +1851,11 @@ namespace ExoInstruments
             const float ClickPadding = 6f;
             for (int i = 0; i < candidates.Count; i++)
             {
+                if (!movable[i]) continue;
                 for (int j = i + 1; j < candidates.Count; j++)
                 {
-                    float threshold = candidates[i].Radius + candidates[j].Radius + ClickPadding;
+                    if (!movable[j]) continue;
+                    float threshold = BodyMarkerFloorPx * 2f + ClickPadding;
                     if ((rawPos[i] - rawPos[j]).sqrMagnitude < threshold * threshold)
                     {
                         Union(i, j);
@@ -1670,18 +1866,18 @@ namespace ExoInstruments
             var clusters = new Dictionary<int, List<int>>();
             for (int i = 0; i < candidates.Count; i++)
             {
+                if (!movable[i]) continue;
                 int root = Find(i);
                 if (!clusters.TryGetValue(root, out var list)) clusters[root] = list = new List<int>();
                 list.Add(i);
             }
 
-            const float MinAdjacentSpacingPx = 18f; // comfortably more than 2x the sky chart's baseline 8px hit radius
+            const float MinAdjacentSpacingPx = 18f; // comfortably more than 2x the baseline 8px hit radius
             const float MaxDeclutterRadiusPx = 40f; // caps how far a huge cluster (e.g. Jool + 5 moons) can sprawl
             foreach (var cluster in clusters.Values)
             {
                 if (cluster.Count < 2) continue;
-                // Deterministic order (not insertion order) so the ring's arrangement doesn't
-                // visibly shuffle between chart refreshes.
+                // Deterministic order so the ring's arrangement doesn't shuffle between refreshes.
                 cluster.Sort((a, b) => string.CompareOrdinal(candidates[a].Body.bodyName, candidates[b].Body.bodyName));
 
                 Vector2 centroid = Vector2.zero;
@@ -1695,25 +1891,15 @@ namespace ExoInstruments
                 {
                     float angle = 2f * Mathf.PI * k / cluster.Count;
                     Vector2 newRaw = centroid + ringRadius * new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                    SkyChartTexture.UnprojectRawPixel(newRaw.x, newRaw.y, w, h, out double newAlt, out double newAz);
-                    newAlt = Math.Max(0.5, newAlt); // never let the nudge push a marker below the horizon line
+                    // Keep the nudge inside the sky ellipse; past the rim there is no sky to name.
+                    newRaw = SkyChartTexture.ClampToSkyEllipse(newRaw, w, h, 1f);
+                    SkyChartTexture.UnprojectRawToEquatorial(newRaw.x, newRaw.y, w, h, out double newRa, out double newDec);
 
                     int idx = cluster[k];
                     var c = candidates[idx];
-                    candidates[idx] = (c.Body, newAlt, newAz, c.Radius, c.Color);
+                    candidates[idx] = (c.Body, newRa, newDec, c.AngRadiusDeg, c.Dist, c.InFront, c.SunLocal, c.Color);
                 }
             }
-        }
-
-        /// <summary>Marker radius in pixels for a body, from its real radius (log-compressed between the smallest moon and a gas giant), always bigger than any star marker so it reads as "a planet, not a star".</summary>
-        static float BodyMarkerRadiusPx(CelestialBody body)
-        {
-            const double minR = 6_000.0;      // ~Gilly class
-            const double maxR = 6_000_000.0;  // ~Jool class
-            double r = Math.Max(1.0, body.Radius);
-            double t = (Math.Log(r) - Math.Log(minR)) / (Math.Log(maxR) - Math.Log(minR));
-            t = Math.Min(1.0, Math.Max(0.0, t));
-            return Mathf.Lerp(3.0f, 15f, (float)t);
         }
 
         /// <summary>
@@ -1808,11 +1994,98 @@ namespace ExoInstruments
         /// </summary>
         bool CanExposeFromOrbit()
         {
+            return CanExposeFromOrbit(out _);
+        }
+
+        /// <summary>
+        /// The same gate, with the reason it refused, so the panel can print it rather than
+        /// leaving the player with a greyed-out button and no explanation. Every one of these is
+        /// something the player did and can undo, which is the standard the spacecraft selector
+        /// already holds itself to.
+        /// </summary>
+        bool CanExposeFromOrbit(out string reason)
+        {
             SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
-            if (!CanCommand(link, out _)) return false;
+            if (!CanCommand(link, out reason)) return false;
+
+            // Shooting mid-slew is allowed. An exposure taken while the vehicle is turning is a
+            // legitimate exposure of whatever the boresight is sweeping across, and it comes out as
+            // streaks; gating it removed a photograph the player might want. What it must not do is
+            // quietly produce a CLEAN frame of the target, so BeginPhotographyExposure re-aims at
+            // the true boresight and the pointing budget carries the slew rate.
+            PointingReadout pointing = GroundStation.Readout(link);
+            if (!pointing.HasCommand)
+            {
+                reason = "not pointed at anything yet";
+                return false;
+            }
+
+            // Enough charge for THIS exposure, not merely a battery that is not flat: Operational
+            // already refuses a dead spacecraft but cannot know how long the exposure is.
+            double cost = GroundStation.ExposureChargeUnits(link, solarSystemCamera.ExposureSeconds);
+            if (cost > link.ElectricCharge)
+            {
+                reason = string.Format("not enough charge: {0:F0} EC needed, {1:F0} EC on board",
+                                       cost, link.ElectricCharge);
+                return false;
+            }
+
             if (!solarSystemCamera.TryBuildOrbitalConditions(selectedPhotographyTarget,
                                                              out SpaceConditionsSnapshot c)) return false;
-            return c.Observable;
+            if (!c.Observable)
+            {
+                reason = c.BlockingConstraint ?? "the geometry forbids it";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Opens the shutter, billing the spacecraft first when the observer is an orbiting one.
+        /// Every exposure goes through here, single or batched: a second call site that skipped the
+        /// bill would make the constraint optional by accident.
+        /// </summary>
+        void BeginPhotographyExposure()
+        {
+            if (ObservingPlatform.IsSpaceBased)
+            {
+                SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
+                if (!GroundStation.TryBillExposure(link, solarSystemCamera.ExposureSeconds,
+                                                   out string reason))
+                {
+                    spaceCommandMessage = reason ?? "no telescope selected";
+                    return;
+                }
+                spaceCommandMessage = null;
+
+                // Mid-slew, the telescope is not looking at the selected target and the frame must
+                // not pretend otherwise. Exposing a synthetic target at the boresight's own
+                // coordinates puts the whole pipeline (star field, occlusion, WCS) on the patch of
+                // sky really in front of the optics, with no special case anywhere downstream.
+                SkyTarget aim = BoresightTargetIfSlewing(link);
+                if (aim.HasTarget)
+                {
+                    solarSystemCamera.BeginExposure(aim);
+                    return;
+                }
+            }
+            solarSystemCamera.BeginExposure(selectedPhotographyTarget);
+        }
+
+        /// <summary>
+        /// The patch of sky the boresight is actually on, as a target, when the telescope has not
+        /// yet arrived. SkyTarget.None once it is settled, which is the ordinary case.
+        /// </summary>
+        SkyTarget BoresightTargetIfSlewing(SpaceTelescopeLink link)
+        {
+            PointingReadout r = GroundStation.Readout(link);
+            if (!r.HasCommand || r.Settled || r.CurrentDirection.sqrMagnitude < 1e-12) return SkyTarget.None;
+
+            if (!ObservingPlatform.TryGetEquatorialFrame(Planetarium.GetUniversalTime(),
+                    out ObservingPlatform.EquatorialFrameSnapshot frame)) return SkyTarget.None;
+
+            frame.WorldToEquatorial(r.CurrentDirection, out double raDeg, out double decDeg);
+            return SkyTarget.FromEquatorial(raDeg, decDeg, "boresight (slewing)");
         }
 
         /// <summary>
@@ -2454,7 +2727,7 @@ namespace ExoInstruments
                     ? $"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)}) [instant]"
                     : $"Capture ({FormatExposure(solarSystemCamera.ExposureSeconds)})";
                 if (GUILayout.Button(captureLabel, GUILayout.Height(28), GUILayout.Width(180)))
-                    solarSystemCamera.BeginExposure(selectedPhotographyTarget);
+                    BeginPhotographyExposure();
                 GUI.enabled = true;
             }
             GUI.enabled = solarSystemCamera.HasCapturedPhoto;
@@ -2495,8 +2768,23 @@ namespace ExoInstruments
 
             if (!canExpose)
             {
-                GUILayout.Label("Can't expose right now: it must be night and the body above the horizon.", smallCaptionStyle);
+                // The two observers are stopped by completely different things, so one sentence
+                // cannot serve both: telling a player operating a spacecraft that it has to be
+                // night is not merely unhelpful, it names a constraint that does not exist in
+                // orbit and sends them off to wait for one that will never arrive.
+                if (ObservingPlatform.IsSpaceBased)
+                {
+                    CanExposeFromOrbit(out string reason);
+                    GUILayout.Label("Can't expose right now: " + (reason ?? "the geometry forbids it") + ".",
+                                    smallCaptionStyle);
+                }
+                else
+                {
+                    GUILayout.Label("Can't expose right now: it must be night and the body above the horizon.", smallCaptionStyle);
+                }
             }
+            if (!string.IsNullOrEmpty(spaceCommandMessage))
+                GUILayout.Label("Last command refused: " + spaceCommandMessage, smallCaptionStyle);
             GUILayout.EndVertical();
         }
 
@@ -2635,7 +2923,7 @@ namespace ExoInstruments
                 stackBatchRemaining = stackBatchSize;
                 stackBatchCollected = 0;
                 stackBatchQueued = 1;
-                solarSystemCamera.BeginExposure(selectedPhotographyTarget);
+                BeginPhotographyExposure();
             }
             GUI.enabled = true;
             if (batchRunning && GUILayout.Button("Cancel series", GUILayout.Height(26), GUILayout.Width(120)))
@@ -3244,7 +3532,9 @@ namespace ExoInstruments
             // next to the target list rather than buried in a diagnostic. On stock this reads as
             // the equatorial KSC; on a pack that relocates the space centre it reads as wherever
             // the observatory actually stands, and the chart above it changes accordingly.
-            GUILayout.Label($"Observing from {ObservatorySite.Describe()}", smallCaptionStyle);
+            GUILayout.Label(ObservingPlatform.IsSpaceBased && ObservingPlatform.ActiveSpaceTelescope.Vessel != null
+                ? $"Observing from {ObservingPlatform.ActiveSpaceTelescope.Vessel.vesselName}, in orbit of {ObservingPlatform.HostBody.bodyName}"
+                : $"Observing from {ObservatorySite.Describe()}", smallCaptionStyle);
             GUILayout.Label("Click anything on the chart to point at it, or search for it by name on the right.");
 
             GUILayout.Space(6);
@@ -3254,6 +3544,7 @@ namespace ExoInstruments
             {
                 GUI.DrawTexture(chartRect, skyChartTexture);
             }
+            DrawBoresightOverlay(chartRect);
             UpdateSkyChartHover(chartRect);
             HandleSkyChartInteraction(chartRect);
 
@@ -3264,7 +3555,7 @@ namespace ExoInstruments
                     : "Hovering: (none)");
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Scroll to zoom, drag to pan. Zenith at center, horizon/rings at 0/20/40/60 deg.");
+            GUILayout.Label("Scroll to zoom, drag to pan. All-sky oval: celestial equator along the long axis, poles top and bottom.");
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Recenter", GUILayout.Width(90)))
             {
@@ -3310,8 +3601,10 @@ namespace ExoInstruments
             int localX = (int)(mouse.x - chartRect.x);
             int localY = (int)(chartRect.height - (mouse.y - chartRect.y));
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
-            hoveredSkyChartStar = SkyChartTexture.HitTest(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, localX, localY);
-            hoveredDeepSky = SkyChartTexture.HitTestDeepSky(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight,
+            hoveredSkyChartStar = SkyChartTexture.HitTest(staticSkyChartPoints, staticSkyOccludedFront,
+                SkyChartWidth, SkyChartHeight, view, localX, localY);
+            hoveredDeepSky = SkyChartTexture.HitTestDeepSky(staticSkyChartPoints, staticSkyOccludedFront,
+                                                            SkyChartWidth, SkyChartHeight,
                                                             view, localX, localY, out DeepSkyObject nebula)
                 ? (DeepSkyObject?)nebula : null;
         }
@@ -3389,19 +3682,26 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Hit-tests a screen point against cachedChartBodies (built alongside the star points) using the same projection the chart was baked with.</summary>
+        /// <summary>
+        /// Hit-tests a screen point against the plotted bodies. A body drawn at its real angular
+        /// size is clickable across its whole disc; a marker keeps the generous fixed tolerance.
+        /// Occluded bodies were never plotted and are not in this list.
+        /// </summary>
         bool TryHitBodyMarker(Rect chartRect, Vector2 screenPos, out CelestialBody hit)
         {
             hit = null;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
-            float bestDistSq = 16f * 16f; // generous click tolerance
-            foreach (var (body, alt, az) in cachedChartBodies)
+            float pxPerDeg = (float)SkyChartProjection.RawPixelsPerDegree(SkyChartWidth, SkyChartHeight);
+            float bestDist = float.MaxValue;
+            foreach (ChartBodyEntry entry in cachedChartBodies)
             {
-                Vector2 proj = SkyChartTexture.ProjectAltAzToScreen(alt, az, SkyChartWidth, SkyChartHeight, view);
+                Vector2 proj = SkyChartTexture.ProjectEquatorialToScreen(entry.RaDeg, entry.DecDeg,
+                    SkyChartWidth, SkyChartHeight, view);
                 float sx = chartRect.x + proj.x;
                 float sy = chartRect.y + (SkyChartHeight - proj.y); // texture y-up -> IMGUI y-down
-                float dsq = (sx - screenPos.x) * (sx - screenPos.x) + (sy - screenPos.y) * (sy - screenPos.y);
-                if (dsq <= bestDistSq) { bestDistSq = dsq; hit = body; }
+                float dist = Mathf.Sqrt((sx - screenPos.x) * (sx - screenPos.x) + (sy - screenPos.y) * (sy - screenPos.y));
+                float tolerance = Mathf.Max(16f, (float)entry.AngularRadiusDeg * pxPerDeg * view.Zoom);
+                if (dist <= tolerance && dist < bestDist) { bestDist = dist; hit = entry.Body; }
             }
             return hit != null;
         }
@@ -3467,19 +3767,72 @@ namespace ExoInstruments
         void ApplySpaceTelescopePointing()
         {
             SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
-            if (link == null || link.Module == null) return;
+            if (link == null || link.Vessel == null) return;
             if (!selectedPhotographyTarget.HasTarget) return;
 
+            // Through the ground station, not the module: the module is null whenever the vessel is
+            // unloaded, which is every time the player uses this panel. GroundStation writes the
+            // command into the protovessel instead, and refuses it when there is no radio link.
             if (selectedPhotographyTarget.IsBody)
             {
-                link.Module.CommandPointingAtBody(selectedPhotographyTarget.Body);
+                if (AlreadyCommanded(link, selectedPhotographyTarget.Body, Vector3d.zero)) return;
+                GroundStation.CommandBody(link, selectedPhotographyTarget.Body, out spaceCommandMessage);
+                return;
+            }
+
+            // A catalogue position goes over as coordinates, not as the vector they point along
+            // right now: see GroundStation.CommandEquatorial for the drift that caused.
+            if (selectedPhotographyTarget.IsEquatorial)
+            {
+                if (AlreadyCommandedEquatorial(link, selectedPhotographyTarget.RaDeg,
+                                               selectedPhotographyTarget.DecDeg)) return;
+                GroundStation.CommandEquatorial(link, selectedPhotographyTarget.RaDeg,
+                                                selectedPhotographyTarget.DecDeg, out spaceCommandMessage);
                 return;
             }
 
             if (solarSystemCamera == null) return;
-            if (solarSystemCamera.TryResolveWorldDirection(selectedPhotographyTarget, out Vector3d direction))
-                link.Module.CommandPointing(direction);
+            if (!solarSystemCamera.TryResolveWorldDirection(selectedPhotographyTarget, out Vector3d direction)) return;
+            if (AlreadyCommanded(link, null, direction)) return;
+            GroundStation.CommandDirection(link, direction, out spaceCommandMessage);
         }
+
+        /// <summary>Whether these exact coordinates are already the commanded ones, to within the field of view.</summary>
+        bool AlreadyCommandedEquatorial(SpaceTelescopeLink link, double raDeg, double decDeg)
+        {
+            TelescopeCommandState state = TelescopeCommandState.Read(link);
+            if (!state.HasCommand || double.IsNaN(state.TargetRaDeg) || double.IsNaN(state.TargetDecDeg)) return false;
+
+            // Compared as an angle on the sky rather than as two coordinate differences: a degree
+            // of RA is not a degree of arc anywhere but the equator, and near the pole comparing
+            // the numbers would call two very different directions the same one.
+            SkyVector a = SkyChartProjection.DirectionFromEquatorial(state.TargetRaDeg, state.TargetDecDeg);
+            SkyVector b = SkyChartProjection.DirectionFromEquatorial(raDeg, decDeg);
+            return OrbitalVisibility.SeparationDeg(a, b) < GroundStation.OnTargetToleranceDeg(link);
+        }
+
+        /// <summary>
+        /// Whether this exact repoint is already the one in progress. Not covered by
+        /// SelectPhotographyTarget ignoring an unchanged target: Awake re-applies whatever survived
+        /// the last scene, so leaving the observatory and returning would re-issue the same command
+        /// and restart its clock.
+        /// </summary>
+        bool AlreadyCommanded(SpaceTelescopeLink link, CelestialBody body, Vector3d direction)
+        {
+            TelescopeCommandState state = TelescopeCommandState.Read(link);
+            if (!state.HasCommand) return false;
+
+            if (body != null) return state.TargetBodyName == body.bodyName;
+            if (!string.IsNullOrEmpty(state.TargetBodyName)) return false;
+            if (state.CommandedDirection.sqrMagnitude < 1e-12 || direction.sqrMagnitude < 1e-12) return false;
+
+            // Inside the field of view is the same pointing: the target is already on the detector
+            // and no real observatory would spend a manoeuvre to centre it better.
+            return Vector3d.Angle(state.CommandedDirection, direction) < GroundStation.OnTargetToleranceDeg(link);
+        }
+
+        /// <summary>Why the last ground command was refused, or null. Shown under the capture controls.</summary>
+        string spaceCommandMessage;
 
         /// <summary>Altitude and azimuth of whatever the telescope is pointed at.</summary>
         bool TryComputeTargetAltAz(SkyTarget target, out double altDeg, out double azDeg)
@@ -3502,7 +3855,9 @@ namespace ExoInstruments
 
         /// <summary>
         /// Points the telescope at whatever patch of sky a chart click landed on, by running the
-        /// chart's own projection backwards and then the horizontal-to-equatorial transform.
+        /// chart's own projection backwards: the chart already IS equatorial. A click inside the
+        /// host body's disc is a click on the planet, not on the sky it hides: from orbit it
+        /// selects the host body itself; from the ground it is the ground, and does nothing.
         /// </summary>
         void PointAtChartPosition(Rect chartRect, Vector2 screenPos)
         {
@@ -3510,19 +3865,20 @@ namespace ExoInstruments
             float localY = SkyChartHeight - (screenPos.y - chartRect.y);   // IMGUI y-down -> texture y-up
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
 
-            if (!SkyChartTexture.TryScreenToAltAz(localX, localY, SkyChartWidth, SkyChartHeight,
-                                                  view, out double altDeg, out double azDeg))
+            if (!SkyChartTexture.TryScreenToEquatorial(localX, localY, SkyChartWidth, SkyChartHeight,
+                                                       view, out double raDeg, out double decDeg))
                 return;
 
-            CelestialBody home = FlightGlobals.GetHomeBody();
-            if (home == null) return;
-
-            double meridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
-                Planetarium.GetUniversalTime(), home.rotationPeriod, home.initialRotation,
-                ObservatorySite.LongitudeDeg);
-            SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, meridianRaDeg,
-                                                  ObservatorySite.LatitudeDeg,
-                                                  out double raDeg, out double decDeg);
+            if (TryBuildChartObserver(out ChartObserverSnapshot snap) && snap.HostOccluderIndex >= 0)
+            {
+                SkyVector dir = SkyChartProjection.DirectionFromEquatorial(raDeg, decDeg);
+                if (SkyOcclusion.Classify(dir, double.PositiveInfinity, 0.0,
+                        in snap.Occluders[snap.HostOccluderIndex]) == OcclusionState.Full)
+                {
+                    if (ObservingPlatform.IsSpaceBased) SelectPhotographyBody(snap.Host);
+                    return;
+                }
+            }
 
             SelectPhotographyTarget(SkyTarget.FromEquatorial(raDeg, decDeg, null),
                                     clearStarSelection: true);
@@ -3552,27 +3908,36 @@ namespace ExoInstruments
             lastComposedPixels = null;
         }
 
-        /// <summary>Refreshes IsSelectedTarget on the cached body points to match selectedPhotographyBody and re-rasters; so the ring appears/moves the instant a body is (de)selected, without waiting for the next full catalog refresh.</summary>
+        /// <summary>Refreshes IsSelectedTarget on the plotted points to match the current selection and re-rasters, so the ring moves the instant a target is picked instead of waiting for the next refresh.</summary>
         void UpdateBodySelectionRingAndRerender()
         {
-            double selAlt = double.NaN, selAz = double.NaN;
-            foreach (var (body, alt, az) in cachedChartBodies)
+            for (int i = 0; i < cachedBodyPoints.Count && i < cachedChartBodies.Count; i++)
             {
-                if (body == selectedPhotographyBody) { selAlt = alt; selAz = az; break; }
-            }
-
-            SkyTarget pointing = selectedPhotographyTarget;
-            for (int i = 0; i < cachedSkyChartPoints.Count; i++)
-            {
-                var p = cachedSkyChartPoints[i];
-                bool shouldBeSelected = p.IsBody
-                    ? !double.IsNaN(selAlt)
-                      && Math.Abs(selAlt - p.AltitudeDeg) < 1e-6 && Math.Abs(selAz - p.AzimuthDeg) < 1e-6
-                    : IsPhotographyTarget(p.Target, pointing);
+                var p = cachedBodyPoints[i];
+                bool shouldBeSelected = cachedChartBodies[i].Body == selectedPhotographyBody;
                 if (p.IsSelectedTarget != shouldBeSelected)
                 {
                     p.IsSelectedTarget = shouldBeSelected;
-                    cachedSkyChartPoints[i] = p;
+                    cachedBodyPoints[i] = p;
+                }
+            }
+
+            if (staticSkyChartPoints != null)
+            {
+                SkyTarget pointing = selectedPhotographyTarget;
+                for (int i = 0; i < staticSkyChartPoints.Count; i++)
+                {
+                    var p = staticSkyChartPoints[i];
+                    bool shouldBeSelected = p.IsDeepSky
+                        ? pointing.IsEquatorial
+                            && Math.Abs(pointing.RaDeg - p.DeepSky.RaDeg) < 1e-6
+                            && Math.Abs(pointing.DecDeg - p.DeepSky.DecDeg) < 1e-6
+                        : IsPhotographyTarget(p.Target, pointing);
+                    if (p.IsSelectedTarget != shouldBeSelected)
+                    {
+                        p.IsSelectedTarget = shouldBeSelected;
+                        staticSkyChartPoints[i] = p;
+                    }
                 }
             }
             RenderSkyChartTexture();
@@ -3613,6 +3978,11 @@ namespace ExoInstruments
             {
                 GUILayout.Label("Telescope not pointed at anything; click this star on the chart to point at it.",
                                 smallCaptionStyle);
+                return;
+            }
+            if (ObservingPlatform.IsSpaceBased)
+            {
+                GUILayout.Label($"Telescope pointed at {selectedPhotographyTarget.DisplayName}", smallCaptionStyle);
                 return;
             }
             TryComputeTargetAltAz(selectedPhotographyTarget, out double alt, out double az);
@@ -3662,16 +4032,10 @@ namespace ExoInstruments
             RenderSkyChartTexture();
         }
 
-        /// <summary>Keeps the view center within the horizon radius so panning can't lose the sky off-screen entirely.</summary>
+        /// <summary>Keeps the view center on the sky ellipse so panning can't lose the map off-screen entirely.</summary>
         void ClampSkyChartPan()
         {
-            Vector2 center = new Vector2(SkyChartWidth / 2f, SkyChartHeight / 2f);
-            float rMax = SkyChartTexture.ComputeRMax(SkyChartWidth, SkyChartHeight);
-            Vector2 offset = skyChartPan - center;
-            if (offset.magnitude > rMax)
-            {
-                skyChartPan = center + offset.normalized * rMax;
-            }
+            skyChartPan = SkyChartTexture.ClampToSkyEllipse(skyChartPan, SkyChartWidth, SkyChartHeight, 0f);
         }
 
         void DrawRightColumn()
@@ -3735,6 +4099,10 @@ namespace ExoInstruments
         // completes a scan of it (observation + detection analysis). Sandbox and
         // science-sandbox games are untouched: full catalog info on click, as
         // always. Gate is KSP's own game mode, no bespoke setting.
+        //
+        // PAYING FOR A DISCOVERY IS A SEPARATE GATE, ScienceEconomyActive below, and it does
+        // include science sandbox. Both used to ride this one flag, so the mode whose entire
+        // currency is Science was the mode in which this mod awarded none of it.
 
         /// <summary>Outcome of the most recent completed scan, shown in the scan report.</summary>
         private float lastScanScienceAwarded;
@@ -3742,8 +4110,46 @@ namespace ExoInstruments
         private int lastScanJackpotPlanetCount;
         private bool lastScanCharacterized;
 
+        /// <summary>
+        /// The fog of war and the Funds economy, both of which need a career game. Science
+        /// Sandbox has no Funds at all, so nothing priced can apply to it.
+        /// </summary>
         private static bool CareerFogActive =>
             HighLogic.CurrentGame != null && HighLogic.CurrentGame.Mode == Game.Modes.CAREER;
+
+        /// <summary>
+        /// Whether discoveries pay Science. Separate from CareerFogActive on purpose: Science
+        /// Sandbox is the mode where Science is the ONLY currency, and riding the fog's gate meant
+        /// the whole mod paid nothing there. Hiding a star's identity and paying for finding out
+        /// what it is are two different decisions, and only the first one needs Funds to exist.
+        /// </summary>
+        private static bool ScienceEconomyActive =>
+            HighLogic.CurrentGame != null
+            && (HighLogic.CurrentGame.Mode == Game.Modes.CAREER
+                || HighLogic.CurrentGame.Mode == Game.Modes.SCIENCE_SANDBOX);
+
+        /// <summary>
+        /// Applies the game's own Science reward slider before anything is credited, the way a
+        /// stock experiment's subject value does. A career set to 50% Science was getting 100% of
+        /// this mod's, which made the difficulty setting a lie for anyone playing it.
+        /// </summary>
+        private static float ApplyScienceDifficulty(float award)
+        {
+            var p = HighLogic.CurrentGame?.Parameters?.Career;
+            return p == null ? award : award * p.ScienceGainMultiplier;
+        }
+
+        /// <summary>
+        /// The Funds counterpart, for money the programme is PAID. Costs are deliberately not run
+        /// through it: KSP's own multiplier applies to income, and discounting the price of
+        /// telescope time on an easy setting would flatten the acquisition ladder instead of
+        /// softening it.
+        /// </summary>
+        private static double ApplyFundsDifficulty(double reward)
+        {
+            var p = HighLogic.CurrentGame?.Parameters?.Career;
+            return p == null ? reward : reward * p.FundsGainMultiplier;
+        }
 
         /// <summary>
         /// True when the star's identity must be withheld from the player. If the
@@ -3798,7 +4204,7 @@ namespace ExoInstruments
             lastScanWasFirstForStar = false;
             lastScanJackpotPlanetCount = 0;
             lastScanCharacterized = false;
-            if (!CareerFogActive) return;
+            if (!ScienceEconomyActive) return;
 
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             if (scenario == null)
@@ -3808,10 +4214,13 @@ namespace ExoInstruments
             }
 
             float award = 0f;
+            // Read the count BEFORE MarkScanned adds this star, so the first scan of a career is
+            // worth the undamped award rather than already one step down the curve.
+            int scansBefore = scenario.ScannedCount;
             if (scenario.MarkScanned(target.CatalogKey))
             {
                 lastScanWasFirstForStar = true;
-                award += ScienceRewards.ScienceRewardFirstScan;
+                award += ScienceRewards.FirstScanAward(scansBefore);
                 // The star has a name now, so the search box must be able to find it under that
                 // name. The index is rebuilt rather than patched: a reveal can unlock a whole
                 // system at once, and its proper name may arrive from the IAU table too.
@@ -3839,6 +4248,7 @@ namespace ExoInstruments
 
             if (award > 0f)
             {
+                award = ApplyScienceDifficulty(award);
                 scenario.AddEarnedScience(award);
                 if (ResearchAndDevelopment.Instance != null)
                 {
@@ -3851,14 +4261,16 @@ namespace ExoInstruments
         /// <summary>Career lines at the top of a scan report: the reveal and what it paid.</summary>
         private void DrawCareerScanOutcome(StarTarget target)
         {
-            if (!CareerFogActive) return;
+            if (!ScienceEconomyActive) return;
             if (lastScanWasFirstForStar)
             {
                 GUILayout.Label($"Target identified: {target.HostStarName ?? target.Name}");
             }
             if (lastScanCharacterized)
             {
-                GUILayout.Label($"Stellar characterization recorded (+{ScienceRewards.ScienceRewardStellarCharacterization:F0} Science).");
+                // Quoted through the same difficulty multiplier the award went through, so the
+                // line cannot disagree with the total printed below it.
+                GUILayout.Label($"Stellar characterization recorded (+{ApplyScienceDifficulty(ScienceRewards.ScienceRewardStellarCharacterization):F0} Science).");
             }
             if (lastScanJackpotPlanetCount > 1)
             {
@@ -3939,6 +4351,11 @@ namespace ExoInstruments
 
         private static bool IsInstrumentUnlocked(InstrumentSpec instrument)
         {
+            // An unfinished instrument is never selectable, in any mode, and nothing unlocks it.
+            // Checked before everything else so no economy path, no sandbox shortcut and no
+            // restored save index can reach it (see InstrumentSpec.UnderConstruction).
+            if (instrument.UnderConstruction) return false;
+
             // The orbital instrument is not bought, so no unlock list can answer for it: it is
             // available exactly when the player has put one up there, in every game mode
             // including sandbox. See Observatories.OrbitalObservatory for why it is gated this
@@ -3959,6 +4376,14 @@ namespace ExoInstruments
         /// </summary>
         void DrawLockedInstrumentRow(InstrumentSpec instrument)
         {
+            // An unfinished instrument carries no price and no requirement, so none of the
+            // economy below applies to it: it is listed and it says so.
+            if (instrument.UnderConstruction)
+            {
+                GUILayout.Label($"{instrument.DisplayName.Split('(')[0].Trim()}: under construction");
+                return;
+            }
+
             // THE ORBITAL INSTRUMENT IS NOT BOUGHT, so none of the Funds economy below describes
             // it: its UnlockCostFunds and UnlockScienceThreshold are both zero by design (see
             // Observatories.OrbitalObservatory), which made every affordability test trivially
@@ -4222,7 +4647,7 @@ namespace ExoInstruments
         void RegisterTtvOutcome()
         {
             lastTtvScienceAwarded = 0f;
-            if (!CareerFogActive) return;
+            if (!ScienceEconomyActive) return;
             if (lastTtvResult == null || !lastTtvResult.Detected) return;
 
             bool truthHasTtv = false;
@@ -4240,7 +4665,7 @@ namespace ExoInstruments
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             if (scenario == null || !scenario.MarkTtvRewarded(session.Target.CatalogKey)) return;
 
-            lastTtvScienceAwarded = ScienceRewards.ScienceRewardTtvDetection;
+            lastTtvScienceAwarded = ApplyScienceDifficulty(ScienceRewards.ScienceRewardTtvDetection);
             scenario.AddEarnedScience(lastTtvScienceAwarded);
             if (ResearchAndDevelopment.Instance != null)
             {
@@ -4608,11 +5033,11 @@ namespace ExoInstruments
         {
             lastRmScienceAwarded = 0f;
             if (lastRmResult == null || !lastRmResult.Detected) return;
-            if (!CareerFogActive) return;
+            if (!ScienceEconomyActive) return;
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             if (scenario == null || !scenario.MarkRmRewarded(rvSession.Target.CatalogKey)) return;
 
-            lastRmScienceAwarded = ScienceRewards.ScienceRewardRossiterMcLaughlin;
+            lastRmScienceAwarded = ApplyScienceDifficulty(ScienceRewards.ScienceRewardRossiterMcLaughlin);
             scenario.AddEarnedScience(lastRmScienceAwarded);
             if (ResearchAndDevelopment.Instance != null)
             {
@@ -5428,73 +5853,120 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Kicks off the full catalog re-transform (RA/Dec -> Alt/Az for every
-        /// loaded target, thousands once background stars are merged in) plus the
-        /// 640x640 raster on a background Task, for the same reason as
-        /// StartImagingRefresh; SkyCoordinates' math and SkyChartTexture.ComputePixels
-        /// touch no UnityEngine.Object API, so both are safe off the main thread.
+        /// Refreshes what moves on the chart: the body points, the star occlusion flags and the
+        /// occlusion overlay, all from the active observer's position at this instant. The star
+        /// and deep-sky points themselves are inertial and are built exactly once per catalogue
+        /// (the old per-second RA/Dec-to-horizontal re-transform of the whole catalogue is gone
+        /// with the horizontal frame itself); afterwards a refresh only touches flags and the
+        /// overlay. Raster runs on a background Task as before.
         /// </summary>
         void StartSkyChartRefresh()
         {
             if (catalog == null || skyChartRenderTask != null) return;
 
-            CelestialBody home = FlightGlobals.GetHomeBody();
-            if (home == null)
+            if (!TryBuildChartObserver(out ChartObserverSnapshot observerSnap))
             {
-                Debug.LogWarning("[ExoInstruments] Home body not available yet; skipping sky chart refresh.");
+                Debug.LogWarning("[ExoInstruments] Observer frame not available yet; skipping sky chart refresh.");
                 return;
             }
 
-            double ut = Planetarium.GetUniversalTime();
-            double localMeridianRaDeg = SkyCoordinates.ComputeLocalMeridianRaDeg(
-                ut, home.rotationPeriod, home.initialRotation, ObservatorySite.LongitudeDeg);
+            GalaxyCatalog galaxyCatalog = SolarSystemCameraTexture.GalaxyCatalog;
+            bool galaxiesReady = galaxyCatalog != null && galaxyCatalog.IsLoaded;
+            bool needStaticBuild = staticSkyChartPoints == null
+                || staticChartCatalog != catalog
+                || (!staticChartHasGalaxies && galaxiesReady);
+
             var catalogSnapshot = catalog;
             var pointingSnapshot = selectedPhotographyTarget;
-            // The search results decide what the chart emphasises, so they are snapshotted here
-            // alongside the catalogue: the background task must not read a set the main thread is
-            // rewriting under it while the player types.
-            var highlightedStarsSnapshot = new HashSet<StarTarget>(highlightedStars);
-            var highlightedPositionsSnapshot = new HashSet<long>(highlightedSkyPositions);
+            var highlightedStarsSnapshot = needStaticBuild ? new HashSet<StarTarget>(highlightedStars) : null;
+            var highlightedPositionsSnapshot = needStaticBuild ? new HashSet<long>(highlightedSkyPositions) : null;
             bool searchActive = searchHighlightActive;
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
             skyChartRenderTaskView = view;
 
-            // Solar-system bodies must be sampled on the MAIN thread (they read
-            // KSP CelestialBody positions/transforms). We compute their
-            // alt/az/marker here into plain data, then hand it to the background
-            // task purely as SkyChartPoints (no KSP types cross the boundary).
-            var bodyPoints = BuildChartBodyPoints(out var bodyHitList);
-            cachedChartBodies = bodyHitList;
+            // No raster task in flight here, so refreshing flags on the shared list is safe.
+            if (!needStaticBuild) ApplyStaticChartFlags();
+            if (needStaticBuild)
+            {
+                staticChartCatalog = catalogSnapshot;
+                staticChartHasGalaxies = galaxiesReady;
+            }
 
+            // Body points on the main thread (they read live KSP positions), published
+            // immediately so clicks resolve against fresh positions.
+            BuildChartBodyPoints(in observerSnap, cachedBodyPoints, cachedChartBodies);
+            var bodyPointsSnapshot = cachedBodyPoints;
+
+            var existingStatic = staticSkyChartPoints;
+            var occludedBuffer = staticSkyOccludedBack;
+            var overlayBuffer = skyOverlayBack =
+                SkyChartOverlayRenderer.EnsureBuffer(skyOverlayBack, SkyChartWidth, SkyChartHeight);
             var buffer = skyChartRefreshPixels =
                 SkyChartTexture.EnsureBuffer(skyChartRefreshPixels, SkyChartWidth, SkyChartHeight);
+            var occludersSnapshot = observerSnap.Occluders;
+            var overlayHost = observerSnap.Overlay;
+            var overlayGlows = observerSnap.Glows;
 
             skyChartRenderTask = Task.Run(() =>
             {
-                var points = new List<SkyChartPoint>();
-                foreach (var star in catalogSnapshot)
+                List<SkyChartPoint> builtStatic = null;
+                List<SkyChartPoint> staticPoints = existingStatic;
+                if (needStaticBuild)
                 {
-                    var horizontal = SkyCoordinates.TryComputeHorizontal(star, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
-                    if (!horizontal.HasValue) continue;
-                    if (!horizontal.Value.IsAboveHorizon(0.0)) continue;
-
-                    points.Add(new SkyChartPoint
-                    {
-                        Target = star,
-                        AltitudeDeg = horizontal.Value.AltitudeDeg,
-                        AzimuthDeg = horizontal.Value.AzimuthDeg,
-                        IsHighlighted = !searchActive || highlightedStarsSnapshot.Contains(star),
-                        IsSelectedTarget = IsPhotographyTarget(star, pointingSnapshot)
-                    });
+                    builtStatic = BuildStaticChartPoints(catalogSnapshot, galaxiesReady ? galaxyCatalog : null,
+                        pointingSnapshot, searchActive, highlightedStarsSnapshot, highlightedPositionsSnapshot);
+                    staticPoints = builtStatic;
                 }
-                points.AddRange(bodyPoints);
-                points.AddRange(BuildDeepSkyPoints(localMeridianRaDeg, pointingSnapshot,
-                                                   searchActive, highlightedPositionsSnapshot));
-                SkyChartTexture.ComputePixels(points, SkyChartWidth, SkyChartHeight, view, searchActive, buffer);
-                // The buffer comes back with the points rather than being read off the field: same
-                // array either way, but it says outright which buffer this result belongs to.
-                return (points, buffer);
+                SkyChartTexture.Prepare(staticPoints, SkyChartWidth, SkyChartHeight);
+
+                byte[] occluded = occludedBuffer != null && occludedBuffer.Length == staticPoints.Count
+                    ? occludedBuffer : new byte[staticPoints.Count];
+                for (int i = 0; i < staticPoints.Count; i++)
+                {
+                    var p = staticPoints[i];
+                    SkyVector dir = SkyChartProjection.DirectionFromEquatorial(p.RaDeg, p.DecDeg);
+                    occluded[i] = SkyOcclusion.IsPointOccluded(dir, occludersSnapshot) ? (byte)1 : (byte)0;
+                }
+
+                SkyChartOverlayRenderer.Render(overlayBuffer, SkyChartWidth, SkyChartHeight,
+                                               in overlayHost, overlayGlows);
+                SkyChartTexture.ComputePixels(staticPoints, occluded, bodyPointsSnapshot,
+                    SkyChartWidth, SkyChartHeight, view, searchActive, overlayBuffer, buffer);
+                return new SkyChartRefreshResult
+                {
+                    StaticPoints = builtStatic,
+                    StaticOccluded = occluded,
+                    Overlay = overlayBuffer,
+                    Pixels = buffer,
+                };
             });
+        }
+
+        /// <summary>
+        /// Brings the persistent star/deep-sky points' display flags up to date with the current
+        /// search and selection. Main thread only, and only called while no refresh task is in
+        /// flight, so the in-place writes race with nothing.
+        /// </summary>
+        void ApplyStaticChartFlags()
+        {
+            if (staticSkyChartPoints == null) return;
+            SkyTarget pointing = selectedPhotographyTarget;
+            for (int i = 0; i < staticSkyChartPoints.Count; i++)
+            {
+                var p = staticSkyChartPoints[i];
+                bool highlighted = IsSearchHighlighted(p);
+                bool selected = p.IsDeepSky
+                    ? pointing.IsEquatorial
+                        && Math.Abs(pointing.RaDeg - p.DeepSky.RaDeg) < 1e-6
+                        && Math.Abs(pointing.DecDeg - p.DeepSky.DecDeg) < 1e-6
+                    : IsPhotographyTarget(p.Target, pointing);
+                if (p.IsHighlighted != highlighted || p.IsSelectedTarget != selected)
+                {
+                    p.IsHighlighted = highlighted;
+                    p.IsSelectedTarget = selected;
+                    staticSkyChartPoints[i] = p;
+                }
+            }
         }
 
         /// <summary>What the object is and how much sky it covers, the two things that decide which instrument can frame it.</summary>
@@ -5564,50 +6036,54 @@ namespace ExoInstruments
         private const double EmissionMapBeamArcmin = 6.0;
 
         /// <summary>
-        /// The bright nebulae, placed on the chart the same way a star is. Pure computation on
-        /// plain data, so it runs on the chart's background task.
-        ///
-        /// A deep-sky marker is never a candidate for the STAR hit test (that one requires a
-        /// Target, and these carry none); it has its own, HitTestDeepSky, which is why highlighting
-        /// one costs nothing in clickability. What the highlight does here is exactly what it does
-        /// for a star: say which markers the current search matched.
+        /// The persistent chart points: every catalogue star, the bright nebulae, and the
+        /// galaxies down to the chart's magnitude cut, at their fixed RA/Dec. Built ONCE per
+        /// catalogue on the background task (the chart is inertial: no horizon cut, no
+        /// per-refresh transform); afterwards only display flags change. Pure computation on
+        /// plain data.
         /// </summary>
-        static List<SkyChartPoint> BuildDeepSkyPoints(double localMeridianRaDeg, SkyTarget pointing,
-                                                      bool searchActive, HashSet<long> highlighted)
+        static List<SkyChartPoint> BuildStaticChartPoints(List<StarTarget> catalogSnapshot,
+                                                          GalaxyCatalog galaxies, SkyTarget pointing,
+                                                          bool searchActive,
+                                                          HashSet<StarTarget> highlightedStars,
+                                                          HashSet<long> highlightedPositions)
         {
-            var points = new List<SkyChartPoint>();
+            var points = new List<SkyChartPoint>(catalogSnapshot.Count + 4096);
+
+            foreach (var star in catalogSnapshot)
+            {
+                if (!star.RaDeg.HasValue || !star.DecDeg.HasValue) continue;
+                points.Add(new SkyChartPoint
+                {
+                    Target = star,
+                    RaDeg = star.RaDeg.Value,
+                    DecDeg = star.DecDeg.Value,
+                    IsHighlighted = !searchActive || highlightedStars.Contains(star),
+                    IsSelectedTarget = IsPhotographyTarget(star, pointing),
+                });
+            }
+
             foreach (var obj in DeepSkyCatalog.All)
             {
-                var horizontal = SkyCoordinates.EquatorialToHorizontal(
-                    obj.RaDeg, obj.DecDeg, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
-                if (!horizontal.IsAboveHorizon(0.0)) continue;
-
                 points.Add(new SkyChartPoint
                 {
                     IsDeepSky = true,
                     DeepSky = obj,
-                    AltitudeDeg = horizontal.AltitudeDeg,
-                    AzimuthDeg = horizontal.AzimuthDeg,
-                    IsHighlighted = !searchActive || highlighted.Contains(SkyPositionKey(obj.RaDeg, obj.DecDeg)),
+                    RaDeg = obj.RaDeg,
+                    DecDeg = obj.DecDeg,
+                    IsHighlighted = !searchActive || highlightedPositions.Contains(SkyPositionKey(obj.RaDeg, obj.DecDeg)),
                     IsSelectedTarget = pointing.IsEquatorial
                                     && Math.Abs(pointing.RaDeg - obj.RaDeg) < 1e-6
                                     && Math.Abs(pointing.DecDeg - obj.DecDeg) < 1e-6,
                 });
             }
 
-            // The galaxies come from the packed catalogue rather than a hand-written list, so the
-            // chart is cut by brightness: at B = 15 there are of order a hundred thousand of them
-            // and the chart would be a wall of markers. 11 is roughly the reach of the RedCat on an
-            // extended source in a single sub, and leaves a few hundred on the whole sky.
-            GalaxyCatalog catalog = SolarSystemCameraTexture.GalaxyCatalog;
-            if (catalog != null && catalog.IsLoaded)
+            // Galaxies come from the packed catalogue, cut by brightness: at B = 15 there are of
+            // order a hundred thousand and the chart would be a wall of markers.
+            if (galaxies != null && galaxies.IsLoaded)
             {
-                foreach (Galaxy g in catalog.Search(0.0, 0.0, 180.0, ChartGalaxyMagnitudeLimit))
+                foreach (Galaxy g in galaxies.Search(0.0, 0.0, 180.0, ChartGalaxyMagnitudeLimit))
                 {
-                    var h = SkyCoordinates.EquatorialToHorizontal(
-                        g.RaDeg, g.DecDeg, localMeridianRaDeg, ObservatorySite.LatitudeDeg);
-                    if (!h.IsAboveHorizon(0.0)) continue;
-
                     points.Add(new SkyChartPoint
                     {
                         IsDeepSky = true,
@@ -5621,9 +6097,9 @@ namespace ExoInstruments
                             MinorArcmin = g.D25Arcmin * g.AxisRatio,
                             Kind = DeepSkyKind.Galaxy,
                         },
-                        AltitudeDeg = h.AltitudeDeg,
-                        AzimuthDeg = h.AzimuthDeg,
-                        IsHighlighted = !searchActive || highlighted.Contains(SkyPositionKey(g.RaDeg, g.DecDeg)),
+                        RaDeg = g.RaDeg,
+                        DecDeg = g.DecDeg,
+                        IsHighlighted = !searchActive || highlightedPositions.Contains(SkyPositionKey(g.RaDeg, g.DecDeg)),
                         IsSelectedTarget = pointing.IsEquatorial
                                         && Math.Abs(pointing.RaDeg - g.RaDeg) < 1e-6
                                         && Math.Abs(pointing.DecDeg - g.DecDeg) < 1e-6,
@@ -5636,7 +6112,11 @@ namespace ExoInstruments
         /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut; it draws whatever clears the frame's own noise floor.</summary>
         private const double ChartGalaxyMagnitudeLimit = 11.0;
 
-        /// <summary>Applies a completed background chart render (see StartSkyChartRefresh), the only part of the pipeline that's allowed to touch the Texture2D.</summary>
+        /// <summary>
+        /// Applies a completed background chart render: publishes the (possibly rebuilt) static
+        /// point list, swaps the occlusion-flag and overlay buffers front/back, and uploads the
+        /// texture, the only part of the pipeline allowed to touch the Texture2D.
+        /// </summary>
         void PollSkyChartRenderTask()
         {
             if (skyChartRenderTask == null || !skyChartRenderTask.IsCompleted) return;
@@ -5646,15 +6126,22 @@ namespace ExoInstruments
                 skyChartRenderTask = null;
                 return;
             }
-            var (points, pixels) = skyChartRenderTask.Result;
-            cachedSkyChartPoints = points;
-            skyChartTexture = SkyChartTexture.ApplyToTexture(pixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
-            skyChartRenderTask = null; // cleared last: it is what gates the next task's writes to that buffer
+            SkyChartRefreshResult result = skyChartRenderTask.Result;
+            if (result.StaticPoints != null) staticSkyChartPoints = result.StaticPoints;
 
-            // The view moved while the refresh was running, so those pixels are of the right sky at
-            // the wrong zoom/pan. Uploading them anyway (above) is deliberate — the fresh points are
-            // worth showing immediately — but they get re-rastered this same frame rather than left
-            // for the player to see the view snap back.
+            byte[] oldOccluded = staticSkyOccludedFront;
+            staticSkyOccludedFront = result.StaticOccluded;
+            staticSkyOccludedBack = oldOccluded;
+
+            byte[] oldOverlay = skyOverlayFront;
+            skyOverlayFront = result.Overlay;
+            skyOverlayBack = oldOverlay;
+
+            skyChartTexture = SkyChartTexture.ApplyToTexture(result.Pixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
+            skyChartRenderTask = null; // cleared last: it is what gates the next task's writes to those buffers
+
+            // The view moved while the refresh was running: re-raster this same frame rather
+            // than leaving the player to see the view snap back.
             if (skyChartRenderTaskView.Zoom != skyChartZoom || skyChartRenderTaskView.Pan != skyChartPan)
                 skyChartRasterDirty = true;
         }
@@ -6186,11 +6673,24 @@ namespace ExoInstruments
         /// </summary>
         void RefreshSkyChartHighlights()
         {
-            for (int i = 0; i < cachedSkyChartPoints.Count; i++)
+            if (staticSkyChartPoints != null)
             {
-                var p = cachedSkyChartPoints[i];
-                p.IsHighlighted = IsSearchHighlighted(p);
-                cachedSkyChartPoints[i] = p;
+                for (int i = 0; i < staticSkyChartPoints.Count; i++)
+                {
+                    var p = staticSkyChartPoints[i];
+                    bool highlighted = IsSearchHighlighted(p);
+                    if (p.IsHighlighted == highlighted) continue;
+                    p.IsHighlighted = highlighted;
+                    staticSkyChartPoints[i] = p;
+                }
+            }
+            for (int i = 0; i < cachedBodyPoints.Count && i < cachedChartBodies.Count; i++)
+            {
+                var p = cachedBodyPoints[i];
+                bool highlighted = IsSearchHighlightedBody(cachedChartBodies[i].Body);
+                if (p.IsHighlighted == highlighted) continue;
+                p.IsHighlighted = highlighted;
+                cachedBodyPoints[i] = p;
             }
             RenderSkyChartTexture();
         }
@@ -6214,7 +6714,8 @@ namespace ExoInstruments
 
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
             skyChartDragPixels = SkyChartTexture.EnsureBuffer(skyChartDragPixels, SkyChartWidth, SkyChartHeight);
-            SkyChartTexture.ComputePixels(cachedSkyChartPoints, SkyChartWidth, SkyChartHeight, view, searchHighlightActive, skyChartDragPixels);
+            SkyChartTexture.ComputePixels(staticSkyChartPoints, staticSkyOccludedFront, cachedBodyPoints,
+                SkyChartWidth, SkyChartHeight, view, searchHighlightActive, skyOverlayFront, skyChartDragPixels);
             skyChartTexture = SkyChartTexture.ApplyToTexture(skyChartDragPixels, SkyChartWidth, SkyChartHeight, skyChartTexture);
         }
 

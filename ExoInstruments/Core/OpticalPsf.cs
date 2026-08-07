@@ -476,14 +476,51 @@ namespace ExoInstruments.Core
             double gaussianFwhmArcsec,
             PupilPad[] pads,
             out int radiusPx)
+            => BuildKernel(plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
+                           atmosphericFwhmArcsec, defocusDiscRadiusPx, vaneCount, vaneWidthMeters,
+                           gaussianFwhmArcsec, pads, MaxKernelRadiusPx, out radiusPx);
+
+        /// <summary>
+        /// The kernel builder above, with the support it may spend explicitly bounded.
+        ///
+        /// Every caller that wants a kernel to CONVOLVE WITH passes the full budget and gets the
+        /// method documented above, unchanged. The bound exists for the two solvers below, which
+        /// do not want a kernel at all: they build one only to read the half-power crossing off
+        /// its central row, and then throw 66048 of its 66049 pixels away. A vaned pupil's
+        /// diffraction term costs 144 pupil evaluations per pixel, so at the full budget that is
+        /// nine and a half million evaluations to answer a question about the innermost few.
+        ///
+        /// Bounding it is exact rather than approximate, for two reasons that both have to hold:
+        ///
+        ///   * the measurement is a RATIO, cur/peak along one row, and Normalise scales the whole
+        ///     kernel by one number, so whatever that number is it divides out;
+        ///   * the convolutions that follow the diffraction term reach only their own radius, so
+        ///     a row sample at |x| is complete as soon as the support extends to |x| plus that
+        ///     reach. The solvers size the bound from the width they are solving for and check
+        ///     that the crossing was actually found inside it (see MeasuredGaussianFwhmFor).
+        /// </summary>
+        private static float[] BuildKernel(
+            double plateScaleArcsecPerPixel,
+            double apertureMeters,
+            double obstructionRatio,
+            double wavelengthMeters,
+            double atmosphericFwhmArcsec,
+            double defocusDiscRadiusPx,
+            int vaneCount,
+            double vaneWidthMeters,
+            double gaussianFwhmArcsec,
+            PupilPad[] pads,
+            int radiusBudgetPx,
+            out int radiusPx)
         {
             radiusPx = 0;
             if (plateScaleArcsecPerPixel <= 0.0 || apertureMeters <= 0.0 || wavelengthMeters <= 0.0)
                 return null;
+            if (radiusBudgetPx < 1) radiusBudgetPx = 1;
 
             // Component 1: diffraction. Always present; it is the instrument's hard limit.
             double airyFwhm = AiryFwhmArcsec(apertureMeters, obstructionRatio, wavelengthMeters);
-            int accR = RadiusFor(airyFwhm, plateScaleArcsecPerPixel);
+            int accR = Math.Min(radiusBudgetPx, RadiusFor(airyFwhm, plateScaleArcsecPerPixel));
             double[] acc;
             bool hasPads = pads != null && pads.Length > 0;
             bool hasVanes = vaneCount > 0 && vaneWidthMeters > 0.0;
@@ -506,7 +543,7 @@ namespace ExoInstruments.Core
                 // always claimed and never did. It costs a 257x257 kernel where the radial path
                 // needs a handful of taps, which is why it is spent only when there is azimuthal
                 // structure to carry: vaneCount = 0 still takes the core-sized radial path.
-                accR = MaxKernelRadiusPx;
+                accR = radiusBudgetPx;
                 var pupil = new PupilDiffraction(apertureMeters, obstructionRatio, wavelengthMeters,
                                                  hasVanes ? vaneCount : 0,
                                                  hasVanes ? vaneWidthMeters : 0.0,
@@ -528,13 +565,13 @@ namespace ExoInstruments.Core
                 // a Kolmogorov wing at 3 FWHM is still 1e-3 of the peak, where an Airy wing at the
                 // same multiple of its own core is 1e-6. The two components need different rules
                 // because they have different tails.
-                int atmR = Math.Max(1, Math.Min(MaxKernelRadiusPx,
+                int atmR = Math.Max(1, Math.Min(radiusBudgetPx,
                     (int)Math.Ceiling(AtmosphericTailRadiusInFwhm * atmFwhm / plateScaleArcsecPerPixel)));
                 double r0 = FriedParameterMeters(atmFwhm, wavelengthMeters);
                 double[] atm = SampleRadial(atmR, plateScaleArcsecPerPixel,
                     theta => AtmosphericIntensity(theta, r0, wavelengthMeters));
 
-                int outR = Math.Min(MaxKernelRadiusPx, accR + atmR);
+                int outR = Math.Min(radiusBudgetPx, accR + atmR);
                 acc = Convolve(acc, accR, atm, atmR, outR);
                 accR = outR;
             }
@@ -548,11 +585,11 @@ namespace ExoInstruments.Core
                 // A Gaussian is down to 1e-6 of peak at 2.2 FWHM, so it needs nothing like the
                 // atmospheric profile's reach; three FWHM is already beyond any pixel that could
                 // carry a value.
-                int gR = Math.Max(1, Math.Min(MaxKernelRadiusPx,
+                int gR = Math.Max(1, Math.Min(radiusBudgetPx,
                     (int)Math.Ceiling(3.0 * gaussFwhm / plateScaleArcsecPerPixel)));
                 double[] g = SampleGaussian(gR, plateScaleArcsecPerPixel, gaussFwhm);
 
-                int outR = Math.Min(MaxKernelRadiusPx, accR + gR);
+                int outR = Math.Min(radiusBudgetPx, accR + gR);
                 acc = Convolve(acc, accR, g, gR, outR);
                 accR = outR;
             }
@@ -565,10 +602,10 @@ namespace ExoInstruments.Core
             // contrast reversals), not a numerical artefact.
             if (defocusDiscRadiusPx >= 0.5)
             {
-                int discR = (int)Math.Min(MaxKernelRadiusPx, Math.Ceiling(defocusDiscRadiusPx));
+                int discR = (int)Math.Min(radiusBudgetPx, Math.Ceiling(defocusDiscRadiusPx));
                 double[] disc = SampleDisc(discR, defocusDiscRadiusPx);
 
-                int outR = Math.Min(MaxKernelRadiusPx, accR + discR);
+                int outR = Math.Min(radiusBudgetPx, accR + discR);
                 acc = Convolve(acc, accR, disc, discR, outR);
                 accR = outR;
             }
@@ -787,7 +824,21 @@ namespace ExoInstruments.Core
         /// linear interpolation between samples so the answer isn't quantised to whole pixels.
         /// </summary>
         public static double MeasureKernelFwhmArcsec(float[] kernel, int radius, double plateScaleArcsecPerPixel)
+            => MeasureKernelFwhmArcsec(kernel, radius, plateScaleArcsecPerPixel, out _);
+
+        /// <summary>
+        /// As above, and says whether the half-power point was actually FOUND inside the kernel
+        /// rather than fallen back on its rim.
+        ///
+        /// Only the callers that deliberately build a small kernel need to know: the fallback is
+        /// the width of the support itself, which for them would be an artefact of the bound they
+        /// chose rather than a property of the profile, so they rebuild at the full support
+        /// instead of believing it.
+        /// </summary>
+        public static double MeasureKernelFwhmArcsec(float[] kernel, int radius, double plateScaleArcsecPerPixel,
+                                                     out bool crossedInside)
         {
+            crossedInside = false;
             if (kernel == null || radius < 1) return 0.0;
             int size = 2 * radius + 1;
             double peak = kernel[radius * size + radius];
@@ -800,6 +851,7 @@ namespace ExoInstruments.Core
                 if (cur <= 0.5 * peak)
                 {
                     double frac = (prev - 0.5 * peak) / Math.Max(1e-12, prev - cur);
+                    crossedInside = true;
                     return 2.0 * (x - 1 + frac) * plateScaleArcsecPerPixel;
                 }
             }
@@ -844,7 +896,13 @@ namespace ExoInstruments.Core
 
         private static double MeasuredFwhmFor(double atmFwhm, double plateScale, double aperture, double obstruction, double wavelength)
         {
-            float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, atmFwhm, 0.0, out int r);
+            int budget = SolveRadiusFor(atmFwhm + AiryFwhmArcsec(aperture, obstruction, wavelength), plateScale);
+            float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, atmFwhm, 0.0,
+                                    0, 0.0, 0.0, null, budget, out int r);
+            double fwhm = MeasureKernelFwhmArcsec(k, r, plateScale, out bool crossed);
+            if (crossed || budget >= MaxKernelRadiusPx) return fwhm;
+
+            k = BuildKernel(plateScale, aperture, obstruction, wavelength, atmFwhm, 0.0, out r);
             return MeasureKernelFwhmArcsec(k, r, plateScale);
         }
 
@@ -895,9 +953,37 @@ namespace ExoInstruments.Core
                                                       double obstruction, double wavelength,
                                                       int vaneCount, double vaneWidthMeters)
         {
+            // This is the call the whole solve is made of, and on a vaned pupil it is the most
+            // expensive thing in a capture: the full support costs 9.5 M pupil evaluations, of
+            // which the measurement reads one row. Sized to the width being solved for instead,
+            // and verified rather than assumed - if the half-power crossing did not fall inside
+            // the bound, the full kernel is built and the answer is the one it always was.
+            int budget = SolveRadiusFor(gaussFwhm + AiryFwhmArcsec(aperture, obstruction, wavelength), plateScale);
             float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, 0.0, 0.0,
-                                    vaneCount, vaneWidthMeters, gaussFwhm, out int r);
+                                    vaneCount, vaneWidthMeters, gaussFwhm, null, budget, out int r);
+            double fwhm = MeasureKernelFwhmArcsec(k, r, plateScale, out bool crossed);
+            if (crossed || budget >= MaxKernelRadiusPx) return fwhm;
+
+            k = BuildKernel(plateScale, aperture, obstruction, wavelength, 0.0, 0.0,
+                            vaneCount, vaneWidthMeters, gaussFwhm, out r);
             return MeasureKernelFwhmArcsec(k, r, plateScale);
+        }
+
+        /// <summary>
+        /// Support a FWHM measurement needs, in pixels, for a profile of about this width.
+        ///
+        /// The half-power point of a profile of full width W sits at W/2 from the centre, and the
+        /// Gaussian convolved in afterwards reaches its own three sigma-equivalent radius, so
+        /// three widths plus that reach plus a margin is past the crossing with room to spare.
+        /// Eight pixels minimum, because at coarse binning the crossing lands on the first or
+        /// second sample and the interpolation there needs neighbours; capped at the kernel
+        /// budget, above which the bound saves nothing and the caller takes the normal path.
+        /// </summary>
+        private static int SolveRadiusFor(double widthArcsec, double plateScaleArcsecPerPixel)
+        {
+            if (!(widthArcsec > 0.0) || !(plateScaleArcsecPerPixel > 0.0)) return 8;
+            int r = (int)Math.Ceiling(6.0 * widthArcsec / plateScaleArcsecPerPixel) + 4;
+            return Math.Max(8, Math.Min(MaxKernelRadiusPx, r));
         }
 
         /// <summary>
@@ -981,19 +1067,116 @@ namespace ExoInstruments.Core
         /// way PupilDiffraction defines it. No radial lookup table is possible here: with a spider
         /// the pattern depends on azimuth as well as radius, which is the entire point.
         /// </summary>
+        /// <summary>
+        /// Radius, in kernel pixels, of the handful of pixels that hold most of the light and are
+        /// therefore sampled at BrightCoreNodeCap instead of the grid's own cap. 4 px is 81
+        /// pixels of 66049, so the cap there is nearly free; see SampleTwoDimensional.
+        /// </summary>
+        private const int BrightCoreRadiusPx = 4;
+
+        /// <summary>
+        /// How those pixels are integrated: sixteen nodes per ring period instead of the four
+        /// the rest of the grid uses, and a ceiling of 48 instead of 12.
+        ///
+        /// Both ends of the roster need one of the two. FORS2 binned 4x4 has a pixel eighteen
+        /// ring periods wide, so the ceiling is what binds and twelve nodes left the peak pixel
+        /// wrong by 8 per cent of itself; SPHERE has a pixel half a period wide, where nothing
+        /// binds and four nodes per period is simply a coarse midpoint rule, worth 1.6 per cent.
+        /// Measured in tools/psf-cost, which is where the two figures come from.
+        /// </summary>
+        private const int BrightCoreNodesPerRingPeriod = 16;
+        private const int BrightCoreNodeCap = 48;
+
+        /// <summary>
+        /// Samples the pupil's two-dimensional far field onto the kernel grid.
+        ///
+        /// This is the most expensive thing in a capture on a vaned pupil, so it spends its
+        /// evaluations where they buy something and says here why the other two savings are free.
+        ///
+        /// THE SYMMETRY FOLD IS EXACT, NOT AN APPROXIMATION. A telescope pupil is a real
+        /// transmission function, so its far-field amplitude obeys A(-u) = conj(A(u)) and the
+        /// intensity |A|^2 is therefore an even function of angle, whatever the pupil contains -
+        /// vanes, pads, anything. The midpoint nodes of a pixel at (-dx,-dy) are the negatives of
+        /// those at (dx,dy), so the pixel AVERAGE inherits the same symmetry term by term. Half
+        /// the grid is computed and mirrored, which is exact and also leaves the kernel exactly
+        /// even rather than even to within the order two floating-point sums happened to run in.
+        ///
+        /// A pupil that is itself symmetric about the grid axes gives more, and PupilDiffraction
+        /// works out from its own geometry how much: four vanes at 0 and 90 degrees and no pads,
+        /// which is every ground instrument on the roster, leaves one OCTANT determining the
+        /// pattern, so seven eighths of the sampling is a copy. Hubble's three mirror pads sit at
+        /// 120 degrees and break every reflection, so it keeps the central symmetry alone. The
+        /// fold is never assumed: an unsymmetric pupil folded anyway would mirror its spikes into
+        /// quadrants they do not belong in, and that would look like structure rather than a bug.
+        ///
+        /// THE BRIGHT CORE IS INTEGRATED BETTER THAN THE GRID'S OWN RULE, which costs almost
+        /// nothing and is the reason this kernel is more accurate than the one it replaced rather
+        /// than merely cheaper. See BrightCoreNodesPerRingPeriod.
+        ///
+        /// A THIRD SAVING WAS MEASURED AND REJECTED, and is recorded because the number is
+        /// tempting and someone will think of it again. Halving the node count beyond 16 px is
+        /// worth 5.6x on Hubble's kernel (2268 ms to 405 ms at 4x4) and leaves max|d| against a
+        /// converged reference where it was, 9.3e-5 of the peak against 9.6e-5, because the far
+        /// wings carry almost none of the weight. What it costs is the DIFFRACTION SPIKES: their
+        /// relative error goes from 0.4 to 1.8 per cent on WFC3/UVIS and from 0.2 to 4.9 on
+        /// WFC3/IR. The argument for accepting that - the twelve-sub-band sum has already
+        /// averaged the far rings away, so a finer average per band resolves structure that
+        /// cancels - is sound as far as it goes, but it is an empirical bound rather than a
+        /// derived one, and the spikes are the whole reason this support was widened to 257x257
+        /// in the first place. So the wings keep their full node count. tools/psf-cost measures
+        /// both, and the taper is three lines away if the time is ever worth more than the
+        /// spikes' fourth significant figure.
+        /// </summary>
         private static double[] SampleTwoDimensional(int radius, double plateScaleArcsecPerPixel, PupilDiffraction pupil)
         {
             int size = 2 * radius + 1;
             var k = new double[size * size];
-            for (int dy = -radius; dy <= radius; dy++)
+
+            double pixelRad = plateScaleArcsecPerPixel * ArcsecToRad;
+            int brightNodes = pupil.NodeCount(pixelRad, BrightCoreNodesPerRingPeriod, BrightCoreNodeCap);
+            int gridNodes = pupil.NodeCount(pixelRad);
+            long brightLimit = (long)BrightCoreRadiusPx * BrightCoreRadiusPx;
+
+            for (int dy = 0; dy <= radius; dy++)
             {
-                for (int dx = -radius; dx <= radius; dx++)
+                // The strongest fold this pupil has proved. Octant: the wedge below the diagonal
+                // in the first quadrant. Quadrant: the first quadrant. Otherwise the upper half,
+                // less the half-row the central symmetry already covers.
+                int firstDx = pupil.DiagonalMirrorSymmetric ? dy
+                            : pupil.AxisMirrorSymmetric ? 0
+                            : (dy == 0 ? 0 : -radius);
+
+                for (int dx = firstDx; dx <= radius; dx++)
                 {
-                    k[(dy + radius) * size + (dx + radius)] = pupil.PixelAveragedIntensityArcsec(
-                        dx * plateScaleArcsecPerPixel, dy * plateScaleArcsecPerPixel, plateScaleArcsecPerPixel);
+                    long r2 = (long)dx * dx + (long)dy * dy;
+                    int nodes = r2 <= brightLimit ? brightNodes : gridNodes;
+                    double v = pupil.PixelAveragedIntensityArcsec(
+                        dx * plateScaleArcsecPerPixel, dy * plateScaleArcsecPerPixel,
+                        plateScaleArcsecPerPixel, nodes);
+
+                    Place(k, size, radius, dx, dy, v);
+                    Place(k, size, radius, -dx, -dy, v);          // always: |A|^2 is even
+                    if (pupil.AxisMirrorSymmetric)
+                    {
+                        Place(k, size, radius, -dx, dy, v);
+                        Place(k, size, radius, dx, -dy, v);
+                    }
+                    if (pupil.DiagonalMirrorSymmetric)
+                    {
+                        Place(k, size, radius, dy, dx, v);
+                        Place(k, size, radius, -dy, -dx, v);
+                        Place(k, size, radius, -dy, dx, v);
+                        Place(k, size, radius, dy, -dx, v);
+                    }
                 }
             }
             return k;
+        }
+
+        private static void Place(double[] k, int size, int radius, int dx, int dy, double v)
+        {
+            if (dx < -radius || dx > radius || dy < -radius || dy > radius) return;
+            k[(dy + radius) * size + (dx + radius)] = v;
         }
 
         private static int RadiusFor(double fwhmArcsec, double plateScaleArcsecPerPixel)
@@ -1045,8 +1228,42 @@ namespace ExoInstruments.Core
             return k;
         }
 
-        /// <summary>Discrete convolution of two square kernels, evaluated only over the output radius that will actually be kept.</summary>
+        /// <summary>
+        /// Above this many multiply-adds, the direct sum below gives way to the transform.
+        ///
+        /// The direct sum is O(ra^2 * rb^2) and stayed affordable only while the diffraction term
+        /// was a handful of taps. Once it takes the whole 128 px budget on a vaned pupil, a ground
+        /// instrument's kernel is 257x257 against a 183x183 atmospheric profile: 2.2 billion
+        /// multiply-adds per sub-band and twelve sub-bands per capture, which measured 8.9 s of a
+        /// 9.5 s reduction on the RC20. The transform does the same convolution in about seven
+        /// million operations.
+        ///
+        /// 16 million is where the two are worth about the same on this machine, and it is set an
+        /// order below where the transform actually wins so that everything small keeps the direct
+        /// sum: that path is exact, and the compact kernels (the RedCat's whole PSF spans two
+        /// pixels) are where a bit-for-bit answer is cheap enough to simply keep having.
+        /// </summary>
+        private const long DirectConvolutionBudget = 16L * 1024 * 1024;
+
+        /// <summary>
+        /// Convolution of two square kernels, evaluated only over the output radius that will
+        /// actually be kept. Direct while that is cheap; through FourierConvolution when it is
+        /// not, which agrees with the direct sum to the last few bits of double precision
+        /// (tools/psf-cost --convolve measures it) and is the only practical route at the sizes a
+        /// vaned pupil now produces.
+        /// </summary>
         private static double[] Convolve(double[] a, int ra, double[] b, int rb, int rOut)
+        {
+            long work = (2L * ra + 1) * (2L * ra + 1) * (2L * rb + 1) * (2L * rb + 1);
+            if (work > DirectConvolutionBudget)
+            {
+                double[] viaTransform = FourierConvolution.ConvolveKernels(a, ra, b, rb, rOut);
+                if (viaTransform != null) return viaTransform;
+            }
+            return ConvolveDirect(a, ra, b, rb, rOut);
+        }
+
+        private static double[] ConvolveDirect(double[] a, int ra, double[] b, int rb, int rOut)
         {
             int sizeA = 2 * ra + 1, sizeB = 2 * rb + 1, sizeOut = 2 * rOut + 1;
             var outK = new double[sizeOut * sizeOut];

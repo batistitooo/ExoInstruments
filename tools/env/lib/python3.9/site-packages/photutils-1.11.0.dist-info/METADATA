@@ -1,0 +1,153 @@
+Metadata-Version: 2.1
+Name: photutils
+Version: 1.11.0
+Summary: An Astropy package for source detection and photometry
+Author-email: Photutils Developers <photutils.team@gmail.com>
+License: Copyright (c) 2011-2023, Photutils Developers
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions are
+        met:
+        
+        1. Redistributions of source code must retain the above copyright
+           notice, this list of conditions and the following disclaimer.
+        
+        2. Redistributions in binary form must reproduce the above copyright
+           notice, this list of conditions and the following disclaimer in the
+           documentation and/or other materials provided with the distribution.
+        
+        3. Neither the name of the copyright holder nor the names of its
+           contributors may be used to endorse or promote products derived from
+           this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+        "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+        LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+        A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+        HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+        LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+        DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+        THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+        (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+        OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+        
+Project-URL: Homepage, https://github.com/astropy/photutils
+Project-URL: Documentation, https://photutils.readthedocs.io/en/stable/
+Keywords: astronomy,astrophysics,photometry,aperture,psf,source detection,background,segmentation,centroids,isophote,morphology,radial profiles
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Natural Language :: English
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Cython
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering :: Astronomy
+Requires-Python: >=3.9
+Description-Content-Type: text/x-rst
+License-File: LICENSE.rst
+Requires-Dist: numpy >=1.22
+Requires-Dist: astropy >=5.1
+Provides-Extra: all
+Requires-Dist: scipy >=1.7.2 ; extra == 'all'
+Requires-Dist: matplotlib >=3.5 ; extra == 'all'
+Requires-Dist: scikit-image >=0.19 ; extra == 'all'
+Requires-Dist: scikit-learn >=1.0 ; extra == 'all'
+Requires-Dist: gwcs >=0.18 ; extra == 'all'
+Requires-Dist: bottleneck ; extra == 'all'
+Requires-Dist: tqdm ; extra == 'all'
+Requires-Dist: rasterio ; extra == 'all'
+Requires-Dist: shapely ; extra == 'all'
+Provides-Extra: docs
+Requires-Dist: photutils[all] ; extra == 'docs'
+Requires-Dist: sphinx ; extra == 'docs'
+Requires-Dist: sphinx-astropy >=1.6 ; extra == 'docs'
+Requires-Dist: tomli ; (python_version < "3.11") and extra == 'docs'
+Provides-Extra: test
+Requires-Dist: pytest-astropy >=0.10 ; extra == 'test'
+
+=========
+Photutils
+=========
+
+|PyPI Version| |Conda Version| |PyPI Downloads| |Astropy|
+
+|CI Status| |Codecov Status| |Latest RTD Status|
+
+Photutils is an `Astropy`_ package for detection and photometry of
+astronomical sources.
+
+Please see the `online documentation
+<https://photutils.readthedocs.io>`_ for `installation instructions
+<https://photutils.readthedocs.io/en/stable/install.html>`_ and usage
+information.
+
+
+Citing Photutils
+----------------
+
+|Zenodo|
+
+If you use Photutils for a project that leads to a publication,
+whether directly or as a dependency of another package, please include
+the following acknowledgment::
+
+    This research made use of Photutils, an Astropy package for
+    detection and photometry of astronomical sources (Bradley et al.
+    <YEAR>).
+
+where (Bradley et al. <YEAR>) is a citation to the `Zenodo record
+<https://doi.org/10.5281/zenodo.596036>`_ of the Photutils
+version that was used. We also encourage citations in the
+main text wherever appropriate. Please see the `CITATION
+<https://github.com/astropy/photutils/blob/main/photutils/CITATION.rst>`_
+file for details and an example BibTeX entry.
+
+
+License
+-------
+
+Photutils is licensed under a 3-clause BSD license.  Please see the
+`LICENSE
+<https://github.com/astropy/photutils/blob/main/LICENSE.rst>`_ file
+for details.
+
+
+.. |PyPI Version| image::  https://img.shields.io/pypi/v/photutils.svg?logo=pypi&logoColor=white&label=PyPI
+    :target: https://pypi.org/project/photutils/
+    :alt: PyPI Latest Release
+
+.. |Conda Version| image:: https://img.shields.io/conda/vn/conda-forge/photutils
+    :target: https://anaconda.org/conda-forge/photutils
+    :alt: Conda Latest Release
+
+.. |PyPI Downloads| image:: https://img.shields.io/pypi/dm/photutils?label=PyPI%20Downloads
+    :target: https://pypistats.org/packages/photutils
+    :alt: PyPI Downloads
+
+.. |Astropy| image:: https://img.shields.io/badge/powered%20by-AstroPy-orange.svg?style=flat
+    :target: https://www.astropy.org/
+    :alt: Powered by Astropy
+
+.. |Zenodo| image:: https://zenodo.org/badge/2640766.svg
+    :target: https://zenodo.org/badge/latestdoi/2640766
+    :alt: Zenodo Latest DOI
+
+.. |CI Status| image:: https://github.com/astropy/photutils/workflows/CI%20Tests/badge.svg#
+    :target: https://github.com/astropy/photutils/actions
+    :alt: CI Status
+
+.. |Codecov Status| image:: https://img.shields.io/codecov/c/github/astropy/photutils?logo=codecov
+    :target: https://codecov.io/gh/astropy/photutils
+    :alt: Coverage Status
+
+.. |Stable RTD Status| image:: https://img.shields.io/readthedocs/photutils/latest.svg?logo=read%20the%20docs&logoColor=white&label=Docs&version=stable
+    :target: https://photutils.readthedocs.io/en/stable/
+    :alt: Stable Documentation Status
+
+.. |Latest RTD Status| image:: https://img.shields.io/readthedocs/photutils/latest.svg?logo=read%20the%20docs&logoColor=white&label=Docs&version=latest
+    :target: https://photutils.readthedocs.io/en/latest/
+    :alt: Latest Documentation Status
+
+.. _Astropy: https://www.astropy.org/

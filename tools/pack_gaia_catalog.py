@@ -11,14 +11,21 @@ frame where a real 30 s sub holds hundreds. That is not a star field, it is a ro
 error, and carrying 29.3 MB to deliver it was the worst of both worlds. The choice is now
 a real star field or none.
 
-Gaia's own measured counts say what a real one costs (queried from gaiadr3.gaia_source,
-cumulative, at this format's 12 bytes/star):
+Gaia's own measured counts say what a real one costs. Re-queried against gaiadr3.gaia_source
+on 2026-08-07, cumulative, at this format's CURRENT 14 bytes/star:
 
-    G < 13   16.8M stars    202 MB
-    G < 14   36.9M stars    443 MB
-    G < 15   78.0M stars    935 MB
-    G < 16  157.7M stars    1.9 GB
-    G < 18  577.2M stars    6.9 GB
+    G < 12    3.09M stars     43 MB
+    G < 13    7.37M stars    103 MB
+    G < 14   16.8M stars     236 MB
+    G < 15   36.9M stars     517 MB
+    G < 16   78.0M stars     1.1 GB
+
+An earlier version of this table was wrong in both columns and is worth naming, because a
+catalogue that is a magnitude shallower than its label looks like a bug in the renderer
+rather than a bug in a comment. Every magnitude was labelled one too low (the row reading
+"G < 13  16.8M" is really G < 14), and every size assumed the version-2 record of 12
+bytes/star, which the reddening column has since made 14. A file built at --gmax 13 holds
+7,369,627 stars, which is the correct count for that cut and not a truncated download.
 
 None of that can go in a mod download. It CAN sit on the disk of someone who wants it,
 which is what this tool is for: run it once, drop the result in PluginData, and frames
@@ -27,11 +34,12 @@ which is at least honestly empty rather than misleadingly sparse.
 
 CHOOSING A DEPTH
 ----------------
-The whole file is held in RAM as four parallel arrays, so the table above is also the
-memory cost. Some guidance rather than a recommendation, since it depends on the machine:
+The whole file is held in RAM as five parallel arrays (RA, dec, V, B-V, E(B-V)) totalling
+the same 14 bytes/star, so the table above is also the memory cost. Some guidance rather
+than a recommendation, since it depends on the machine:
 
-  * G < 13 (202 MB) is a safe first try and already ~7x Tycho-2's density.
-  * G < 14 (443 MB) is the deepest most machines will want alongside KSP itself.
+  * G < 13 (103 MB) is a safe first try and already ~3x Tycho-2's density.
+  * G < 14 (236 MB) is the deepest most machines will want alongside KSP itself.
   * G < 15 and beyond are for people who know what their RAM is doing.
 
 Search cost does NOT scale with catalogue size: the format is banded by declination and

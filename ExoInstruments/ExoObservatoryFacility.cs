@@ -41,6 +41,25 @@ namespace ExoInstruments
         // this name up in PSystemSetup, not just by walking up its parent chain.
         private const string FacilityName = "ExoObservatory";
         private const string FacilityId = "SpaceCenter/ExoObservatory";
+        // THE MODEL'S TEXTURE IS ONE FLAT WHITE PIXEL BLOCK, AND THAT IS ON PURPOSE.
+        //
+        // Four of its meshes carry a real KSP shader: the tower (WallTexture, _Color 0.774 grey)
+        // and the dome with both door leaves (Door, _Color 0.887 near-white). The other 240
+        // materials are untextured Unity Standard, straight off the OBJ import. So the whole
+        // silhouette of the building is those four meshes, and their look is the _Color tint
+        // alone: grey concrete tower, white dome, which is what a real observatory looks like.
+        //
+        // It cannot be anything else yet, because the meshes have no UV layout. Their UVs are
+        // raw object-space coordinates running -624..+471, so any pattern would tile several
+        // hundred times across a single panel. ExoObservatoryFlatWhite.png is therefore the only
+        // map that can be correct here: white, so _Color reads exactly as authored, and flat, so
+        // the tiling has nothing to alias. Unwrap the meshes first, then a real texture can drop
+        // in under the same filename with no change to the .mu.
+        //
+        // What it replaced was a stray "Wipe Pattern - Diagonal.png" from TextMesh Pro's example
+        // assets, which never shipped and which KSP logged as a missing texture on every load.
+        // `python3 tools/dump_mu.py` checks every texture a model names against the files beside
+        // it and exits non-zero when one is absent.
         private const string Level1ModelUrl = "ExoInstruments/Parts/ExoObservatoryLVL1";
         private const float Level1Cost = 30000f;
         // TODO: reintroduce ExoObservatoryLVL2 as a second UpgradeLevel once

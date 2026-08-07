@@ -130,6 +130,25 @@ namespace ExoInstruments.Core
         /// </summary>
         public bool HasApertureDoor = true;
 
+        // --- Slewing -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Fastest this spacecraft is allowed to rotate, degrees per second.
+        ///
+        /// A published ceiling, not a derived one: a real observatory's rate limit is set by its
+        /// rate gyroscopes' measuring range and the guidance system's ability to track its own
+        /// attitude while moving, not by how hard its wheels can push. Zero leaves the manoeuvre
+        /// torque-limited throughout. Transplanted through SlewDynamics.UniverseTimeScale.
+        /// </summary>
+        public double MaxSlewRateDegPerSecond;
+
+        /// <summary>
+        /// Time between arriving at an attitude and being able to expose through it: guide-star
+        /// acquisition and settling. Separate from the manoeuvre because it does not scale with the
+        /// angle, which is why real programmes group targets that sit near each other.
+        /// </summary>
+        public double GuideStarAcquisitionSeconds;
+
         // --- Consumables -------------------------------------------------------------------
 
         /// <summary>

@@ -36,6 +36,27 @@ def walk(obj, depth=0):
     for c in obj.children:
         walk(c, depth + 1)
 
+def check_textures(m, path):
+    """Report every texture the model names against the files sitting next to it.
+
+    KSP resolves a .mu's texture by name relative to the model's own directory, and when the
+    file is not there it logs one ERR line at load and hands the material a null map. Nothing
+    else happens: the mesh still draws, tinted by the material's _Color alone, so a model can
+    ship for months referencing a texture that was never exported. ExoObservatoryLVL1 did
+    exactly that, pointing its dome, doors and tower at a TextMesh Pro example asset. Returns
+    the number of missing textures so the caller can fail on it.
+    """
+    directory = os.path.dirname(path) or "."
+    missing = 0
+    for t in m.textures:
+        stem = os.path.splitext(t.name)[0]
+        found = next((e for e in (".png", ".dds", ".jpg", ".tga", ".mbm", ".truecolor")
+                      if os.path.exists(os.path.join(directory, stem + e))), None)
+        print(f"  {t.name:44} {'-> ' + stem + found if found else 'MISSING NEXT TO THE MODEL'}")
+        missing += found is None
+    return missing
+
+
 path = sys.argv[1]
 m = mulib.Mu()
 if not m.read(path):
@@ -43,6 +64,11 @@ if not m.read(path):
     sys.exit(1)
 print(f"{os.path.basename(os.path.dirname(path))}/{os.path.basename(path)}  version={m.version}")
 print(f"materials: {[mat.name for mat in m.materials]}")
-print(f"textures:  {[t.name for t in m.textures]}")
+print(f"textures ({len(m.textures)}):")
+missing = check_textures(m, path)
 print("transform tree:")
 walk(m.obj)
+if missing:
+    print(f"\n{missing} texture(s) the game will not find. KSP logs one ERR each and draws the "
+          "mesh with a null map, so this never shows up as a crash.")
+    sys.exit(2)

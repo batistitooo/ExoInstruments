@@ -82,6 +82,19 @@ namespace ExoInstruments.Core
         /// <summary>Available from the start of any career game, no purchase needed, the player's first, cheapest instrument.</summary>
         public bool UnlockedByDefault { get; set; }
 
+        /// <summary>
+        /// This instrument is not offered at all, in any game mode, and no amount of Funds or
+        /// Science unlocks it. It still appears in the observatory list as an "under construction"
+        /// row, so that a player can see it is coming rather than wonder where it went.
+        ///
+        /// This is not part of the career economy and it is not a difficulty setting: it is the
+        /// switch for an instrument whose PHYSICS is not finished. Career unlocking gates a
+        /// working model behind a price; this gates a model that would report numbers the mod
+        /// cannot yet stand behind. The direct-imaging path is the current case, and
+        /// TECHNICAL_REFERENCE section 12.3 states exactly what is missing and what closes it.
+        /// </summary>
+        public bool UnderConstruction { get; set; }
+
         /// <summary>One-time Funds cost to unlock this instrument in career mode.</summary>
         public double UnlockCostFunds { get; set; }
 

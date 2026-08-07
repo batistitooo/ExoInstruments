@@ -822,18 +822,247 @@ part; nothing else about attitude needs adding, which is deliberate (see the par
       the regime is *visible at the instrument's own plate scale* — neither invisible nor
       catastrophic.
 
+## 24c. The PSF kernel's cost, and that cutting it changed nothing that matters
+
+A galaxy photograph through the orbital Hubble at 4×4 took **424 s**, of which **411 s was building
+the PSF kernel** — the per-stage log from §23 said so directly, which is what it is for. §7.113 of
+the technical reference has the four changes and `tools/psf-cost/README.md` has the measurements.
+
+Headless first:
+
+```
+cd tools/psf-cost
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- --symmetry
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- --convolve
+dotnet run -c Release -p:Core=../../ExoInstruments/Core -- --solve
+dotnet run -c Release -p:Core=../../ExoInstruments/Core
+```
+
+- [ ] **24c.1** `--symmetry` exits zero. It checks the reflections the sampler folds its grid on
+      against the pattern itself: every pupil must be exactly even, and a pupil that *claims* the
+      axis or diagonal mirrors must have them to 1e-9. The two Hubble entries must claim neither —
+      their three mirror pads sit at 120° and break both — and if one ever starts claiming them,
+      the fold will mirror its spikes into quadrants they do not belong in.
+
+- [ ] **24c.1b** `--convolve` exits zero. Composing a PSF's terms goes through
+      `FourierConvolution.ConvolveKernels` above a work budget and the direct sum below it; the two
+      must agree to about 1e-14 of the peak, which is double precision and not a tolerance to
+      loosen.
+
+- [ ] **24c.2** `--solve` exits zero. It replays every bounded delivered-width solve against a
+      full-support bisection over the roster, three binnings and twelve sub-bands. Expect several
+      minutes: the reference side deliberately builds the kernels the shipped path now avoids.
+
+- [ ] **24c.3** The default report. **Every** column must be better than or equal to the
+      `untapered` one beside it — that column is what the kernel was before, so a single number
+      worse than its neighbour means accuracy was traded, which is the one thing these changes
+      must not do. `max|d|/peak` should be in the 1e-4 range for every pupil except FORS2 at 4×4,
+      whose wings are aliased and were before (its pixel spans eighteen ring periods); its
+      **core** must stay near 2e-3, not the 8e-2 it was.
+
+- [ ] **24c.4** `tools/spacecraft-tests` still reproduces WFC3 IHB Table 6.7. One row moved when
+      the core sampling improved — 1000 nm, 0.0883″ → 0.0892″, toward the converged 0.08924″ — and
+      no other should.
+
+Then in game:
+
+- [ ] **24c.4b** Photograph a galaxy on the **RC20** at 4×4 as well. The ground instruments pay a
+      second cost Hubble does not: their kernel is the diffraction grid convolved with a Kolmogorov
+      profile, which was a direct 257×257 against 183×183 sum. `tools/capture-profile` puts the
+      whole reduction at 809 ms where it was 9502 ms; in game it must be seconds, not minutes.
+
+- [ ] **24c.5** Photograph a galaxy through the orbital telescope at 4×4. The **Reduction:** line
+      must show `PSF kernel` in the tens of seconds, not the hundreds, and it must no longer be the
+      largest stage — `stars + emission` should lead.
+
+- [ ] **24c.6** The same shot at 1×1. This is the case that was worst: the delivered-width solve
+      used to run its full bisection there and build three hundred kernels. It must now be *faster*
+      than 4×4 for this stage, not slower.
+
+- [ ] **24c.7** A bright star in the same frame. The diffraction spikes must still be there and
+      still cross the whole kernel. They are what the 257×257 support exists for, and the wings are
+      where the sampling was cut.
+
+- [ ] **24c.8** Switch to the WFC3/IR channel and check the zoom slider. It must have a real range.
+      The IR entry was missing `BarlowFactor`, so `MinFovDeg` was `MaxFovDeg / 0` = infinity and
+      `Mathf.Clamp` pinned every capture's field of view to it.
+
+## 24d. Operating the telescope from the ground
+
+The three checks §24b used to list as open items were the same hole seen from three sides:
+`ApplySpaceTelescopePointing` began with a null check on the PartModule, and a PartModule only
+exists while its vessel is loaded, which from the observatory it never is. So choosing a target
+moved the camera and nothing else: the spacecraft did not turn, the repoint took no time, and the
+battery never moved. `Flight/GroundStation.cs` is what receives a command aimed at an unloaded
+vessel; §13.14 of the technical reference has the model.
+
+Headless first:
+
+```
+cd tools/slew-tests && dotnet run -c Release -p:Core=../../ExoInstruments/Core
+```
+
+64 checks: the published 6 deg/min against the Primer's own "about one hour to go full circle";
+the scale transplant (a real-scale install must leave every published figure at exactly 1x, and a
+90 deg repoint must cost the same fraction of a Kerbin orbit as HST's does of Earth's);
+the two branches of the rest-to-rest profile meeting at the crossover; `FractionOfAngleCovered`
+against a numerical integration of the rate profile it is the integral of; Vallado's eclipse
+fraction against the mod's (which delegates to `OrbitalVisibility`, so this is what catches a wrong
+delegation) and against HST's published ~36 min occultation; and `Advance`/`EnduranceSeconds`
+agreeing that advancing by the endurance lands on the reserve.
+
+Then in game, with a telescope in orbit and the observatory panel open at the space centre:
+
+- [ ] **24d.1 Nothing happens without a radio.** Launch the telescope with **no antenna**. It must
+      appear in the spacecraft list (it is not broken, it is out of reach) with
+      `no antenna link: fly the spacecraft, or give it an antenna` beside it, and clicking a target
+      must not start a slew. Add an antenna and the same click must work.
+
+- [ ] **24d.1b The CommNet setting is respected.** Start a save with **CommNet disabled** in the
+      difficulty options. The antenna-less telescope must now be commandable: with the setting off
+      `Vessel.Connection` is null on every vessel, and reading the link state off it used to report
+      every telescope in the game as unreachable with no message that explained why.
+
+- [ ] **24d.2 The repoint takes real time.** Click a target on the far side of the sky. The panel
+      must read `Slewing, N min to go` with a progress bar, then `Acquiring guide stars`, then
+      `On target and guiding`. At the shipped part's numbers a 90 degree repoint is about 15
+      minutes of mission time plus 6.5 of acquisition; warp through it and it must resolve at the
+      right instant, not on the wall clock. **It must not cost half an orbit**: the published
+      6 deg/min is transplanted through the universe's time scale (§13.65), so on stock Kerbin a
+      90 deg repoint is about 4.6 min plus 2.0 of acquisition against a ~29 min orbit. A target
+      clear of the limb when clicked must still be clear when the telescope arrives.
+
+- [ ] **24d.2b The blue box does not walk off the star.** Point at a *catalogue* target (a star,
+      not a planet), then warp through the whole slew watching the chart. The commanded box must
+      stay exactly on the star's marker for the entire manoeuvre. It used to drift: the command was
+      stored as the world vector the coordinates mapped to at the click, while the star is redrawn
+      from its RA/Dec every frame, so the two came apart and the gap grew with time.
+
+- [ ] **24d.2c Board it mid-slew and it must behave.** Start a large repoint, then fly out to the
+      telescope while it is still turning. It must rotate smoothly onto the target and hold, not
+      tumble. Two separate faults did this: the command was composed against the root part's
+      transform while SAS holds it against `vessel.ReferenceTransform` (test it on a satellite whose
+      probe core is NOT the root and not aligned with it, which is where they differ), and the roll
+      was left undefined by `FromToRotation`, whose axis vanishes at 180 degrees. Also give it
+      manual rotation input while the hold is on: the spacecraft must obey you, not fight you.
+
+- [ ] **24d.3 The chart shows both.** During the slew the sky chart must carry an amber crosshair
+      where the boresight is, a blue open box where it is going, and a dotted arc between them.
+      The crosshair must move along that arc and turn green when it arrives. The arc is a great
+      circle, so on the all-sky oval it should visibly *bend*; a straight line on screen would mean
+      the projection is being ignored.
+
+- [ ] **24d.4 You may shoot mid-slew, and it must come out wrong in the right way.** The Capture
+      button stays enabled for the whole manoeuvre, and the panel says how far the frame will
+      streak at the current rate. Take one: it must be a smeared frame of whatever the boresight is
+      sweeping over, NOT a clean frame of the target the telescope has not reached yet. Two things
+      make that true and both are worth checking separately: the exposure re-aims at the boresight's
+      own coordinates (so the field is the wrong patch of sky), and the slew rate goes into the
+      pointing budget as drift (so it streaks). A long exposure early in a big repoint should be
+      almost unrecognisable.
+
+- [ ] **24d.5 Turning costs charge.** Watch the battery figure across a large repoint. It must
+      fall, and it must fall at the vessel's own reaction wheels' rate (0.75 EC/s for the shipped
+      part) on top of the bus draw. Then fly out to the same telescope and slew it by hand with
+      SAS: KSP's own wheel billing must take it down at the same rate, because the two have to
+      cost the same or the cheap way to move a telescope is to drive out to it.
+
+- [ ] **24d.6 A repoint it cannot finish is refused.** Build one with the telescope, a probe core
+      and an antenna and **no solar panels**, and let the battery run down. A large repoint must be
+      refused with `not enough charge: the N min slew draws X EC/s and the battery runs out after
+      M min`, and the spacecraft must not move. With panels fitted the same command must be
+      accepted, because the affordability test is whether the battery outlasts the manoeuvre at the
+      *net* rate, not whether it could pay the whole bill up front.
+
+- [ ] **24d.7 The exposure is priced too.** Set a long exposure. The panel must state its cost in
+      EC, and when the battery cannot cover it the Capture button must be disabled saying so
+      rather than producing a frame.
+
+- [ ] **24d.8 The battery recharges while nobody is watching.** Note the charge, leave the
+      observatory, warp several days, and come back. It must have gone **up** toward capacity, at
+      the panels' rate scaled by the sunlit fraction of the orbit the panel prints. Stock KSP
+      simulates nothing on an unloaded vessel, so without this the first two checks above would be
+      a one-way trip to a dead telescope.
+
+- [ ] **24d.9 And it is not billed twice.** Fly the telescope by hand for a while under warp, then
+      return to the observatory. The battery must be whatever the game's own simulation left it at,
+      not that minus another pass of the ground ledger over the same hour.
+
+- [ ] **24d.10 Re-entering the observatory does not re-command.** Pick a target, leave the space
+      centre scene, come back. The telescope must still be on target, not starting the same slew
+      again and paying for it a second time.
+
+- [ ] **24d.11 Retargeting mid-slew charges for what is left.** Start a large repoint, and half way
+      through click a target near where the boresight has got to. The new slew must be short,
+      because it starts from where the vehicle actually is and not from either endpoint.
+
+- [ ] **24d.12 Switching spacecraft commands the new one.** With two telescopes in orbit and a
+      target selected, switch between them in the spacecraft list. The one just selected must slew
+      to the target rather than sitting wherever it was last sent.
+
 ## 24b. Known open items
 
-Three things are declared and not wired, and none of them will fail a check above because nothing
-checks them. They are listed so they are not mistaken for working:
+One thing is declared and not wired, and it will not fail a check above because nothing checks it.
+It is listed so it is not mistaken for working:
 
-- **Electric charge is never consumed.** `ExposureElectricChargePerSecond` and
-  `IdleElectricChargePerSecond` exist on `SpacePlatformSpec` and are read by nothing. An exposure
-  is gated on the vessel having *some* charge and costs none of it, so there is no power budget to
-  manage and an eclipse costs nothing.
 - **The downlink is a readout only.** The frame volume and the transfer time are computed and
-  displayed correctly; nothing waits for them, queues behind them, or is prevented by them.
-- **The pointing hold cannot be engaged.** `ModuleExoSpaceTelescope.CommandPointing` and
-  `DrivePointing` are written and correct, and nothing calls them. The PAW exposes only
-  `Release pointing hold`, so the telescope does not slew itself to the selected target: the
-  player aims the vehicle.
+  displayed correctly; nothing waits for them, queues behind them, or is prevented by them. Note
+  that this is now the *only* one left of the three that used to be here: electric charge and the
+  pointing hold are both wired, and §24d is how they are checked.
+
+## 25. The full-sky chart, and the planet that is the mask
+
+The target-selection chart was rebuilt from a KSC-zenith dome into a full-sky equatorial chart
+whose observer is whatever platform is selected, with occlusion drawn as the occluding body
+itself at its true angular size. The geometry has a headless harness; the rendering and the
+interaction need eyes in game.
+
+Headless first:
+
+    cd tools/skychart-tests && dotnet run -p:Core=../../ExoInstruments/Core
+
+386 checks: the oval's landmark points; the projection round trip (rim included); the parity of the new projection against the old dome's
+(known-good in game) local north/east handedness at sites and sky points in both hemispheres,
+which is the check that catches a mirrored sky; the finite-distance
+occlusion classification (a target IN FRONT of the occluder on the same sight line is Clear, the
+partial band is `alpha_occ ± alpha_target`); the closed-form Hammer Jacobian against finite
+differences; the 100 m horizon-dip identity; the rendered
+terminator's illuminated disc fraction against the Lambert-sphere `(1 + cos i)/2` at three phase
+angles; and that the limb glow is brighter on the sunlit limb than the dark one.
+
+In game, in one pass:
+
+1. Ground instrument selected: the chart is the whole sky as the classic 2:1 all-sky oval
+   (Hammer), celestial equator along the long axis, poles top and bottom, RA 0h on the rims.
+   Half of it is under Kerbin's ground hemisphere; the ground is lit on the day side
+   and dark at night, and its edge (the horizon) sweeps across the chart as Kerbin rotates:
+   time-warp and watch the mask move while the stars stand still. That is the intended inversion
+   of the old chart, where stars swept and the horizon stood still.
+2. Stars behind the ground are not drawn, not hovered, not clickable; the search list still
+   finds them and reports "N deg below horizon".
+3. Select the orbital telescope while it is over the far side of Kerbin from KSC. This is the
+   scenario that used to deadlock (everything the old KSC-dome chart showed was exactly the sky
+   Kerbin blocked from the spacecraft). Now: Kerbin's disc sits on the chart at ~126 degrees
+   across from LKO, everything outside it is selectable, and the disc carries the real
+   terminator. Verify the limb glow is visibly wider and warmer on the sunlit limb, and the Sun
+   wears its avoidance halo.
+4. The Mun from LKO: a star-sized dot at zoom 1 that becomes a real disc with a correct phase as
+   you zoom in. If the Mun happens to be transiting Kerbin's disc, it draws ON TOP of it (it is
+   in front); if it is behind Kerbin, it is simply absent.
+5. Clicking inside Kerbin's disc from orbit selects Kerbin itself as the photography target.
+   Clicking the ground hemisphere from KSC does nothing.
+6. Jool's moons still declutter into a clickable ring while they are dots; a body drawn at real
+   size is never nudged.
+7. Orbital status panel, occulted target: "Next window in m:ss", counting down, and roughly
+   consistent with the occulted-fraction line next to it. While observable with a finite window:
+   "Window closes in". Inside solar avoidance it says the season is the timescale instead of
+   giving a countdown.
+8. Search rows in orbit read "N deg off the limb" or "occulted, N deg inside the limb";
+   `alt:>30` filters on that clearance. On the ground the wording and the filter are unchanged.
+9. The ground forecast heatmaps are gone while a space telescope is selected (their model is
+   airmass and night) and back when a ground instrument is.
+10. Drag and zoom stay smooth with the overlay composited (the drag path gained array lookups
+    only, no trigonometry); zoom 15 on the limb shows a soft edge, not a staircase.
+11. Ground capture gating is untouched: a target the chart shows just above the true (dipped)
+    horizon but below 0 degrees of altitude is still refused by the RC20 gate, the deliberate
+    1-degree band documented in TECHNICAL_REFERENCE §8.1.

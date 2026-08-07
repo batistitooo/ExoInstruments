@@ -2,9 +2,47 @@ namespace ExoInstruments.Core
 {
     /// <summary>
     /// Registry of real instruments the player can observe with. Precision/cadence from each
-    /// instrument's own papers (see Citation). Career economy fields are ALL PLACEHOLDERS —
-    /// balance à valider avec Baptiste; relative ordering (bigger investment → bigger payoff)
-    /// is the only constraint honored here.
+    /// instrument's own papers (see Citation).
+    ///
+    /// THE CAREER PRICE OF AN INSTRUMENT IS ITS APERTURE, THROUGH THE PUBLISHED COST LAW.
+    /// Every UnlockCostFunds and ScanCostFunds below comes out of one formula rather than being
+    /// chosen instrument by instrument, so the ladder cannot be argued with piecemeal: change the
+    /// two constants and the whole roster moves together, in the order real telescopes cost.
+    ///
+    ///   UnlockCostFunds = C * (D / 1 m) ^ (alpha * kappa)
+    ///
+    ///   alpha   THE SOURCED PART. van Belle, Meinel &amp; Meinel (2004), Proc. SPIE 5489, 563
+    ///           ("The scaling relationship between telescope cost and aperture size for very
+    ///           large telescopes", also arXiv:2107.09605) fit ground-based optical telescopes
+    ///           built since 1980 at cost proportional to D^2.46, and report a distinctly
+    ///           shallower law near D^2.0 for space-based ones. Both are used here, ground and
+    ///           space, and they are why TESS is cheap (10.5 cm of aperture) while being in orbit
+    ///           is what costs.
+    ///
+    ///   kappa   THE GAME NUMBER, 0.65, and the only place a balance choice enters. Real
+    ///           telescopes span six decades of cost, from a 51 mm astrograph to a VLT unit; a
+    ///           KSP career can pay across about three. Raising the law to a constant power is
+    ///           the one compression that leaves the ORDER and the relative spacing in log space
+    ///           exactly as published: no single instrument is nudged, they are all squeezed by
+    ///           the same amount. Undiluted, alpha = 2.46 would put the VLT 39 000x above WASP.
+    ///
+    ///   C       the scale. 44 000 for ground, which is what fixes the RC20 (0.51 m) at 15 000
+    ///           funds, the one number kept from the old hand-picked table because it is a good
+    ///           first purchase. For space it is 75x that per unit aperture before compression
+    ///           (16.5x after), the middle of the range usually quoted for what putting a given
+    ///           mirror in orbit multiplies its cost by.
+    ///
+    /// SCAN COST IS OPERATIONS, WHICH TRACK CAPITAL. An observatory's running budget is a roughly
+    /// fixed fraction of what it cost to build, so telescope time is priced at UnlockCost/300 per
+    /// night, times how much of a night one observation of that KIND actually consumes: 0.3 for a
+    /// photograph, 2 for a radial-velocity run, 3 for a transit campaign. A floor of 20 funds
+    /// keeps the smallest instruments from being free to run. This is why SPECULOOS, four 1 m
+    /// telescopes, is no longer the free starting instrument and WASP is: WASP is a rack of
+    /// camera lenses, and it is genuinely the cheapest thing in the roster to build AND to run.
+    ///
+    /// WHAT IS STILL UNBALANCED, DELIBERATELY: the photography instruments carry a real price and
+    /// return almost no Science, because their gameplay loop does not exist yet. Do not read
+    /// their ScienceRewardMultiplier of 0 as a balance decision.
     ///
     /// PHOTOMETRIC PRECISION: every transit instrument here still uses the fitted magnitude
     /// scaling (InstrumentSpec.EstimatePrecision), because none of them yet carries a
@@ -31,15 +69,19 @@ namespace ExoInstruments.Core
             Description = "Four robotic 1-meter telescopes in the Atacama desert, built to stare at the smallest, coolest stars in the neighborhood. " +
                           "It hunts for transits: the tiny periodic dip in a star's brightness when a planet crosses in front of it. " +
                           "Small red stars make that dip proportionally deeper, which is how its sibling project caught the seven TRAPPIST-1 worlds. " +
-                          "Precise, patient, and free to start with: the workhorse of this program.",
+                          "Precise, patient, and the first real capital purchase a programme makes: the workhorse it graduates to once WASP has cleared the easy targets.",
             IsSpaceBased = false,
             ApertureMeters = 1.0,          // each SSO unit: 1m Ritchey-Chretien
             SiteAltitudeMeters = 2490.0,   // Paranal SPECULOOS Southern Observatory
-            UnlockedByDefault = true,     // the observatory's own starting instrument
-            UnlockCostFunds = 0.0,
-            UnlockScienceThreshold = 0.0,
-            ScanCostFunds = 500.0,
-            ScienceRewardMultiplier = 1.0,
+            // NO LONGER THE STARTING INSTRUMENT. Four 1 m telescopes is 2 m of effective aperture
+            // and the cost law prices it accordingly; a programme does not open with the best
+            // small-star photometer in the world. WASP took the free slot, which is also the
+            // historical order: hot Jupiters off camera lenses first, ultra-cool dwarfs later.
+            UnlockedByDefault = false,
+            UnlockCostFunds = 133_000.0,  // D_eff = sqrt(4) * 1 m = 2.0 m
+            UnlockScienceThreshold = 65.0,
+            ScanCostFunds = 1_330.0,      // transit campaign, 3 nights of a 133 000-funds facility
+            ScienceRewardMultiplier = 1.5,
 
             // Every figure below is from Murray et al. 2020 (MNRAS 495, 2446, "Photometry and
             // performance of SPECULOOS-South") Table 1, except where noted. With this block
@@ -122,9 +164,15 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 0.111,        // Canon 200mm f/1.8 lens: 111mm entrance pupil, scintillation-limited on bright stars, WASP's real noise regime
             SiteAltitudeMeters = 2400.0,   // Roque de los Muchachos, La Palma (SuperWASP-North)
-            UnlockCostFunds = 10_000.0,
+            // THE STARTING TRANSIT INSTRUMENT. The cost law makes it the cheapest thing in the
+            // roster to build (1 300 funds notional, on 111 mm of entrance pupil) and its nights
+            // hit the 20-funds floor, so it is the one instrument a career can run freely from
+            // the first day. Its precision is also the worst here by a factor of seven, which is
+            // the right opening: bright stars and hot Jupiters, exactly what SuperWASP found.
+            UnlockedByDefault = true,
+            UnlockCostFunds = 0.0,
             UnlockScienceThreshold = 0.0,
-            ScanCostFunds = 250.0,
+            ScanCostFunds = 20.0,
             ScienceRewardMultiplier = 1.0,
 
             // NO Detector BLOCK: SuperWASP is two numbers short of one, so it stays on the fitted
@@ -162,9 +210,13 @@ namespace ExoInstruments.Core
                           "It watches each patch of sky continuously for weeks, which is exactly what catching repeated transits demands. " +
                           "The aperture is tiny (10.5 cm), so it favors bright stars, but the uninterrupted coverage is something no ground telescope can offer.",
             IsSpaceBased = true,           // Earth-orbiting: observes around the clock, no atmosphere in the way
-            UnlockCostFunds = 300_000.0,
-            UnlockScienceThreshold = 100.0,
-            ScanCostFunds = 2_500.0,
+            // The space law, and the one place it visibly disagrees with intuition: four 10.5 cm
+            // cameras is 21 cm of effective aperture, so almost nothing here is being paid for
+            // the optics. The 16.5x space premium is the entire price, which is the honest
+            // description of TESS as a mission.
+            UnlockCostFunds = 96_000.0,   // D_eff = sqrt(4) * 0.105 m = 0.21 m, space law
+            UnlockScienceThreshold = 50.0,
+            ScanCostFunds = 950.0,        // transit campaign, 3 nights
             ScienceRewardMultiplier = 2.0,
 
             // NO Detector BLOCK: one number short. Sourced already, from Ricker et al. 2015
@@ -209,9 +261,9 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 3.6,
             SiteAltitudeMeters = 2400.0,   // La Silla
-            UnlockCostFunds = 200_000.0,
+            UnlockCostFunds = 340_000.0,  // 3.6 m, ground law
             UnlockScienceThreshold = 120.0,
-            ScanCostFunds = 3_500.0,
+            ScanCostFunds = 2_275.0,      // RV run, 2 nights
             ScienceRewardMultiplier = 2.5,
         };
 
@@ -232,9 +284,14 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 8.2,          // one VLT unit telescope
             SiteAltitudeMeters = 2635.0,   // Paranal
-            UnlockCostFunds = 900_000.0,
-            UnlockScienceThreshold = 400.0,
-            ScanCostFunds = 8_000.0,
+            // Same 8.2 m unit telescope as FORS2 and SPHERE, so the aperture term is identical
+            // and the three prices differ only by an instrument multiplier: 1.0 for a workhorse
+            // imager, 1.25 for SPHERE's extreme-AO bench, 1.5 for an ultra-stable vacuum
+            // spectrograph. That ordering is not in doubt; the exact factors are a balance
+            // choice, unlike the aperture term above them.
+            UnlockCostFunds = 1_910_000.0,  // 8.2 m ground law x 1.5
+            UnlockScienceThreshold = 350.0,
+            ScanCostFunds = 12_700.0,       // RV run, 2 nights on the dearest facility in the roster
             ScienceRewardMultiplier = 4.0,
         };
 
@@ -255,9 +312,9 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 1.93,
             SiteAltitudeMeters = 650.0,    // Observatoire de Haute-Provence
-            UnlockCostFunds = 60_000.0,
-            UnlockScienceThreshold = 30.0,
-            ScanCostFunds = 1_500.0,
+            UnlockCostFunds = 126_000.0,  // 1.93 m, ground law
+            UnlockScienceThreshold = 60.0,
+            ScanCostFunds = 840.0,        // RV run, 2 nights
             ScienceRewardMultiplier = 1.5,
         };
 
@@ -285,9 +342,26 @@ namespace ExoInstruments.Core
             IsSpaceBased = false,
             ApertureMeters = 39.3,
             SiteAltitudeMeters = 3046.0,   // Cerro Armazones
-            UnlockCostFunds = 4_000_000.0,
-            UnlockScienceThreshold = 900.0,
-            ScanCostFunds = 25_000.0,
+            // NOT OFFERED. The direct-imaging physics behind this instrument is the one path in
+            // the mod that is still an ordering heuristic rather than a performance model: the
+            // planet radiates as a blackbody at its equilibrium temperature (which makes every
+            // real directly-imaged planet undetectable), the contrast floor scales with target
+            // magnitude by a photon-noise law in a speckle-limited regime, its radial law is a
+            // chosen inverse square, and integration improves it as sqrt(t) without bound. The
+            // better model already exists in this codebase for SPHERE (Core/SpeckleField,
+            // Coronagraph, AngularDifferentialImaging, ContrastCurve) and is not wired here yet.
+            // TECHNICAL_REFERENCE section 12.3 and section 12 items 112-120 carry the detail.
+            UnderConstruction = true,
+            // THE ONE INSTRUMENT THE APERTURE LAW IS NOT ALLOWED TO PRICE. van Belle, Meinel &
+            // Meinel report that the monolithic-mirror relation breaks for segmented apertures:
+            // Keck, LBT and GTC all come in materially under it. At 39.3 m the law would ask
+            // 15.6 M funds, twelve times a VLT unit, where the real ELT is costed at about
+            // EUR 1.45 B against roughly EUR 330 M for one VLT unit, a factor of 4.4. That
+            // measured ratio is used directly instead, through the same kappa compression:
+            // 4.4^0.65 = 2.62 times the FORS2 baseline.
+            UnlockCostFunds = 3_330_000.0,
+            UnlockScienceThreshold = 500.0,
+            ScanCostFunds = 11_100.0,     // a direct-imaging ADI sequence is about one night
             ScienceRewardMultiplier = 6.0,
         };
 
@@ -313,9 +387,10 @@ namespace ExoInstruments.Core
             ApertureMeters = VisualTelescopeCatalog.RedCat51.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.RedCat51.SiteAltitudeMeters, // Observatoire de Haute-Provence
             VisualTelescope = VisualTelescopeCatalog.RedCat51,
-            // Placeholders, balance à valider avec Baptiste. Priced below the RC20 and unlocked
-            // by default: it is the cheapest real instrument here, and it is what a player should
-            // have in hand before deciding whether resolution or coverage is what they want next.
+            // THE STARTING PHOTOGRAPHIC INSTRUMENT, the counterpart to WASP on the detection
+            // side. The cost law puts 51 mm of aperture at 380 funds notional, which is close
+            // enough to nothing that charging for it would be noise; a career opens holding it.
+            // Its nights hit the 20-funds floor for the same reason.
             UnlockedByDefault = true,
             UnlockCostFunds = 0.0,
             UnlockScienceThreshold = 0.0,
@@ -345,11 +420,12 @@ namespace ExoInstruments.Core
             ApertureMeters = VisualTelescopeCatalog.Rc20.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Rc20.SiteAltitudeMeters, // Observatoire de Haute-Provence
             VisualTelescope = VisualTelescopeCatalog.Rc20,
-            // Placeholders, balance à valider avec Baptiste.
+            // 0.51 m through the ground law. This is the instrument the scale constant C was
+            // chosen against, so 15 000 is where every other price in the file hangs from.
             UnlockedByDefault = false,
             UnlockCostFunds = 15_000.0,
-            UnlockScienceThreshold = 5.0,
-            ScanCostFunds = 50.0,
+            UnlockScienceThreshold = 10.0,
+            ScanCostFunds = 20.0,         // a photograph is 0.3 of a night; hits the floor
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
@@ -379,9 +455,9 @@ namespace ExoInstruments.Core
             // every optical respect, so priced and gated above it per this file's own "bigger
             // investment -> bigger payoff" ordering rule.
             UnlockedByDefault = false,
-            UnlockCostFunds = 60_000.0,
-            UnlockScienceThreshold = 20.0,
-            ScanCostFunds = 120.0,
+            UnlockCostFunds = 44_000.0,   // 1.0 m, ground law
+            UnlockScienceThreshold = 25.0,
+            ScanCostFunds = 45.0,         // a photograph is 0.3 of a night
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
@@ -408,12 +484,14 @@ namespace ExoInstruments.Core
             ApertureMeters = VisualTelescopeCatalog.Fors2Vlt.ApertureMeters,
             SiteAltitudeMeters = VisualTelescopeCatalog.Fors2Vlt.SiteAltitudeMeters, // Paranal Observatory
             VisualTelescope = VisualTelescopeCatalog.Fors2Vlt,
-            // Placeholders, balance à valider avec Baptiste. The biggest jump yet over the
-            // CDK1000, priced and gated accordingly per this file's own ordering rule.
+            // 8.2 m through the ground law, with the baseline instrument multiplier of 1.0: this
+            // is the cheapest of the three ways into the VLT, and the jump over the CDK1000 is
+            // 29x because that is what the published cost law says an 8.2 m mirror is worth
+            // against a 1 m one, not because a step was wanted here.
             UnlockedByDefault = false,
-            UnlockCostFunds = 250_000.0,
-            UnlockScienceThreshold = 80.0,
-            ScanCostFunds = 400.0,
+            UnlockCostFunds = 1_270_000.0,
+            UnlockScienceThreshold = 250.0,
+            ScanCostFunds = 1_270.0,      // a photograph is 0.3 of a night, on a very expensive night
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
@@ -441,12 +519,13 @@ namespace ExoInstruments.Core
             SiteAltitudeMeters = VisualTelescopeCatalog.Sphere.SiteAltitudeMeters, // Paranal Observatory
             VisualTelescope = VisualTelescopeCatalog.Sphere,
             // Placeholders, balance à valider avec Baptiste. A specialist upgrade rather than a
-            // strict step up from the CDK1000/FORS2 (tiny FOV, no blue channel), so priced
-            // similarly to FORS2 rather than automatically higher.
+            // strict step up from the CDK1000/FORS2 (tiny FOV, no blue channel). Same 8.2 m
+            // mirror as FORS2, so the same aperture term, times the 1.25 instrument multiplier
+            // that SAXO and ZIMPOL are worth over a workhorse imager.
             UnlockedByDefault = false,
-            UnlockCostFunds = 300_000.0,
-            UnlockScienceThreshold = 100.0,
-            ScanCostFunds = 450.0,
+            UnlockCostFunds = 1_590_000.0,
+            UnlockScienceThreshold = 300.0,
+            ScanCostFunds = 1_590.0,      // a photograph is 0.3 of a night
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
