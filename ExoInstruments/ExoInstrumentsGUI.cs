@@ -5528,8 +5528,12 @@ namespace ExoInstruments
                 {
                     double frameScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
                     note = $", real {image.SurveyId} imagery at {image.SamplingArcsec:F1}\"/px"
+                         // F2, not F1, and for a reason: the space instruments are the ones this
+                         // branch fires on, and F1 renders WFC3/UVIS's 0.0396"/px as 0.0"/px. A
+                         // warning that names the instrument's resolution as zero reads as a bug
+                         // in the warning. Same format the capture readout uses for this number.
                          + (image.SamplingArcsec > 1.5 * frameScale
-                            ? $", coarser than this instrument's {frameScale:F1}\"/px"
+                            ? $", coarser than this instrument's {frameScale:F2}\"/px"
                             : "");
                 }
                 else if (images != null && images.IsCoveredByAnother(obj.Id, out string owner))
