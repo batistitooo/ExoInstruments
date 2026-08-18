@@ -151,16 +151,26 @@ def radial_profile(kernel, nbins=40):
     return 0.5 * (edges[:-1] + edges[1:]), prof / prof[0]
 
 
-def draw_point_sampled(obj, size, scale):
-    """Draws a GalSim object the way OpticalPsf samples its own kernel: the surface brightness at
-    pixel centres, with no pixel convolution.
+def draw_pixel_integrated(obj, size, scale):
+    """Draws a GalSim object the way a detector records it: integrated over each pixel's area.
 
-    This is not a convenience. OpticalPsf.SampleRadial evaluates the profile at the centre of each
-    pixel through a radial lookup table; it does not integrate over the pixel's area. Drawing GalSim
-    with method='auto' would convolve in the pixel response and compare two different quantities.
-    (The vaned path, SampleTwoDimensional, DOES pixel-average -- see the FORS2 note in the README.)
+    THIS REFERENCE CHANGED, AND THE REASON IS A FIX RATHER THAN A CONVENIENCE. It used to be
+    method='no_pixel', the surface brightness at pixel centres, because that is what OpticalPsf
+    did: SampleRadial evaluated the profile at the centre of each pixel and never integrated over
+    it. Comparing against 'auto' would then have compared two different quantities.
+
+    That was a real error and this harness measured it: on the RedCat 51, at 1.17 pixels per FWHM,
+    point sampling put 0.861 of the light inside half a FWHM where a pixel-integrated PSF puts
+    0.536, an aperture correction 58.7% optimistic, which lands straight in CcdEquation and
+    overstates the instrument's signal-to-noise. OpticalPsf.BuildKernel now builds on a
+    supersampled grid and sums each block of sub-pixels into one detector pixel, which is that
+    integral. So the correct reference is 'auto', and using 'no_pixel' would now be the thing that
+    compares two different quantities.
+
+    Section 4 keeps both draws side by side, so the size of the choice stays visible rather than
+    disappearing into a passing check.
     """
-    img = obj.drawImage(nx=size, ny=size, scale=scale, method='no_pixel')
+    img = obj.drawImage(nx=size, ny=size, scale=scale, method='auto')
     a = img.array.astype(float).copy()
     return a / a.sum()
 
@@ -255,7 +265,7 @@ def instrument(tag):
     psf = galsim.Convolve([galsim.OpticalPSF(**optics),
                            galsim.Kolmogorov(lam=lam_nm, r0=r0, gsparams=GSP_FFT)],
                           gsparams=GSP_FFT)
-    gs = draw_point_sampled(psf, size, scale)
+    gs = draw_pixel_integrated(psf, size, scale)
 
     # FWHM, measured identically on both arrays.
     exo_fwhm = measure_fwhm_px(exo) * scale
@@ -310,7 +320,7 @@ def atmosphere_only():
         size = 2 * radius + 1
         exo = exo / exo.sum()
 
-        gs = draw_point_sampled(
+        gs = draw_pixel_integrated(
             galsim.Kolmogorov(lam=meta["wavelength_m"] * 1e9, r0=meta["fried_r0_m"], gsparams=GSP),
             size, scale)
 
@@ -412,7 +422,7 @@ def diffraction_control():
         if nvanes:
             optics.update(nstruts=nvanes, strut_thick=meta["vane_width_over_diameter"],
                           strut_angle=0.0 * galsim.degrees)
-        gs = draw_point_sampled(galsim.OpticalPSF(**optics), size, scale)
+        gs = draw_pixel_integrated(galsim.OpticalPSF(**optics), size, scale)
 
         dev = np.abs(exo / exo.max() - gs / gs.max()).max()
         # Loose on purpose, and the README says why: at these plate scales the diffraction core is

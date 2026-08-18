@@ -226,7 +226,7 @@ static class DumpEmission
         // A grid over the first patch, sampled through the real interpolation, plus a ring of points
         // outside it which must come back uncovered rather than wrong.
         var sb = new StringBuilder();
-        sb.AppendLine("ra_deg,dec_deg,covered,rayleighs");
+        sb.AppendLine("ra_deg,dec_deg,l_deg,b_deg,patch,covered,rayleighs,cubic");
         EmissionMap.AllocateScratch(out long[] px, out double[] wt);
         var cursor = EmissionPatchSet.Cursor.New();
 
@@ -239,14 +239,33 @@ static class DumpEmission
             double dec = -2.45 + rad * Math.Sin(t);
             double ra = 85.25 + rad * Math.Cos(t) / Math.Cos(dec * Math.PI / 180.0);
 
+            // WHICH PATCH ANSWERED, recorded rather than assumed. IC 434 and NGC 2024 overlap over
+            // most of this field, so a checker that always reads the first patch is comparing two
+            // different measurements of the same sky and calling the difference a format error.
             var patch = set.FindCoveringPatch(ra, dec, 0.0);
+            int patchIndex = -1, seen = 0;
+            foreach (var candidate in set.Patches)
+            {
+                if (ReferenceEquals(candidate, patch)) { patchIndex = seen; break; }
+                seen++;
+            }
             GalacticCoordinates.EquatorialToGalactic(ra, dec, out double l, out double b);
             bool covered = patch != null
                 && set.TryRayleighsAtGalactic(patch, l, b, px, wt, ref cursor, out double v);
             double value = 0.0;
-            if (covered) set.TryRayleighsAtGalactic(patch, l, b, px, wt, ref cursor, out value);
-            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2},{3:R}",
-                ra, dec, covered ? 1 : 0, value));
+            bool cubic = false;
+            if (covered)
+            {
+                set.TryRayleighsAtGalactic(patch, l, b, px, wt, ref cursor, out value);
+                cubic = EmissionPatchSet.LastReconstructionWasCubic;
+            }
+            // The Galactic direction THE READER USED, not one the checker recomputes. The two
+            // transforms agree to 3e-6 deg, which is nothing until it lands within 3e-6 deg of a
+            // cell boundary and picks a different four cells to interpolate over; the disagreement
+            // is then the gradient across a whole 51 arcsec cell, and it measures the transform
+            // rather than the format.
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R},{3:R},{4},{5},{6:R},{7}",
+                ra, dec, l, b, patchIndex, covered ? 1 : 0, value, cubic ? 1 : 0));
         }
         File.WriteAllText("exo_patchset.csv", sb.ToString());
         Console.WriteLine("  written exo_patchset.csv");

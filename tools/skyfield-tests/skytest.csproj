@@ -13,6 +13,12 @@
     <Compile Include="$(Core)/GnomonicProjection.cs" />
     <Compile Include="$(Core)/RenderedStarCatalog.cs" />
     <Compile Include="$(Core)/StarFieldRenderer.cs" />
+    <!-- The transit chain, which LightCurveSimulator needs. It was never listed here, which is
+         one of the five reasons this harness stopped compiling. -->
+    <Compile Include="$(Core)/LightCurveSimulator.cs" />
+    <Compile Include="$(Core)/TransitPhotometry.cs" />
+    <Compile Include="$(Core)/TransitTimingVariations.cs" />
+    <Compile Include="$(Core)/TransitDetector.cs" />
     <Compile Include="$(Core)/StellarPhotometry.cs" />
     <Compile Include="$(Core)/SkyBrightnessModel.cs" />
     <Compile Include="$(Core)/SkyCoordinates.cs" />

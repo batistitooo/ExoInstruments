@@ -145,7 +145,9 @@ v(t) = K · (cos(ν+ω) + e·cos(ω))
   ```
   K = 28.4329 · (Mp·sini/Mjup) · ((M*+Mp)/M☉)^(-2/3) · (P/yr)^(-1/3) · (1-e²)^(-1/2)
   ```
-  Constant `28.4329 m/s` cited to **Lovis & Fischer (2010)**, eq. 2 (also Cumming et al. 1999) — the K for `Mp·sini=1 Mjup, Mtotal=1 M☉, P=1yr, e=0`. Depends only on `Mp·sini`, so unlike the transit path, no inclination measurement is needed.
+  Constant `28.4329 m/s` cited to **Lovis & Fischer (2010)**, eq. 2 (also Cumming et al. 1999) — the K for `Mp·sini=1 Mjup, Mtotal=1 M☉, P=1yr, e=0`.
+- **The mass term is the minimum mass, `StarTarget.RvMinimumMassJupiter`, and not the true mass.** The catalogue publishes both (`mass_sini` and `mass`), they differ wherever some other measurement constrained the inclination, and RV data alone constrains only the first. Precedence: the catalogue's own `mass_sini`; else `mass·sin(i)` when an in-range inclination exists; else `mass` alone, the standard i = 90 assumption. An inclination outside 0-180 deg is treated as malformed input rather than geometry (the export carries `i = -2` on the transiting Wolf 503 b). The total-mass term does take the true mass, which is what it means.
+- **This was wrong until it was checked against the catalogue's own published `k` column**, which the loader used to discard: the single stored mass preferred `mass`, so the formula read a true mass as a minimum mass and inflated K by `1/sin(i)`. 51 Peg b came out at 75.13 m/s against a published 55.77 ± 0.15; it now comes out at 56.66. `RvSimulator` injects this amplitude into every generated measurement, so the simulated data carried it too. `tools/rv-tests` pins it: 34 checks, the headline one being a 120-day simulated HARPS campaign on 51 Peg fitted back by `RvDetector` to 56.6 m/s against the literature 55.8.
 - Mean anomaly: `M = 2π·((ut/P + PlanetPhaseOffset01) mod 1)`.
 - Eccentric anomaly `E`: Newton-Raphson solve of Kepler's equation `M = E - e·sinE`, ≤50 iterations, tolerance 1e-10, starting guess `E₀=M` (good for e<~0.8).
 - True anomaly: `ν = 2·atan(sqrt((1+e)/(1-e))·tan(E/2))`.
@@ -165,6 +167,17 @@ Fits `v(t) = A·cos(ωt) + B·sin(ωt) + C` per trial period via 3×3 normal equ
 - **Search**: `effectiveMaxPeriodDays = min(maxPeriodDays, baseline/2)` (longer periods aren't constrained); 2000-step coarse grid + local fine refinement (200 steps) around the best coarse period.
 - **Multi-planet** (`DetectMultiple`): iterative prewhitening — detect strongest, subtract the fitted sinusoid, repeat on residuals up to 4 planets. `LikelyHarmonicOfPeriodDays` flags (not proves) a candidate within 5% of a 1:1–3:1 integer ratio of a prior detection's period (explicitly: "a flag for the report, not proof either way — real RV surveys face the same call").
 - **Detection threshold**: SNR ≥ 8.0 default; requires ≥10 samples.
+
+### 3.3 Validation (`tools/rv-tests/`)
+
+34 checks, all of them against the catalogue's published `k` column rather than against the mod's own prediction. That distinction is the point: the detector recovering the period the simulator injected proves the two agree, not that either is right, and a wrong K passes every self-consistency test there is. Run with:
+
+```
+cd tools/rv-tests
+dotnet run -p:Core=../../ExoInstruments/Core
+```
+
+Covered: 51 Peg b within 3% of its published K, and 35% away when computed from the true mass; the 78 catalogue entries whose two masses differ by more than 10%, at 3.8% median error against 44.4%; the `mass·sin(i)` projection against `mass_sini` where both exist (0.27% median) and against the published K where only the true mass exists (1.07% against 1.47%); a simulated HARPS campaign fitted back by `RvDetector` to the literature value; and the scope of the correction, that a target whose row carries no geometry is bit-identical to before it. The harness re-reads the CSV itself for the reference values, so they never arrive through the loader under test.
 
 ---
 
@@ -258,7 +271,7 @@ Normalized so the single best upcoming cell = 1.0 (deliberately relative — an 
 
 ### 6.1 Sources
 
-- **exoplanet.eu** CSV/TSV export → `ExoplanetCSVLoader.cs`. Columns consumed: `star_mass, star_radius, star_distance, mag_v/i/j/h/k (fallback chain), orbital_period, radius, ra, dec, star_name/alternate names, planet_status, mass/mass_sini, semi_major_axis, eccentricity, inclination, impact_parameter, omega, star_teff, temp_measured (preferred) / temp_calculated`. Rows missing star mass/radius/distance, or orbital period ≤0, are skipped (counted). Deterministic transit phase offset from a Java-style string hash of the planet name (no real epoch exists in the export).
+- **exoplanet.eu** CSV/TSV export → `ExoplanetCSVLoader.cs`. Columns consumed: `star_mass, star_radius, star_distance, mag_v/i/j/h/k (fallback chain), orbital_period, radius, ra, dec, star_name/alternate names, planet_status, mass, mass_sini, semi_major_axis, eccentricity, inclination, impact_parameter, omega, tperi, k, k_error_min/max, star_teff, temp_measured (preferred) / temp_calculated`. The two mass columns are stored separately, never collapsed: §3.1 for why. `k` is the published semi-amplitude, carried so a recovered value can be compared against the literature rather than against the mod's own prediction, and its asymmetric error bars are collapsed to the larger side. Rows missing star mass/radius/distance, or orbital period ≤0, are skipped (counted). Deterministic transit phase offset from a Java-style string hash of the planet name (no real epoch exists in the export).
 - **Yale Bright Star Catalogue** (BSC5, V/50, Hoffleit & Warren 1991, ~9110 stars complete to V~6.5) via a VizieR TSV query → `BackgroundStarCatalogLoader.cs`. Fixed-width name-field parsing (Flamsteed/Bayer/constellation). No mass/radius/distance data at all (all zeroed — treated as "unknown" everywhere downstream). Teff derived photometrically from B-V color (§6.4), not spectroscopy.
 
 ### 6.2 Merge & deduplication (`StarCatalogMerger.cs`)
@@ -1763,10 +1776,15 @@ Numbered items are referenced elsewhere as "§12 item N". The subsections **§12
 84. **No CCD on this roster has a published persistence amplitude.** *(This entry used to say "no detector", which is no longer true: WFC3/IR's persistence is measured, fitted and running — §13.75. The conclusion survives for the CCDs and the entry is narrowed to them.)* The CCD mechanism is modelled (§7.5166) as a thresholded, density-bounded capture into two surface-trap populations releasing thermally in elapsed time, each part of that shape being what the measurements show rather than a choice. **WFC3/UVIS is the only CCD here that has been tested**, and ISR WFC3 2005-10 found no significant image persistence after highly saturated exposures — carried as a *measured absence*, which is a different fact from an unknown and is flagged separately rather than as another `NaN`. Nothing is published for the IMX492, for FORS2's CCID-20 or for ZIMPOL's CCDs, so those three carry `NaN` and the effect is off. Two real measurements exist on CCDs that are *not* here — WFPC2's 0.3 % ± 0.1 % clearing in 1000 s, and LSSTCam's e2v CCD250 at ~10 e⁻ clearing in over 100 s — and are used to validate the model, never as defaults.
 85. **CCD trap release runs over the exposure's own duration, and the dead time between subs is not part of it.** Charge released while the shutter is shut still lands in the next frame read, so none is lost; what is lost is the distinction between a sequence taken back to back and one with gaps in it, and the pipeline has no cadence model to read a gap from. It biases in the safe direction — a residual is never reported decaying faster than it really does — and it is inert today, every CCD having the effect off (item 84, §7.5166). *The infrared array's persistence does not share this limitation:* its published model is a function of elapsed time since the stimulus, and that clock is carried per pixel and advanced by each exposure's own length (§13.75).
 86. **The count-rate non-linearity's anchor is a convention, not a measurement, and it is the one unpinned constant in the infrared chain.** The slope is measured to sub-percent accuracy — 0.75 % ± 0.06 % per dex over 16 magnitudes (ISR 2019-01) — but the flux level it is measured *relative to* is wherever the photometric zero point was established, and the report states that convention without giving a number: "flux zeropoints are established from standard stars which are about ten astronomical magnitudes (4 dex) brighter than faint, sky-dominated targets." 100 e⁻/s is used, a bright-standard-star rate on this detector sitting 4 dex above a sky-dominated source's ~0.01 e⁻/s, which reproduces exactly the span that sentence describes. Nothing about the effect's *shape* depends on it; it sets where the correction passes through zero, and therefore the absolute zero point of infrared photometry by up to a few tenths of a percent (§13.75).
-87. **WFC3's Channel Select Mechanism is not modelled.** The real instrument can send the beam to the UVIS CCDs or the IR array and switch between them on orbit; here the channel is a persistent field on the part, so a telescope keeps the detector it was built with. Both channels exist and carry the same telescope (§13.75); what is missing is switching between them after launch.
+87. **WFC3's Channel Select Mechanism: closed 2026-08-07.** The "Switch camera" toggle (PAW in flight, observatory panel over the command link) swaps `instrumentName` with `alternateInstrumentName` and everything from the detector inwards follows through the same path a spacecraft change takes: filters reclamped to the new channel's own set, plate scale and zoom range, frame and stack discarded. What remains unmodelled is the mechanism's move time, for which no figure is published (§13.75).
 88. **WFC3/IR's plate scale is anisotropic and one number is carried.** IHB 7.4 measures 0.135 × 0.121 arcsec/pixel, the IR focal plane being tilted with respect to the incoming beam, and this pipeline carries one scale per instrument. The geometric mean is used, which preserves the solid angle per pixel exactly and therefore the sky background; what it does not preserve is the field's real 136 × 123 arcsec shape, which comes out square at 129.6 arcsec. The same limitation as UVIS's item 45, reached by a different route and resolved by a different criterion, for the reason §13.75 gives.
 89. **The two handbooks disagree on the IR focal plane's tilt and neither is derivable from the other.** IHB 7.4 gives 24°, DHB 1.3 gives 22°. Nothing in this pipeline reads the tilt — it enters only through the plate-scale anisotropy, which is measured directly and used directly (item 88) — so the disagreement is recorded rather than resolved, and would have to be resolved before any model of the field's geometric distortion could be built on it.
 94. **The published slew rate and acquisition time are transplanted through a universe time scale, not used literally.** 6 deg/min and 6.5 minutes are HST's real figures, and on a body a tenth of Earth's size they make a ninety-degree repoint cost half an orbit rather than a fifth of one, so a target clear of the limb at the click is occulted on arrival. What is preserved instead is the quantity the constraint exists to represent, the fraction of an orbit spent turning, through the ratio of grazing-orbit periods √(R³/μ) between this universe's home body and Earth. The scale is exactly 1 on a real-scale install, where every figure is then used as published. The literal figures are the sourced ones; the transplant is a stated modelling choice on top of them (§13.65).
+95. **Past the template's last epoch the event is extrapolated, and the extrapolation's three reserves are these.** The magnitude tracks continue linearly at the template's own final slope down to a declared floor of 12 mag below peak, which is the radioactive tail's own functional form (exponential decay is linear in magnitudes) at a measured rate; the spectrum is the last epoch's measurement HELD. Each reserve is a real error: (a) the decline is grey, one slope for every band, where the real per-band tail rates differ by tenths of a mag per 100 d; (b) the frozen shape ignores nebular evolution, so colours stop drifting the day the data ends, and the staleness grows over the months the extrapolation spans; (c) for the Ia the template ends mid-transition at 1.9 mag/100 d, steeper than the measured settled tail (1.4-1.5, Lair et al. 2006, AJ 132, 2024), so the late tail dims somewhat too fast, conservative in the direction of missing light rather than inventing it. The floor itself is a horizon of validity, not physics (13.9).
+96. **SNe IIb are rendered with the Ibc spectral template.** Li's fractions carry them (12% of SNe II) and Richardson's IIb peak magnitude is used, but Nugent publishes no IIb spectral series; a IIb sheds its hydrogen within days of explosion, after which it IS a stripped-envelope spectrum, which is the template used (13.9).
+97. **The host extinction of a supernova enters only through the as-observed peak-magnitude distributions.** No per-event host-dust draw exists, so two events at the same phase in the same galaxy differ in brightness but not in colour, where real host reddening would redden one of them. Drawing a host screen on top of Richardson's as-observed distributions would double-count the dimming (13.9).
+98. **A catalogued "galaxy" brighter than M_B = -23.5 hosts no supernovae, and the rate-size relation is not extrapolated past a factor of ten either side of its fiducial.** Both bounds exist because the census found the model producing 650 supernovae per century in SDSS J102724.35+413820.2, whose B_T and redshift-based modulus imply M_B = -27.8: an active nucleus, whose light is not the stellar population Li's SNuB is quoted per unit of. Three such rows carried a thousand of the catalogue's three thousand events. The luminosity itself is never clamped, only the empirical size correction; what is lost is any real cD galaxy at the very top of the luminosity function, whose rate is now quoted at the edge of the calibrated range rather than beyond it (13.9).
+99. **The supernova DISCOVERY THRESHOLD samples the host's local light as a 5x5 box mean, where the exact quantity is its surface brightness integrated over the detection aperture.** The threshold itself is not approximate: it is `CcdEquation.SignalToNoise`, the same Merline and Howell equation the photometry uses and that tools/photometry-tests cross-validates, carrying the source's own shot noise, the aperture pixel count, the background estimation factor and read noise in quadrature. What the box mean approximates is only the background level fed into it, and it is a detection criterion in the truest sense: no pixel of the image, no FITS value and no photometric measurement is computed from it, so it cannot propagate into anything the frame reports. It exists because sky-only noise called an event sitting on its host's nucleus a 6500 sigma detection while the frame showed nothing (13.9).
 90. **The unloaded telescope's illumination is orbit-averaged, not resolved to where it is in its own eclipse.** A vessel KSP is not simulating has no meaningful instant, and the ledger is advanced across gaps that at high time warp are many orbits, so the sunlit *fraction* is the physically meaningful quantity over any interval longer than one orbit and the only thing about the illumination that is exactly computable from the geometry. It is wrong for intervals shorter than an orbit, in a direction that averages out (§13.65).
 91. **Solar panel output ignores the incidence angle on the panel itself.** The 1/r² falloff against the distance KSP rates panels at is applied; the cosine of the angle between the panel normal and the Sun is not, so a fixed panel bolted at an unhelpful angle produces its full rated output whenever the spacecraft is in sunlight. The panel's orientation is a property of one particular build and of the attitude the telescope is currently holding, and the attitude is exactly what the ground-operations mode is changing (§13.65).
 92. **The eclipse fraction is the circular-orbit expression, evaluated at the semi-major axis.** The relation is exact for a circular orbit and used with `a` rather than the instantaneous radius deliberately, because the quantity is orbit-averaged and feeding it a radius from one point of an eccentric orbit would make the answer depend on when the ledger happened to run. It understates the sunlit fraction for an eccentric orbit, whose apoapsis is eclipsed less than the mean (§13.65).
@@ -1865,13 +1883,33 @@ Two consequences that no resolution would remove:
 **The layer built for it.** `Core/EmissionPatchSet.cs` adds high-resolution patches over the sky where
 a finer survey exists, built by `tools/pack_shassa_patches.py` from **SHASSA** (Gaustad, McCullough,
 Rosing & Van Buren 2001, PASP 113, 1326) — 0.8′ over everything south of +15° declination, at which
-the Horsehead spans 10 elements rather than 1.3.
+the Horsehead spans 10 elements rather than 1.3. North of it, from **NSNS** DR0.2 (S. Ziegenbalg, CC-BY-NC-SA)
+at 6.44″, which is where every famous northern nebula sits.
+
+**Three lines, not one.** A northern patch carries **H-alpha, [O III] 5007 and [S II] 6716** as three
+planes over one shared run geometry; a southern patch carries H-alpha alone, because SHASSA is an
+H-alpha survey. This is what makes a narrowband frame of the Veil an *oxygen* frame rather than a
+recoloured hydrogen one: `Core/NebularLineRatios.cs` derives [N II] and [S II] from H-alpha through
+the warm-ionised-medium relation of Haffner, Reynolds & Tufte (1999), and that relation describes
+photoionised diffuse gas, not the radiative shocks of a supernova remnant. It declines to derive
+[O III] at all, by design, because [O III] needs O++ and does not track H-alpha. Where a measured plane
+exists it is used and the ratio model is not consulted.
 
 Design points, each of which was a decision with an alternative:
 
 * **Patches, not a finer all-sky map.** All-sky at nside 4096 (0.86′) is 201 million cells and 403 MB,
-  nearly all diffuse background 6′ already describes. A degree or two per catalogued object is ~5 MB
-  for the whole catalogue. Outside a patch the base map answers.
+  nearly all diffuse background 6′ already describes. A degree or two per catalogued object is a few
+  MB for the whole catalogue. Outside a patch the base map answers.
+* **Resolution is a property of the patch, not of the file.** A southern patch stays at nside 4096
+  (51″), which matches SHASSA's 47″ beam; storing it finer would resample the same information into
+  four times the bytes. A northern one goes to nside 8192 (25.8″), because NSNS resolves 6.44″ and a
+  single set-wide nside had been throwing away a factor of eight. At 51″ a cell is seven pixels
+  across on a RedCat 51, which is why the northern nebulae rendered as soft lumps rather than
+  filaments.
+* **A cell's value is the MEAN of the cutout over that cell**, not the survey pixel nearest its
+  centre. Sixteen NSNS pixels fall in one cell; a point sample kept one of them, which is aliasing
+  rather than downsampling: it passes the survey's pixel noise through at full amplitude while
+  discarding the structure that should have averaged it down.
 * **Run-length by HEALPix ring.** In RING order a disc cuts each ring in one contiguous stretch, so a
   patch is a few hundred runs rather than a 4-byte pixel index per 2-byte value, which would have
   cost three times the values themselves.
@@ -1888,16 +1926,96 @@ Design points, each of which was a decision with an alternative:
   structure's *amplitude*, reported per patch.
 * **The fine term is apodised to zero across the patch's outer margin**, so a patch joins the base map
   continuously.
+* **The load-time gain correction is band-limited to one degree, and it is a ratio of smoothed
+  fields rather than a smoothed ratio.** `CalibrateAgainst` reconciles each patch with the composite
+  at load. It used to do so per composite cell: divide the group mean by the composite's raw 3.44′
+  cell value and multiply every cell of the group by that. Two things were wrong with it and both
+  were visible.
 
-Validated in `tools/emission-tests`: the shipped reader covers exactly the directions the file does
-over 4000 test positions, and its values agree with an independent read to 5.3×10⁻³ relative — which
-is the Galactic transform's own 3×10⁻⁶ deg accuracy acting on the gradient across a 51″ cell, half
-float precision alone being 4.9×10⁻⁴.
+  It was **piecewise constant**, so the correction stepped at every 206″ boundary and stamped a hard
+  rectangular grid across the map, plainly visible at 15″ per pixel. And it was fitted **finer than
+  the reference resolves**: Finkbeiner's northern sky is WHAM at a one degree beam, so its 3.44′
+  cells there are interpolation, and forcing a 26″ patch onto them cell by cell did not calibrate
+  the patch, it flattened the patch's contrast onto the reference's. Measured on the Veil, the gain
+  was **4.14** on sky under 5 R and **0.59** on filaments over 60 R: it brightened the faint sky
+  fourfold and dimmed the filaments by 40%, undoing at load the entire reason the patch exists.
+  It touches `Values` and never `ExtraValues`, which is why only H-alpha frames showed it while the
+  [O III] and [S II] frames beside them were clean.
 
-**What remains open.** SHASSA stops at +15°, so IC 1396, North America, the Heart, the Soul, the
-Bubble and the Cave stay at 6′; **VTSS** at 1.6′ over the northern plane is the obvious next layer and
-is not built. And even at 0.8′ these are survey images: the result is a nebula rather than a smudge,
-but it is not a two-arcsecond astrophotograph and does not claim to be.
+  Now both terms are brought to a one degree beam first and divided afterwards (a smoothed ratio is
+  unstable: the per-cell ratio diverges wherever the denominator nears the noise floor, and no
+  later smoothing recovers it), and the resulting gain is **interpolated** at each patch cell rather
+  than applied as its containing cell's step. The beam is the coarsest constituent of the composite,
+  not the composite's published 6′, and the choice is measured rather than asserted. Across beams,
+  the ratio of the gain on faint sky to that on bright, which is 1.0 for an honest calibration and
+  rises as the correction erases contrast:
+
+  | beam | 6′ | 10′ | 15′ | 20′ | 30′ | 45′ | 60′ | 90′ |
+  |---|---|---|---|---|---|---|---|---|
+  | flattening | 5.1 | 3.8 | 2.8 | 2.4 | 1.9 | 1.4 | **1.2** | 1.1 |
+  | residual vs composite | 1.9% | 2.1% | 2.4% | 2.8% | 2.6% | 2.4% | **2.6%** | 2.3% |
+
+  The residual is flat across the whole range, so the fine correction bought no accuracy and cost
+  the contrast. On a Veil field the frame's own contrast (99th percentile over median) went from
+  **5.0 to 11.5**. The contract the harness verifies changed with it: it used to compare group means
+  against the very raw cell values the old gain forced them onto, which verified what had just been
+  imposed and could not say whether imposing it was right. The forbidden-line planes are apodised to **zero itself** rather than to the
+  composite: there is no published all-sky [O III] or [S II] map to fall back on, and fading to
+  H-alpha's composite would put hydrogen light in an oxygen frame.
+* **A zero on a forbidden-line plane is a measurement, not a gap.** NSNS's [O III] and [S II] maps
+  arrive background-subtracted, so around half of an empty field is negative through noise alone
+  (VeilEast: 57% of raw [O III] pixels). They are stored **signed**, on each plane's own
+  sigma-clipped sky level rather than on H-alpha's fitted pedestal, and the deposit declines to turn
+  a non-positive surface brightness into photons. Flooring them at zero instead, as the first version
+  did, rectified the noise into a positive bias, and because the reader then read a zero as
+  "not measured" it collapsed the C1 reconstruction onto its C0 fallback and ruled a visible 1′
+  lattice across every [O III] frame.
+
+Validated in `tools/emission-tests`: over 4000 test positions the shipped reader covers every
+direction an independent read can interpolate, and where both take the bilinear path their values
+agree to **9.8×10⁻¹³** relative.
+
+That figure used to be 5.3×10⁻³, and the difference was three confounds in the checker rather than
+anything in the format. It read patch index 0 while the harness sampled a region where IC 434 and
+NGC 2024 overlap, so it was comparing two different measurements of the same sky; it recomputed the
+Galactic direction with a different transform, and 3×10⁻⁶ deg is nothing until it lands that close to
+a cell boundary and selects a different four cells; and it compared its own bilinear result against
+the reader's C1 cubic stencil, which is a different reconstruction by design. The harness now records
+which patch answered, the Galactic direction it used, and which reconstruction it took, and the
+remaining agreement is machine precision.
+
+**What remains open, and one of these is a real defect.**
+
+* **The forbidden-line planes' absolute scale is stated by the survey but not independently
+  verified here.** H-alpha's is verified: every cutout is regressed against the Finkbeiner composite
+  at the composite's own beam, so the survey only has to be linear and correctly shaped. There is no
+  all-sky [O III] or [S II] map to do the same against. What there is, is the survey's own
+  declaration: the NSNS DR0.2 registry records give H-alpha as "background-corrected and
+  intensity-calibrated to Rayleighs using WHAM data", and [O III] and [S II] as "linear intensity and
+  full dynamic range **in Rayleighs**". All three bands are therefore on one stated scale, and
+  applying H-alpha's fitted factor to the other two **preserves the survey's own line ratio**, since
+  numerator and denominator take the same factor. That factor is the NSNS-to-Finkbeiner zero-point
+  transfer, not a guess about the oxygen band.
+* **The line ratio the map produces has not been checked against a fair reference.** Integrated over
+  the Veil field the packed planes give [O III] 5007 / H-alpha = **0.34**, rising to **0.62** over the
+  filaments brighter than 120 R; per pixel the median in those filaments is **0.45 to 0.53**. An
+  earlier revision of this section called that low by a factor of three to eight, against the 1.5 to 4
+  of published slit spectrophotometry of Cygnus Loop radiative filaments (Fesen, Blair & Kirshner
+  1982, ApJ 262, 171; Raymond et al. 1988, ApJ 324, 869). **That comparison was invalid and is
+  withdrawn.** A slit is placed on the brightest, most [O III]-favourable filament and resolves it;
+  a 25.8" beam averages the thin [O III] shock front together with the surrounding sky, and dilutes
+  it far more than it dilutes the thicker H-alpha cooling layer behind it. The two numbers do not
+  measure the same quantity. The valid test is against flux-calibrated **imaging** photometry of the
+  whole remnant at comparable resolution (Levenson et al. 1998, ApJS 118, 541 is the reference for
+  the Cygnus Loop), matched aperture for aperture. **That test has not been run**, so the ratio
+  stands as the survey's, unverified by us, and should not be quoted as a measurement of the object.
+* **The northern rim agreement is poor.** Where a southern patch joins the base map to ~22%, a
+  northern one reaches 233% of the composite's local value at worst (VeilWest). NSNS and Finkbeiner
+  disagree at the rim by more than the crossfade can hide.
+* **nside 8192 still throttles NSNS by a factor of four.** 12.9″ cells would match the survey to
+  within a factor of two, and need HEALPix pixel indices wider than the `int` the run table uses.
+* Even at 25.8″ these are survey images: the result is a nebula rather than a smudge, but it is not a
+  two-arcsecond astrophotograph and does not claim to be.
 
 ### 12.2 Colorimetry, chromatic PSF, and the airglow spectrum
 
@@ -2014,6 +2132,12 @@ as published, or a closed-form consequence of one.
 | Slew rate ceiling | 6°/min × universe time scale | HST Primer, Pointing/Orientation/Roll; cross-checked against its own "about one hour" full circle |
 | Guide-star acquisition | 390 s ÷ universe time scale, independent of the angle | HST Primer, Orbital Visibility, Acquisition Times, and Overheads |
 | Universe time scale | √(R³/μ)⊕ ÷ √(R³/μ)home | preserves repoint time as a fraction of an orbit; exactly 1 on a real-scale install |
+| SN rates per galaxy | SNuB(L0)·(L/L0)^RSS · L, L from B_T and modulus with M_B_sun 5.44 | Li et al. 2011 (LOSS III) Table 4; Willmer 2018 |
+| SN subtype fractions | II-P 70, II-L 10, IIb 12, IIn 9 % of SNe II; Ic 54 % of Ibc | Li et al. 2011 (LOSS II), volume-limited |
+| SN peak magnitudes | Gaussian in M_B per class, mean and sigma as observed | Richardson et al. 2014 Table |
+| SN light and spectra | Nugent spectral time series, every band by integration | Nugent, Kim & Perlmutter 2002; Gilliland, Nugent & Phillips 1999; Levan et al. 2005; Di Carlo et al. 2002 |
+| SN flux anchor | template B peak at drawn M_B via Bessell B; mod-V bridge at 5556 A | Bessell, Castelli & Plez 1998 zero point; the mod's own 948 ph/cm^2/s/A |
+| SN positions in hosts | CC on the bluest measured plane, Ia the reddest; Sersic without a map | Anderson et al. 2012 association |
 | Slew charge | wheels' own published EC rate × manoeuvre time | KSP's own `ModuleReactionWheel` billing rule; game balance, labelled as such |
 | Thruster slew impulse | I = 2Jω_peak/r, m = I/(Isp g₀) | conservation of angular momentum; definition of specific impulse |
 | Eclipsed fraction of an orbit | acos(√(a²−R²)/(a cos β))/π | Vallado; identical term for term to the occultation relation above |
@@ -2625,6 +2749,43 @@ Every band on this instrument lies beyond **830 nm**, the red end of the CIE 193
 
 62 checks. The persistence model is asserted against ISR 2015-15's *own prose statements* rather than against itself: the four trends the report reads out of Table 2 (A rises with exposure time, x₀ and α and γ all fall), the handbook's ~0.3 e⁻/s at 1000 s for a 10⁵ e⁻ fluence and ~0.03 e⁻/s at 10⁴ s, the stated decay slope of about −1 measured at −0.98, and the "< 0.05 e⁻/s below 30 000 e⁻ beyond 500 s" bound. Note that trend 1 is checked at the endpoints and not as monotonicity, because the published fit itself wobbles by 0.001 twice. The IPC kernel is checked cell by cell, for its published sum, for its anisotropy, against Seshadri's independent device, and for a uniform frame staying uniform (which is what proves the edges replicate rather than zero-pad). The catalogue entry is checked against the shipped UVIS one for everything upstream of the channel-select mechanism, and no CCD on the roster may carry infrared-array physics.
 
+### 13.9 Supernovae (`Core/Supernovae.cs`, `Core/SupernovaTemplateSet.cs`, `tools/pack_supernova_templates.py`)
+
+A supernova here is a point source whose spectrum is a measurement: the Nugent spectral time
+series, one full spectrum per phase, packed by `tools/pack_supernova_templates.py` into the
+shipped `PluginData/SupernovaTemplates.sntpl` (0.4 MB). A spectrum per phase is what makes every
+filter right by integration through `SystemResponse.EffectiveWidthAngstromForSpectrum`, the exact
+analogue of the stellar Planck path with the model replaced by data; the harness shows a II-P's
+H-alpha standing 2.3x over its continuum where the Ia shows nothing, which is the classification
+itself (Filippenko 1997) falling out of the photometry.
+
+**The calibration does not invent a scale.** The packer anchors each template's B light curve
+through the Bessell B passband; in game the peak is set to an absolute M_B drawn from Richardson
+et al. (2014), as observed, sigma included. As-observed is what makes host extinction free of
+double counting: those distributions already contain it, so only the foreground Galactic screen
+from the dust map is applied, through the same Fitzpatrick curve the stars use. The bridge from
+that B anchor to the magnitude the mod prices flux with is computed once in the packer from the
+published B zero point and the mod's own 948 photons/cm^2/s/A, so a supernova and a Gaia star sit
+on one flux scale by construction.
+
+**Occurrence is a pure function of one seed.** Rates are Li et al. (2011) Table 4 in SNuB with
+their own rate-size relation, applied to each catalogued galaxy's L_B from its B_T and the
+distance modulus the v2 catalogue now carries (a galaxy without one hosts nothing). Events are
+generated per (seed, host, 200-year block) with an exact Poisson draw, so nothing is persisted
+but the seed and the player's discoveries, and a reload cannot reroll history. The harness
+reproduces Table 4 cell for cell, the rate-size law to 1e-6, and Li's own Milky Way estimate
+within its published error.
+
+**Discovery is the player's photograph, not an announcement.** An undiscovered supernova appears
+nowhere: it is simply a new star in the frame, deposited through the same path as every
+catalogued star (trails included). When a finished frame holds one at five times its own
+per-pixel noise, the discovery fires: designation in the real convention (SN {year}{letters}),
+Science, a chart marker from then on. Timescales are nuclear (56Ni 6.1 d, 56Co 77 d) and are NOT
+scaled to Kerbin's calendar, unlike the slew rate: radioactive decay does not care whose year it
+is. Past the template's last epoch the tracks extrapolate at the template's own final rate down
+to 12 mag below peak, the tail's own linear-in-magnitude form, with the last measured spectrum
+held; section 12 item 95 carries the three reserves that model earns.
+
 ### 13.8 Validation (`tools/spacecraft-tests/`, `tools/slew-tests/`)
 
 92 checks in the first, 58 in the second, none of which test that the code does what the code says. Every assertion is against a
@@ -2663,6 +2824,12 @@ equal-area aperture sampling; frame volume and downlink; and the cosmic-ray deri
 - Biretta, J. et al. (2003). "ACS Background Light vs. Bright Earth Limb Angle." *STScI Instrument Science Report* ACS 2003-05. — Independent measurement of the same effect on ACS; the bound on how far the STIS slope understates it below 16 degrees.
 - Krist, J. & Hook, R. *The Tiny Tim User's Guide*, version 6.3 (2004); Krist, J., Hook, R. & Stoehr, F. (2011). "20 years of Hubble Space Telescope optical modeling using Tiny Tim." *Proc. SPIE* 8127, 81270J. — HST's obscuration set (primary edge, secondary and spider, three mirror support pads) and the `wfc3_uvis1.pup` pupil table: secondary radius 0.330, spider width 0.022, pad radii 0.065 and positions, in pupil-radius units.
 - Leinert, Ch. et al. (1998). "The 1997 reference of diffuse night sky brightness." *A&AS* 127, 1. — **Table 16**, zodiacal light brightness observed from the Earth in S10sun at 500 nm on a grid of helioecliptic longitude against ecliptic latitude, with the ecliptic-pole value in its caption and its own interpolation rule; Sect. 8.4 and Fig. 39 for the reddening relative to the Sun, which is not modelled.
+- Li, W., et al. (2011). "Nearby supernova rates from the Lick Observatory Supernova Search. III." MNRAS 412, 1473, Table 4 (SNuB by Hubble type, rate-size slopes, fiducial sizes); and II., MNRAS 412, 1441 (volume-limited subtype fractions). — The occurrence model, verbatim from the paper's own LaTeX source.
+- Richardson, D., et al. (2014). "Absolute-magnitude distributions of supernovae." AJ 147, 118. — Peak M_B mean and dispersion per class, as observed.
+- Nugent, P., Kim, A., & Perlmutter, S. (2002). PASP 114, 803; Gilliland, Nugent & Phillips (1999), ApJ 521, 30; Levan et al. (2005); Di Carlo et al. (2002), ApJ 573, 144. — The spectral time-series templates, from c3.lbl.gov/nugent.
+- Bessell, M. S., Castelli, F., & Plez, B. (1998). A&A 333, 231, Table A2. — The B zero point the template calibration is anchored through; passband from the SVO Filter Profile Service.
+- Willmer, C. N. A. (2018). ApJS 236, 47. — The Sun's absolute magnitude in Johnson B (+5.44), for galaxy luminosities from B_T and distance modulus.
+- Anderson, J. P., et al. (2012). MNRAS 424, 1372. — The association of core-collapse SNe with their hosts' star-forming light, sampled here as the bluest measured plane.
 - Vallado, D. A. *Fundamentals of Astrodynamics and Applications*. — The circular-orbit cylindrical-shadow fraction against the beta angle, used for the orbit-averaged solar power budget and shown in section 13.65 to be term for term the occultation relation of section 13.2.
 - Wertz, J. R., ed. (1978). *Spacecraft Attitude Determination and Control*, Reidel, Sect. 18.3; Sidi, M. J. (1997). *Spacecraft Dynamics and Control*, Cambridge University Press, ch. 7. — The on-off thruster limit cycle: rate increment per minimum impulse, deadband traversal, and cycle period.
 - Abramowitz, M. & Stegun, I. A. (1964). *Handbook of Mathematical Functions*, Eq. 7.1.26. — Rational approximation to the error function, for the exact pixel integral of the Gaussian PSF component.

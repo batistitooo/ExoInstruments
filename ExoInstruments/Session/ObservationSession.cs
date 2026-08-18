@@ -39,7 +39,11 @@ namespace ExoInstruments.Session
         // (e.g. 6h on 6h-day Kerbin) can never lock every slot into daylight.
         private double nextSampleUt;
 
-        public ObservationSession(StarTarget target, List<StarTarget> systemPlanets, InstrumentSpec instrument, double startUt, ImagingObserverContext observerContext)
+        /// <summary>The seed every noise draw in this campaign came from, so the run can be repeated. See RvObservationSession.RandomSeed for why this exists.</summary>
+        public int RandomSeed { get; }
+
+        public ObservationSession(StarTarget target, List<StarTarget> systemPlanets, InstrumentSpec instrument, double startUt, ImagingObserverContext observerContext,
+            int? randomSeed = null)
         {
             Target = target;
             SystemPlanets = systemPlanets != null && systemPlanets.Count > 0
@@ -51,7 +55,8 @@ namespace ExoInstruments.Session
             LastSampleUt = startUt;
             Samples = new List<FluxSample>();
             IsRunning = true;
-            _rng = new Random();
+            RandomSeed = randomSeed ?? new Random().Next();
+            _rng = new Random(RandomSeed);
             ttvSignals = new TransitTimingVariations.TtvSignal[SystemPlanets.Count];
             for (int i = 0; i < SystemPlanets.Count; i++)
             {

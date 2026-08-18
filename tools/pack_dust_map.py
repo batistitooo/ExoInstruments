@@ -38,6 +38,41 @@ VERSION = 2
 # value everywhere, which is 3e-5 mag at the median sight line and 0.07 at the worst.
 SATURATION_LIMIT = 65504.0    # largest finite binary16
 
+# Where to get SFD98 when dustmaps' own fetch cannot.
+#
+# dustmaps.sfd.fetch() downloads the two maps from Harvard Dataverse by DOI, and Dataverse now sits
+# behind an AWS WAF that answers a plain HTTP client with 202 and an empty body
+# (x-amzn-waf-action: challenge). dustmaps then parses that empty body as JSON and dies with
+# JSONDecodeError, which is what a player sees. dustmaps 1.0.14 is the current release, so there is
+# no upstream fix to wait for.
+#
+# These are the same two files, from the SDSS public mirror that the original IDL dust_getval has
+# pointed at for twenty years. The packer's own sanity checks below still have to pass on whatever
+# arrives, and a map packed from this source is byte-identical to one packed from Dataverse.
+SFD_MIRROR = "https://svn.sdss.org/public/data/sdss/catalogs/dust/trunk/maps/"
+SFD_MIRROR_BYTES = 67115520   # both poles, 4096x4096 float32 plus header
+
+
+def fetch_sfd_from_mirror(quiet=False):
+    """Puts SFD_dust_4096_{ngp,sgp}.fits where dustmaps expects to find them."""
+    import os
+    import urllib.request
+    from dustmaps.std_paths import data_dir
+
+    target = os.path.join(data_dir(), "sfd")
+    os.makedirs(target, exist_ok=True)
+    for pole in ("ngp", "sgp"):
+        name = f"SFD_dust_4096_{pole}.fits"
+        path = os.path.join(target, name)
+        if os.path.exists(path) and os.path.getsize(path) == SFD_MIRROR_BYTES:
+            continue
+        if not quiet:
+            print(f"fetching {name} from the SDSS mirror (64 MB)...", flush=True)
+        urllib.request.urlretrieve(SFD_MIRROR + name, path)
+        size = os.path.getsize(path)
+        if size != SFD_MIRROR_BYTES:
+            raise SystemExit(f"{name} came back {size} bytes, expected {SFD_MIRROR_BYTES}")
+
 
 def build(map_name, nside, quiet=False):
     import numpy as np
@@ -52,7 +87,12 @@ def build(map_name, nside, quiet=False):
         except Exception:                                   # noqa: BLE001
             if not quiet:
                 print("fetching SFD98 (about 150 MB, once)...", flush=True)
-            fetch_sfd()
+            try:
+                fetch_sfd()
+            except Exception as exc:                        # noqa: BLE001
+                if not quiet:
+                    print(f"dustmaps' own download failed ({exc}); using the mirror", flush=True)
+                fetch_sfd_from_mirror(quiet)
             query = SFDQuery()
         # dustmaps' SFDQuery returns SFD's own E(B-V); Schlafly & Finkbeiner's recalibration is
         # the 0.86 factor, applied here rather than left to the reader.

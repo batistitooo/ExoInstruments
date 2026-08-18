@@ -65,6 +65,25 @@ namespace ExoInstruments.Core
         public bool HasPlanet { get; set; } = true;
         public double? PlanetRadiusEarth { get; set; }    // null if unmeasured (typical for RV-only)
         public double? PlanetMassJupiter { get; set; }    // true mass if known, else M*sin(i)
+
+        // The catalog's own mass_sini column, kept separately from PlanetMassJupiter because
+        // the two are different measurements and the RV mass function wants this one. Where a
+        // true mass exists it comes from geometry the RV data does not carry (a transit, or an
+        // astrometric orbit), so it can exceed M*sin(i) by 1/sin(i): 33x on HD 181720 b, whose
+        // orbit is nearly face-on. Feeding that into K would inflate the reflex signal by the
+        // same factor. See EstimatedRvSemiAmplitudeMps.
+        public double? PlanetMinimumMassJupiter { get; set; }
+
+        // Published RV semi-amplitude and its error bar, straight from the catalog's k columns.
+        // Not used by the simulation, which injects its own K: this is the literature value, so
+        // a player's recovered K can be compared against the real measurement.
+        public double? PublishedRvSemiAmplitudeMps { get; set; }
+        public double? PublishedRvSemiAmplitudeErrorMps { get; set; }
+
+        // Time of periastron passage, BJD. Carried for reference only: the simulator has no
+        // real epoch to anchor to (see PlanetPhaseOffset01) because KSP's clock is not BJD.
+        public double? TimeOfPeriastronJd { get; set; }
+
         public double PlanetPeriodDays { get; set; }
         public double? SemiMajorAxisAU { get; set; }       // measured value, when the catalog has one
         public double Eccentricity { get; set; }
@@ -201,6 +220,40 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// Mp*sin(i) in Jupiter masses, the only mass an RV measurement constrains, and so
+        /// the term the mass function below takes. Three cases, in order of evidence:
+        /// the catalog's measured mass_sini; else a true mass projected onto the line of
+        /// sight with a measured inclination; else the true mass alone, the standard i = 90
+        /// assumption, which is what an entry carrying no geometry at all means.
+        ///
+        /// The measured value wins even where it looks wrong. A handful of entries pair an
+        /// inclination near 90 with a mass_sini well below the true mass, which cannot both be
+        /// right. Two of those also carry a published K, and mass_sini is what reproduces it
+        /// (HIP 56640 b: 52.5 m/s against a published 53.4, where the true mass gives 96.8).
+        /// The excess sits in the true mass, not in mass_sini.
+        ///
+        /// The projection is measured too: on the 245 loaded entries carrying mass, mass_sini
+        /// and inclination together, mass*sin(i) reproduces the published mass_sini to a median
+        /// of 0.27%, and exactly where the true mass was derived from mass_sini in the first
+        /// place. It is the one path here with no measurement behind it, so it is used last.
+        /// </summary>
+        public double? RvMinimumMassJupiter
+        {
+            get
+            {
+                if (PlanetMinimumMassJupiter.HasValue && PlanetMinimumMassJupiter.Value > 0)
+                    return PlanetMinimumMassJupiter.Value;
+                if (!PlanetMassJupiter.HasValue || PlanetMassJupiter.Value <= 0) return null;
+                // Out-of-range inclinations are malformed, not measurements: the catalog carries
+                // i = -2 on Wolf 503 b, a transiting planet whose real inclination is near 90.
+                // Projecting onto that would cut its amplitude by 30x.
+                if (!InclinationDeg.HasValue || InclinationDeg.Value < 0.0 || InclinationDeg.Value > 180.0)
+                    return PlanetMassJupiter.Value;
+                return PlanetMassJupiter.Value * Math.Sin(InclinationDeg.Value * Math.PI / 180.0);
+            }
+        }
+
+        /// <summary>
         /// True when there's a real periodic RV signal to look for: a known planet
         /// mass and a well-formed orbit. Retracted entries are always false, same
         /// reasoning as IsTransiting.
@@ -211,29 +264,42 @@ namespace ExoInstruments.Core
             {
                 if (!HasPlanet) return false;
                 if (Status == PlanetStatus.Retracted) return false;
-                if (!PlanetMassJupiter.HasValue || PlanetMassJupiter.Value <= 0) return false;
+                double? mSini = RvMinimumMassJupiter;
+                // Zero only when the orbit is exactly face-on, in which case there is
+                // genuinely no line-of-sight reflex to detect.
+                if (!mSini.HasValue || mSini.Value <= 0) return false;
                 return StellarMassSolar > 0 && PlanetPeriodDays > 0;
             }
         }
 
         /// <summary>
-        /// RV semi-amplitude K from the standard mass-function formula. Depends only
-        /// on Mp*sin(i), which is exactly what PlanetMassJupiter already stores when
-        /// the true mass is unknown; so unlike the transit geometry above, no
-        /// inclination measurement is needed here.
+        /// RV semi-amplitude K from the standard mass-function formula.
         /// K = 28.4329 m/s * (Mp*sini/Mjup) * ((Ms+Mp)/Msun)^(-2/3) * (P/yr)^(-1/3) * (1-e^2)^(-1/2)
+        ///
+        /// The numerator is RvMinimumMassJupiter, never PlanetMassJupiter: the latter prefers
+        /// the true mass when the catalog has one, and reading a true mass as a minimum mass
+        /// overstates K by 1/sin(i). Measured against the catalog's own published k column,
+        /// 51 Peg b lands at 56.7 m/s from mass_sini = 0.46 Mjup against a published
+        /// 55.77 +/- 0.15, and at 75.1 m/s from the true mass of 0.61 Mjup, 35% high.
+        ///
+        /// The total-mass term does take the true mass, which is what it means. It is a 1e-4
+        /// correction on any planet, but the two masses are not interchangeable and using the
+        /// projected one here would be a second, smaller version of the same mistake.
         /// </summary>
         public double EstimatedRvSemiAmplitudeMps
         {
             get
             {
                 if (!IsRvDetectable) return 0.0;
+                // Read once: RvSimulator calls this per generated epoch, and a long campaign
+                // under extreme warp generates a lot of them.
+                double minimumMassJupiter = RvMinimumMassJupiter.Value;
                 double periodYears = PlanetPeriodDays / DaysPerYear;
-                double planetMassSolar = PlanetMassJupiter.Value * JupiterMassInSolarMasses;
-                double totalMassSolar = StellarMassSolar + planetMassSolar;
+                double trueMassJupiter = PlanetMassJupiter ?? minimumMassJupiter;
+                double totalMassSolar = StellarMassSolar + trueMassJupiter * JupiterMassInSolarMasses;
                 double eccFactor = 1.0 / Math.Sqrt(Math.Max(1e-9, 1.0 - Eccentricity * Eccentricity));
                 return RvSemiAmplitudeConstantMps
-                    * PlanetMassJupiter.Value
+                    * minimumMassJupiter
                     * Math.Pow(totalMassSolar, -2.0 / 3.0)
                     * Math.Pow(periodYears, -1.0 / 3.0)
                     * eccFactor;

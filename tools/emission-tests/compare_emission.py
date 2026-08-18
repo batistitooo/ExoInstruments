@@ -252,50 +252,104 @@ def patch_set():
         print(f"  [note] {path} is gone, skipped")
         return
 
+    # EVERY PATCH, KEYED BY INDEX, because the harness records which one answered each direction.
+    # IC 434 and NGC 2024 overlap over most of the sampled field; reading one of them everywhere
+    # compares two different measurements of the same sky and blames the format for the difference.
+    d = np.genfromtxt("exo_patchset.csv", delimiter=",", names=True)
+    wanted = set(int(v) for v in d["patch"] if v >= 0)
+    store = {}
     with open(path, "rb") as f:
-        assert f.read(8) == b"EXOPTCH1", "not a patch set"
-        _, nside = struct.unpack("<ii", f.read(8))
+        assert f.read(8) == b"EXOPTCH3", "not a patch set"
+        _, default_nside = struct.unpack("<ii", f.read(8))
         f.read(1)
         struct.unpack("<d", f.read(8))
         for _ in range(2):
             n, = struct.unpack("<i", f.read(4))
             f.read(n)
-        struct.unpack("<i", f.read(4))
-        nl, = struct.unpack("<i", f.read(4))
-        f.read(nl)
-        ra, dec, radius = struct.unpack("<ddf", f.read(20))
-        nruns, = struct.unpack("<i", f.read(4))
-        runs = [struct.unpack("<ii", f.read(8)) for _ in range(nruns)]
-        total = sum(c for _, c in runs)
-        vals = np.frombuffer(f.read(2 * total), dtype="<f2").astype(np.float64)
+        npatch, = struct.unpack("<i", f.read(4))
+        for pi in range(npatch):
+            nl, = struct.unpack("<i", f.read(4))
+            name = f.read(nl).decode("utf-8")
+            ra, dec, radius = struct.unpack("<ddf", f.read(20))
+            nside, = struct.unpack("<i", f.read(4))       # v3: the patch's own resolution
+            nruns, = struct.unpack("<i", f.read(4))
+            runs = [struct.unpack("<ii", f.read(8)) for _ in range(nruns)]
+            total = sum(c for _, c in runs)
+            nplanes, = struct.unpack("<i", f.read(4))
+            vals = None
+            for q in range(nplanes):
+                m, = struct.unpack("<i", f.read(4))
+                f.read(m)
+                struct.unpack("<d", f.read(8))
+                raw = f.read(2 * total)
+                if q == 0:
+                    vals = np.frombuffer(raw, dtype="<f2").astype(np.float64)
+            if pi not in wanted:
+                continue
+            # A dict of this patch's own cells, not a whole-sky array: nside 8192 would be 805
+            # million cells and 6 GB of mostly-NaN.
+            cell = {}
+            off = 0
+            for start_pix, count in runs:
+                for k in range(count):
+                    cell[start_pix + k] = vals[off + k]
+                off += count
+            store[pi] = (name, radius, nside, nruns, total, cell)
 
-    full = np.full(hp.nside2npix(nside), np.nan)
-    off = 0
-    for start, count in runs:
-        full[start:start + count] = vals[off:off + count]
-        off += count
+    if not store:
+        failures.append("patch set: the harness recorded no covering patch")
+        return
 
-    d = np.genfromtxt("exo_patchset.csv", delimiter=",", names=True)
-    gal = SkyCoord(ra=d["ra_deg"] * u.deg, dec=d["dec_deg"] * u.deg).galactic
-    ref = hp.get_interp_val(full, gal.l.deg, gal.b.deg, nest=False, lonlat=True)
+    ref = np.full(len(d), np.nan)
+    for pi, (_, _, nside, _, _, cell) in store.items():
+        rows = np.flatnonzero(d["patch"].astype(int) == pi)
+        if rows.size == 0:
+            continue
+        pix, wts = hp.get_interp_weights(nside, d["l_deg"][rows], d["b_deg"][rows],
+                                         nest=False, lonlat=True)
+        for k, i in enumerate(rows):
+            acc = 0.0
+            for j in range(4):
+                v = cell.get(int(pix[j, k]))
+                if v is None or not np.isfinite(v):
+                    acc = np.nan
+                    break
+                acc += wts[j, k] * v
+            ref[i] = acc
     covered = d["covered"] > 0.5
     finite = np.isfinite(ref)
+    cubic = d["cubic"] > 0.5
 
-    check("the reader covers exactly the directions the file does",
-          float(np.count_nonzero(covered != finite)), 0.0, 0.0)
+    # COVERAGE IS NOT THE FOUR-NEIGHBOUR RULE. The reader deliberately keeps answering when some
+    # bilinear neighbours are masked, reweighting over the ones that carry a measurement rather than
+    # handing the direction to the base map (see the non-positive rule in EmissionPatchSet). So the
+    # contract is one-directional: everywhere this reference can interpolate, the reader must be
+    # covered too. The reverse is the documented behaviour, not a disagreement.
+    check("the reader covers every direction this reference can interpolate",
+          float(np.count_nonzero(finite & ~covered)), 0.0, 0.0)
+    reweighted = int(np.count_nonzero(covered & ~finite))
 
-    both = covered & finite
+    # Values only where the reader took the same path this reference does. The C1 cubic stencil has
+    # no short independent reimplementation, and comparing it against bilinear would measure the
+    # difference between two reconstructions rather than whether the format was read correctly.
+    both = covered & finite & ~cubic
     if both.sum() == 0:
-        failures.append("patch set: nothing comparable")
+        failures.append("patch set: no bilinear samples to compare")
         return
     rel = np.abs(d["rayleighs"][both] - ref[both]) / np.maximum(1e-9, np.abs(ref[both]))
     # The residual is the Galactic transform's own 3e-6 deg accuracy acting on the gradient across a
     # 51 arcsec cell, not the format: half-float precision alone is 4.9e-4.
     check(f"values over {int(both.sum())} directions, relative", float(rel.max()), 0.0, 1e-2)
-    print(f"  [note] {nruns} run-length rows carry {total} cells over a {radius:.2f} deg radius; "
-          f"values {ref[both].min():.0f} to {ref[both].max():.0f} R")
+    for pi, (name, radius, nside, nruns, total, _) in sorted(store.items()):
+        used = int(np.count_nonzero(d["patch"].astype(int) == pi))
+        print(f"  [note] {name}: {nruns} run-length rows carry {total} cells at nside {nside} over "
+              f"a {radius:.2f} deg radius; answered {used} directions")
+    print(f"  [note] {int(both.sum())} of {int(covered.sum())} covered directions took the bilinear "
+          f"path and are compared; {int(np.count_nonzero(cubic))} took the C1 cubic stencil and are "
+          f"checked for coverage only; {reweighted} were reweighted over masked neighbours")
     notes.append(f"the patch format round-trips to {rel.max():.1e} relative over "
-                 f"{int(both.sum())} directions, with coverage agreeing exactly")
+                 f"{int(both.sum())} bilinear directions, and the reader covers every direction an "
+                 f"independent read can interpolate")
 
 
 def main():

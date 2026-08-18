@@ -140,7 +140,7 @@ namespace ExoInstruments.Core
             {
                 RenderedStar star = stars[i];
 
-                double signal = electronsFor(star);
+                double signal = star.FixedElectrons > 0.0 ? star.FixedElectrons : electronsFor(star);
                 if (signal <= signalCutoffElectrons) continue;
 
                 HorizontalCoordinates startAltAz = SkyCoordinates.EquatorialToHorizontal(

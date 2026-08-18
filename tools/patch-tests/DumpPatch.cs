@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
 using ExoInstruments.Core;
 
@@ -34,7 +35,13 @@ static class DumpPatch
         var sw = Stopwatch.StartNew();
         set.RejectOutliers();
         long rejectMs = sw.ElapsedMilliseconds;
-        set.CalibrateAgainst(composite);
+        // EXO_SKIP_CALIBRATE measures what the packer's own regression achieves on its own. The
+        // contract check below compares group means against the very cell values CalibrateAgainst
+        // forces them onto, so with the step enabled it verifies what it just imposed and cannot
+        // say whether the step was needed.
+        bool skipCalibrate = Environment.GetEnvironmentVariable("EXO_SKIP_CALIBRATE") == "1";
+        if (!skipCalibrate) set.CalibrateAgainst(composite);
+        else Console.WriteLine("(CalibrateAgainst skipped)");
         sw.Stop();
 
         int afterAll = 0;
@@ -50,9 +57,20 @@ static class DumpPatch
         Console.WriteLine($"cost at load: {rejectMs} ms to reject, "
                         + $"{sw.ElapsedMilliseconds - rejectMs} ms to calibrate");
 
-        // The contract, verified: at the composite's own beam the patch must reproduce it.
-        double worst = 0.0;
-        int checkedCells = 0;
+        // THE CONTRACT, AT THE SCALE THE COMPOSITE ACTUALLY RESOLVES. This used to compare each
+        // group's mean against the composite's RAW cell value, which is the very quantity the old
+        // per-cell gain forced them onto: it verified what had just been imposed and could not say
+        // whether imposing it was right. It was not. Finkbeiner's northern sky is WHAM at a one
+        // degree beam, so its 3.44' cells there are interpolation, and matching a 26" patch to them
+        // cell by cell flattened the patch's contrast onto the reference's.
+        //
+        // The honest statement is distributional and at the beam: over cells the composite can
+        // constrain, the patch must agree with it in the median, and the agreement must not depend
+        // on how bright the patch is. A gain that rises on faint sky and falls on bright is
+        // contrast being erased, whatever the mean says.
+        var deviations = new List<double>();
+        var faint = new List<double>();
+        var bright = new List<double>();
         foreach (var patch in set.Patches)
         {
             foreach (var group in set.ComposeGroups(patch, composite.Nside))
@@ -61,12 +79,22 @@ static class DumpPatch
                 if (!(target > 0.0) || group.Value.Count == 0) continue;
                 double sum = 0.0;
                 foreach (double v in group.Value) sum += v;
-                double dev = Math.Abs(sum / group.Value.Count / target - 1.0);
-                if (dev > worst) worst = dev;
-                checkedCells++;
+                double mean = sum / group.Value.Count;
+                deviations.Add(Math.Abs(mean / target - 1.0));
+                if (mean < 5.0) faint.Add(mean / target);
+                else if (mean > 60.0) bright.Add(mean / target);
             }
         }
-        Console.WriteLine($"contract: {checkedCells} composite cells checked, worst departure {worst:E2}");
+        deviations.Sort();
+        faint.Sort();
+        bright.Sort();
+        double Median(List<double> v) => v.Count == 0 ? double.NaN : v[v.Count / 2];
+        Console.WriteLine($"contract at the composite's beam over {deviations.Count} cells: "
+                        + $"median departure {Median(deviations) * 100:F1}%, "
+                        + $"90th percentile {(deviations.Count > 0 ? deviations[(int)(0.9 * (deviations.Count - 1))] * 100 : 0):F1}%");
+        Console.WriteLine($"contrast preserved: patch/composite is {Median(faint):F2} on sky under 5 R "
+                        + $"and {Median(bright):F2} over 60 R "
+                        + $"(ratio {Median(faint) / Median(bright):F1}; 1.0 means the patch kept its own contrast)");
     }
 
     /// <summary>Cells departing from the median of their own neighbours by more than a factor two either way.</summary>

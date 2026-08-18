@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>pairtests</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="CheckGalaxyPair.cs" /><Compile Include="Stub.cs" />
+    <!-- The real shipped Core, nothing re-implemented. -->
+    <Compile Include="$(Core)/ParallelWork.cs" />
+    <Compile Include="$(Core)/GalaxyImageSet.cs" />
+    <Compile Include="$(Core)/GalaxyImageRenderer.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/GalaxyCatalog.cs" />
+    <Compile Include="$(Core)/GalaxyRenderer.cs" />
+    <Compile Include="$(Core)/SersicProfile.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/SystemBandpass.cs" />
+    <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericNoise.cs" />
+    <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/PhotometricDetector.cs" />
+    <Compile Include="$(Core)/CcdEquation.cs" />
+    <Compile Include="$(Core)/DarkCurrentModel.cs" />
+    <Compile Include="$(Core)/DetectionResult.cs" />
+    <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/PhotonFluxModel.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
+  </ItemGroup>
+</Project>

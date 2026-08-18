@@ -93,6 +93,43 @@ instead of starting over; delete that directory to start fresh.
 restricts to a cone (RA, Dec, radius in degrees) instead, which is what the test in
 tools/bandpass-wcs-tests uses and is a quick way to check the pipeline end to end.
 
+    python3 pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --from-cache
+
+repacks from a cache a completed run already downloaded, with no network at all. That is the
+mode to use after a change to this file, and it is separate from the resume above because the
+cache stores only the LEAVES of the source_id subdivision: an ordinary re-run still has to ask
+the archive for every COUNT before it can tell that a range was ever subdivided, which is hours
+of queries to produce a file it already has the rows for. --from-cache first checks the cached
+slices tile the whole sky and refuses if they do not, since a cache with a hole packs a sky
+with a hole. Adding --cone to it cuts a small test catalogue out of the same rows.
+
+    python3 pack_gaia_catalog.py --reindex old.starcat --out fixed.starcat
+
+repairs the declination index of a catalogue that already exists, keeping every record exactly
+as it is and changing only their order and the offset table. Every star carries its own
+declination, so a file whose index is wrong can be rebuilt from itself in seconds, which beats
+re-downloading hours of Gaia to recover numbers already on the disk. It is also the only way
+back when the cache that built the file is gone or predates a column.
+
+WHAT THE INDEX IS AND WHY IT IS CHECKED
+---------------------------------------
+Stars are stored sorted into 0.1 degree declination bands, and RenderedStarCatalog.Search reads
+ONLY the bands the requested cone overlaps. That makes a wrong band index the quietest possible
+failure: the file loads, reports its full star count, decodes every record correctly, and returns
+nothing from every search, so the sky renders empty with no error logged anywhere and an empty
+frame looks exactly like a genuinely empty field.
+
+Version 3 shipped in that state. The reddening column was inserted into the middle of the tuple
+the band sort read from, which moved the declination from index 4 to index 5 while the sort went
+on reading index 4, so the catalogue was binned by REDDENING: 91 of 1800 bands held anything and
+4.87 million stars, two thirds of the file, sat in the band at dec +89.9. The record for every
+star was correct. Nothing threw. Every star field was empty.
+
+So the index is now built in one place, checked against every star's own declination before
+anything is written, and the packer refuses to write a file that fails. tools/bandpass-wcs-tests
+additionally measures the density of a cone toward the Galactic centre on the installed
+catalogue, which is the check that would have caught this the day it appeared.
+
 Then copy the result to:
     <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat
 
@@ -109,6 +146,7 @@ That is the only star catalogue the renderer looks for. See the README.
 """
 
 import argparse
+import collections
 import csv
 import getpass
 import http.client
@@ -116,6 +154,7 @@ import http.cookiejar
 import io
 import math
 import os
+import re
 import struct
 import sys
 import time
@@ -216,6 +255,16 @@ def reddening_milli(a0):
     return EBV_UNKNOWN if milli >= EBV_UNKNOWN else milli
 
 
+# One star, NAMED rather than positional. It is named because the version-3 reddening column
+# was inserted into the middle of a plain tuple, which silently moved dec_deg from index 4 to
+# index 5 while the band sort still read index 4. The catalogue was then binned by REDDENING:
+# 91 of 1800 bands held anything, 4.87M stars sat in the band at dec +89.9 (the E(B-V) sentinel),
+# every cone search found nothing, and every star field rendered empty with no error anywhere.
+# Field access by name cannot repeat that.
+PackedStar = collections.namedtuple(
+    "PackedStar", "ra_fixed dec_fixed v_milli bv_milli ebv_milli dec_deg")
+
+
 def build_star(ra, dec, g, bp_rp, a0=None):
     """One packed record, or None when the row carries no usable position/magnitude."""
     if ra is None or dec is None or g is None:
@@ -245,7 +294,7 @@ def build_star(ra, dec, g, bp_rp, a0=None):
 
     ra_fixed = int(round((ra % 360.0) * RA_SCALE)) % (2 ** 32)
     dec_fixed = max(-(2 ** 31), min(2 ** 31 - 1, int(round(dec * DEC_SCALE))))
-    return (ra_fixed, dec_fixed, v_milli, bv_milli, reddening_milli(a0), dec)
+    return PackedStar(ra_fixed, dec_fixed, v_milli, bv_milli, reddening_milli(a0), dec)
 
 
 # --- ESA archive access, with no third-party dependency -------------------------------
@@ -391,6 +440,113 @@ def cache_path(cache_dir, gmax, lo, hi):
     return os.path.join(cache_dir, f"g{gmax}_{lo}_{hi}.csv")
 
 
+# --- The declination band index -------------------------------------------------------
+# Every cone search stands on this. RenderedStarCatalog.Search reads ONLY the bands the
+# requested cone's declination range overlaps, so a star filed under the wrong band is a
+# star that no search can ever return, and a whole catalogue filed wrongly renders an empty
+# sky. Nothing throws: the file loads, reports its full star count, and decodes every record
+# correctly. That is why the index is both built and checked here, in one place.
+
+def band_of(dec_deg):
+    """The declination band a star belongs to. Takes DEGREES, and nothing else."""
+    return min(DEC_BAND_COUNT - 1, max(0, int((dec_deg + 90.0) / DEC_BAND_WIDTH_DEG)))
+
+
+def build_band_index(stars):
+    """Orders the stars by band and returns the offset table the reader indexes with.
+
+    Sorted by band, then by the raw fixed-point RA, which is monotonic in RA, so the runtime
+    binary-searches the integers directly.
+
+    The key carries the WHOLE record (s[:5] begins with ra_fixed, so the RA ordering is the same
+    one) rather than stopping at the RA. Two stars can share a band and a fixed-point RA, and a
+    key that stops there leaves their order to Python's stable sort, which means to the order the
+    rows happened to arrive in: repacking the same stars from a different source then produces a
+    file that differs in a couple of bytes for no reason anyone can see. Both files are correct,
+    which is exactly what makes the difference expensive to chase. Sorting on the full record
+    makes the output depend only on the set of stars, so a rebuild is byte-reproducible and a
+    diff against a known-good catalogue means something.
+    """
+    stars.sort(key=lambda s: (band_of(s.dec_deg), s[:5]))
+
+    counts = [0] * DEC_BAND_COUNT
+    for s in stars:
+        counts[band_of(s.dec_deg)] += 1
+
+    band_start = [0] * (DEC_BAND_COUNT + 1)
+    total = 0
+    for b in range(DEC_BAND_COUNT):
+        band_start[b] = total
+        total += counts[b]
+    band_start[DEC_BAND_COUNT] = total
+    return band_start
+
+
+def band_index_fault(stars, band_start):
+    """Names what is wrong with a freshly built index, or returns None when it is sound.
+
+    This is the exact check, not a heuristic: it re-derives every star's band from that star's
+    own declination and compares it with the slot the index actually put it in. It is O(n) over
+    data already in memory, which is nothing against the hours the download took, and it holds
+    for a --cone build as well as an all-sky one.
+    """
+    if band_start[DEC_BAND_COUNT] != len(stars):
+        return (f"the band offsets end at {band_start[DEC_BAND_COUNT]} but there are "
+                f"{len(stars)} stars")
+
+    band = 0
+    previous_ra = -1
+    for i, s in enumerate(stars):
+        while band < DEC_BAND_COUNT - 1 and i >= band_start[band + 1]:
+            band += 1
+            previous_ra = -1
+        belongs = band_of(s.dec_deg)
+        if belongs != band:
+            return (f"star {i} at dec {s.dec_deg:.4f} deg is indexed under band {band} "
+                    f"(dec {-90.0 + band * DEC_BAND_WIDTH_DEG:.1f}) but belongs in band {belongs}. "
+                    "No cone search would ever reach it")
+        if s.ra_fixed < previous_ra:
+            return f"star {i} breaks the RA ordering inside band {band}, so the binary search is invalid"
+        previous_ra = s.ra_fixed
+    return None
+
+
+def header_band_fault(path):
+    """The same question asked of a FINISHED file, from its header alone.
+
+    Cheap enough to run on any .starcat before installing it: it reads the offset table and
+    nothing else. It cannot re-derive the true bands without the records, so it asks the
+    statistical question instead. A real all-sky catalogue fills essentially every band, since
+    even the poles hold some stars, and no single 0.1 degree strip can hold a large share of the
+    sky. The broken build failed both halves at once: 91 of 1800 bands populated, and 66% of the
+    file in one band.
+
+    Returns a sentence naming the problem, or None. Only meaningful for an ALL-SKY catalogue: a
+    --cone build legitimately touches a handful of bands.
+    """
+    with open(path, "rb") as f:
+        if f.read(len(MAGIC)) != MAGIC:
+            return "not an ExoInstruments packed star catalogue"
+        version, count = struct.unpack("<II", f.read(8))
+        band_count, band_width = struct.unpack("<If", f.read(8))
+        if count == 0 or band_count == 0:
+            return None
+        band_start = struct.unpack(f"<{band_count + 1}I", f.read(4 * (band_count + 1)))
+
+    populated = sum(1 for b in range(band_count) if band_start[b + 1] > band_start[b])
+    sizes = [(band_start[b + 1] - band_start[b], b) for b in range(band_count)]
+    biggest, biggest_band = max(sizes)
+    share = biggest / count
+    if populated >= band_count // 4 and share < 0.10:
+        return None
+
+    return (f"the declination index is broken: {populated} of {band_count} bands hold anything, "
+            f"and {biggest:,} stars ({share:.0%} of the file) sit in one band at dec "
+            f"{-90.0 + biggest_band * band_width:.1f} deg. Every cone search reads only the bands "
+            "its field overlaps, so this renders an EMPTY sky with no error, here and in the game. "
+            "Rebuild it with tools/pack_gaia_catalog.py.")
+
+
 def with_retries(what, action):
     """
     Repeat a whole TAP job through a refusal the archive may not repeat.
@@ -429,6 +585,9 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
     """
     cached = cache_path(cache_dir, gmax, lo, hi)
     if os.path.exists(cached):
+        fault = cache_columns_fault(cached)
+        if fault:
+            raise SystemExit(fault)
         with open(cached) as f:
             rows = list(csv.DictReader(f))
         print(f"      cached: {len(rows)} rows", flush=True)
@@ -457,9 +616,95 @@ def fetch_range(gmax, lo, hi, columns, cache_dir, depth=0):
     yield list(csv.DictReader(io.StringIO(text)))
 
 
-def fetch(gmax, cone, slices, cache_dir):
+# Every column the CURRENT format needs. A cache written before one of these was added is not a
+# usable cache: the missing column reads as empty for every row, which build_star turns into a
+# legitimate "not measured" sentinel rather than an error, so the repack succeeds and quietly
+# ships a catalogue with a whole column blank. That is not hypothetical. The cache left over from
+# the version-2 build holds only ra, dec, phot_g_mean_mag and bp_rp, and repacking version 3 from
+# it produced 7,369,627 stars with no reddening estimate at all, against 62.6% that carry one.
+REQUIRED_COLUMNS = ("ra", "dec", "phot_g_mean_mag", "bp_rp", "ag_gspphot")
+
+
+def cache_columns_fault(path):
+    """Names a cached slice written before a column this format needs, or None when it is usable."""
+    with open(path) as f:
+        present = {c.strip() for c in f.readline().strip().split(",")}
+    missing = [c for c in REQUIRED_COLUMNS if c not in present]
+    if not missing:
+        return None
+    return (f"{os.path.basename(path)} was downloaded without {', '.join(missing)}, so it predates "
+            f"catalogue version {VERSION}. Every row in it would pack as 'not measured' for that "
+            "column, silently, and the result would look like a complete catalogue. Delete the "
+            "cache directory and download again.")
+
+
+def cached_ranges(cache_dir, gmax):
+    """Every completed slice on disk, checked to tile the whole source_id space exactly.
+
+    A cache with a hole in it packs a sky with a hole in it, which is the same silent failure
+    as a bad band index: the file loads, reports a plausible count, and a wedge of sky is simply
+    absent. So this verifies the ranges are contiguous from 0 to SOURCE_ID_MAX and refuses to
+    proceed otherwise, rather than packing whatever happens to be there.
+    """
+    pattern = re.compile(r"^g" + re.escape(str(gmax)) + r"_(\d+)_(\d+)\.csv$")
+    ranges = sorted((int(m.group(1)), int(m.group(2)), os.path.join(cache_dir, m.group(0)))
+                    for m in (pattern.match(n) for n in os.listdir(cache_dir)) if m)
+    if not ranges:
+        raise SystemExit(f"--from-cache: no completed g{gmax} slices in {cache_dir}")
+
+    covered = 0
+    for lo, hi, name in ranges:
+        if lo != covered:
+            gap = "overlaps" if lo < covered else "leaves a gap before"
+            raise SystemExit(f"--from-cache: {os.path.basename(name)} {gap} the slice before it. "
+                             "The cache is not a complete tiling of the sky, so it would pack a "
+                             "catalogue with a wedge missing. Finish the run online first.")
+        covered = hi
+    if covered != SOURCE_ID_MAX:
+        raise SystemExit(f"--from-cache: the cache covers source_id up to {covered}, not "
+                         f"{SOURCE_ID_MAX}. The download is incomplete; finish it online first.")
+
+    for lo, hi, name in ranges:
+        fault = cache_columns_fault(name)
+        if fault:
+            raise SystemExit(f"--from-cache: {fault}")
+    return ranges
+
+
+def within_cone(row, cone):
+    """True when a cached row falls inside the requested cone."""
+    ra_deg, dec_deg, radius = cone[0], cone[1], cone[2]
+    try:
+        ra, dec = float(row["ra"]), float(row["dec"])
+    except (TypeError, ValueError):
+        return False
+    d0, d1 = math.radians(dec_deg), math.radians(dec)
+    separation = math.sin(d0) * math.sin(d1) + math.cos(d0) * math.cos(d1) * \
+        math.cos(math.radians(ra - ra_deg))
+    return separation >= math.cos(math.radians(radius))
+
+
+def fetch(gmax, cone, slices, cache_dir, from_cache=False):
     """Rows from the ESA archive, in source_id slices small enough for one job each."""
     columns = "ra, dec, phot_g_mean_mag, bp_rp, ag_gspphot"
+
+    if from_cache:
+        # No network at all. The cache already holds every row a completed run downloaded, so
+        # rebuilding after a packer fix costs minutes rather than the hours the download did.
+        # This is not a nicety: the resumable cache only stores the LEAVES of the subdivision,
+        # so an ordinary re-run still has to ask the archive for every COUNT before it knows a
+        # range was subdivided, and a rebuild that needs the network is a rebuild people skip.
+        ranges = cached_ranges(cache_dir, gmax)
+        print(f"  {len(ranges)} cached slices tiling the whole sky; no network")
+        for i, (lo, hi, path) in enumerate(ranges):
+            with open(path) as f:
+                rows = list(csv.DictReader(f))
+            if cone:
+                rows = [r for r in rows if within_cone(r, cone)]
+            print(f"  cached slice {i + 1}/{len(ranges)}: {len(rows)} rows", flush=True)
+            yield rows
+        return
+
     if cone:
         ra, dec, radius = cone
         print(f"  cone {ra} {dec} r={radius} deg, G < {gmax}", flush=True)
@@ -478,9 +723,99 @@ def fetch(gmax, cone, slices, cache_dir):
         yield from fetch_range(gmax, lo, hi, columns, cache_dir)
 
 
+def write_catalogue(out, stars, all_sky=True):
+    """Indexes, checks and writes the catalogue. Returns a process exit status.
+
+    The only writer of this format, so the index every reader depends on is built and checked in
+    exactly one place.
+    """
+    band_start = build_band_index(stars)
+
+    # Checked BEFORE anything is written, because an unwritten file is a visible failure and a
+    # wrongly indexed one is not: it loads, counts right, decodes right, and renders nothing.
+    fault = band_index_fault(stars, band_start)
+    if fault:
+        print(f"refusing to write {out}: {fault}", file=sys.stderr)
+        return 1
+
+    with open(out, "wb") as f:
+        f.write(MAGIC)
+        f.write(struct.pack("<II", VERSION, len(stars)))
+        f.write(struct.pack("<If", DEC_BAND_COUNT, DEC_BAND_WIDTH_DEG))
+        f.write(struct.pack(f"<{DEC_BAND_COUNT + 1}I", *band_start))
+        record = struct.Struct("<IiHhH")
+        f.write(b"".join(
+            record.pack(s.ra_fixed, s.dec_fixed, s.v_milli, s.bv_milli, s.ebv_milli)
+            for s in stars))
+
+    size_mb = os.path.getsize(out) / (1024 * 1024)
+    no_colour = sum(1 for s in stars if s.bv_milli == BV_UNKNOWN)
+    no_reddening = sum(1 for s in stars if s.ebv_milli == EBV_UNKNOWN)
+    populated = sum(1 for b in range(DEC_BAND_COUNT) if band_start[b + 1] > band_start[b])
+    biggest = max(band_start[b + 1] - band_start[b] for b in range(DEC_BAND_COUNT))
+    print(f"{len(stars)} stars -> {out} ({size_mb:.1f} MB), {no_colour} without a colour index, "
+          f"{no_reddening} without a reddening estimate")
+    print(f"declination index: {populated} of {DEC_BAND_COUNT} bands populated, "
+          f"largest band {biggest} stars")
+    if all_sky:
+        # The all-sky shape check as well, so this and setup_data.py agree on what a good file
+        # looks like rather than each trusting a different rule.
+        shape = header_band_fault(out)
+        if shape:
+            print(f"refusing to keep {out}: {shape}", file=sys.stderr)
+            os.remove(out)
+            return 1
+    print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat")
+    return 0
+
+
+def reindex(path, out):
+    """Rewrites an existing catalogue with a correct declination index, keeping every record.
+
+    WHY THIS IS WORTH A MODE. The band index is derived entirely from data already in the file:
+    every record carries its own declination, so a catalogue whose index is wrong can be repaired
+    from itself, exactly, in seconds. The alternative is re-downloading hours of Gaia to recover
+    numbers that are already on the disk, and where the cache that produced the file is gone or
+    predates a column, re-downloading does not even reproduce it.
+
+    The records are untouched. Only their ORDER and the offset table change.
+
+    Bands are recomputed from the DECODED declination rather than from the original catalogue's
+    float, which is the value the reader itself bands by, so the index and the reader cannot
+    disagree about a star sitting on a boundary.
+    """
+    with open(path, "rb") as f:
+        if f.read(len(MAGIC)) != MAGIC:
+            raise SystemExit(f"--reindex: {path} is not an ExoInstruments packed star catalogue")
+        version, count = struct.unpack("<II", f.read(8))
+        band_count, band_width = struct.unpack("<If", f.read(8))
+        f.read(4 * (band_count + 1))     # the old index, which is exactly what is being replaced
+        payload = f.read()
+
+    if version > VERSION:
+        raise SystemExit(f"--reindex: {path} is version {version}, newer than this packer writes")
+    if band_count != DEC_BAND_COUNT or abs(band_width - DEC_BAND_WIDTH_DEG) > 1e-6:
+        raise SystemExit(f"--reindex: {path} is banded {band_count} x {band_width} deg, not "
+                         f"{DEC_BAND_COUNT} x {DEC_BAND_WIDTH_DEG}")
+
+    record = struct.Struct("<IiHhH" if version >= 3 else "<IiHh")
+    if len(payload) != count * record.size:
+        raise SystemExit(f"--reindex: {path} holds {len(payload)} bytes of records, not the "
+                         f"{count * record.size} its header claims. It is truncated.")
+
+    stars = [PackedStar(r[0], r[1], r[2], r[3], r[4] if version >= 3 else EBV_UNKNOWN,
+                        r[1] / DEC_SCALE)
+             for r in record.iter_unpack(payload)]
+    print(f"Reindexing {count} stars from {path} (version {version})")
+    if version < VERSION:
+        print(f"  version {version} carries no reddening column, so it is written as version "
+              f"{VERSION} with every star's E(B-V) unmeasured, which is what it already was")
+    return write_catalogue(out, stars, all_sky=True)
+
+
 def main():
     p = argparse.ArgumentParser(description="Pack Gaia DR3 into ExoInstruments' star catalogue format.")
-    p.add_argument("--gmax", type=float, required=True, help="faint limit in Gaia G (see the depth table in this file's docstring)")
+    p.add_argument("--gmax", type=float, help="faint limit in Gaia G (see the depth table in this file's docstring)")
     p.add_argument("--out", required=True, help="output .bin path")
     p.add_argument("--slices", type=int, default=48, help="source_id slices to split the query into; each is subdivided further if the archive refuses it")
     p.add_argument("--user", help="ESA archive username. Strongly recommended: anonymous access "
@@ -489,9 +824,22 @@ def main():
     p.add_argument("--cache", help="directory for completed slices, so a restart resumes (default: <out>.cache)")
     p.add_argument("--cone", nargs=3, type=float, metavar=("RA", "DEC", "RADIUS"),
                    help="restrict to a cone in degrees, for testing the pipeline end to end")
+    p.add_argument("--from-cache", action="store_true",
+                   help="repack from an already-downloaded cache without touching the network. "
+                        "Refuses to run unless the cached slices tile the whole sky.")
+    p.add_argument("--reindex", metavar="CATALOGUE",
+                   help="rebuild the declination index of an existing catalogue into --out, "
+                        "keeping every record. Repairs a mis-indexed file without re-downloading.")
     args = p.parse_args()
 
-    if args.user:
+    if args.reindex:
+        return reindex(args.reindex, args.out)
+    if args.gmax is None:
+        p.error("--gmax is required unless --reindex is given")
+
+    if args.from_cache:
+        print("Repacking from the local cache; the ESA archive is not contacted.")
+    elif args.user:
         login(args.user)
     else:
         print("No --user given, so this runs anonymously. Expect ranges that fail at ~2 minutes "
@@ -502,7 +850,7 @@ def main():
     cache_dir = args.cache or (args.out + ".cache")
     os.makedirs(cache_dir, exist_ok=True)
     print(f"Resumable cache: {cache_dir} (delete it to start over)")
-    for table in fetch(args.gmax, args.cone, args.slices, cache_dir):
+    for table in fetch(args.gmax, args.cone, args.slices, cache_dir, args.from_cache):
         for row in table:
             def value(name):
                 v = row.get(name)
@@ -523,38 +871,7 @@ def main():
         print("no usable rows returned", file=sys.stderr)
         return 1
 
-    def band_of(dec):
-        return min(DEC_BAND_COUNT - 1, max(0, int((dec + 90.0) / DEC_BAND_WIDTH_DEG)))
-
-    # Sorted by band, then by the raw fixed-point RA, which is monotonic in RA, so the
-    # runtime binary-searches the integers directly.
-    stars.sort(key=lambda s: (band_of(s[4]), s[0]))
-
-    band_start = [0] * (DEC_BAND_COUNT + 1)
-    counts = [0] * DEC_BAND_COUNT
-    for s in stars:
-        counts[band_of(s[4])] += 1
-    total = 0
-    for b in range(DEC_BAND_COUNT):
-        band_start[b] = total
-        total += counts[b]
-    band_start[DEC_BAND_COUNT] = total
-
-    with open(args.out, "wb") as f:
-        f.write(MAGIC)
-        f.write(struct.pack("<II", VERSION, len(stars)))
-        f.write(struct.pack("<If", DEC_BAND_COUNT, DEC_BAND_WIDTH_DEG))
-        f.write(struct.pack(f"<{DEC_BAND_COUNT + 1}I", *band_start))
-        record = struct.Struct("<IiHhH")
-        f.write(b"".join(record.pack(s[0], s[1], s[2], s[3], s[4]) for s in stars))
-
-    size_mb = os.path.getsize(args.out) / (1024 * 1024)
-    no_colour = sum(1 for s in stars if s[3] == BV_UNKNOWN)
-    no_reddening = sum(1 for s in stars if s[4] == EBV_UNKNOWN)
-    print(f"{len(stars)} stars -> {args.out} ({size_mb:.1f} MB), {no_colour} without a colour index, "
-          f"{no_reddening} without a reddening estimate")
-    print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat")
-    return 0
+    return write_catalogue(args.out, stars, all_sky=not args.cone)
 
 
 if __name__ == "__main__":

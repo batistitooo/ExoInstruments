@@ -248,7 +248,7 @@ namespace ExoInstruments
         private const string DebugConsoleCommand = "exoinstruments_debug";
         private const string InputLockId = "ExoInstrumentsObservatoryLock";
 
-        // R_sun / R_earth — converts a transit depth into an estimated planet radius.
+        // R_sun / R_earth, which converts a transit depth into an estimated planet radius.
         private const double SolarRadiusToEarthRadii = 109.2;
 
         private readonly SolarSystemCameraTexture solarSystemCamera = new SolarSystemCameraTexture();
@@ -458,8 +458,18 @@ namespace ExoInstruments
                 // composite says, which is what leaves no seam anywhere, including at its rim.
                 set.RejectOutliers();
                 set.CalibrateAgainst(SolarSystemCameraTexture.EmissionMap);
-                Debug.Log($"[ExoInstruments] Emission patches: {set.PatchCount} regions at nside {set.Nside} "
-                        + $"({set.ResolutionArcmin:F2} arcmin), {set.Source}"
+                // Patches carry their own resolution now, so quote the range rather than one number.
+                double finest = double.MaxValue, coarsest = 0.0;
+                foreach (EmissionPatchSet.Patch p in set.Patches)
+                {
+                    double a = EmissionPatchSet.PatchResolutionArcmin(p) * 60.0;
+                    if (a > 0.0 && a < finest) finest = a;
+                    if (a > coarsest) coarsest = a;
+                }
+                string beamText = finest < double.MaxValue && coarsest > finest
+                    ? $"{finest:F0} to {coarsest:F0} arcsec"
+                    : $"{set.ResolutionArcmin * 60.0:F0} arcsec";
+                Debug.Log($"[ExoInstruments] Emission patches: {set.PatchCount} regions at {beamText}, {set.Source}"
                         + (set.RejectedCells > 0
                             ? $" | {set.RejectedCells} outlier cells rejected"
                             : "")
@@ -493,6 +503,12 @@ namespace ExoInstruments
                            ? $" | {catalog.RejectedAsImplausible} row(s) dropped: brighter than "
                              + $"{GalaxyCatalog.ImplausibleSurfaceBrightnessB:F0} B-mag/arcsec^2 inside D25, "
                              + "which no galaxy is"
+                           : "")
+                        + (catalog.ColoursRejectedAsImplausible > 0
+                           ? $" | {catalog.ColoursRejectedAsImplausible} B-V colour(s) outside "
+                             + $"[{GalaxyCatalog.BluestPlausibleColourBv:F1}, "
+                             + $"{GalaxyCatalog.ReddestPlausibleColourBv:F1}], which no galaxy has, "
+                             + "replaced by the type mean"
                            : ""));
             }
             catch (Exception e)
@@ -531,6 +547,28 @@ namespace ExoInstruments
             catch (Exception e)
             {
                 Debug.LogError($"[ExoInstruments] Failed to load the galaxy shape maps: {e.Message}");
+            }
+
+            string templatePath = KSPUtil.ApplicationRootPath
+                                + "GameData/ExoInstruments/PluginData/SupernovaTemplates.sntpl";
+            try
+            {
+                if (System.IO.File.Exists(templatePath))
+                {
+                    SolarSystemCameraTexture.SupernovaTemplates = Core.SupernovaTemplateSet.Load(templatePath);
+                    Debug.Log("[ExoInstruments] Supernova templates: "
+                            + SolarSystemCameraTexture.SupernovaTemplates.Source);
+                }
+                else
+                {
+                    Debug.Log("[ExoInstruments] No supernova templates at " + templatePath
+                            + "; supernovae are disabled. Ship-installed builds carry the file; "
+                            + "tools/pack_supernova_templates.py rebuilds it.");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExoInstruments] Failed to load the supernova templates: {e.Message}");
             }
         }
 
@@ -598,6 +636,9 @@ namespace ExoInstruments
             // Apply whatever the background render Tasks finished since last
             // frame, cheap (an IsCompleted check, at most a texture upload),
             // safe to do every frame regardless of which session is active.
+            SolarSystemCameraTexture.SupernovaSeed =
+                ExoInstrumentsScenario.Instance != null ? ExoInstrumentsScenario.Instance.SupernovaSeed : 0;
+
             PollImagingRenderTask();
             PollSkyChartRenderTask();
             // After the poll: a completed refresh replaces the points this raster reads, and if it
@@ -609,6 +650,12 @@ namespace ExoInstruments
             PollTransitAnalysisTask();
             PollRvAnalysisTask();
             BetterTimeWarpIntegration.PollRestore();
+            // Discovery is checked on the TRANSITION to a finished photo: the sightings list
+            // belongs to that frame, and rechecking every Update would re-toast every pass.
+            bool hasPhotoNow = solarSystemCamera != null && solarSystemCamera.HasCapturedPhoto;
+            if (hasPhotoNow && !hadCapturedPhotoLastUpdate) CheckSupernovaDiscoveries();
+            hadCapturedPhotoLastUpdate = hasPhotoNow;
+
             if (windowVisible && SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography)
             {
                 solarSystemCamera.TickCapture(Time.deltaTime);
@@ -1459,7 +1506,15 @@ namespace ExoInstruments
             GUILayout.Label($"Stellar radius: {target.RadiusSolar:F3} R_sun   Stellar mass: {target.StellarMassSolar:F3} M_sun");
             if (target.PlanetMassJupiter.HasValue)
             {
-                GUILayout.Label($"Planet mass (min): {target.PlanetMassJupiter.Value:F3} M_jup");
+                // The card used to label the true mass "(min)", which is a different quantity
+                // and is what the RV amplitude used to be computed from. Both are shown when
+                // the catalog has both, because the gap between them IS the unknown inclination.
+                double? mSini = target.PlanetMinimumMassJupiter;
+                bool haveBoth = mSini.HasValue && Math.Abs(mSini.Value - target.PlanetMassJupiter.Value) > 1e-9;
+                string massLine = haveBoth
+                    ? $"Planet mass: {target.PlanetMassJupiter.Value:F3} M_jup   (Mp*sin i: {mSini.Value:F3} M_jup)"
+                    : $"Planet mass (min): {target.PlanetMassJupiter.Value:F3} M_jup";
+                GUILayout.Label(massLine);
             }
             // Activity is knowable for an identified target (real surveys read it
             // off archival photometry / Ca II indices), and it tells the player
@@ -2107,6 +2162,28 @@ namespace ExoInstruments
             // Observability strip: always visible.
             DrawPhotographyObservability();
 
+            // Known supernovae the last frame caught, named; unknown ones stay unannounced until
+            // the player notices the new star and its frame discovers it.
+            List<SupernovaSighting> lastSn = solarSystemCamera.LastSupernovae;
+            if (lastSn != null && ExoInstrumentsScenario.Instance != null)
+            {
+                foreach (SupernovaSighting sn in lastSn)
+                {
+                    string designation = ExoInstrumentsScenario.Instance.SupernovaDesignation(sn.Key);
+                    if (designation == null) continue;
+                    // Where it is and what it is fighting: a supernova on its host's nucleus is
+                    // real, detectable and nearly invisible by eye, and saying so is the difference
+                    // between a player thinking the feature is broken and knowing where to look.
+                    double snr = sn.SignalToNoise;
+                    GUILayout.Label($"{designation} in frame: type {(sn.IsIIb ? "IIb" : sn.Class.ToString())}, "
+                                  + $"day {sn.PhaseDays:F0}, V {sn.VMagApparent:F1}, "
+                                  + $"at pixel ({sn.PixelX:F0}, {sn.PixelY:F0}), SNR {snr:F0}"
+                                  + (sn.LocalBackgroundElectrons > sn.PredictedElectrons
+                                      ? "  (buried in the host's own light: subtract an earlier frame to see it)"
+                                      : ""), smallCaptionStyle);
+                }
+            }
+
             if (!solarSystemCamera.IsAvailable)
             {
                 GUILayout.Label("Amateur astrograph camera unavailable on this install (KSP's own scaled-space camera wasn't found).", smallCaptionStyle);
@@ -2467,6 +2544,16 @@ namespace ExoInstruments
                             : $", forbidden-line ratios at T_e = {solarSystemCamera.LastEmissionTemperatureK:F0} K"),
                         smallCaptionStyle);
 
+                    // MEASURED OR DERIVED, said plainly, because it is the difference between a
+                    // survey of this line and a model of it. [O III] is only ever measured: no
+                    // relation derives it from H-alpha, and a frame that shows it without saying so
+                    // invites the reading that the ratio model produced it.
+                    if (solarSystemCamera.LastEmissionMeasuredLines != null)
+                        GUILayout.Label(
+                            $"   {solarSystemCamera.LastEmissionMeasuredLines} measured by the survey; "
+                            + "any other line here is derived from H-alpha",
+                            smallCaptionStyle);
+
                     // Which layer answered, and at what beam. This is the number that decides
                     // whether the frame can show structure at all, so it is on the frame.
                     double beam = solarSystemCamera.LastEmissionResolutionArcmin;
@@ -2579,14 +2666,24 @@ namespace ExoInstruments
             // it feeds would be garbage.
             bool stackBatchRunning = stackBatchRemaining > 0;
 
-            // Zoom (FOV): left = wide, right = tight. Smaller FOV = more zoom.
+            // Zoom (FOV): left = wide, right = tight. Smaller FOV = more zoom. An instrument with
+            // no Barlow has a fixed field (SolarSystemCameraTexture.HasZoomRange), so the slider's
+            // two ends coincide and dragging it can only ever return the value it already had:
+            // that row becomes the field-of-view readout it really is, with no dead control.
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Zoom (FOV {FormatFov(solarSystemCamera.FovDeg)})", GUILayout.Width(150));
-            GUI.enabled = !stackBatchRunning;
-            float invFov = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - solarSystemCamera.FovDeg;
-            invFov = GUILayout.HorizontalSlider(invFov, SolarSystemCameraTexture.MinFovDeg, SolarSystemCameraTexture.MaxFovDeg);
-            solarSystemCamera.FovDeg = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - invFov;
-            GUI.enabled = true;
+            if (SolarSystemCameraTexture.HasZoomRange)
+            {
+                GUILayout.Label($"Zoom (FOV {FormatFov(solarSystemCamera.FovDeg)})", GUILayout.Width(150));
+                GUI.enabled = !stackBatchRunning;
+                float invFov = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - solarSystemCamera.FovDeg;
+                invFov = GUILayout.HorizontalSlider(invFov, SolarSystemCameraTexture.MinFovDeg, SolarSystemCameraTexture.MaxFovDeg);
+                solarSystemCamera.FovDeg = SolarSystemCameraTexture.MaxFovDeg + SolarSystemCameraTexture.MinFovDeg - invFov;
+                GUI.enabled = true;
+            }
+            else
+            {
+                GUILayout.Label($"Field of view {FormatFov(SolarSystemCameraTexture.MaxFovDeg)} (fixed)");
+            }
             GUILayout.EndHorizontal();
 
             // Exposure time. Real range spans 32us to 2000s (six decades); a linear slider
@@ -2683,26 +2780,28 @@ namespace ExoInstruments
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            // Autoguiding. Forced on and locked for an instrument with no real bare/unguided
-            // mode (VisualTelescopeSpec.AlwaysAutoguided, e.g. the VLT); SetActiveTelescope
-            // already flips the property itself; this just stops the player from toggling it
-            // back off and reintroducing drift trailing a real 8.2m research telescope never has.
-            bool autoguidingLocked = SolarSystemCameraTexture.AutoguidingForced;
-            GUILayout.BeginHorizontal();
-            GUI.enabled = !autoguidingLocked;
-            solarSystemCamera.Autoguiding = GUILayout.Toggle(solarSystemCamera.Autoguiding,
-                autoguidingLocked
-                    ? " Autoguiding (always on; this instrument has no unguided mode)"
-                    : " Autoguiding (tracks the sky; off = the target drifts between shots unless re-centered)");
-            GUI.enabled = true;
-            GUILayout.FlexibleSpace();
-            // Manual re-center: only meaningful without autoguiding; with it
-            // on, every capture already re-centers automatically.
-            GUI.enabled = !solarSystemCamera.Autoguiding;
-            if (GUILayout.Button("Update telescope target", GUILayout.Height(22), GUILayout.Width(180)))
-                solarSystemCamera.UpdateAim(selectedPhotographyTarget);
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
+            // Autoguiding, and the manual re-center that only exists to make up for its absence.
+            //
+            // The WHOLE row is dropped for an instrument with no real bare/unguided mode
+            // (VisualTelescopeSpec.AlwaysAutoguided, e.g. the VLT): the camera itself forces the
+            // property on there (ConformSettingsToSpec), which leaves both controls unusable by
+            // construction, the toggle because it is already at its only legal value and the
+            // button because guided captures re-center themselves. Drawing them greyed out
+            // presented a decision the player does not have.
+            if (!SolarSystemCameraTexture.AutoguidingForced)
+            {
+                GUILayout.BeginHorizontal();
+                solarSystemCamera.Autoguiding = GUILayout.Toggle(solarSystemCamera.Autoguiding,
+                    " Autoguiding (tracks the sky; off = the target drifts between shots unless re-centered)");
+                GUILayout.FlexibleSpace();
+                // Manual re-center: only meaningful without autoguiding; with it
+                // on, every capture already re-centers automatically.
+                GUI.enabled = !solarSystemCamera.Autoguiding;
+                if (GUILayout.Button("Update telescope target", GUILayout.Height(22), GUILayout.Width(180)))
+                    solarSystemCamera.UpdateAim(selectedPhotographyTarget);
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+            }
 
             GUILayout.Space(4);
             GUILayout.BeginHorizontal();
@@ -3355,8 +3454,13 @@ namespace ExoInstruments
             info.DustMapSource = SolarSystemCameraTexture.DustMap != null
                 ? SolarSystemCameraTexture.DustMap.Source : null;
             info.LineSurfaceBrightnessRayleighs = solarSystemCamera.LastEmissionRayleighs;
-            info.EmissionLineName = SolarSystemCameraTexture.EmissionMap != null
-                ? SolarSystemCameraTexture.EmissionMap.LineName : null;
+            // THE LINES THIS FILTER ACTUALLY PASSED, not the base map's. EmissionMap.LineName is
+            // always "H-alpha", because the all-sky map is an H-alpha map, so taking LINE from it
+            // stamped an [O III] frame with LINE = H-alpha in its own header.
+            info.EmissionLineName = solarSystemCamera.LastEmissionLines
+                ?? (SolarSystemCameraTexture.EmissionMap != null
+                    ? SolarSystemCameraTexture.EmissionMap.LineName : null);
+            info.EmissionMeasuredLines = solarSystemCamera.LastEmissionMeasuredLines;
             info.EmissionMapSource = SolarSystemCameraTexture.EmissionMap != null
                 ? SolarSystemCameraTexture.EmissionMap.Source : null;
 
@@ -3545,6 +3649,7 @@ namespace ExoInstruments
                 GUI.DrawTexture(chartRect, skyChartTexture);
             }
             DrawBoresightOverlay(chartRect);
+            DrawSupernovaMarkers(chartRect);
             UpdateSkyChartHover(chartRect);
             HandleSkyChartInteraction(chartRect);
 
@@ -3582,7 +3687,7 @@ namespace ExoInstruments
         {
             // A drag is not a hover: the cursor is holding the sky, not pointing at a star, and the
             // pan already owns that frame's budget. This is an O(catalogue) sweep, so the passes
-            // that cannot change its answer skip it — the layout pass has no real chartRect to test
+            // that cannot change its answer skip it, because the layout pass has no real chartRect to test
             // against anyway (GetRect hands back a dummy), and nothing between two mouse positions
             // moves the cursor.
             if (skyChartDragging) return;
@@ -3627,7 +3732,14 @@ namespace ExoInstruments
                 // drag-vs-click distinction needed; their markers are big,
                 // deliberate targets): a hit selects the body as the
                 // photography target straight away and never starts a pan drag.
-                if (TryHitBodyMarker(chartRect, e.mousePosition, out CelestialBody hitBody))
+                if (TryHitSupernovaMarker(chartRect, e.mousePosition,
+                                          out ExoInstrumentsScenario.DiscoveredSupernova hitSn))
+                {
+                    SelectPhotographyTarget(
+                        SkyTarget.FromEquatorial(hitSn.RaDeg, hitSn.DecDeg, hitSn.Designation),
+                        clearStarSelection: true);
+                }
+                else if (TryHitBodyMarker(chartRect, e.mousePosition, out CelestialBody hitBody))
                 {
                     SelectPhotographyBody(hitBody);
                     e.Use();
@@ -3851,6 +3963,127 @@ namespace ExoInstruments
             altDeg = horizontal.AltitudeDeg;
             azDeg = horizontal.AzimuthDeg;
             return true;
+        }
+
+        private bool hadCapturedPhotoLastUpdate;
+
+        /// <summary>
+        /// Checks the finished frame for supernovae bright enough to notice, and turns the new
+        /// ones into discoveries.
+        ///
+        /// The rule is the conventional point-source detection threshold: predicted electrons at
+        /// least five times the 1-sigma noise AT THE EVENT'S OWN PIXEL, which includes the host
+        /// galaxy's light there. A frame-wide sky-only noise called a supernova sitting on its
+        /// nucleus a 6500 sigma detection while the player could not see it, because near a core
+        /// the galaxy buries the sky by orders of magnitude. Already-known events stay quiet:
+        /// rediscovering your own supernova is not news.
+        /// </summary>
+        void CheckSupernovaDiscoveries()
+        {
+            List<SupernovaSighting> sightings = solarSystemCamera.LastSupernovae;
+            ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
+            if (sightings == null || scenario == null) return;
+
+            foreach (SupernovaSighting sn in sightings)
+            {
+                // Per event, not per frame: what buries a supernova is its own host, and the host
+                // is only under the ones that landed on it. The five-sigma rule is applied to the
+                // CcdEquation SNR, so the sigma in it is the aperture measurement's own.
+                if (sn.SignalToNoise < 5.0) continue;
+                if (double.IsNaN(sn.PixelX)
+                    || sn.PixelX < 0 || sn.PixelX >= SolarSystemCameraTexture.TextureWidth
+                    || sn.PixelY < 0 || sn.PixelY >= SolarSystemCameraTexture.TextureHeight) continue;
+                string classLabel = sn.IsIIb ? "IIb" : sn.Class.ToString();
+                if (!scenario.TryDiscoverSupernova(sn.Key, sn.HostName, classLabel,
+                        sn.RaDeg, sn.DecDeg, sn.ExplosionUt, out string designation)) continue;
+
+                float award = ApplyScienceDifficulty(ScienceRewards.ScienceRewardSupernovaDiscovery);
+                scenario.AddEarnedScience(award);
+                if (ResearchAndDevelopment.Instance != null)
+                    ResearchAndDevelopment.Instance.AddScience(award, TransactionReasons.ScienceTransmission);
+
+                ScreenMessages.PostScreenMessage(
+                    $"Supernova discovered! {designation} (type {classLabel}) in {sn.HostName}, "
+                    + $"day {sn.PhaseDays:F0}, V {sn.VMagApparent:F1}  (+{award:F0} Science)",
+                    10f, ScreenMessageStyle.UPPER_CENTER);
+                Debug.Log($"[ExoInstruments] Supernova discovery: {designation} in {sn.HostName}, "
+                        + $"type {classLabel}, day {sn.PhaseDays:F1}, V {sn.VMagApparent:F2}, "
+                        + $"{sn.PredictedElectrons:F0} e-, SNR {sn.SignalToNoise:F1} "
+                        + $"(host contributes {sn.LocalBackgroundElectrons:F0} e-/px there)");
+            }
+        }
+
+        /// <summary>
+        /// Discovered supernovae still inside their template span, as chart markers. Undiscovered
+        /// ones are deliberately absent: the sky does not announce them, your photographs do.
+        /// </summary>
+        void DrawSupernovaMarkers(Rect chartRect)
+        {
+            if (Event.current == null || Event.current.type != EventType.Repaint) return;
+            ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
+            var templates = SolarSystemCameraTexture.SupernovaTemplates;
+            if (scenario == null || templates == null) return;
+
+            double ut = Planetarium.GetUniversalTime();
+            var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
+            Color previous = GUI.color;
+            foreach (ExoInstrumentsScenario.DiscoveredSupernova d in scenario.DiscoveredSupernovae)
+            {
+                if (!SupernovaStillActive(d, ut, templates, out _)) continue;
+                Vector2 proj = SkyChartTexture.ProjectEquatorialToScreen(
+                    d.RaDeg, d.DecDeg, SkyChartWidth, SkyChartHeight, view);
+                var pos = new Vector2(chartRect.x + proj.x, chartRect.y + (SkyChartHeight - proj.y));
+                if (!chartRect.Contains(pos)) continue;
+
+                GUI.color = new Color(1f, 0.5f, 0.9f, 0.95f);
+                const float R = 6f, T = 1.5f;
+                GUI.DrawTexture(new Rect(pos.x - R, pos.y - T * 0.5f, 2 * R, T), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(pos.x - T * 0.5f, pos.y - R, T, 2 * R), Texture2D.whiteTexture);
+                GUI.Label(new Rect(pos.x + 5f, pos.y - 18f, 120f, 16f), d.Designation, smallCaptionStyle);
+            }
+            GUI.color = previous;
+        }
+
+        static bool SupernovaStillActive(ExoInstrumentsScenario.DiscoveredSupernova d, double ut,
+                                         Core.SupernovaTemplateSet templates, out double phaseDays)
+        {
+            phaseDays = (ut - d.ExplosionUt) / 86400.0;
+            string cls = d.ClassLabel == "IIb" ? "Ibc" : d.ClassLabel;
+            try
+            {
+                var template = templates.Get((Core.SupernovaClass)Enum.Parse(typeof(Core.SupernovaClass), cls, false));
+                return template != null && phaseDays >= 0.0 && phaseDays <= template.ActiveDays;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>A chart click on a discovered supernova's marker, within the same tolerance a body marker gets.</summary>
+        bool TryHitSupernovaMarker(Rect chartRect, Vector2 screenPos,
+                                   out ExoInstrumentsScenario.DiscoveredSupernova hit)
+        {
+            hit = default(ExoInstrumentsScenario.DiscoveredSupernova);
+            ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
+            var templates = SolarSystemCameraTexture.SupernovaTemplates;
+            if (scenario == null || templates == null) return false;
+
+            double ut = Planetarium.GetUniversalTime();
+            var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
+            float bestDist = 14f;
+            bool found = false;
+            foreach (ExoInstrumentsScenario.DiscoveredSupernova d in scenario.DiscoveredSupernovae)
+            {
+                if (!SupernovaStillActive(d, ut, templates, out _)) continue;
+                Vector2 proj = SkyChartTexture.ProjectEquatorialToScreen(
+                    d.RaDeg, d.DecDeg, SkyChartWidth, SkyChartHeight, view);
+                float sx = chartRect.x + proj.x;
+                float sy = chartRect.y + (SkyChartHeight - proj.y);
+                float dist = Vector2.Distance(new Vector2(sx, sy), screenPos);
+                if (dist < bestDist) { bestDist = dist; hit = d; found = true; }
+            }
+            return found;
         }
 
         /// <summary>
@@ -6080,10 +6313,19 @@ namespace ExoInstruments
 
             // Galaxies come from the packed catalogue, cut by brightness: at B = 15 there are of
             // order a hundred thousand and the chart would be a wall of markers.
+            //
+            // A SEARCH HIT IS EXEMPT. The cut exists to keep browsing legible, not to hide an
+            // object the player has just named: the supernova forecast sends people to hosts like
+            // IC4808 (B = 12.9) and IC5267 (B = 11.4), which the search finds and the chart could
+            // not draw, so the target could be selected from the list and never seen or clicked.
+            // Searching is the player saying which faint object they mean, so it overrides.
             if (galaxies != null && galaxies.IsLoaded)
             {
-                foreach (Galaxy g in galaxies.Search(0.0, 0.0, 180.0, ChartGalaxyMagnitudeLimit))
+                double limit = searchActive ? FaintestSearchableGalaxyMag : ChartGalaxyMagnitudeLimit;
+                foreach (Galaxy g in galaxies.Search(0.0, 0.0, 180.0, limit))
                 {
+                    if (searchActive && !highlightedPositions.Contains(SkyPositionKey(g.RaDeg, g.DecDeg))
+                        && g.TotalBMag > ChartGalaxyMagnitudeLimit) continue;
                     points.Add(new SkyChartPoint
                     {
                         IsDeepSky = true,
@@ -6111,6 +6353,9 @@ namespace ExoInstruments
 
         /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut; it draws whatever clears the frame's own noise floor.</summary>
         private const double ChartGalaxyMagnitudeLimit = 11.0;
+
+        /// <summary>How faint a galaxy may be and still be drawn when the player has SEARCHED for it: the whole catalogue, whose own packing limit is the real bound.</summary>
+        private const double FaintestSearchableGalaxyMag = 99.0;
 
         /// <summary>
         /// Applies a completed background chart render: publishes the (possibly rebuilt) static

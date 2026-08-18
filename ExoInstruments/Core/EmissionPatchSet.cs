@@ -36,8 +36,8 @@ namespace ExoInstruments.Core
     /// </summary>
     public sealed class EmissionPatchSet
     {
-        private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'P', (byte)'T', (byte)'C', (byte)'H', (byte)'1' };
-        private const int FormatVersion = 1;
+        private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'P', (byte)'T', (byte)'C', (byte)'H', (byte)'3' };
+        private const int FormatVersion = 3;
 
         /// <summary>One patch: a disc of sky stored as run-length rows of HEALPix pixels.</summary>
         public sealed class Patch
@@ -46,6 +46,15 @@ namespace ExoInstruments.Core
             public double CentreRaDeg;
             public double CentreDecDeg;
             public double RadiusDeg;
+
+            /// <summary>
+            /// The patch's OWN HEALPix resolution. Set per patch because the surveys differ:
+            /// SHASSA's 47 arcsec beam is already matched by nside 4096, while NSNS resolves 6.44
+            /// arcsec and was being stored eight times coarser than it was measured. A single
+            /// set-wide nside had to pick one, and picking the coarse one blurred every northern
+            /// nebula into lumps.
+            /// </summary>
+            public int Nside;
 
             internal int[] RunStart;    // HEALPix pixel of each run's first cell
             internal int[] RunLength;
@@ -59,6 +68,49 @@ namespace ExoInstruments.Core
             /// <summary>Cells the patch holds.</summary>
             public int CellCount => Values != null ? Values.Length : 0;
 
+            /// <summary>
+            /// The forbidden-line planes this patch also carries, or null. Sampled on the SAME
+            /// runs as H-alpha, so a plane is a second value array over one geometry.
+            /// </summary>
+            public ushort[][] ExtraValues;
+            public double[] ExtraWavelengthMeters;
+            public string[] ExtraLineNames;
+
+            /// <summary>Index of the plane measuring this line, or -1 when the patch has none and the caller must derive it.</summary>
+            public int PlaneFor(double wavelengthMeters)
+            {
+                if (ExtraWavelengthMeters == null) return -1;
+                for (int i = 0; i < ExtraWavelengthMeters.Length; i++)
+                    if (Math.Abs(ExtraWavelengthMeters[i] - wavelengthMeters) < 1e-12) return i;
+                return -1;
+            }
+
+            /// <summary>H-alpha when plane is negative, otherwise the extra plane of that index.</summary>
+            internal bool TryPlane(int plane, long pixel, ref int cursor, out double rayleighs)
+                => plane < 0 ? TryValue(pixel, ref cursor, out rayleighs)
+                             : TryPlaneValue(plane, pixel, ref cursor, out rayleighs);
+
+            /// <summary>
+            /// COVERAGE, and the value separately. True means this patch holds the cell; the value
+            /// is then NaN if that cell carries no measurement.
+            ///
+            /// The two used to be one answer -- false for a pixel outside the patch AND for a
+            /// masked cell inside it -- and the caller could only treat both as "the base map's
+            /// job". That is what put a hard-edged box on every bright star in every SHASSA patch:
+            /// the packer masks the continuum-subtraction crater around a star as NaN, the lookup
+            /// reported that exactly like the patch's outer rim, and the sample switched to the
+            /// composite mid-frame. Where the two surveys agree the switch is invisible (measured
+            /// at iota Ori: +0.0 ADU across 36% of a 10 arcmin box). Where they disagree it is the
+            /// artefact: around M42's Trapezium the composite reads 4324 to 4380 R against the
+            /// patch's 45 to 900 R in the saturated bowl, so a 3.7 x 1.2 arcmin strip -- the two
+            /// NaN cells there, dilated by the interpolation stencil -- came out +33 ADU brighter
+            /// than the sky around it, with an edge sharp to the pixel.
+            ///
+            /// Coverage is a question about the patch's GEOMETRY and has one right answer; whether
+            /// a covered cell was measured is a question about its VALUE, and only the caller
+            /// knows what to do about it. See TryRayleighsAtGalactic, which now masks and
+            /// reweights, as its own comment has always said it did.
+            /// </summary>
             internal bool TryValue(long pixel, ref int cursor, out double rayleighs)
             {
                 rayleighs = double.NaN;
@@ -85,7 +137,32 @@ namespace ExoInstruments.Core
             private bool Read(int run, int pixel, out double rayleighs)
             {
                 rayleighs = Float16.ToDouble(Values[RunOffset[run] + (pixel - RunStart[run])]);
-                return !double.IsNaN(rayleighs);
+                return true;                            // covered; NaN says unmeasured, not absent
+            }
+
+            /// <summary>The same lookup on one of the extra planes. Shares the run geometry, so only the array differs.</summary>
+            internal bool TryPlaneValue(int plane, long pixel, ref int cursor, out double rayleighs)
+            {
+                rayleighs = double.NaN;
+                if (ExtraValues == null || plane < 0 || plane >= ExtraValues.Length) return false;
+                if (RunStart == null || pixel < 0 || pixel > int.MaxValue) return false;
+                int p = (int)pixel;
+
+                int i = cursor;
+                if (!(i >= 0 && i < RunStart.Length && p >= RunStart[i] && p - RunStart[i] < RunLength[i]))
+                {
+                    int lo = 0, hi = RunStart.Length - 1, found = -1;
+                    while (lo <= hi)
+                    {
+                        int mid = (lo + hi) / 2;
+                        if (RunStart[mid] <= p) { found = mid; lo = mid + 1; } else hi = mid - 1;
+                    }
+                    if (found < 0 || p - RunStart[found] >= RunLength[found]) return false;
+                    cursor = found;
+                    i = found;
+                }
+                rayleighs = Float16.ToDouble(ExtraValues[plane][RunOffset[i] + (p - RunStart[i])]);
+                return true;                            // covered; NaN says unmeasured, not absent
             }
         }
 
@@ -97,6 +174,19 @@ namespace ExoInstruments.Core
         public int PatchCount => patches != null ? patches.Length : 0;
         public int Nside => nside;
         public double ResolutionArcmin => IsLoaded ? Healpix.PixelResolutionDeg(nside) * 60.0 : 0.0;
+
+        /// <summary>
+        /// Which reconstruction the last sample used, for the format cross-check only. The C1 cubic
+        /// stencil has no short independent reimplementation, so the harness compares values only
+        /// where the bilinear path ran, and checks coverage everywhere. ThreadStatic, and read by
+        /// nothing that captures: a per-sample out parameter would have cost every caller a slot in
+        /// the hottest loop in the mod to serve one test.
+        /// </summary>
+        [ThreadStatic] public static bool LastReconstructionWasCubic;
+
+        /// <summary>Resolution of one patch, which is the number a frame over it should report.</summary>
+        public static double PatchResolutionArcmin(Patch patch)
+            => patch != null && patch.Nside > 0 ? Healpix.PixelResolutionDeg(patch.Nside) * 60.0 : 0.0;
         public double LineWavelengthMeters { get; private set; }
         public string LineName { get; private set; }
         public string Source { get; private set; }
@@ -157,6 +247,9 @@ namespace ExoInstruments.Core
                         CentreDecDeg = reader.ReadDouble(),
                         RadiusDeg = reader.ReadSingle(),
                     };
+                    patch.Nside = reader.ReadInt32();
+                    if (!Healpix.IsValidNside(patch.Nside))
+                        throw new InvalidDataException("bad patch nside " + patch.Nside);
 
                     int runCount = reader.ReadInt32();
                     if (runCount < 0 || runCount > 10_000_000) throw new InvalidDataException("implausible run count");
@@ -178,7 +271,28 @@ namespace ExoInstruments.Core
                         total += patch.RunLength[r];
                         if (total > int.MaxValue) throw new InvalidDataException("patch too large");
                     }
-                    patch.Values = EmissionMap.ReadHalfFloats(reader, (int)total);
+                    int planeCount = reader.ReadInt32();
+                    if (planeCount < 1 || planeCount > 16) throw new InvalidDataException("implausible plane count " + planeCount);
+                    for (int q = 0; q < planeCount; q++)
+                    {
+                        string planeName = ReadString(reader, 64);
+                        double planeWavelength = reader.ReadDouble();
+                        ushort[] planeValues = EmissionMap.ReadHalfFloats(reader, (int)total);
+                        if (q == 0)
+                        {
+                            patch.Values = planeValues;
+                            continue;
+                        }
+                        if (patch.ExtraValues == null)
+                        {
+                            patch.ExtraValues = new ushort[planeCount - 1][];
+                            patch.ExtraWavelengthMeters = new double[planeCount - 1];
+                            patch.ExtraLineNames = new string[planeCount - 1];
+                        }
+                        patch.ExtraValues[q - 1] = planeValues;
+                        patch.ExtraWavelengthMeters[q - 1] = planeWavelength;
+                        patch.ExtraLineNames[q - 1] = planeName;
+                    }
 
                     double ra = patch.CentreRaDeg * Math.PI / 180.0;
                     double dec = patch.CentreDecDeg * Math.PI / 180.0;
@@ -323,9 +437,17 @@ namespace ExoInstruments.Core
             RejectedCells = 0;
             if (patches == null) return;
 
-            foreach (Patch patch in patches)
+            // ONE PATCH PER WORKER. Every buffer below is that patch's own, and a patch's cells are
+            // written by nobody else, so the repaired map does not depend on how the patches were
+            // divided between threads. Only the rejected-cell tally is shared, and it is a sum of
+            // integers, which is order-independent too. This matters at nside 8192: the northern
+            // patches carry four times the cells they used to, and serially the repair cost 19.5 s
+            // of load on its own.
+            var rejectedPerPatch = new int[patches.Length];
+            System.Threading.Tasks.Parallel.For(0, patches.Length, ParallelWork.Options, pi =>
             {
-                if (patch.Values == null || patch.RunStart.Length == 0) continue;
+                Patch patch = patches[pi];
+                if (patch.Values == null || patch.RunStart.Length == 0) return;
                 int cells = patch.Values.Length;
 
                 // A dense pixel -> index table over the patch's own range, so a neighbourhood
@@ -334,7 +456,7 @@ namespace ExoInstruments.Core
                 int last = patch.RunStart[patch.RunStart.Length - 1]
                          + patch.RunLength[patch.RunLength.Length - 1];
                 long span = (long)last - first;
-                if (span <= 0 || span > 40_000_000) continue;
+                if (span <= 0 || span > 40_000_000) return;
 
                 var index = new int[span];
                 for (long i = 0; i < span; i++) index[i] = -1;
@@ -347,7 +469,7 @@ namespace ExoInstruments.Core
                 // spherical-to-pixel conversions and 37 seconds of load. Flattened into one array
                 // with a start index per cell rather than an array of arrays, so 44 thousand cells
                 // cost one allocation instead of forty-four thousand.
-                double step = Healpix.PixelResolutionDeg(nside);
+                double step = Healpix.PixelResolutionDeg(patch.Nside);
                 var start = new int[cells + 1];
                 var neighbours = BuildNeighbourhoods(patch, index, first, span, step, start);
 
@@ -388,11 +510,13 @@ namespace ExoInstruments.Core
                     if (marked == 0) break;
                     for (int i = 0; i < cells; i++)
                         if (mark[i]) { values[i] = replacement[i]; mark[i] = false; }
-                    RejectedCells += marked;
+                    rejectedPerPatch[pi] += marked;
                 }
 
                 for (int i = 0; i < cells; i++) patch.Values[i] = Float16.FromDouble(values[i]);
-            }
+            });
+
+            for (int i = 0; i < rejectedPerPatch.Length; i++) RejectedCells += rejectedPerPatch[i];
         }
 
         /// <summary>Flattened neighbourhood lists: neighbours[start[i]..start[i+1]) are the cells within RejectionRadiusCells of cell i, itself included.</summary>
@@ -407,7 +531,7 @@ namespace ExoInstruments.Core
             {
                 int self = patch.RunOffset[r] + k;
                 start[self] = flat.Count;
-                Healpix.RingPixelCentreDegrees(nside, patch.RunStart[r] + k, out double l, out double b);
+                Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k, out double l, out double b);
                 double cosB = Math.Cos(b * Math.PI / 180.0);
 
                 for (int dy = -RejectionRadiusCells; dy <= RejectionRadiusCells; dy++)
@@ -418,7 +542,7 @@ namespace ExoInstruments.Core
                     {
                         if (dx * dx + dy * dy > RejectionRadiusCells * RejectionRadiusCells) continue;
                         double nl = l + (Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0);
-                        long offset = Healpix.SphericalDegreesToRing(nside, nl, nb) - first;
+                        long offset = Healpix.SphericalDegreesToRing(patch.Nside, nl, nb) - first;
                         if (offset < 0 || offset >= span) continue;
                         int at = index[offset];
                         if (at >= 0) flat.Add(at);
@@ -448,7 +572,7 @@ namespace ExoInstruments.Core
         public int CountNeighbourOutliers(Patch patch, double sigmas)
         {
             if (patch == null || patch.Values == null) return 0;
-            double step = Healpix.PixelResolutionDeg(nside);
+            double step = Healpix.PixelResolutionDeg(patch.Nside);
             var window = new double[9];
             int cursor = 0, bad = 0;
 
@@ -459,7 +583,7 @@ namespace ExoInstruments.Core
                 double v = Float16.ToDouble(patch.Values[self]);
                 if (!(v > 0.0)) { bad++; continue; }
 
-                Healpix.RingPixelCentreDegrees(nside, patch.RunStart[r] + k, out double l, out double b);
+                Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k, out double l, out double b);
                 int count = 0;
                 double cosB = Math.Cos(b * Math.PI / 180.0);
                 for (int dy = -1; dy <= 1; dy++)
@@ -469,7 +593,7 @@ namespace ExoInstruments.Core
                     double nb = b + dy * step;
                     if (nb > 90.0 || nb < -90.0) continue;
                     double nl = l + (Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0);
-                    if (!patch.TryValue(Healpix.SphericalDegreesToRing(nside, nl, nb), ref cursor, out double n)) continue;
+                    if (!patch.TryValue(Healpix.SphericalDegreesToRing(patch.Nside, nl, nb), ref cursor, out double n)) continue;
                     if (n > 0.0) window[count++] = n;
                 }
                 if (count < 6) continue;
@@ -488,7 +612,7 @@ namespace ExoInstruments.Core
             for (int r = 0; r < patch.RunStart.Length; r++)
             for (int k = 0; k < patch.RunLength[r]; k++)
             {
-                Healpix.RingPixelCentreDegrees(nside, patch.RunStart[r] + k, out double l, out double b);
+                Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k, out double l, out double b);
                 long parent = Healpix.SphericalDegreesToRing(compositeNside, l, b);
                 if (!groups.TryGetValue(parent, out List<double> list))
                     groups[parent] = list = new List<double>(16);
@@ -522,7 +646,7 @@ namespace ExoInstruments.Core
                 {
                     if (dx * dx + dy * dy > RejectionRadiusCells * RejectionRadiusCells) continue;
                     double nl = lDeg + (Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0);
-                    long pixel = Healpix.SphericalDegreesToRing(nside, nl, nb);
+                    long pixel = Healpix.SphericalDegreesToRing(patch.Nside, nl, nb);
                     long offset = pixel - first;
                     if (offset < 0 || offset >= span) continue;
                     int at = index[offset];
@@ -589,28 +713,45 @@ namespace ExoInstruments.Core
         public void CalibrateAgainst(EmissionMap composite)
         {
             if (patches == null || composite == null || !composite.IsLoaded) return;
-            if (nside % composite.Nside != 0) return;   // not a whole-number subdivision: no contract
 
             CalibratedCells = 0;
-            foreach (Patch patch in patches)
+
+            // One patch per worker, as in RejectOutliers: every buffer is that patch's own and no
+            // patch writes another's cells, so the result does not depend on the division. The
+            // beam-limited smoothing costs a 31x31 cell window per composite cell, which serially
+            // is seconds of load.
+            var calibratedPerPatch = new int[patches.Length];
+            System.Threading.Tasks.Parallel.For(0, patches.Length, ParallelWork.Options, pIndex =>
             {
-                if (patch.Values == null) continue;
+                Patch patch = patches[pIndex];
+                var gainPixels = new long[Healpix.CubicTaps];
+                var gainWeights = new double[Healpix.CubicTaps];
+                if (patch.Values == null) return;
+
+                // The contract is now judged per patch, because they no longer share a resolution:
+                // a patch whose cells do not subdivide the composite's wholly has no group whose
+                // mean the composite can fix, and is left alone rather than taking the set down.
+                if (patch.Nside % composite.Nside != 0) return;
 
                 // Group the patch's cells by the composite cell that contains them. A child's
                 // centre lies inside its parent, so the containing-cell lookup IS the parent.
                 var sum = new Dictionary<long, double>();
                 var count = new Dictionary<long, int>();
                 var parents = new long[patch.Values.Length];
+                var cellL = new double[patch.Values.Length];
+                var cellB = new double[patch.Values.Length];
 
                 for (int r = 0; r < patch.RunStart.Length; r++)
                 {
                     for (int k = 0; k < patch.RunLength[r]; k++)
                     {
                         int index = patch.RunOffset[r] + k;
-                        Healpix.RingPixelCentreDegrees(nside, patch.RunStart[r] + k,
+                        Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k,
                                                        out double l, out double b);
                         long parent = Healpix.SphericalDegreesToRing(composite.Nside, l, b);
                         parents[index] = parent;
+                        cellL[index] = l;
+                        cellB[index] = b;
 
                         double v = Float16.ToDouble(patch.Values[index]);
                         if (!(v > 0.0)) continue;
@@ -618,6 +759,53 @@ namespace ExoInstruments.Core
                         count[parent] = (count.TryGetValue(parent, out int c) ? c : 0) + 1;
                     }
                 }
+
+                // THE GAIN PER COMPOSITE CELL, then smoothed to the composite's OWN BEAM before it
+                // is applied to anything. This is the whole correctness of the step. The composite
+                // is Finkbeiner's 6 arcmin beam tabulated on 3.44 arcmin cells, so two neighbouring
+                // cells are not independent measurements: they are the same beam oversampled. A
+                // gain fitted per cell therefore chases the composite's sampling noise, and applied
+                // as written, cell by cell, it is a piecewise-constant field with a step at every
+                // 206 arcsec boundary.
+                //
+                // Measured on the shipped file, that is not a small effect: the gain differed from
+                // unity by more than 10% over 58% of a Veil frame and by more than 30% over 32%,
+                // with a 95th percentile of 3.8 and a maximum of 444. Stamped in 206 arcsec blocks
+                // onto a map rendered at 15 arcsec per pixel, it was the mottling that made every
+                // H-alpha frame look worse than the [O III] one beside it -- and only H-alpha,
+                // because this step touches Values and never ExtraValues.
+                //
+                // What the composite can legitimately fix is the calibration at scales it resolves.
+                // Below 6 arcmin it has no information and NSNS is the only measurement there.
+                // RATIO OF SMOOTHED FIELDS, NOT A SMOOTHED RATIO. Both terms are brought to the
+                // composite's beam FIRST and divided afterwards. Dividing per cell and smoothing
+                // the result is a different operation and an unstable one: the ratio blows up
+                // wherever the denominator approaches the noise floor, and no amount of subsequent
+                // smoothing brings it back.
+                //
+                // Measured on the shipped file, the per-cell ratio was not merely noisy, it was
+                // systematically wrong: median gain 4.14 where the patch reads under 5 R and 0.59
+                // where it reads over 60 R. That is not a calibration correction, it is NSNS's
+                // contrast being flattened onto Finkbeiner's, whose northern sky is WHAM at a one
+                // degree beam. It brightened the faint sky fourfold and dimmed the filaments by
+                // 40%, which is the whole reason the patch exists, undone at load.
+                var patchMean = new Dictionary<long, double>(sum.Count);
+                var compCell = new Dictionary<long, double>(sum.Count);
+                foreach (var entry in sum)
+                {
+                    int c = count[entry.Key];
+                    double target = composite.RawCellValue(entry.Key);
+                    if (c <= 0 || !(target > 0.0)) continue;
+                    patchMean[entry.Key] = entry.Value / c;
+                    compCell[entry.Key] = target;
+                }
+
+                var patchSmooth = SmoothOverBeam(patchMean, composite.Nside, CompositeBeamArcmin);
+                var compSmooth = SmoothOverBeam(compCell, composite.Nside, CompositeBeamArcmin);
+                var smoothed = new Dictionary<long, double>(patchSmooth.Count);
+                foreach (var entry in patchSmooth)
+                    if (entry.Value > 0.0 && compSmooth.TryGetValue(entry.Key, out double t) && t > 0.0)
+                        smoothed[entry.Key] = t / entry.Value;
 
                 for (int index = 0; index < patch.Values.Length; index++)
                 {
@@ -628,19 +816,106 @@ namespace ExoInstruments.Core
                     double v = Float16.ToDouble(patch.Values[index]);
                     if (!(v > 0.0) || !count.TryGetValue(parent, out int c) || c == 0)
                     {
-                        // No measurement here: the composite's own value, which is this group's
-                        // mean once the gain below has been applied to its siblings.
+                        // No measurement here: the composite's own value.
                         patch.Values[index] = Float16.FromDouble(target);
-                        CalibratedCells++;
+                        calibratedPerPatch[pIndex]++;
                         continue;
                     }
 
-                    double mean = sum[parent] / c;
-                    if (!(mean > 0.0)) continue;
-                    patch.Values[index] = Float16.FromDouble(v * (target / mean));
-                    CalibratedCells++;
+                    // The gain INTERPOLATED at this cell's own direction, not the containing
+                    // composite cell's step value, so the correction is continuous across every
+                    // boundary the composite grid has.
+                    double g = InterpolateCellField(smoothed, composite.Nside,
+                                                    cellL[index], cellB[index], gainPixels, gainWeights);
+                    if (!(g > 0.0)) continue;
+                    patch.Values[index] = Float16.FromDouble(v * g);
+                    calibratedPerPatch[pIndex]++;
                 }
+            });
+
+            for (int i = 0; i < calibratedPerPatch.Length; i++) CalibratedCells += calibratedPerPatch[i];
+        }
+
+        /// <summary>
+        /// The scale above which the composite may correct a patch, and it is the beam of the
+        /// composite's COARSEST constituent rather than of the composite as published. Finkbeiner
+        /// (2003) is WHAM at a 1 degree beam, filled in with VTSS at 1.6' and SHASSA at 0.8' where
+        /// those reach; over the northern nebulae the backbone is WHAM, and empirically the map
+        /// carries no structure below about 10' there. Correcting a patch at a finer scale than the
+        /// reference resolves does not calibrate it, it erases its contrast.
+        ///
+        /// Measured across the beam, on the Veil, as the ratio of the gain applied to sky under 5 R
+        /// against that applied over 60 R, which is 1.00 for an honest calibration and rises as the
+        /// correction flattens the patch onto the reference:
+        ///
+        ///     beam     6'    10'    15'    20'    30'    45'    60'    90'
+        ///     ratio   5.1    3.8    2.8    2.4    1.9    1.4    1.2    1.1
+        ///     residual 1.9%  2.1%   2.4%   2.8%   2.6%   2.4%   2.6%   2.3%
+        ///
+        /// The residual against the composite at its own beam is flat across that whole range, so
+        /// the fine correction buys no accuracy and costs the contrast the patch exists to supply.
+        /// One degree is where the flattening stops and is what WHAM measures.
+        /// </summary>
+        private const double CompositeBeamArcmin = 60.0;
+
+        /// <summary>
+        /// A per-cell field averaged over the composite's beam. Cell values sampled finer than the
+        /// beam carry sampling noise rather than resolved structure, and a correction derived from
+        /// them has to be band-limited to the beam before it is trusted or it injects that noise.
+        /// Inverse-variance-free Gaussian weights over the cells within one beam.
+        /// </summary>
+        private static Dictionary<long, double> SmoothOverBeam(Dictionary<long, double> field,
+                                                               int nside, double beamArcmin)
+        {
+            double stepDeg = Healpix.PixelResolutionDeg(nside);
+            double sigmaDeg = beamArcmin / 60.0 / 2.3548;          // FWHM to sigma
+            int radius = Math.Max(1, (int)Math.Ceiling(2.0 * sigmaDeg / stepDeg));
+            var outp = new Dictionary<long, double>(field.Count);
+
+            foreach (var entry in field)
+            {
+                Healpix.RingPixelCentreDegrees(nside, entry.Key, out double l, out double b);
+                double cosB = Math.Cos(b * Math.PI / 180.0);
+                double acc = 0.0, weight = 0.0;
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    double nb = b + dy * stepDeg;
+                    if (nb > 90.0 || nb < -90.0) continue;
+                    for (int dx = -radius; dx <= radius; dx++)
+                    {
+                        double nl = l + (Math.Abs(cosB) > 1e-6 ? dx * stepDeg / cosB : 0.0);
+                        long p = Healpix.SphericalDegreesToRing(nside, nl, nb);
+                        if (!field.TryGetValue(p, out double v)) continue;
+                        double rr = (dx * dx + dy * dy) * stepDeg * stepDeg;
+                        double w = Math.Exp(-0.5 * rr / (sigmaDeg * sigmaDeg));
+                        acc += w * v;
+                        weight += w;
+                    }
+                }
+                outp[entry.Key] = weight > 0.0 ? acc / weight : entry.Value;
             }
+            return outp;
+        }
+
+        /// <summary>
+        /// A per-cell field read at an arbitrary direction, bilinearly over the cells that carry a
+        /// value and renormalised over them. Applying the containing cell's value instead is what
+        /// makes a correction piecewise constant, and a step at every cell edge is visible whenever
+        /// the frame resolves the cell.
+        /// </summary>
+        private static double InterpolateCellField(Dictionary<long, double> field, int nside,
+                                                   double lDeg, double bDeg,
+                                                   long[] pixelScratch, double[] weightScratch)
+        {
+            Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
+            double acc = 0.0, weight = 0.0;
+            for (int i = 0; i < 4; i++)
+            {
+                if (!field.TryGetValue(pixelScratch[i], out double v)) continue;
+                acc += weightScratch[i] * v;
+                weight += weightScratch[i];
+            }
+            return weight > 0.0 ? acc / weight : double.NaN;
         }
 
         /// <summary>Cells the calibration touched. Every cell of every patch, when it runs.</summary>
@@ -649,9 +924,25 @@ namespace ExoInstruments.Core
         public bool TryRayleighsAtGalactic(Patch patch, int patchIndex, double lDeg, double bDeg,
                                            long[] pixelScratch, double[] weightScratch,
                                            ref Cursor cursor, out double rayleighs)
+            => TryRayleighsAtGalactic(patch, patchIndex, -1, lDeg, bDeg,
+                                      pixelScratch, weightScratch, ref cursor, out rayleighs);
+
+        /// <summary>
+        /// The same interpolation on one of the patch's FORBIDDEN-LINE planes: plane -1 is
+        /// H-alpha, 0 and up are the extra planes in the order they were packed.
+        ///
+        /// One method rather than two, because the reconstruction is the delicate part (the C1
+        /// stencil, the incomplete-stencil fallback, the non-positive rule) and a second copy of
+        /// it would drift. Only the array read differs, and Patch handles that.
+        /// </summary>
+        public bool TryRayleighsAtGalactic(Patch patch, int patchIndex, int plane,
+                                           double lDeg, double bDeg,
+                                           long[] pixelScratch, double[] weightScratch,
+                                           ref Cursor cursor, out double rayleighs)
         {
             rayleighs = double.NaN;
             if (patch == null || patch.Values == null) return false;
+            if (plane >= 0 && (patch.ExtraValues == null || plane >= patch.ExtraValues.Length)) return false;
             if (cursor.Runs == null) cursor = Cursor.New(patchIndex + 1);
             int cursorBase = patchIndex * Cursor.RingsPerLookup;
             if (patchIndex < 0 || cursorBase + Cursor.RingsPerLookup > cursor.Runs.Length)
@@ -659,6 +950,16 @@ namespace ExoInstruments.Core
                 patchIndex = 0;
                 cursorBase = 0;
             }
+
+            // WHAT COUNTS AS A MEASUREMENT, and it is not the same question on the two kinds of
+            // plane. H-alpha is stored strictly positive with NaN over the continuum-subtraction
+            // residuals, so there a non-positive value can only be a masked cell. The forbidden-line
+            // planes are stored as a BACKGROUND-SUBTRACTED field: NSNS's [O III] and [S II] maps sit
+            // on a sky level of their own, and over half of every cutout falls below it purely
+            // through noise (VeilEast: 57% of raw [O III] pixels are negative). On those planes a
+            // zero, and a small negative, IS the measurement -- "no oxygen light here" -- and only
+            // NaN means nothing was measured. TryPlane reports coverage, so NaN is tested here.
+            bool measuredPlane = plane >= 0;
 
             // THE C1 RECONSTRUCTION FIRST, over the sixteen cells of the cubic stencil, and only
             // when every one of them is a measurement inside this patch. See
@@ -669,36 +970,51 @@ namespace ExoInstruments.Core
             // over the neighbours that do carry a measurement -- has no sound cubic equivalent;
             // those cells, and the patch's outer rim where the stencil leaves the patch, fall
             // through to the bilinear path unchanged.
-            if (Healpix.CubicInterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch)
+            //
+            // Rejecting a zero tap here is what ruled that mesh across an [O III] frame: with 57%
+            // of the plane at or below zero, virtually no sixteen-cell stencil was ever complete,
+            // every sample took the C0 bilinear path, and the crease at each cell edge became the
+            // visible lattice. The comment above predicted it exactly.
+            LastReconstructionWasCubic = false;
+            int patchNside = patch.Nside > 0 ? patch.Nside : nside;
+            if (Healpix.CubicInterpolationWeightsDegrees(patchNside, lDeg, bDeg, pixelScratch, weightScratch)
                 == Healpix.CubicTaps)
             {
                 double cubic = 0.0;
                 bool complete = true;
                 for (int i = 0; i < Healpix.CubicTaps; i++)
                 {
-                    if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 2)], out double v)
-                        || !(v > 0.0))
+                    if (!patch.TryPlane(plane, pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 2)], out double v)
+                        || double.IsNaN(v)
+                        || (!measuredPlane && !(v > 0.0)))
                     {
                         complete = false;
                         break;
                     }
                     cubic += weightScratch[i] * v;
                 }
-                if (complete && cubic > 0.0)
+
+                // A measured plane keeps whatever the reconstruction gives, including the small
+                // negative a cubic overshoot leaves beside a bright filament: clamping it here would
+                // rectify the noise and lift the background, and the deposit already refuses to turn
+                // a non-positive surface brightness into photons.
+                if (complete && (measuredPlane ? !double.IsNaN(cubic) : cubic > 0.0))
                 {
                     rayleighs = cubic;
+                    LastReconstructionWasCubic = true;
                     return true;
                 }
             }
 
-            Healpix.InterpolationWeightsDegrees(nside, lDeg, bDeg, pixelScratch, weightScratch);
+            Healpix.InterpolationWeightsDegrees(patchNside, lDeg, bDeg, pixelScratch, weightScratch);
 
             // A NON-POSITIVE VALUE IS NOT A MEASUREMENT OF ZERO EMISSION. SHASSA is a
             // continuum-subtracted survey: an off-band image is scaled and subtracted from the
             // H-alpha one to remove stellar continuum, and at a bright star that subtraction
             // over-corrects and drives the residual to zero or below (Gaustad et al. 2001,
-            // PASP 113, 1326, Sect. 4). 795 cells of 542,673 across the fourteen patches are such
-            // residuals, in discs on the brightest stars.
+            // PASP 113, 1326, Sect. 4). The packer stores those cells as NaN rather than as a
+            // number: 2,229 cells across the eighteen SHASSA patches, in discs on the brightest
+            // stars, and not one patch holds a single non-positive value.
             //
             // They are MASKED, not handed back to the base map. Two reasons, and the second is the
             // one that matters. First, a masked cell surrounded by good ones is fully covered by
@@ -709,12 +1025,22 @@ namespace ExoInstruments.Core
             // patch's own resolution -- SHASSA resolves filaments a 6 arcmin beam averages away --
             // so the handover shows as a step, and at 0.86 arcmin per cell that step is a 13-pixel
             // staircase. Trading a black disc for a grey one with a jagged edge is not a fix.
+            //
+            // THIS PARAGRAPH DESCRIBED CODE THAT DID NOT EXIST. The masked cells are NaN, the
+            // lookup answered NaN and off-the-patch with the same false, and the loop below took
+            // the first branch -- so every masked cell WAS handed back to the base map, and the
+            // staircase this argues against was what the renderer actually drew: a sharp-edged box
+            // on the brightest star in every patch, invisible wherever the two surveys agree and
+            // +33 ADU at M42's Trapezium, where they disagree tenfold because SHASSA saturates
+            // there. Coverage and measurement are now separate answers (see Patch.TryValue), and
+            // the reweighting below is the one that runs.
             double sum = 0.0, weight = 0.0;
             for (int i = 0; i < 4; i++)
             {
-                if (!patch.TryValue(pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 1)], out double v))
+                if (!patch.TryPlane(plane, pixelScratch[i], ref cursor.Runs[cursorBase + (i >> 1)], out double v))
                     return false;                       // outside the patch: that IS the base map's job
-                if (!(v > 0.0)) continue;               // a subtraction residual: no measurement here
+                if (double.IsNaN(v)) continue;               // covered, but nothing was measured here
+                if (!measuredPlane && !(v > 0.0)) continue;  // a subtraction residual: no measurement here
                 sum += weightScratch[i] * v;
                 weight += weightScratch[i];
             }

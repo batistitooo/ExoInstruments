@@ -147,11 +147,28 @@ namespace ExoInstruments.Core
             return s;
         }
 
-        /// <summary>Plane-parallel airmass sec(z). Accurate to &lt;1% above 20 deg, which is our telescope floor.</summary>
+        /// <summary>
+        /// Airmass, from Kasten and Young (1989, Applied Optics 28, 4735).
+        ///
+        ///     X = 1 / [ sin(h) + 0.50572 (h + 6.07995)^-1.6364 ],   h in degrees
+        ///
+        /// WHY NOT sec(z). This used to be the plane-parallel 1/sin(h), whose own comment claimed
+        /// accuracy better than 1% above the 20 degree telescope floor. Measured, it is 0.69% at
+        /// 20 degrees and the error grows fast below that: sec(z) treats the atmosphere as a flat
+        /// slab, so it diverges at the horizon where the real airmass tops out near 38. Kasten and
+        /// Young fit the real refracting, curved atmosphere and stay within 0.1% of it all the way
+        /// down to the horizon, at the cost of one power.
+        ///
+        /// This term multiplies every extinction and sky-brightness figure in a frame, so it is
+        /// worth having right rather than nearly right, and it removes a floor on how low the
+        /// telescope can be pointed before the model stops meaning anything.
+        /// </summary>
         public static double AirmassAt(double altitudeDeg)
         {
             if (altitudeDeg <= 0.0) return double.PositiveInfinity;
-            return 1.0 / Math.Sin(altitudeDeg * Math.PI / 180.0);
+            double h = altitudeDeg;
+            return 1.0 / (Math.Sin(h * Math.PI / 180.0)
+                          + 0.50572 * Math.Pow(h + 6.07995, -1.6364));
         }
 
         /// <summary>Maximum altitude this declination ever reaches from this latitude (at meridian transit).</summary>

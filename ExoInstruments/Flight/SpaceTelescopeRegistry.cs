@@ -20,6 +20,9 @@ namespace ExoInstruments.Flight
         /// <summary>The catalogue instrument this telescope carries.</summary>
         public VisualTelescopeSpec Instrument;
 
+        /// <summary>Catalogue name of the other channel, when the part declares one. Empty otherwise.</summary>
+        public string AlternateInstrumentName = "";
+
         /// <summary>The live module, or null when the vessel is unloaded. Everything below works either way.</summary>
         public ModuleExoSpaceTelescope Module;
 
@@ -182,6 +185,7 @@ namespace ExoInstruments.Flight
                 Vessel = v,
                 VesselName = v.vesselName,
                 Instrument = module.Instrument,
+                AlternateInstrumentName = module.alternateInstrumentName ?? "",
                 Module = module,
                 ApertureDoorOpen = module.apertureDoorOpen,
                 BlockedApertureFraction = module.BlockedApertureFraction,
@@ -226,11 +230,15 @@ namespace ExoInstruments.Flight
                     VisualTelescopeSpec spec = FindInstrument(instrumentName);
                     if (spec == null || spec.SpacePlatform == null) continue;
 
+                    string alternateName = node.GetValue("alternateInstrumentName");
+                    if (string.IsNullOrEmpty(alternateName)) alternateName = PrefabAlternateName(part);
+
                     var link = new SpaceTelescopeLink
                     {
                         Vessel = v,
                         VesselName = v.vesselName,
                         Instrument = spec,
+                        AlternateInstrumentName = alternateName ?? "",
                         Module = null,
                         ProtoModule = m,
                         ApertureDoorOpen = ReadBool(node, "apertureDoorOpen", false),
@@ -254,12 +262,22 @@ namespace ExoInstruments.Flight
         /// </summary>
         private static string PrefabInstrumentName(ProtoPartSnapshot part)
         {
-            if (part == null || part.partInfo == null || part.partInfo.partPrefab == null) return null;
+            ModuleExoSpaceTelescope prefab = PrefabModule(part);
+            return prefab != null ? prefab.instrumentName : null;
+        }
 
+        private static string PrefabAlternateName(ProtoPartSnapshot part)
+        {
+            ModuleExoSpaceTelescope prefab = PrefabModule(part);
+            return prefab != null ? prefab.alternateInstrumentName : null;
+        }
+
+        private static ModuleExoSpaceTelescope PrefabModule(ProtoPartSnapshot part)
+        {
+            if (part == null || part.partInfo == null || part.partInfo.partPrefab == null) return null;
             List<ModuleExoSpaceTelescope> prefabs =
                 part.partInfo.partPrefab.FindModulesImplementing<ModuleExoSpaceTelescope>();
-            if (prefabs == null || prefabs.Count == 0) return null;
-            return prefabs[0].instrumentName;
+            return prefabs != null && prefabs.Count > 0 ? prefabs[0] : null;
         }
 
         /// <summary>
@@ -357,7 +375,7 @@ namespace ExoInstruments.Flight
                 ? v : fallback;
         }
 
-        private static VisualTelescopeSpec FindInstrument(string name)
+        internal static VisualTelescopeSpec FindInstrument(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
             VisualTelescopeSpec[] all = VisualTelescopeCatalog.All;

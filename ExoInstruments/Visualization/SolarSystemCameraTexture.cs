@@ -143,11 +143,45 @@ namespace ExoInstruments.Visualization
                 ExposureSeconds *= (float)(oldAreaM2 / newAreaM2);
             }
 
+            ConformSettingsToSpec();
+        }
+
+        /// <summary>
+        /// A fresh camera on whatever instrument is already active.
+        ///
+        /// The reconciliation is not optional housekeeping: the GUI addon is
+        /// [KSPAddon(Startup.SpaceCentre, false)], so it and the camera it owns are rebuilt on
+        /// every return to the Space Centre, while Spec is static and survives. Selecting the
+        /// VLT, flying a mission and coming back therefore produced a camera holding the plain
+        /// property DEFAULTS (0.5 s, unguided, gain 1) under SPHERE's spec, which are not values
+        /// that instrument can take. Autoguiding was the visible half: AutoguidingForced disables
+        /// the very toggle needed to put it back, so the box sat unchecked and unclickable on an
+        /// instrument with no unguided mode at all.
+        /// </summary>
+        public SolarSystemCameraTexture()
+        {
+            ConformSettingsToSpec();
+        }
+
+        /// <summary>
+        /// Forces every player-set control into what the active spec can actually accept: zoom to
+        /// its wide end, exposure and gain into its real ranges, the filter wheel onto a position
+        /// it physically carries, and Autoguiding on for an instrument with no bare/unguided mode
+        /// (a real research telescope like the VLT). Without the last one, Autoguiding, being a
+        /// plain player-set toggle, would carry over whatever was last chosen on the RC20/CDK1000,
+        /// including off.
+        ///
+        /// Shared by SetActiveTelescope and the constructor, because the two situations that can
+        /// leave a control out of step with the spec are switching the spec under the settings and
+        /// rebuilding the settings under the spec.
+        /// </summary>
+        private void ConformSettingsToSpec()
+        {
             FovDeg = MaxFovDeg;
             ExposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             Gain = Mathf.Clamp(Gain, MinGain, MaxGain);
-            if (spec.AlwaysAutoguided) Autoguiding = true;
-            if (Array.IndexOf(spec.AvailableFilters, Filter) < 0) Filter = CameraFilter.Luminance;
+            if (Spec.AlwaysAutoguided) Autoguiding = true;
+            if (Array.IndexOf(Spec.AvailableFilters, Filter) < 0) Filter = CameraFilter.Luminance;
 
             // A cooler setpoint belongs to the camera that was on the telescope, not to the
             // observer: carrying -30 C from a TEC-cooled ZWO onto FORS2's cryogenic detector would
@@ -368,6 +402,16 @@ namespace ExoInstruments.Visualization
 
         /// <summary>Field of view with a real Barlow, the "high power" end of the zoom range.</summary>
         public static float MinFovDeg => MaxFovDeg / BarlowFactor;
+
+        /// <summary>
+        /// False when the instrument's field is FIXED, i.e. it carries no Barlow/Powermate to
+        /// change it (BarlowFactor 1: the RedCat 51, SPHERE's real 3.69" field, and both Hubble
+        /// channels, which fly the instruments they launched with). MinFovDeg == MaxFovDeg there, so
+        /// the GUI drops the zoom slider entirely rather than drawing a control with nothing to
+        /// express. Read this rather than comparing the two FOVs at the call site: the fact being
+        /// tested is a property of the optics, not a float coincidence.
+        /// </summary>
+        public static bool HasZoomRange => BarlowFactor > 1f;
 
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
 
@@ -875,7 +919,7 @@ namespace ExoInstruments.Visualization
         }
         /// <summary>Sensor gain, [MinGain, MaxGain]: higher = brighter + noisier.</summary>
         public float Gain { get; set; } = 1.0f;
-        /// <summary>When true the mount tracks the sky (no drift). Off by default — a bare RC20 has no autoguider.</summary>
+        /// <summary>When true the mount tracks the sky (no drift). Off by default: a bare RC20 has no autoguider.</summary>
         public bool Autoguiding { get; set; } = false;
 
         // --- Timed-exposure capture state ----------------------------------
@@ -1112,7 +1156,7 @@ namespace ExoInstruments.Visualization
             isProcessing = false;
         }
 
-        /// <summary>Marks the photo as consumed without releasing the locked aim. Used between stacking subs — the natural drift is what alignment is supposed to correct.</summary>
+        /// <summary>Marks the photo as consumed without releasing the locked aim. Used between stacking subs, where the natural drift is what alignment is supposed to correct.</summary>
         public void ConsumeCapturedPhoto()
         {
             HasCapturedPhoto = false;
@@ -1541,7 +1585,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Renders one frame through the locked aim into readbackTexture. Called once at
-        /// exposure completion — no live preview. Works entirely in KSP's scaled-space frame
+        /// exposure completion, with no live preview. Works entirely in KSP's scaled-space frame
         /// using the game's own scaledBody transforms, so no coordinate conversion is needed.
         /// </summary>
         private void RenderScene(SkyTarget target)
@@ -1554,7 +1598,7 @@ namespace ExoInstruments.Visualization
             Vector3 camPos = lockedCamPos;
             Quaternion look = lockedLook;
 
-            // Deliberately NOT touching Sun.Instance's rotation the way Tarsier does —
+            // Deliberately NOT touching Sun.Instance's rotation the way Tarsier does,
             // mutating that global object bleeds a color shift into the live scene.
             // Sun parallax from KSC is ~0.05 deg (negligible). May need revisiting for
             // distant bodies like Jool, but only with a technique that can't affect the game view.
@@ -1577,7 +1621,7 @@ namespace ExoInstruments.Visualization
 
             float fov = Mathf.Clamp(FovDeg, MinFovDeg, MaxFovDeg);
 
-            // Force every body's scaled stand-in visible — KSP fades them by real-camera
+            // Force every body's scaled stand-in visible, because KSP fades them by real-camera
             // distance, which has nothing to do with where our clone points.
             //
             // The home body is the exception, and it must be switched OFF rather than merely
@@ -1909,6 +1953,7 @@ namespace ExoInstruments.Visualization
             // background pass needs nothing but arithmetic.
             /// <summary>The instrument's integrated spectral response for this filter and airmass: optics, filter, QE curve and extinction in one object (see SystemBandpass). Built on the main thread, read-only thereafter.</summary>
             public SystemResponse Response;
+            public List<RenderedSupernova> Supernovae;
             public double ApertureAreaCm2;
             /// <summary>Atmospheric extinction at the fitted filter's own wavelength: extinction alone, no ND filter, no cloud.</summary>
             public double CloudTransmission;
@@ -2347,6 +2392,8 @@ namespace ExoInstruments.Visualization
             LastTargetPixelY = double.NaN;
             LastTargetOffsetArcsec = double.NaN;
             LastTargetInFrame = false;
+            LastSupernovae = null;
+            LastSupernovaNoiseElectrons = 0.0;
 
             if (!TryBuildFieldGeometry(inputs.Ut, out GnomonicProjection projection,
                                        out double meridianRaDeg, out double latitudeDeg))
@@ -2416,6 +2463,7 @@ namespace ExoInstruments.Visualization
             GatherDispersionGeometry(ref inputs, projection, meridianRaDeg, latitudeDeg, target);
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
             inputs.Galaxies = SearchGalaxyCatalog(inputs, latitudeDeg);
+            inputs.Supernovae = GatherSupernovae(inputs);
             inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
             inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds);
         }
@@ -2550,6 +2598,9 @@ namespace ExoInstruments.Visualization
         /// <summary>Name of the high-resolution patch the last frame was drawn from, or null when the base map answered.</summary>
         public string LastEmissionPatchName { get; private set; }
 
+        /// <summary>Lines this frame took from a MEASURED plane rather than from the ratio model, or null.</summary>
+        public string LastEmissionMeasuredLines { get; private set; }
+
         // The registration reference a stack aligns on used to be exposed here as
         // LastRegistrationX/Y, aliases onto the live LastTargetPixelX/Y. It now travels with the
         // rest of the frame's geometry in LastCaptureGeometry, because reading it live is what
@@ -2574,6 +2625,18 @@ namespace ExoInstruments.Visualization
         /// catalogue's own brightness. See GalaxyImageSet and tools/pack_galaxy_images.py.
         /// </summary>
         public static GalaxyImageSet GalaxyImages { get; set; }
+
+        /// <summary>The packed spectral templates, or null when the file is absent (supernovae then simply never occur).</summary>
+        public static SupernovaTemplateSet SupernovaTemplates { get; set; }
+
+        /// <summary>Per-save seed the deterministic supernova history is generated from. Zero disables the model.</summary>
+        public static long SupernovaSeed { get; set; }
+
+        /// <summary>Supernovae the LAST capture had in its field, with the electrons the frame really gave them. For the discovery check.</summary>
+        public List<SupernovaSighting> LastSupernovae { get; private set; }
+
+        /// <summary>Per-pixel 1-sigma noise of that frame (sky + dark shot noise, read noise), the denominator of the 5-sigma discovery rule.</summary>
+        public double LastSupernovaNoiseElectrons { get; private set; }
 
         /// <summary>Galaxies drawn into the last frame, and the electrons they contributed. Diagnostics, read after a capture.</summary>
         public int LastGalaxiesDrawn { get; private set; }
@@ -2714,13 +2777,53 @@ namespace ExoInstruments.Visualization
             if (map == null || !map.IsLoaded || !inputs.HaveFieldGeometry || signal == null) return;
             if (inputs.Response == null) return;
 
-            // Which lines this filter admits, and what each is worth per rayleigh. ThroughputAt is
-            // zero outside the passband, so the admission test and the coefficient are one call.
+            // THE PATCHES FIRST, because which lines this frame can render depends on which of
+            // them are MEASURED here, and that is a property of the patch.
+            EmissionPatchSet patchSetEarly = EmissionPatches;
+            List<EmissionPatchSet.Patch> patchesHere = null;
+            if (patchSetEarly != null && patchSetEarly.IsLoaded)
+            {
+                // The field radius needs the WCS, which GatherSkyField has already built.
+                double radiusDeg = 0.5 * Math.Sqrt((double)TextureWidth * TextureWidth
+                                                 + (double)TextureHeight * TextureHeight)
+                                 * inputs.PlateScaleArcsec / 3600.0;
+                patchesHere = patchSetEarly.FindOverlappingPatches(
+                    LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg, radiusDeg);
+                if (patchesHere.Count == 0) patchesHere = null;
+            }
+
+            // EVERY LINE THIS FRAME COULD CARRY: the ones derivable from H-alpha, plus the ones a
+            // patch here actually measures. The second half is not optional. DerivableLines is by
+            // construction the list of lines that FOLLOW from an H-alpha map, and [O III] is
+            // deliberately absent from it (NebularLineRatios explains why deriving it would be
+            // inventing a sky). Iterating over that list alone meant an [O III] filter admitted
+            // nothing, returned before the patch was ever consulted, and rendered an empty frame
+            // even with a measured [O III] plane sitting under the field.
+            var candidates = new List<EmissionLines.Line>(NebularLineRatios.DerivableLines);
+            if (patchesHere != null)
+            {
+                foreach (EmissionPatchSet.Patch patch in patchesHere)
+                {
+                    if (patch.ExtraWavelengthMeters == null) continue;
+                    for (int i = 0; i < patch.ExtraWavelengthMeters.Length; i++)
+                    {
+                        EmissionLines.Line measuredLine = EmissionLines.Nearest(patch.ExtraWavelengthMeters[i]);
+                        if (measuredLine.WavelengthMeters <= 0.0) continue;
+                        bool known = false;
+                        foreach (EmissionLines.Line c in candidates)
+                            if (Math.Abs(c.WavelengthMeters - measuredLine.WavelengthMeters) < 1e-12) { known = true; break; }
+                        if (!known) candidates.Add(measuredLine);
+                    }
+                }
+            }
+
+            // Which of them this filter admits, and what each is worth per rayleigh. ThroughputAt
+            // is zero outside the passband, so the admission test and the coefficient are one call.
             var lines = new List<EmissionLines.Line>();
             var coefficients = new List<double>();
             double exposureTransmission = inputs.ExposureSeconds
                                         * Math.Max(0.0, inputs.StarNonAtmosphericTransmission);
-            foreach (EmissionLines.Line line in NebularLineRatios.DerivableLines)
+            foreach (EmissionLines.Line line in candidates)
             {
                 double throughput = inputs.Response.ThroughputAt(line.WavelengthMeters);
                 if (!(throughput > 0.0)) continue;
@@ -2744,16 +2847,8 @@ namespace ExoInstruments.Visualization
             // The high-resolution layer, if one covers this field. Resolved once: a frame cannot
             // span two patches, and asking per pixel would be a hundred dot products for an answer
             // that does not change.
-            EmissionPatchSet patchSet = EmissionPatches;
-            List<EmissionPatchSet.Patch> patchList = null;
-            if (patchSet != null && patchSet.IsLoaded)
-            {
-                double fieldRadiusDeg = 0.5 * Math.Sqrt((double)w * w + (double)h * h)
-                                      * inputs.PlateScaleArcsec / 3600.0;
-                patchList = patchSet.FindOverlappingPatches(
-                    LastWcs.ReferenceRaDeg, LastWcs.ReferenceDecDeg, fieldRadiusDeg);
-                if (patchList.Count == 0) patchList = null;
-            }
+            EmissionPatchSet patchSet = patchSetEarly;
+            List<EmissionPatchSet.Patch> patchList = patchesHere;
             if (patchList != null)
             {
                 var patchNames = new string[patchList.Count];
@@ -2761,7 +2856,16 @@ namespace ExoInstruments.Visualization
                 LastEmissionPatchName = string.Join(" + ", patchNames);
             }
             else LastEmissionPatchName = null;
-            LastEmissionResolutionArcmin = patchList != null ? patchSet.ResolutionArcmin : map.ResolutionArcmin;
+            // The FINEST patch over the field, not the set's default: patches carry their own
+            // resolution now, and a northern one is four times finer than a southern one.
+            if (patchList != null)
+            {
+                double finest = double.MaxValue;
+                foreach (EmissionPatchSet.Patch p in patchList)
+                    finest = Math.Min(finest, EmissionPatchSet.PatchResolutionArcmin(p));
+                LastEmissionResolutionArcmin = finest < double.MaxValue ? finest : patchSet.ResolutionArcmin;
+            }
+            else LastEmissionResolutionArcmin = map.ResolutionArcmin;
 
             // ONE SAMPLE PER NATIVE PIXEL, NOT PER BINNED PIXEL. Binning here is charge-domain
             // summing, which is what FullWellElectrons and the dark-current terms already assume:
@@ -2793,6 +2897,35 @@ namespace ExoInstruments.Visualization
             var linesArray = lines.ToArray();
             var coefficientsArray = coefficients.ToArray();
 
+            // WHICH ADMITTED LINES THIS FIELD HAS A MEASUREMENT FOR, resolved once. A patch packed
+            // from NSNS carries [O III] and [S II] planes beside its H-alpha; SHASSA's carry only
+            // H-alpha. Where a plane exists the frame uses the MEASURED line, and the ratio model
+            // is not consulted at all: NebularLineRatios derives the forbidden lines from a warm
+            // ionised medium relation (Haffner, Reynolds & Tufte 1999) that a supernova remnant's
+            // shocks do not obey, and [O III] it declines to derive at all, by design. A measured
+            // plane settles both cases with data.
+            //
+            // -1 means no plane and the derived ratio answers, which is every southern patch and
+            // every field with no patch at all: unchanged behaviour where there is nothing new.
+            int[][] planeForLine = null;
+            if (patchList != null)
+            {
+                planeForLine = new int[patchList.Count][];
+                var measured = new List<string>();
+                for (int pi = 0; pi < patchList.Count; pi++)
+                {
+                    planeForLine[pi] = new int[linesArray.Length];
+                    for (int i = 0; i < linesArray.Length; i++)
+                    {
+                        planeForLine[pi][i] = patchList[pi].PlaneFor(linesArray[i].WavelengthMeters);
+                        if (planeForLine[pi][i] >= 0 && !measured.Contains(linesArray[i].Name))
+                            measured.Add(linesArray[i].Name);
+                    }
+                }
+                LastEmissionMeasuredLines = measured.Count > 0 ? string.Join(", ", measured) : null;
+            }
+            else LastEmissionMeasuredLines = null;
+
             Action<int, EmissionScratch> fillRow = (y, scratch) =>
             {
                 long[] pixelScratch = scratch.Pixels;
@@ -2807,6 +2940,12 @@ namespace ExoInstruments.Visualization
                     double rSum = 0.0;
                     int rCount = 0;
                     int patchSamples = 0;
+
+                    // Measured planes accumulate beside H-alpha, on the same sub-pixel grid.
+                    double[] measuredSum = scratch.MeasuredSum;
+                    int[] measuredCount = scratch.MeasuredCount;
+                    if (measuredSum != null)
+                        for (int i = 0; i < measuredSum.Length; i++) { measuredSum[i] = 0.0; measuredCount[i] = 0; }
 
                     for (int sy = 0; sy < bin; sy++)
                     for (int sx = 0; sx < bin; sx++)
@@ -2828,6 +2967,21 @@ namespace ExoInstruments.Visualization
                                         pixelScratch, weightScratch, ref patchCursor, out sample)) continue;
                                 fromPatch = true;
                                 patchSamples++;
+
+                                // The same position on whatever forbidden-line planes this patch
+                                // carries for the filter's admitted lines.
+                                if (measuredSum != null)
+                                {
+                                    for (int i = 0; i < linesArray.Length; i++)
+                                    {
+                                        int plane = planeForLine[pi][i];
+                                        if (plane < 0) continue;
+                                        if (!patchSet.TryRayleighsAtGalactic(patchList[pi], pi, plane, l, b,
+                                                pixelScratch, weightScratch, ref patchCursor, out double lv)) continue;
+                                        measuredSum[i] += lv;
+                                        measuredCount[i]++;
+                                    }
+                                }
                                 break;
                             }
                         }
@@ -2856,9 +3010,18 @@ namespace ExoInstruments.Visualization
                     double pixelRayleighs = 0.0, pixelElectrons = 0.0;
                     for (int i = 0; i < linesArray.Length; i++)
                     {
-                        double ratio = ratios.RatioToHalpha(linesArray[i]);
-                        if (double.IsNaN(ratio) || !(ratio > 0.0)) continue;
-                        double lineR = r * ratio;
+                        double lineR;
+                        if (measuredSum != null && measuredCount[i] > 0)
+                        {
+                            lineR = measuredSum[i] / measuredCount[i];   // measured beats derived
+                        }
+                        else
+                        {
+                            double ratio = ratios.RatioToHalpha(linesArray[i]);
+                            if (double.IsNaN(ratio) || !(ratio > 0.0)) continue;
+                            lineR = r * ratio;
+                        }
+                        if (!(lineR > 0.0)) continue;
                         pixelRayleighs += lineR;
                         pixelElectrons += lineR * coefficientsArray[i];
                     }
@@ -2877,16 +3040,17 @@ namespace ExoInstruments.Visualization
             };
 
             int patchCount = patchList != null ? patchList.Count : 1;
+            int measuredLines = LastEmissionMeasuredLines != null ? linesArray.Length : 0;
             if (ParallelWork.Worthwhile((long)w * h * bin * bin))
             {
                 Parallel.For(0, h, ParallelWork.Options,
-                    () => new EmissionScratch(patchCount),
+                    () => new EmissionScratch(patchCount, measuredLines),
                     (y, state, scratch) => { fillRow(y, scratch); return scratch; },
                     scratch => { });
             }
             else
             {
-                var scratch = new EmissionScratch(patchCount);
+                var scratch = new EmissionScratch(patchCount, measuredLines);
                 for (int y = 0; y < h; y++) fillRow(y, scratch);
             }
 
@@ -2922,10 +3086,19 @@ namespace ExoInstruments.Visualization
             public readonly double[] Weights;
             public EmissionPatchSet.Cursor Cursor;
 
-            public EmissionScratch(int patchCount)
+            /// <summary>Per-line accumulators for the measured forbidden-line planes. Null when no patch in the field carries any, which costs nothing on the ordinary path.</summary>
+            public readonly double[] MeasuredSum;
+            public readonly int[] MeasuredCount;
+
+            public EmissionScratch(int patchCount, int lineCount)
             {
                 EmissionMap.AllocateScratch(out Pixels, out Weights);
                 Cursor = EmissionPatchSet.Cursor.New(patchCount);
+                if (lineCount > 0)
+                {
+                    MeasuredSum = new double[lineCount];
+                    MeasuredCount = new int[lineCount];
+                }
             }
         }
 
@@ -3207,13 +3380,35 @@ namespace ExoInstruments.Visualization
                 foreach (Galaxy g in galaxies) present.Add(g.Name);
             }
 
+            // Brighter catalogued total wins a mutual-coverage tie; name order settles a dead heat.
+            bool CatalogDominates(Galaxy a, string otherName)
+            {
+                GalaxyCatalog catalog = GalaxyCatalog;
+                if (catalog == null || !catalog.TryGetByName(otherName, out Galaxy other)) return true;
+                if (!double.IsNaN(a.TotalBMag) && !double.IsNaN(other.TotalBMag)
+                    && Math.Abs(a.TotalBMag - other.TotalBMag) > 1e-9)
+                    return a.TotalBMag < other.TotalBMag;
+                return string.CompareOrdinal(a.Name, otherName) < 0;
+            }
+
             foreach (Galaxy g in galaxies)
             {
                 // A companion whose light is already inside a neighbour's map is drawn by that
                 // map, once, with its own catalogued flux folded into the neighbour's total.
+                //
+                // For MUTUAL coverage (an interacting pair so close that each map swallowed the
+                // other, M51 + NGC5195 in the shipped data) an unconditional skip drops BOTH
+                // members and the pair vanishes. One member must deposit: its map total already
+                // folds the companion's catalogued flux in, so the pair is drawn once at
+                // combined brightness. The tie-break picks that member.
                 if (haveImages && images.IsCoveredByAnother(g.Name, out string owner)
                     && present.Contains(owner))
-                    continue;
+                {
+                    bool mutual = images.IsCoveredByAnother(owner, out string ownersOwner)
+                               && string.Equals(ownersOwner, g.Name, StringComparison.OrdinalIgnoreCase);
+                    if (!mutual || !CatalogDominates(g, owner))
+                        continue;
+                }
 
                 double colour = g.ColourBv;
                 bool modelledColour = double.IsNaN(colour);
@@ -3535,6 +3730,90 @@ namespace ExoInstruments.Visualization
             double noiseElectrons = Math.Sqrt(skyElectrons + darkElectrons) + Spec.ReadNoiseElectrons;
 
             return StarFieldRenderer.NoiseFloorCutoffFraction * Math.Max(1.0, noiseElectrons);
+        }
+
+        /// <summary>Sky position of a resolved supernova, cached because the sampling walks the host's light map.</summary>
+        private static readonly Dictionary<string, KeyValuePair<double, double>> supernovaPositions =
+            new Dictionary<string, KeyValuePair<double, double>>();
+
+        private static double longestTemplateDays = -1.0;
+
+        /// <summary>
+        /// The supernovae shining in any of the frame's galaxies at this instant.
+        ///
+        /// Runs on the gather (main) thread because resolving a first-seen event's position may
+        /// touch the host's light map on disk; after that the position is cached and the cost is
+        /// the deterministic event arithmetic. The template's measured spectrum at the current
+        /// phase rides along so the deposit stage prices it through the real passband.
+        /// </summary>
+        private List<RenderedSupernova> GatherSupernovae(FrameComputeInputs inputs)
+        {
+            SupernovaTemplateSet templates = SupernovaTemplates;
+            long seed = SupernovaSeed;
+            if (templates == null || seed == 0 || inputs.Galaxies == null || inputs.Galaxies.Count == 0)
+                return null;
+
+            if (longestTemplateDays < 0.0)
+            {
+                double longest = 0.0;
+                foreach (Core.SupernovaClass c in Enum.GetValues(typeof(Core.SupernovaClass)))
+                {
+                    SupernovaTemplate t = templates.Get(c);
+                    if (t != null && t.ActiveDays > longest) longest = t.ActiveDays;
+                }
+                longestTemplateDays = longest;
+            }
+
+            List<RenderedSupernova> found = null;
+            double eBv = double.IsNaN(inputs.FieldReddeningEBv) ? 0.0 : Math.Max(0.0, inputs.FieldReddeningEBv);
+            double extinctionAtV = eBv > 0.0
+                ? -2.5 * Math.Log10(Math.Max(1e-30, SystemResponse.ExtinctionTransmission(
+                      StellarPhotometry.JohnsonVWavelengthMeters, eBv)))
+                : 0.0;
+
+            for (int gi = 0; gi < inputs.Galaxies.Count; gi++)
+            {
+                Galaxy g = inputs.Galaxies[gi];
+                if (double.IsNaN(g.DistanceModulusMag)) continue;
+
+                List<SupernovaEvent> events = Core.Supernovae.ActiveAt(seed, in g, inputs.Ut, longestTemplateDays);
+                for (int i = 0; i < events.Count; i++)
+                {
+                    SupernovaEvent e = events[i];
+                    SupernovaTemplate template = templates.Get(e.Class);
+                    if (template == null) continue;
+
+                    double phase = e.PhaseDaysAt(inputs.Ut);
+                    double vAnchor = template.VAnchorAt(phase);
+                    if (double.IsInfinity(vAnchor)) continue;
+
+                    Core.SpectralCurve shape = template.ShapeAt(phase);
+                    if (shape == null) continue;
+
+                    if (!supernovaPositions.TryGetValue(e.Key, out KeyValuePair<double, double> pos))
+                    {
+                        GalaxyImage map = GalaxyImages != null ? GalaxyImages.Fetch(g.Name) : null;
+                        e = Core.Supernovae.ResolvePosition(e, in g, map);
+                        pos = new KeyValuePair<double, double>(e.RaDeg, e.DecDeg);
+                        supernovaPositions[e.Key] = pos;
+                    }
+
+                    (found = found ?? new List<RenderedSupernova>()).Add(new RenderedSupernova
+                    {
+                        Key = e.Key,
+                        HostName = e.HostName,
+                        Class = e.Class,
+                        IsIIb = e.IsIIb,
+                        PhaseDays = phase,
+                        RaDeg = pos.Key,
+                        DecDeg = pos.Value,
+                        VMagApparent = e.PeakAbsoluteBMag + g.DistanceModulusMag + vAnchor + extinctionAtV,
+                        EBv = eBv,
+                        Shape = shape,
+                    });
+                }
+            }
+            return found;
         }
 
         /// <summary>
@@ -4716,13 +4995,13 @@ namespace ExoInstruments.Visualization
         {
             int drawn = 0;
 
+            SystemResponse response = inputs.Response;
+            double area = inputs.ApertureAreaCm2;
+            double exposure = inputs.ExposureSeconds;
+            double transmission = inputs.StarNonAtmosphericTransmission * scintillation;
+
             if (inputs.Stars != null && inputs.Stars.Count > 0)
             {
-                SystemResponse response = inputs.Response;
-                double area = inputs.ApertureAreaCm2;
-                double exposure = inputs.ExposureSeconds;
-                double transmission = inputs.StarNonAtmosphericTransmission * scintillation;
-
                 // One cache per frame, built here rather than alongside the response: it runs
                 // quadratures, this is the background thread, and a frame is one sight line so its
                 // stars share nearly all of them. See ReddenedResponseCache.
@@ -4739,6 +5018,96 @@ namespace ExoInstruments.Visualization
                         response, reddening, area, exposure, transmission));
 
                 lastReddeningQuadratures = reddening.Evaluations;
+            }
+
+            // Supernovae, on the SAME deposit path (trails included). Their electrons come from
+            // the template's measured spectrum through the spectrum overload, which is what makes
+            // a II-P's H-alpha land in a narrowband filter; everything else about them is a star.
+            if (inputs.Supernovae != null && inputs.Supernovae.Count > 0 && response != null)
+            {
+                var snStars = new List<RenderedStar>(inputs.Supernovae.Count);
+                var sightings = new List<SupernovaSighting>(inputs.Supernovae.Count);
+
+                foreach (RenderedSupernova sn in inputs.Supernovae)
+                {
+                    double width = response.EffectiveWidthAngstromForSpectrum(sn.Shape, sn.EBv);
+                    double electrons = PhotonFluxModel.CollectedElectrons(
+                        sn.VMagApparent, width, area, exposure) * transmission;
+
+                    snStars.Add(new RenderedStar
+                    {
+                        RaDeg = sn.RaDeg,
+                        DecDeg = sn.DecDeg,
+                        VMag = sn.VMagApparent,
+                        ColorIndexBV = double.NaN,
+                        ReddeningEBv = double.NaN,
+                        FixedElectrons = Math.Max(electrons, 1e-12),
+                    });
+
+                    var sighting = new SupernovaSighting
+                    {
+                        Key = sn.Key,
+                        HostName = sn.HostName,
+                        Class = sn.Class,
+                        IsIIb = sn.IsIIb,
+                        PhaseDays = sn.PhaseDays,
+                        RaDeg = sn.RaDeg,
+                        DecDeg = sn.DecDeg,
+                        VMagApparent = sn.VMagApparent,
+                        PredictedElectrons = electrons,
+                        PixelX = double.NaN,
+                        PixelY = double.NaN,
+                        ExplosionUt = inputs.Ut - sn.PhaseDays * 86400.0,
+                    };
+                    HorizontalCoordinates altAz = SkyCoordinates.EquatorialToHorizontal(
+                        sn.RaDeg, sn.DecDeg, inputs.EndMeridianRaDeg, inputs.ObserverLatitudeDeg);
+                    if (inputs.Projection.TryProject(
+                            SkyVector.FromHorizontal(altAz.AltitudeDeg, altAz.AzimuthDeg),
+                            out double px, out double py))
+                    {
+                        sighting.PixelX = px;
+                        sighting.PixelY = py;
+                    }
+                    sightings.Add(sighting);
+                }
+
+                drawn += StarFieldRenderer.DepositStars(
+                    signal, TextureWidth, TextureHeight,
+                    snStars, inputs.Projection,
+                    inputs.StartMeridianRaDeg, inputs.EndMeridianRaDeg,
+                    inputs.ObserverLatitudeDeg,
+                    inputs.SignalCutoffElectrons,
+                    ignored => 0.0);
+
+                LastSupernovae = sightings;
+
+                // THE HOST'S OWN LIGHT IS PART OF THE BACKGROUND, and leaving it out is what made
+                // the detector call a source the player could not see a 6500 sigma discovery: an
+                // event 8 arcsec from its nucleus sits on the galaxy's core, where the surface
+                // brightness buries the sky by orders of magnitude. It is sampled from the plane
+                // the galaxy was deposited into, before the supernova itself goes in.
+                //
+                // THE SNR IS CcdEquation.SignalToNoise, not an expression written here. That is
+                // the same Merline and Howell equation the photometry uses, cross-validated in
+                // tools/photometry-tests, and it carries the terms an ad-hoc sqrt(sky+dark)+read
+                // drops: the source's OWN shot noise, the aperture's pixel count, the background
+                // estimation factor, and read noise in quadrature rather than added linearly.
+                double skyElectrons = Math.Max(0.0, inputs.SkyElectronsPerPixel);
+                double darkElectrons = Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor * inputs.ExposureSeconds;
+                double aperturePixels = SupernovaAperturePixels(inputs);
+                for (int i = 0; i < sightings.Count; i++)
+                {
+                    SupernovaSighting sn = sightings[i];
+                    double local = SampleSignalAround(signal, sn.PixelX, sn.PixelY);
+                    sn.LocalBackgroundElectrons = local;
+                    sn.SignalToNoise = CcdEquation.SignalToNoise(
+                        sn.PredictedElectrons, aperturePixels,
+                        BackgroundAnnulusPixels(aperturePixels),
+                        skyElectrons + Math.Max(0.0, local), darkElectrons,
+                        Spec.ReadNoiseElectrons, ElectronsPerAdu(Gain));
+                    sightings[i] = sn;
+                }
+                LastSupernovaNoiseElectrons = Math.Sqrt(skyElectrons + darkElectrons) + Spec.ReadNoiseElectrons;
             }
 
             // Outside the block above on purpose. The diffuse gas does not depend on whether any
@@ -4758,6 +5127,49 @@ namespace ExoInstruments.Visualization
             }
 
             lastStarsDrawnInternal = drawn;
+        }
+
+        /// <summary>
+        /// Pixels the detection aperture covers, from the frame's own delivered PSF width and
+        /// plate scale through the same CcdEquation helper the photometry uses.
+        /// </summary>
+        private static double SupernovaAperturePixels(FrameComputeInputs inputs)
+        {
+            double fwhmArcsec = Math.Max(1e-6, inputs.Pointing.EquivalentFwhmArcsec > 0.0
+                ? inputs.Pointing.EquivalentFwhmArcsec : PlateScaleArcsecPerPixel);
+            double radiusArcsec = CcdEquation.OptimalApertureRadiusInFwhm * fwhmArcsec;
+            return Math.Max(1.0, CcdEquation.AperturePixels(radiusArcsec, PlateScaleArcsecPerPixel));
+        }
+
+        /// <summary>Sky annulus area, from the equation's own published aperture-to-annulus ratio.</summary>
+        private static double BackgroundAnnulusPixels(double aperturePixels)
+            => aperturePixels * CcdEquation.BackgroundToApertureAreaRatio;
+
+        /// <summary>
+        /// Mean deposited signal per pixel in a small box around a point: what a source at that
+        /// position has to stand out from. Zero off the sensor.
+        ///
+        /// A BOX MEAN, AND THAT IS THE ONE APPROXIMATION HERE, declared in section 12: the exact
+        /// quantity is the host's surface brightness integrated over the detection aperture, and
+        /// this is its mean over a 5x5 box. It feeds the DISCOVERY THRESHOLD only. No pixel of the
+        /// image, no FITS value and no photometric measurement is computed from it.
+        /// </summary>
+        private static double SampleSignalAround(float[] plane, double px, double py, int radius = 2)
+        {
+            if (plane == null || double.IsNaN(px) || double.IsNaN(py)) return 0.0;
+            int cx = (int)Math.Round(px), cy = (int)Math.Round(py);
+            double sum = 0.0; int n = 0;
+            for (int y = cy - radius; y <= cy + radius; y++)
+            {
+                if (y < 0 || y >= TextureHeight) continue;
+                for (int x = cx - radius; x <= cx + radius; x++)
+                {
+                    if (x < 0 || x >= TextureWidth) continue;
+                    sum += plane[y * TextureWidth + x];
+                    n++;
+                }
+            }
+            return n > 0 ? sum / n : 0.0;
         }
 
         /// <summary>
@@ -6014,5 +6426,43 @@ namespace ExoInstruments.Visualization
             lastCaptureSnapshot = null;
             hasLockedAim = false;
         }
+    }
+
+    /// <summary>A supernova as the frame needs it: where, how bright in the mod's V, and its measured spectrum at this phase.</summary>
+    public struct RenderedSupernova
+    {
+        public string Key;
+        public string HostName;
+        public Core.SupernovaClass Class;
+        public bool IsIIb;
+        public double PhaseDays;
+        public double RaDeg;
+        public double DecDeg;
+        public double VMagApparent;
+        public double EBv;
+        public Core.SpectralCurve Shape;
+    }
+
+    /// <summary>What one frame recorded about one supernova: enough for the discovery check and the logbook, nothing more.</summary>
+    public struct SupernovaSighting
+    {
+        public string Key;
+        public string HostName;
+        public Core.SupernovaClass Class;
+        public bool IsIIb;
+        public double PhaseDays;
+        public double RaDeg;
+        public double DecDeg;
+        public double VMagApparent;
+        public double PredictedElectrons;
+
+        /// <summary>Mean deposited signal per pixel around the event, dominated by the host near a nucleus. What it must stand out from.</summary>
+        public double LocalBackgroundElectrons;
+
+        /// <summary>Detection signal-to-noise from CcdEquation, with the host's light at the event included in the background.</summary>
+        public double SignalToNoise;
+        public double PixelX;
+        public double PixelY;
+        public double ExplosionUt;
     }
 }

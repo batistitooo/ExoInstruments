@@ -127,6 +127,67 @@ namespace ExoInstruments.Core
             return EquatorialToHorizontal(target.RaDeg.Value, target.DecDeg.Value, localMeridianRaDeg, observerLatitudeDeg);
         }
 
+        /// <summary>
+        /// Precesses catalogue coordinates from J2000 to the equinox of date.
+        ///
+        /// WHY THIS EXISTS. Every catalogue this project reads gives positions at J2000: Gaia DR3,
+        /// the Bright Star Catalogue, HyperLEDA, the exoplanet catalogue. The Earth's axis moves,
+        /// so those are not where the stars are TODAY, and the equatorial-to-horizontal transform
+        /// below assumes coordinates of date. Skipping the step is not a small error: measured
+        /// against Skyfield over 160 pointings, eight targets, five sites and four epochs through
+        /// 2026, it was 0.35 degrees RMS and 0.61 worst, which is 21 arcminutes of pointing on a
+        /// field that can be a few arcminutes across.
+        ///
+        /// The angles are the IAU 1976 precession (Lieske et al. 1977), the standard rigorous
+        /// rotation rather than the small-angle approximation, so it does not degrade near the
+        /// pole where the approximation's dRA blows up as 1/cos(dec). Good to about an arcsecond
+        /// over a century, which is far inside what remains: nutation (up to 17 arcsec) and annual
+        /// aberration (20 arcsec) are NOT applied, and neither is proper motion. See ACCURACY.md
+        /// in Studio for what that leaves.
+        /// </summary>
+        /// <param name="julianCenturiesFromJ2000">(TT - J2000) in Julian centuries. UT seconds / 3155760000 is close enough at this accuracy.</param>
+        public static void PrecessFromJ2000(double raDeg, double decDeg,
+                                            double julianCenturiesFromJ2000,
+                                            out double raOfDateDeg, out double decOfDateDeg)
+        {
+            double t = julianCenturiesFromJ2000;
+            const double ArcsecToDeg = 1.0 / 3600.0;
+
+            double zeta = (2306.2181 * t + 0.30188 * t * t + 0.017998 * t * t * t) * ArcsecToDeg;
+            double z = (2306.2181 * t + 1.09468 * t * t + 0.018203 * t * t * t) * ArcsecToDeg;
+            double theta = (2004.3109 * t - 0.42665 * t * t - 0.041833 * t * t * t) * ArcsecToDeg;
+
+            double ra0 = DegToRad(raDeg), dec0 = DegToRad(decDeg);
+            double zetaR = DegToRad(zeta), zR = DegToRad(z), thetaR = DegToRad(theta);
+
+            // Unit vector in the J2000 frame, rotated by Rz(-z) Ry(theta) Rz(-zeta).
+            double cosDec = Math.Cos(dec0);
+            double x0 = cosDec * Math.Cos(ra0);
+            double y0 = cosDec * Math.Sin(ra0);
+            double z0 = Math.Sin(dec0);
+
+            double cz = Math.Cos(zetaR), sz = Math.Sin(zetaR);
+            double x1 = cz * x0 - sz * y0;
+            double y1 = sz * x0 + cz * y0;
+            double z1 = z0;
+
+            double ct = Math.Cos(thetaR), st = Math.Sin(thetaR);
+            double x2 = ct * x1 - st * z1;
+            double y2 = y1;
+            double z2 = st * x1 + ct * z1;
+
+            double cZ = Math.Cos(zR), sZ = Math.Sin(zR);
+            double x3 = cZ * x2 - sZ * y2;
+            double y3 = sZ * x2 + cZ * y2;
+            double z3 = z2;
+
+            raOfDateDeg = NormalizeDegrees(RadToDeg(Math.Atan2(y3, x3)));
+            decOfDateDeg = RadToDeg(Math.Asin(Math.Max(-1.0, Math.Min(1.0, z3))));
+        }
+
+        /// <summary>Julian centuries per second, for turning a UT offset from J2000 into the argument above.</summary>
+        public const double JulianCenturiesPerSecond = 1.0 / (86400.0 * 36525.0);
+
         private static double DegToRad(double deg) => deg * Math.PI / 180.0;
         private static double RadToDeg(double rad) => rad * 180.0 / Math.PI;
 

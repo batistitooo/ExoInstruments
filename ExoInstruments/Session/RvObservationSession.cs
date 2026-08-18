@@ -39,8 +39,22 @@ namespace ExoInstruments.Session
         // grid, so a cadence commensurate with the day length can't starve.
         private double nextSampleUt;
 
+        /// <summary>
+        /// The seed every noise draw in this campaign came from, so the run can be repeated.
+        ///
+        /// A campaign that cannot be reproduced cannot be published against, and this one could
+        /// not: the generator was constructed unseeded, so a recovered semi-amplitude was
+        /// unrepeatable even from an identical target, instrument, site and start date. The
+        /// imaging path never had that gap, its PCG32 streams are seeded per exposure and the seed
+        /// is written into the FITS header as RANDSEED; this is the same discipline for the
+        /// campaigns. Passing null still draws a seed, and then SAYS which, which is the point: an
+        /// interesting run stays reproducible after the fact rather than only when someone thought
+        /// to pin it in advance.
+        /// </summary>
+        public int RandomSeed { get; }
+
         public RvObservationSession(StarTarget target, List<StarTarget> systemPlanets, InstrumentSpec instrument, double startUt, ImagingObserverContext observerContext,
-            List<StarTarget> transitBurstPlanets = null)
+            List<StarTarget> transitBurstPlanets = null, int? randomSeed = null)
         {
             Target = target;
             SystemPlanets = systemPlanets != null && systemPlanets.Count > 0
@@ -52,7 +66,8 @@ namespace ExoInstruments.Session
             LastSampleUt = startUt;
             Samples = new List<RvSample>();
             IsRunning = true;
-            _rng = new Random();
+            RandomSeed = randomSeed ?? new Random().Next();
+            _rng = new Random(RandomSeed);
             TransitBurstPlanets = transitBurstPlanets ?? new List<StarTarget>();
             nextSampleUt = startUt + CadenceSecondsAt(startUt);
             CurrentConditions = SnapshotAt(startUt);

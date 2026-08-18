@@ -57,6 +57,7 @@ class Program
         TestFilterCurves();
         TestGaiaPhotometry();
         TestGaiaCatalogueFormat();
+        TestInstalledGaiaCatalogue();
         TestStarFieldThroughput();
 
         Console.WriteLine();
@@ -741,14 +742,32 @@ class Program
         // line: summing along a line is dominated by the rings, which both kernels share. The
         // decisive statement is that the vaned kernel varies with azimuth at all, and the vaneless
         // one cannot, being radially symmetric by construction.
-        // Same PHYSICAL radius in both, since the two kernels have different supports.
-        double ring = 0.75 * Math.Min(rBefore, rVaned);
-        double vanedRatio = AzimuthalContrast(vaned, rVaned, ring);
-        double bareRatio = AzimuthalContrast(before, rBefore, ring);
+        // MEASURED AS THE MEAN SIZE OF THE AXIS-TO-DIAGONAL RATIO'S DEPARTURE FROM ONE.
+        //
+        // Three earlier versions of this measurement were wrong, and each failure is the reason
+        // for the next. Max over min around ONE ring is set by whether that radius lands in a
+        // diffraction null: it read 227x at 18 px and 3.2x at 17.25 px on a kernel that had not
+        // changed by one bit, and its true median over several radii is 1.6x. The signed on-axis
+        // excess averaged over radius cancels to 1.1, because the spike carries its own rings and
+        // is alternately brighter and fainter than its surroundings, 3.45x at 40 px and 0.07x at
+        // 100 px. Departure from the kernel's own azimuthal average scores 0.20 on a radially
+        // symmetric kernel, because integrating a radial profile over a SQUARE pixel is genuinely
+        // not a function of radius alone.
+        //
+        // Taking |ratio - 1| at each radius and averaging avoids all three. A ratio at a single
+        // radius divides out the steep radial profile and the sampling of it, which the vaneless
+        // control confirms by scoring 0.042 against the vaned kernel's 2.33 without having been
+        // tuned to. Taking the magnitude stops the sign flips cancelling. And the radii are tied
+        // to the Airy FWHM rather than to either kernel's support, so an unrelated change to how
+        // far a kernel reaches cannot move them.
+        double airyFwhmPx = OpticalPsf.AiryFwhmArcsec(sphere.ApertureMeters,
+            sphere.SecondaryObstructionFraction, lambda) / plate;
+        double vanedDev = MeanAxisRatioDeviation(vaned, rVaned, 2.0 * airyFwhmPx, 12.0 * airyFwhmPx);
+        double bareDev = MeanAxisRatioDeviation(before, rBefore, 2.0 * airyFwhmPx, 0.95 * rBefore);
         Check("and it carries azimuthal structure the radial kernel cannot represent at all",
-              vanedRatio > 10.0 * bareRatio,
-              $"max/min around a ring at {ring:F0} px: {vanedRatio:F1}x vaned "
-              + $"against {bareRatio:F2}x vaneless");
+              vanedDev > 20.0 * bareDev,
+              $"mean |axis/diagonal - 1| over radius: {vanedDev:F3} with vanes against "
+              + $"{bareDev:F4} without, {vanedDev / Math.Max(1e-12, bareDev):F0}x");
 
         // --- What this actually changes, per instrument ------------------------------------
         //
@@ -778,6 +797,48 @@ class Program
     /// perfectly radially symmetric. Measured that way a vaneless kernel scored 3.11x, which was an
     /// artifact of the sampling and nothing else.
     /// </summary>
+    /// <summary>
+    /// Mean over radius of |on-axis / diagonal - 1|: the size of a kernel's four-fold azimuthal
+    /// structure, regardless of which way round it goes at any given radius.
+    ///
+    /// A radially symmetric kernel gives a ratio of exactly 1 at every radius, so this returns
+    /// nearly zero for one by construction rather than by tuning. A four-vane spider gives a ratio
+    /// that swings either side of 1 as radius grows, because the spike carries its own ring
+    /// structure along the axis; measured on ZIMPOL it runs 3.45 at 40 px and 0.07 at 100 px.
+    /// </summary>
+    static double MeanAxisRatioDeviation(float[] kernel, int radius, double innerPx, double outerPx)
+    {
+        int size = 2 * radius + 1;
+        double total = 0.0;
+        int n = 0;
+        for (double r = innerPx; r <= outerPx; r += 0.5)
+        {
+            double onAxis = 0.0, offAxis = 0.0;
+            foreach (double deg in new[] { 0.0, 90.0, 180.0, 270.0 })
+                onAxis += SampleKernelBilinear(kernel, size, radius, r, deg);
+            foreach (double deg in new[] { 45.0, 135.0, 225.0, 315.0 })
+                offAxis += SampleKernelBilinear(kernel, size, radius, r, deg);
+            if (!(offAxis > 0.0)) continue;
+            total += Math.Abs(onAxis / offAxis - 1.0);
+            n++;
+        }
+        return n > 0 ? total / n : 0.0;
+    }
+
+    static double SampleKernelBilinear(float[] kernel, int size, int radius, double r, double deg)
+    {
+        double a = deg * Math.PI / 180.0;
+        double fx = radius + r * Math.Cos(a);
+        double fy = radius + r * Math.Sin(a);
+        int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+        if (x0 < 0 || y0 < 0 || x0 + 1 >= size || y0 + 1 >= size) return 0.0;
+        double tx = fx - x0, ty = fy - y0;
+        return (1 - tx) * (1 - ty) * kernel[y0 * size + x0]
+             + tx * (1 - ty) * kernel[y0 * size + x0 + 1]
+             + (1 - tx) * ty * kernel[(y0 + 1) * size + x0]
+             + tx * ty * kernel[(y0 + 1) * size + x0 + 1];
+    }
+
     static double AzimuthalContrast(float[] kernel, int radius, double ringRadiusPx)
     {
         int size = 2 * radius + 1;
@@ -999,10 +1060,117 @@ class Program
               + $"a heavily reddened bulge star at BP-RP = 5 has G - V = {GaiaPhotometry.GMinusV(5.0):F2}, "
               + $"so G = 15 is V = {15.0 - GaiaPhotometry.GMinusV(5.0):F1}. {withColour} of {found.Count} carry a colour index");
 
-        // The density is the whole point of the exercise.
+        // The density is the whole point of the exercise, so it is CHECKED and not merely
+        // printed. A cone search that comes back thin is the signature of a broken declination
+        // index, and it is otherwise invisible: the file loads, counts right, decodes right,
+        // and renders an empty sky with nothing logged anywhere.
         double areaDeg2 = Math.PI * 0.3 * 0.3;
-        Console.WriteLine($"         density {found.Count / areaDeg2:F0} stars/deg2 toward the Galactic centre at G < 15, "
-                          + $"against the 61.9 all-sky of the Tycho-2 file this replaced");
+        double density = found.Count / areaDeg2;
+        Check("a cone toward the Galactic centre comes back crowded",
+              density > 1000.0,
+              $"{density:F0} stars/deg2 at G < 15, against the 61.9 all-sky of the Tycho-2 file "
+              + "this replaced. Below about 1000 here means the search is missing stars the file holds");
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ The installed catalogue
+    //
+    // The fixture above is COMMITTED, which is what makes it useless as a guard on the packer:
+    // it is a version-2 file frozen in July, so it kept passing while the version-3 packer began
+    // writing a catalogue whose stars were binned by REDDENING instead of declination. 91 of 1800
+    // bands held anything, 4.87 million stars sat in the band at dec +89.9, every cone search
+    // returned nothing, and every star field rendered empty with no error anywhere.
+    //
+    // These checks run against the REAL catalogue on this machine, whatever the packer most
+    // recently produced, and they are the ones that would have caught that the day it appeared.
+    // They are skipped rather than failed when no catalogue is installed, since nothing ships and
+    // most machines will not have one.
+
+    static string InstalledCatalogue()
+    {
+        string fromEnv = Environment.GetEnvironmentVariable("EXOINSTRUMENTS_STARCAT");
+        if (!string.IsNullOrEmpty(fromEnv))
+            return System.IO.File.Exists(fromEnv) ? fromEnv : null;
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var root in new[] {
+            "/Library/Application Support/Steam/steamapps/common/Kerbal Space Program",
+            "/.steam/steam/steamapps/common/Kerbal Space Program",
+            "/.local/share/Steam/steamapps/common/Kerbal Space Program",
+        })
+        {
+            string path = home + root + "/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat";
+            if (System.IO.File.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    static int ConeCount(RenderedStarCatalog c, double ra, double dec, double radiusDeg)
+    {
+        var found = new System.Collections.Generic.List<RenderedStar>();
+        c.Search(ra, dec, radiusDeg, 30.0, found);
+        return found.Count;
+    }
+
+    static double ConeAreaDeg2(double radiusDeg)
+    {
+        double r = radiusDeg * Math.PI / 180.0;
+        return 2.0 * Math.PI * (1.0 - Math.Cos(r)) * (180.0 / Math.PI) * (180.0 / Math.PI);
+    }
+
+    static void TestInstalledGaiaCatalogue()
+    {
+        Console.WriteLine("The star catalogue installed on this machine: is it actually searchable?");
+
+        string path = InstalledCatalogue();
+        if (path == null)
+        {
+            Console.WriteLine("  SKIP  no catalogue installed (set EXOINSTRUMENTS_STARCAT to point at one)");
+            Console.WriteLine();
+            return;
+        }
+
+        var catalogue = new RenderedStarCatalog();
+        catalogue.Load(path);
+        Console.WriteLine($"        {path}");
+        Check("the installed catalogue loads", catalogue.IsLoaded, $"{catalogue.Count} stars");
+        if (!catalogue.IsLoaded) { Console.WriteLine(); return; }
+
+        double area = ConeAreaDeg2(0.25);
+        double centre = ConeCount(catalogue, 266.4, -29.0, 0.25) / area;
+        double pleiades = ConeCount(catalogue, 56.75, 24.12, 0.25) / area;
+        double pole = ConeCount(catalogue, 192.86, 27.13, 0.25) / area;
+
+        // An absolute floor rather than a target, because the depth is the user's choice: a
+        // G < 13 build measures 642 stars/deg2 here and a deeper one measures more. Nothing
+        // remotely correct measures single digits.
+        Check("a cone at the Galactic centre returns a plausible density",
+              centre > 100.0,
+              $"{centre:F0} stars/deg2 in 0.25 deg at RA 266.4 Dec -29.0 "
+              + "(a G < 13 build measures 642; a broken index measures 0)");
+
+        // The shape of the sky, which no accident reproduces. The Galactic centre is the densest
+        // direction there is and the north Galactic pole the sparsest, and a catalogue filed
+        // under the wrong declinations cannot produce that ordering: it either returns nothing
+        // everywhere or returns whatever happened to land in the band the search read.
+        Check("the sky is denser toward the Galactic centre than toward the pole",
+              centre > 3.0 * pole && pleiades > pole,
+              $"centre {centre:F0}, Pleiades {pleiades:F0}, north Galactic pole {pole:F0} stars/deg2");
+
+        // Pole to pole, because the failure this guards against emptied 1709 of 1800 bands while
+        // leaving a handful populated. Sampling one meridian catches that immediately.
+        int emptyDeclinations = 0;
+        var thin = new System.Collections.Generic.List<string>();
+        for (double dec = -85.0; dec <= 85.0; dec += 10.0)
+        {
+            int n = ConeCount(catalogue, 180.0, dec, 1.0);
+            if (n == 0) { emptyDeclinations++; thin.Add($"{dec:F0}"); }
+        }
+        Check("every declination from pole to pole returns stars",
+              emptyDeclinations == 0,
+              emptyDeclinations == 0
+                  ? "18 one-degree cones along the RA 180 meridian, all populated"
+                  : $"{emptyDeclinations} of 18 cones came back empty at dec {string.Join(", ", thin)}");
         Console.WriteLine();
     }
 

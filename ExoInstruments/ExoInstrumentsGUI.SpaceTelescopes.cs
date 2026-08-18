@@ -179,7 +179,12 @@ namespace ExoInstruments
             Guid currentId = current != null && current.Vessel != null ? current.Vessel.id : Guid.Empty;
             Guid newId = link != null && link.Vessel != null ? link.Vessel.id : Guid.Empty;
 
-            if (currentId != newId)
+            // The INSTRUMENT is compared too: a channel switch keeps the vessel and changes the
+            // detector, and a UVIS frame or stack must not survive into the IR camera.
+            string currentInstrument = current != null && current.Instrument != null ? current.Instrument.Name : null;
+            string newInstrument = link != null && link.Instrument != null ? link.Instrument.Name : null;
+
+            if (currentId != newId || !string.Equals(currentInstrument, newInstrument, StringComparison.Ordinal))
             {
                 // The frame in hand belongs to whichever telescope took it: a different aperture,
                 // plate scale and orbit make it a different instrument, exactly as switching
@@ -229,6 +234,7 @@ namespace ExoInstruments
 
             // The power state comes first and is not gated on having a target: a telescope whose
             // panels do not cover its bus load is one to fix rather than to plan with.
+            DrawChannelSelector(link);
             DrawPowerReadout(link);
             DrawPointingReadout(link);
 
@@ -332,6 +338,41 @@ namespace ExoInstruments
                     TelemetryBudget.DescribeBits(platform.FullFrameBits),
                     FormatDuration(seconds), link.SignalStrength));
             }
+        }
+
+        /// <summary>
+        /// The camera on the beam, and the button that flips WFC3's Channel Select Mechanism to
+        /// the other one. Everything downstream reacts through the same path a spacecraft change
+        /// takes: registry rescan, SetActiveTelescope, filter and zoom reclamp, stack discard.
+        /// </summary>
+        private void DrawChannelSelector(SpaceTelescopeLink link)
+        {
+            if (link == null || link.Instrument == null) return;
+
+            VisualTelescopeSpec alt = string.IsNullOrEmpty(link.AlternateInstrumentName)
+                ? null : SpaceTelescopeRegistry.FindInstrument(link.AlternateInstrumentName);
+            string cameraName = string.IsNullOrEmpty(link.Instrument.CameraName)
+                ? link.Instrument.Name : link.Instrument.CameraName;
+
+            if (alt == null || alt.SpacePlatform == null)
+            {
+                GUILayout.Label("Camera: " + cameraName);
+                return;
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Camera: " + cameraName);
+            string altName = string.IsNullOrEmpty(alt.CameraName) ? alt.Name : alt.CameraName;
+            if (GUILayout.Button("Switch to " + altName, GUILayout.Width(180)))
+            {
+                if (GroundStation.TrySwitchChannel(link, out string reason))
+                {
+                    telescopeScanTime = -999f;   // republish the link now, not in two seconds
+                    spaceCommandMessage = null;
+                }
+                else spaceCommandMessage = reason;
+            }
+            GUILayout.EndHorizontal();
         }
 
         /// <summary>

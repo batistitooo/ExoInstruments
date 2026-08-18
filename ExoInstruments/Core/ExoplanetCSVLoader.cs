@@ -96,7 +96,16 @@ namespace ExoInstruments.Core
 
                     HasPlanet = true,
                     PlanetRadiusEarth = planetRadiusEarth,
+                    // Both mass columns are kept. `mass` is the true mass where some other
+                    // measurement (a transit, an astrometric orbit) constrained the inclination;
+                    // `mass_sini` is what the RV data alone gives, and it is the one the RV mass
+                    // function takes. Collapsing them into one field made K wrong by 1/sin(i) on
+                    // the 168 entries whose two masses differ by more than 10%.
                     PlanetMassJupiter = GetDouble(row, colIndex, "mass") ?? GetDouble(row, colIndex, "mass_sini"),
+                    PlanetMinimumMassJupiter = GetDouble(row, colIndex, "mass_sini"),
+                    PublishedRvSemiAmplitudeMps = GetDouble(row, colIndex, "k"),
+                    PublishedRvSemiAmplitudeErrorMps = LargerError(row, colIndex, "k_error_min", "k_error_max"),
+                    TimeOfPeriastronJd = GetDouble(row, colIndex, "tperi"),
                     PlanetPeriodDays = periodDays.Value,
                     SemiMajorAxisAU = GetDouble(row, colIndex, "semi_major_axis"),
                     Eccentricity = GetDouble(row, colIndex, "eccentricity") ?? 0.0,
@@ -139,6 +148,19 @@ namespace ExoInstruments.Core
             if (!colIndex.TryGetValue(column, out int i) || i >= row.Length) return null;
             string v = row[i].Trim().Trim('"');
             return string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+
+        /// <summary>
+        /// The catalog's error bars are asymmetric (separate min/max columns). Collapsed to the
+        /// larger of the two: a single symmetric sigma is what a comparison against a recovered
+        /// value needs, and taking the larger side keeps it from claiming false precision.
+        /// </summary>
+        private static double? LargerError(string[] row, Dictionary<string, int> colIndex, string minColumn, string maxColumn)
+        {
+            double? lo = GetDouble(row, colIndex, minColumn);
+            double? hi = GetDouble(row, colIndex, maxColumn);
+            if (!lo.HasValue && !hi.HasValue) return null;
+            return Math.Max(Math.Abs(lo ?? 0.0), Math.Abs(hi ?? 0.0));
         }
 
         private static double? GetDouble(string[] row, Dictionary<string, int> colIndex, string column)

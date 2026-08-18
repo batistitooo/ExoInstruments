@@ -97,6 +97,22 @@ find rather than failing.
 
   *Note: the exoplanet detection pipeline is untouched. It keeps searching the small Bright Star Catalogue on purpose, so finding a transit stays a tractable hunt; the rendered star catalogue exists only to fill in what a camera sees.*
 
+- **Supernovae, in the galaxies you photograph.** The installed galaxy catalogue is not a static
+  backdrop: every galaxy in it explodes at its own real rate, and the events are yours to find.
+  Occurrence follows Li et al. (2011) LOSS III, rates per Hubble type and per unit B luminosity with
+  that paper's own rate-size relation, so a luminous Sc produces them often and a dwarf almost never.
+  Class fractions (Ia, Ib, Ic, II-P, II-L, IIb, IIn) and peak absolute magnitudes come from LOSS II
+  and Richardson et al. (2014), and the light curve is a Nugent spectral template integrated through
+  whichever filter is actually fitted, so an H-alpha frame catches a II-P's hydrogen line where a
+  blackbody of the same colour would miss it. The event sits on the host's own light distribution,
+  not at its centre, and its foreground reddening comes from the dust map like everything else.
+  Nothing announces it. A supernova exists in your photographs before it exists on your sky chart:
+  the frame is checked at the event's own pixel, where the host galaxy's light is part of the noise,
+  and only a five-sigma detection there becomes a discovery, worth Science once and once only.
+  Discoveries are then marked on the chart for as long as the event is still shining. History is a
+  pure function of one per-save seed, so the same save always had the same supernovae and reloading
+  cannot reroll them.
+
 - **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: cosmetic (bad-pixel-map) correction before alignment (the same calibration step real pipelines like PixInsight and IRAF/ccdproc run before registration), optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail; the same reason real astrophotographers shoot many short exposures instead of one long one. An optional **lucky imaging** mode keeps only the sharpest subs (ranked by a real variance-of-Laplacian focus metric, Pech-Pacheco et al. 2000) before stacking, following the same selective-frame principle real lucky imaging uses to beat atmospheric seeing (Fried 1978).
 
 <p align="center">
@@ -316,8 +332,8 @@ your ESA password, which is never echoed and never passed on the command line. B
 | `dust` | `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout |
 | `halpha` | `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband |
 | `galaxies` | `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape |
-| `patches` | `HalphaPatches.patchset` | 1.1 MB | SHASSA | High-resolution Hα where SHASSA covers the sky |
-| `images` | `GalaxyImages.galimg` | 273 MB at B ≤ 11 | DSS/SDSS cutouts | Real imagery instead of a smooth Sérsic ellipse |
+| `patches` | `HalphaPatches.patchset` | 14.6 MB | SHASSA in the south, NSNS in the north | High-resolution Hα, plus [O III] 5007 and [S II] 6716 where NSNS covers the sky |
+| `images` | `GalaxyImages.galimg` | 452 MB at B ≤ 11 | Legacy DR10, Pan-STARRS, SDSS9, DES DR2 cutouts | Real imagery instead of a smooth Sérsic ellipse |
 
 **The first four are built by default**, the star field at `--gmax 13`, which is 7.4 M stars and
 103 MB. `patches` and `images` are opt-in, not because they are worth less but because they cost a
@@ -873,7 +889,7 @@ Three things the packer does that are worth knowing about:
 * **A close companion is kept, not masked.** M51 and NGC 5195 arrive as the survey saw them, bridge
   included, normalised to the sum of their catalogued fluxes, and the companion is not drawn twice.
 
-At B ≤ 11 that is 146 galaxies of the 156 on the chart, in 273 MB, loaded lazily: only the maps a
+At B ≤ 11 that is 148 galaxies of the 155 on the chart, in 452 MB, loaded lazily: only the maps a
 frame actually contains are read from disk. The three with nothing at all (the SMC, NGC 4945,
 NGC 2997) are far south of Pan-STARRS' limit and outside the Legacy footprint. The giants are the ones the cap bites: M31's 4.7° box is stored at
 16.7″ per map pixel by default, and `--giant-pixels 4096` puts it at 4.2″ for 32 MB more.
@@ -882,6 +898,28 @@ The sky chart says on hover whether a galaxy has real imagery and at what sampli
 readout says which of the two each galaxy in the frame came from, so the picture never claims more
 resolution than the data behind it. `tools/galaxy-image-tests` checks the whole chain against an independent astropy
 reprojection: flux conservation lands at 100.02 %, geometry at 1.6 × 10⁻⁶ map pixels.
+
+## Supernovae, and what the galaxy catalogue has to carry
+
+Supernovae need one quantity the four rendering parameters do not include: a **distance modulus**.
+Without it a galaxy's luminosity is unknown, so its rate is unknown and an event's apparent brightness
+would be invented. Catalogue format version 2 carries it, taken from HyperLEDA's own adopted distance
+where there is one, its weighted mean of published distances next, and the kinematic value last. A
+galaxy with none simply hosts nothing, which is the honest failure.
+
+A version 1 catalogue keeps working for everything else and hosts no supernovae at all. Rerunning
+`setup_data.py` rebuilds it: the script reads the on-disk format version and replaces a file that is
+too old, so there is no flag to remember.
+
+```
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --with galaxies
+```
+
+The templates themselves ship with the mod (`PluginData/SupernovaTemplates.sntpl`, 345 KB): Nugent's
+spectral time series for each class, resampled and integrated through the mod's own bandpasses.
+`tools/pack_supernova_templates.py` rebuilds them from the published originals at
+<https://c3.lbl.gov/nugent/nugent_templates.html>, with Bessell B from the SVO Filter Profile Service
+to set the zero point each template's peak magnitude is quoted in.
 
 ## Colour, dispersion, and the sky's own lines
 

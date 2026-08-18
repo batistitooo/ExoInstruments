@@ -39,7 +39,20 @@ import struct
 import sys
 
 MAGIC = b"EXOGALX1"
-VERSION = 1
+VERSION = 2
+
+# Bounds outside which a B-V stops being a colour and becomes an error. Real integrated colours
+# run from about 0.0 (extreme blue compact dwarfs) to about +1.05 (giant ellipticals) plus
+# Galactic reddening, Circinus at an observed +1.46 the reddest real value in a bt<=15 pull.
+# HyperLEDA's vt is a homogenised mean that for some objects is not a total magnitude at all
+# (NGC5194: vt 10.72 with a quoted error of 2.58 against a true V_T near 8.0), and the resulting
+# "colours" reach -3.2, M31, M51 and NGC0253 among the 116 casualties. V is drawn as bt - bv, so a
+# kept error goes into every photograph whole, 2.1 magnitudes for M51, while a rejected colour
+# falls back to the per-type mean at render time and misses by tenths. Mirrors
+# Core/GalaxyCatalog.BluestPlausibleColourBv/ReddestPlausibleColourBv, which NaN the same colours
+# at load so an already-installed catalogue is safe too.
+BV_PLAUSIBLE_MIN = -0.1
+BV_PLAUSIBLE_MAX = 1.5
 
 HYPERLEDA_URL = "http://atlas.obs-hp.fr/hyperleda/fG.cgi"
 
@@ -62,7 +75,7 @@ def fetch_hyperleda(bmax):
         "of": "1,leda",
         "nra": "l",
         "nakd": "1",
-        "d": "objname,al2000,de2000,bt,vt,logd25,logr25,pa,t",
+        "d": "objname,al2000,de2000,bt,vt,logd25,logr25,pa,t,modbest,mod0,modz",
         "sql": sql,
         "ob": "de2000",
         "a": "csv[|]",
@@ -127,6 +140,7 @@ def main():
     out = []
     dropped = 0
     implausible = []
+    implausible_colours = []
     for row in rows:
         vals = {k: number(row, k) for k in REQUIRED}
         if any(math.isnan(v) for v in vals.values()):
@@ -154,6 +168,9 @@ def main():
         t = number(row, "t")
         vt = number(row, "vt")
         bv = bt - vt if not math.isnan(vt) else float("nan")
+        if not math.isnan(bv) and not (BV_PLAUSIBLE_MIN <= bv <= BV_PLAUSIBLE_MAX):
+            implausible_colours.append((row.get("objname", "").strip(), bt, bv))
+            bv = float("nan")
 
         if not (0.0 < d25 < 600.0) or not (0.0 < axis <= 1.0000001):
             dropped += 1
@@ -175,22 +192,42 @@ def main():
             dropped += 1
             continue
 
-        out.append((row.get("objname", "").strip(), ra, dec, bt, bv, d25, min(1.0, axis), pa, t))
+        # Distance modulus, preferring redshift-independent measurements: modbest is HyperLEDA's
+        # own adopted value, mod0 the weighted mean of published distances, modz the kinematic
+        # fallback. NaN when the catalogue has none; the loader treats such a galaxy as one whose
+        # distance is unknown, which disables the physics that need one (supernovae) and nothing
+        # else.
+        mod = number(row, "modbest")
+        if math.isnan(mod):
+            mod = number(row, "mod0")
+        if math.isnan(mod):
+            mod = number(row, "modz")
+
+        out.append((row.get("objname", "").strip(), ra, dec, bt, bv, d25, min(1.0, axis), pa, t, mod))
 
     out.sort(key=lambda g: g[2])
     print(f"{len(out)} kept, {dropped} dropped for a missing or impossible value")
     for (nm, bt, d25, mu) in implausible:
         print(f"  dropped {nm}: B_T {bt:.2f} in D25 {d25:.2f}' is {mu:.2f} B-mag/arcsec^2 inside "
               f"the isophote, which no galaxy is")
+    if implausible_colours:
+        print(f"{len(implausible_colours)} B-V colours outside [{BV_PLAUSIBLE_MIN}, "
+              f"{BV_PLAUSIBLE_MAX}] written as NaN (renderer falls back to the type mean); "
+              f"the brightest:")
+        for (nm, bt, bv) in sorted(implausible_colours, key=lambda c: c[1])[:5]:
+            print(f"  {nm}: B_T {bt:.2f} with B-V {bv:+.2f}, which no galaxy has")
 
     # A few named galaxies, printed so a units error cannot pass silently. Measured values from a
     # real run: M31 at B_T 4.29, D25 177.8' (2.96 deg), b/a 0.392, PA 35; M87 at 9.65, 7.11', 0.938.
-    # Getting logd25 wrong by its factor of ten would show here immediately.
+    # Getting logd25 wrong by its factor of ten would show here immediately. The colour is printed
+    # too, since HyperLEDA's junk vt values passed through this very line unseen for a month: M31
+    # and M51 must show B-V nan, not the impossible -2 the archive serves for them.
     for name in ("NGC0224", "NGC0598", "NGC4486", "NGC5194", "NGC1068"):
         for g in out:
             if g[0].replace(" ", "").upper() == name:
                 print(f"  {g[0]:>10}: RA {g[1]:9.4f}  Dec {g[2]:+8.4f}  B_T {g[3]:5.2f}  "
-                      f"D25 {g[5]:7.2f}'  b/a {g[6]:.3f}  PA {g[7]:5.1f}  T {g[8]:+.1f}")
+                      f"B-V {g[4]:+5.2f}  D25 {g[5]:7.2f}'  b/a {g[6]:.3f}  PA {g[7]:5.1f}  "
+                      f"T {g[8]:+.1f}")
                 break
 
     from_type = 0
@@ -200,7 +237,7 @@ def main():
         src = args.source.encode("utf-8")
         f.write(struct.pack("<i", len(src)))
         f.write(src)
-        for name, ra, dec, bt, bv, d25, axis, pa, t in out:
+        for name, ra, dec, bt, bv, d25, axis, pa, t, mod in out:
             nb = name.encode("utf-8")[:64]
             f.write(struct.pack("<i", len(nb)))
             f.write(nb)
@@ -211,10 +248,14 @@ def main():
             from_type += 1
             f.write(struct.pack("<fffffff", bt, bv, d25, axis, pa, t if not math.isnan(t) else 0.0,
                                 n_sersic))
+            # v2 field: distance modulus (mag), NaN when HyperLEDA has none.
+            f.write(struct.pack("<f", mod))
             f.write(struct.pack("<B", 0))
 
     size = os.path.getsize(args.out) / (1024 * 1024)
-    print(f"wrote {args.out} ({size:.1f} MB), {from_type} Sersic indices set from morphological type")
+    with_mod = sum(1 for g in out if not math.isnan(g[9]))
+    print(f"wrote {args.out} ({size:.1f} MB), {from_type} Sersic indices set from morphological type, "
+          f"{with_mod}/{len(out)} with a distance modulus")
     print("Copy it to <KSP>/GameData/ExoInstruments/PluginData/")
     return 0
 

@@ -12,6 +12,20 @@ class Program
     const double SiteAltitude = 100.0;
     const double LumBandwidth = 2650.0, LumWavelength = 550e-9;
 
+    /// <summary>
+    /// The grey limit of the bandpass integral: no filter curve, no QE curve, no atmosphere.
+    ///
+    /// This harness bit-rotted when Core replaced the grey-band photometry with an integral over
+    /// the real bandpass, and this is what repairs it without changing a single number it checks.
+    /// SystemResponse reduces to FWHM x QE exactly in this configuration, asserted to 1e-12 in
+    /// tools/bandpass-wcs-tests, so every absolute anchor below still means what it meant.
+    /// </summary>
+    static readonly SystemResponse GreyResponse =
+        new SystemResponse(LumWavelength, LumBandwidth, 1.0, null, QE, 1.0, SiteAltitude);
+
+    /// <summary>Sky spectrum for the sky-brightness integral. Solar, because moonlight and scattered starlight are.</summary>
+    const double SkySpectrumTeffK = 5772.0;
+
     static double PlateScale => PixelPitch / FocalLength * (180.0 / Math.PI) * 3600.0;
     static double FovDeg => W * PlateScale / 3600.0;
     static double AreaCm2 => Math.PI * Math.Pow(Aperture * 100 / 2, 2) * (1 - Obstruction * Obstruction);
@@ -99,13 +113,25 @@ class Program
               $"B/R hot {blueHot / redHot:F3} vs cool {blueCool / redCool:F3}");
 
         // Absolute anchor: a V=0 star through the RC20's luminance filter for 1 s.
-        double e0 = PhotonFluxModel.CollectedElectrons(0.0, LumBandwidth, AreaCm2, QE, 1.0, 1.0);
+        //
+        // BIT-ROTTED AND REPAIRED. This harness stopped compiling when Core replaced the grey-band
+        // photometry with an integral over the real bandpass: the six-argument CollectedElectrons
+        // became CollectedElectronsGreyBand, unchanged in meaning, and SkyBrightnessModel began
+        // taking a SystemResponse instead of a bandwidth and a scalar QE. The grey-band forms are
+        // still exactly what this section wants, since it is checking absolute anchors against
+        // hand-computable numbers rather than measuring the bandpass integral.
+        double e0 = PhotonFluxModel.CollectedElectronsGreyBand(0.0, LumBandwidth, AreaCm2, QE, 1.0, 1.0);
         Check("V=0 star gives a plausible 1 s electron count", e0 > 1e9 && e0 < 1e10, $"{e0:E3} e-/s");
 
         // Limiting magnitude of a 30 s sub against a dark sky, at SNR = 5.
         double t = 30.0;
+        // A grey response, which is the closed form this section is anchored against: no filter
+        // curve, no QE curve, no atmosphere. SystemResponse reduces to FWHM x QE there, which
+        // tools/bandpass-wcs-tests asserts to 1e-12, so nothing about the number below changed
+        // when the integral replaced the scalar.
         double skyPerPx = SkyBrightnessModel.ElectronsPerPixelPerSecond(
-            SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2, PlateScale, LumBandwidth, AreaCm2, QE, 1.0);
+            SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2, PlateScale, GreyResponse, AreaCm2, 1.0,
+            SkySpectrumTeffK);
         double seeingFwhm = 1.5;
         double npix = Math.PI * Math.Pow(seeingFwhm / PlateScale, 2) / 4.0;
         double limit = SolveLimitingMag(t, skyPerPx * t, npix, 5.0);
@@ -126,7 +152,7 @@ class Program
         for (int i = 0; i < 80; i++)
         {
             double mid = 0.5 * (lo + hi);
-            double s = PhotonFluxModel.CollectedElectrons(mid, LumBandwidth, AreaCm2, QE, t, 1.0);
+            double s = PhotonFluxModel.CollectedElectronsGreyBand(mid, LumBandwidth, AreaCm2, QE, t, 1.0);
             double noise = Math.Sqrt(s + npix * (skyElectrons + Dark * t + ReadNoise * ReadNoise));
             if (s / noise > snr) lo = mid; else hi = mid;
         }
@@ -158,8 +184,8 @@ class Program
               $"-14deg -> {SkyBrightnessModel.TwilightVMagPerArcsec2(-14):F2} mag/arcsec2");
 
         // Sky rate must scale with pixel area, not with pixel count.
-        double r1 = SkyBrightnessModel.ElectronsPerPixelPerSecond(21.7, 1.0, LumBandwidth, AreaCm2, QE, 1.0);
-        double r2 = SkyBrightnessModel.ElectronsPerPixelPerSecond(21.7, 2.0, LumBandwidth, AreaCm2, QE, 1.0);
+        double r1 = SkyBrightnessModel.ElectronsPerPixelPerSecond(21.7, 1.0, GreyResponse, AreaCm2, 1.0, SkySpectrumTeffK);
+        double r2 = SkyBrightnessModel.ElectronsPerPixelPerSecond(21.7, 2.0, GreyResponse, AreaCm2, 1.0, SkySpectrumTeffK);
         Check("sky scales with pixel solid angle", Math.Abs(r2 / r1 - 4.0) < 1e-9, $"ratio {r2 / r1:F6} for 2x the plate scale");
         Console.WriteLine();
     }
@@ -188,7 +214,7 @@ class Program
         var plane = new float[W * H];
         StarFieldRenderer.Deposit(plane, W, H, new PointSource
         {
-            SignalFraction = 1.0,
+            SignalElectrons = 1.0,
             StartPixelX = 100.37, StartPixelY = 200.62,
             EndPixelX = 100.37, EndPixelY = 200.62,
         });
@@ -202,7 +228,7 @@ class Program
         Array.Clear(plane, 0, plane.Length);
         StarFieldRenderer.Deposit(plane, W, H, new PointSource
         {
-            SignalFraction = 1.0,
+            SignalElectrons = 1.0,
             StartPixelX = 300, StartPixelY = 300,
             EndPixelX = 420, EndPixelY = 360,
         });
@@ -214,7 +240,7 @@ class Program
         Array.Clear(plane, 0, plane.Length);
         StarFieldRenderer.Deposit(plane, W, H, new PointSource
         {
-            SignalFraction = 1.0, StartPixelX = -50, StartPixelY = -50, EndPixelX = -40, EndPixelY = -40,
+            SignalElectrons = 1.0, StartPixelX = -50, StartPixelY = -50, EndPixelX = -40, EndPixelY = -40,
         });
         sum = 0; foreach (var v in plane) sum += v;
         Check("an off-sensor source deposits nothing", sum == 0.0, $"sum = {sum}");
@@ -255,20 +281,26 @@ class Program
             double startMer = meridianRa - 360.0 * exposure / rotationPeriod;
 
             double sky = SkyBrightnessModel.ElectronsPerPixelPerSecond(
-                SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2, PlateScale, LumBandwidth, AreaCm2, QE, 1.0) * exposure;
-            double floor = 0.05 * (Math.Sqrt(sky + Dark * exposure) + ReadNoise) / FullWell;
+                SkyBrightnessModel.DarkSkyZenithVMagPerArcsec2, PlateScale, GreyResponse, AreaCm2, 1.0,
+                SkySpectrumTeffK) * exposure;
+            // DepositStars now takes an absolute electron cutoff where it used to take the full
+            // well and a fraction of it. Same threshold, stated in electrons.
+            double cutoff = 0.05 * (Math.Sqrt(sky + Dark * exposure) + ReadNoise);
 
             int drawn = StarFieldRenderer.DepositStars(
-                plane, W, H, stars, proj, startMer, endMer, lat, FullWell, floor,
-                st => StellarPhotometry.CollectedElectrons(st.VMag, st.ColorIndexBV, LumWavelength,
-                                                          LumBandwidth, AreaCm2, QE, exposure, 1.0));
+                plane, W, H, stars, proj, startMer, endMer, lat, cutoff,
+                st => StellarPhotometry.CollectedElectrons(st.VMag, st.ColorIndexBV, GreyResponse,
+                                                          AreaCm2, exposure, 1.0));
 
             double sum = 0; int lit = 0; float peak = 0;
             foreach (var v in plane) { sum += v; if (v > 0) { lit++; if (v > peak) peak = v; } }
             double trailPx = 360.0 * exposure / rotationPeriod * 3600.0 / PlateScale;
 
             Console.WriteLine($"          {exposure,4:F0} s: {drawn} drawn, {lit} pixels lit, "
-                            + $"peak {peak * 100:F1}% of full well, expected trail ~{trailPx:F0} px");
+                            // DepositStars deposits ELECTRONS now, where it used to deposit a
+                            // fraction of the full well, so the division is explicit. Without it
+                            // this line read "peak 600773% of full well".
+                            + $"peak {peak / FullWell * 100.0:F1}% of full well, expected trail ~{trailPx:F0} px");
             Check($"{exposure:F0} s exposure draws stars", drawn > 0 && lit > 0, "");
             // Even a 1 s unguided sub trails visibly on a world with a 6 h day, because the sky
             // sweeps four times faster than Earth's, so 1 s is already 54 px at this plate
@@ -285,9 +317,9 @@ class Program
         // Tracked: no trail at all, every star a compact point.
         var tracked = new float[W * H];
         int n2 = StarFieldRenderer.DepositStars(tracked, W, H, stars, proj, meridianRa, meridianRa, lat,
-            FullWell, 0.0,
-            st => StellarPhotometry.CollectedElectrons(st.VMag, st.ColorIndexBV, LumWavelength,
-                                                      LumBandwidth, AreaCm2, QE, 30.0, 1.0));
+            0.0,
+            st => StellarPhotometry.CollectedElectrons(st.VMag, st.ColorIndexBV, GreyResponse,
+                                                      AreaCm2, 30.0, 1.0));
         int litTracked = 0; foreach (var v in tracked) if (v > 0) litTracked++;
         Check("autoguided exposure leaves no trail", litTracked <= 4 * n2,
               $"{litTracked} pixels for {n2} stars (4 per star = pure sub-pixel splitting)");

@@ -24,6 +24,15 @@ namespace ExoInstruments.Core
         /// </summary>
         public double ReddeningEBv;
 
+        /// <summary>
+        /// Electrons already computed by the caller, or zero for the ordinary case. A transient's
+        /// electrons come from its own measured spectrum through the spectrum overload of the
+        /// bandpass, which the per-star callback cannot express; carrying the result here lets a
+        /// supernova ride the SAME deposit path as every star, trails included, instead of a
+        /// duplicate one.
+        /// </summary>
+        public double FixedElectrons;
+
         public bool HasColor => !double.IsNaN(ColorIndexBV);
 
         public bool HasReddening => !double.IsNaN(ReddeningEBv);

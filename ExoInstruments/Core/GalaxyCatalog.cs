@@ -32,6 +32,14 @@ namespace ExoInstruments.Core
         /// <summary>False when SersicIndex came from the morphological type rather than from a profile fit.</summary>
         public bool IsSersicIndexMeasured;
 
+        /// <summary>
+        /// Distance modulus, magnitudes, or NaN when HyperLEDA carries none (v1 catalogues: every
+        /// entry). What turns the apparent catalogue into an absolute one: M_B = B_T - modulus,
+        /// and a supernova's apparent peak is its absolute peak plus this. A galaxy without one
+        /// simply hosts no supernovae rather than hosting them at an invented distance.
+        /// </summary>
+        public double DistanceModulusMag;
+
         public double SemiMajorArcsec => D25Arcmin * 60.0 * 0.5;
 
         /// <summary>
@@ -83,7 +91,10 @@ namespace ExoInstruments.Core
     public sealed class GalaxyCatalog
     {
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'G', (byte)'A', (byte)'L', (byte)'X', (byte)'1' };
-        private const int FormatVersion = 1;
+        private const int FormatVersion = 2;
+
+        /// <summary>Version 1 files still load; they carry no distance column, and every galaxy reads as "distance unknown".</summary>
+        private const int OldestSupportedVersion = 1;
 
         private Galaxy[] galaxies;
         private double[] decSorted;   // declinations of `galaxies`, ascending, for the cone search
@@ -111,6 +122,36 @@ namespace ExoInstruments.Core
         /// </summary>
         public const double ImplausibleSurfaceBrightnessB = 18.0;
 
+        /// <summary>
+        /// Count of catalogued B-V colours replaced by NaN at load because no galaxy has them;
+        /// such entries fall back to the per-type mean colour at render time, exactly as an entry
+        /// the catalogue never had a colour for.
+        /// </summary>
+        public int ColoursRejectedAsImplausible { get; private set; }
+
+        /// <summary>
+        /// Bounds outside which a catalogued B-V stops being a colour and becomes an error.
+        ///
+        /// Real integrated colours run from about 0.0 (the extreme metal-poor blue compact
+        /// dwarfs; ordinary irregulars sit near +0.4) to about +1.05 (giant ellipticals), and
+        /// Galactic dust only reddens them; the reddest observed colour of any galaxy the shipped
+        /// catalogue carries one for is Circinus at +1.46, behind E(B-V) of about 0.7. HyperLEDA's
+        /// vt is nonetheless a homogenised mean that for some objects is not a total magnitude at
+        /// all (NGC 5194: vt 10.72 with a quoted error of 2.58, against a true V_T near 8.0), and
+        /// the resulting "colours" reach -3.2, with 116 entries outside these bounds in a bt<=15
+        /// pull, M31, M51 and NGC 253 among them.
+        ///
+        /// V is drawn as B_T minus this colour, so a kept error goes into the picture whole (2.1
+        /// magnitudes for M51), while a rejected colour costs at most the few tenths the per-type
+        /// mean misses by. That asymmetry is why these bounds hug the measured range instead of
+        /// leaving the generous margin the surface-brightness wall above does: there the junk sat
+        /// seven magnitudes from anything real, here it is continuous with the real values.
+        /// tools/pack_galaxy_catalog.py writes NaN over the same bounds; the check runs again here
+        /// so an already-installed catalogue is safe too.
+        /// </summary>
+        public const double BluestPlausibleColourBv = -0.1;
+        public const double ReddestPlausibleColourBv = 1.5;
+
         public void Load(string path)
         {
             using (var stream = File.OpenRead(path))
@@ -124,7 +165,8 @@ namespace ExoInstruments.Core
                         throw new InvalidDataException("not an ExoInstruments packed galaxy catalogue");
 
                 int version = reader.ReadInt32();
-                if (version != FormatVersion) throw new InvalidDataException("unsupported galaxy catalogue version " + version);
+                if (version < OldestSupportedVersion || version > FormatVersion)
+                    throw new InvalidDataException("unsupported galaxy catalogue version " + version);
 
                 int count = reader.ReadInt32();
                 if (count < 0 || count > 20_000_000) throw new InvalidDataException("implausible galaxy count " + count);
@@ -132,6 +174,7 @@ namespace ExoInstruments.Core
 
                 var accepted = new List<Galaxy>(count);
                 int rejected = 0;
+                int coloursRejected = 0;
                 for (int i = 0; i < count; i++)
                 {
                     var g = new Galaxy
@@ -147,6 +190,7 @@ namespace ExoInstruments.Core
                         MorphologicalType = reader.ReadSingle(),
                         SersicIndex = reader.ReadSingle(),
                     };
+                    g.DistanceModulusMag = version >= 2 ? reader.ReadSingle() : double.NaN;
                     g.IsSersicIndexMeasured = reader.ReadByte() != 0;
 
                     // A row whose magnitude and size cannot both be right is dropped rather than
@@ -160,6 +204,15 @@ namespace ExoInstruments.Core
                     {
                         rejected++;
                         continue;
+                    }
+
+                    // An impossible colour loses the colour, not the row: the shape and the total
+                    // magnitude are separate measurements and still good. NaN sends the renderer
+                    // to its per-type mean, the same path as an entry with no colour at all.
+                    if (g.ColourBv < BluestPlausibleColourBv || g.ColourBv > ReddestPlausibleColourBv)
+                    {
+                        g.ColourBv = double.NaN;
+                        coloursRejected++;
                     }
                     accepted.Add(g);
                 }
@@ -184,6 +237,7 @@ namespace ExoInstruments.Core
                 decSorted = decs;
                 Source = source;
                 RejectedAsImplausible = rejected;
+                ColoursRejectedAsImplausible = coloursRejected;
             }
         }
 

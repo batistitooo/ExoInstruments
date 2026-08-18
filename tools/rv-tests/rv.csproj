@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>rv</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="RvTests.cs" />
+    <Compile Include="Stub.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/ExoplanetCSVLoader.cs" />
+    <Compile Include="$(Core)/StarNames.cs" />
+    <Compile Include="$(Core)/StarProperNameTable.cs" />
+    <Compile Include="$(Core)/RvSimulator.cs" />
+    <Compile Include="$(Core)/RvSample.cs" />
+    <Compile Include="$(Core)/RvDetector.cs" />
+    <Compile Include="$(Core)/RvDetectionResult.cs" />
+    <Compile Include="$(Core)/RossiterMcLaughlin.cs" />
+    <Compile Include="$(Core)/StellarActivity.cs" />
+    <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <Compile Include="$(Core)/Observatories.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/SpacePlatformSpec.cs" />
+    <Compile Include="$(Core)/PhotometricDetector.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/PupilDiffraction.cs" />
+    <Compile Include="$(Core)/Coronagraph.cs" />
+    <Compile Include="$(Core)/ImagingObservingConditions.cs" />
+    <Compile Include="$(Core)/MoonlightPollution.cs" />
+    <Compile Include="$(Core)/LightCurveSimulator.cs" />
+    <Compile Include="$(Core)/TransitPhotometry.cs" />
+    <Compile Include="$(Core)/TransitTimingVariations.cs" />
+    <Compile Include="$(Core)/TransitDetector.cs" />
+    <Compile Include="$(Core)/CcdEquation.cs" />
+    <Compile Include="$(Core)/SkyBrightnessModel.cs" />
+    <Compile Include="$(Core)/AperturePhotometry.cs" />
+    <Compile Include="$(Core)/AstrometricSolution.cs" />
+    <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericRefraction.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/DarkCurrentModel.cs" />
+    <Compile Include="$(Core)/DetectionResult.cs" />
+    <Compile Include="$(Core)/DetectorLinearity.cs" />
+    <Compile Include="$(Core)/DitherPattern.cs" />
+    <Compile Include="$(Core)/EmissionLines.cs" />
+    <Compile Include="$(Core)/EmissionMap.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/FitsWcs.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
+    <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/FocalPlaneIllumination.cs" />
+    <Compile Include="$(Core)/FourierConvolution.cs" />
+    <Compile Include="$(Core)/GalacticCoordinates.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+    <Compile Include="$(Core)/Healpix.cs" />
+    <Compile Include="$(Core)/HorizontalToGalactic.cs" />
+    <Compile Include="$(Core)/InfraredArray.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/NebularLineRatios.cs" />
+    <Compile Include="$(Core)/NoiseSampler.cs" />
+    <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
+    <Compile Include="$(Core)/Pcg32.cs" />
+    <Compile Include="$(Core)/PhotonFluxModel.cs" />
+    <Compile Include="$(Core)/RadialPsfProfile.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/SensorNonUniformity.cs" />
+    <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/SystemBandpass.cs" />
+  </ItemGroup>
+</Project>

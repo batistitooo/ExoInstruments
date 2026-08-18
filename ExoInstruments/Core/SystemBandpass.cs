@@ -275,6 +275,63 @@ namespace ExoInstruments.Core
             return Integrate(Math.Max(0.0, intrinsicTeffK), true, eBv);
         }
 
+        /// <summary>
+        /// Effective width for a source whose spectrum is MEASURED rather than modelled: the
+        /// shape is photon density normalised to 1 at Johnson V (5556 A), the same convention
+        /// the Planck path normalises to, so the source's V magnitude still sets the flux and
+        /// PhotonFluxModel prices it identically to a star. This is what a supernova template
+        /// integrates through, and why its narrowband photometry (an H-alpha line in a II-P)
+        /// comes out right where a blackbody of matching colour would not.
+        ///
+        /// eBv folds a Fitzpatrick (1999) foreground screen into the integrand, renormalised at
+        /// V by the caller adding the corresponding A(5556) to the magnitude.
+        /// </summary>
+        public double EffectiveWidthAngstromForSpectrum(SpectralCurve photonShape, double eBv = 0.0)
+        {
+            if (photonShape == null || greyTransmission <= 0.0) return 0.0;
+
+            double start, end;
+            if (filterTransmissionCurve != null)
+            {
+                start = filterTransmissionCurve.MinWavelengthMeters;
+                end = filterTransmissionCurve.MaxWavelengthMeters;
+            }
+            else
+            {
+                if (widthMeters <= 0.0 || centralWavelengthMeters <= 0.0) return 0.0;
+                start = centralWavelengthMeters - 0.5 * widthMeters;
+                end = centralWavelengthMeters + 0.5 * widthMeters;
+            }
+            if (start < 1e-9) start = 1e-9;
+            if (end <= start) return 0.0;
+
+            // The screen's value at V, so the shape can be renormalised inside the integral and
+            // the caller's magnitude carries the V-band extinction explicitly.
+            double screenAtV = eBv > 0.0
+                ? ExtinctionTransmission(StellarPhotometry.JohnsonVWavelengthMeters, eBv) : 1.0;
+            if (screenAtV <= 0.0) return 0.0;
+
+            int steps = filterTransmissionCurve != null ? CurveIntegrationSteps : IntegrationSteps;
+            double stepMeters = (end - start) / steps;
+            double sum = 0.0;
+            for (int i = 0; i <= steps; i++)
+            {
+                double lambda = start + i * stepMeters;
+                double weight = (i == 0 || i == steps) ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0);
+                double shape = photonShape.At(lambda);
+                if (shape <= 0.0) continue;
+                if (eBv > 0.0) shape *= ExtinctionTransmission(lambda, eBv) / screenAtV;
+                sum += weight * shape * Integrand(lambda, 0.0, true, 0.0);
+            }
+            return sum * stepMeters / 3.0 * 1e10;
+        }
+
+        /// <summary>10^(-0.4 * A(lambda)) for a Fitzpatrick (1999) screen of the given E(B-V).</summary>
+        public static double ExtinctionTransmission(double wavelengthMeters, double eBv)
+        {
+            return InterstellarExtinction.Transmission(wavelengthMeters, eBv);
+        }
+
         /// <summary>EffectiveWidthAngstromForTemperature with the atmosphere left out; see EffectiveWidthAngstromFlatNoExtinction.</summary>
         public double EffectiveWidthAngstromForTemperatureNoExtinction(double teffK)
         {

@@ -69,6 +69,24 @@ namespace ExoInstruments.Core
         public static readonly Line SII6716 = L("[S II] 6716", 6716.44, true);
         public static readonly Line SII6731 = L("[S II] 6731", 6730.82, true);
 
+        /// <summary>
+        /// The catalogued line closest to a wavelength, within a tolerance tight enough that only
+        /// the intended one matches. Used to turn a packed plane's wavelength back into the line
+        /// it measures, so the map file and this table cannot drift into disagreeing about which
+        /// line a plane holds. Returns a zero-wavelength Line when nothing is near enough.
+        /// </summary>
+        public static Line Nearest(double wavelengthMeters, double toleranceMeters = 1e-11)
+        {
+            Line best = default(Line);
+            double bestGap = toleranceMeters;
+            for (int i = 0; i < All.Length; i++)
+            {
+                double gap = System.Math.Abs(All[i].WavelengthMeters - wavelengthMeters);
+                if (gap <= bestGap) { bestGap = gap; best = All[i]; }
+            }
+            return best;
+        }
+
         public static readonly Line[] All =
         {
             OII3726, OII3729, HBeta, OIII4959, OIII5007,

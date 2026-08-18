@@ -13,6 +13,7 @@
     <Compile Include="$(Core)/EmissionMap.cs" />
     <Compile Include="$(Core)/Healpix.cs" />
     <Compile Include="$(Core)/Float16.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
     <Compile Include="$(Core)/GalacticCoordinates.cs" />
     <Compile Include="$(Core)/SexagesimalCoordinates.cs" />
   </ItemGroup>

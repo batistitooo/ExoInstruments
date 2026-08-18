@@ -388,12 +388,32 @@ frame to divide by.
 ## 15. The high-resolution patch layer
 
 - [ ] **15.1** **It loads.** `KSP.log` must carry
-      `Emission patches: <n> regions at nside 4096 (0.86 arcmin), SHASSA ... on the Finkbeiner ...`.
+      `Emission patches: <n> regions at 26 to 51 arcsec, SHASSA ... and NSNS ... on the Finkbeiner ...`.
+      The range is the point: southern patches sit at 51 arcsec to match SHASSA's beam, northern ones
+      at 26 arcsec because NSNS resolves 6.44. One number there means the per-patch resolution of
+      format v3 did not load.
       Without the file every field is drawn at 6' and nothing else changes.
 - [ ] **15.2** **The Horsehead.** Point at `IC 434` (the emission ridge, not `B 33`) with the RC20 or
       the CDK1000 in `Ha`. The frame must show the ridge with structure and the dark cloud beside it,
       not a smooth gradient. The readout must say
       `from the IC 434 Horsehead high-resolution patch at 0.86' sampling`.
+- [ ] **15.4b** **[O III] renders, and renders as oxygen.** Point at `NGC 6960` with the RedCat 51 in
+      `OIII` and expose 300 s. The frame must show the Veil's filaments, and they must NOT be the same
+      filaments the `Ha` frame shows: [O III] traces the fast shock front and H-alpha the cooling gas
+      behind it, so the two frames are visibly different objects. The readout must name
+      `[O III] 5007` under measured lines. An empty frame means the line-candidate set fell back to
+      `NebularLineRatios.DerivableLines`, which does not contain [O III] on purpose.
+- [ ] **15.4d** **No grid on an H-alpha frame.** Point at `NGC 6960` with the RedCat 51 in `Ha`,
+      expose 130 s at 4x4. Faint sky inside the patch must NOT carry a rectangular grid of blocks
+      about 206 arcsec across. That grid is the load-time gain correction applied per composite cell
+      instead of band-limited and interpolated, and it appears only in H-alpha because
+      `CalibrateAgainst` touches `Values` and never `ExtraValues`. The nebula must also look no
+      flatter than the `OIII` frame of the same field: a washed-out H-alpha beside a punchy [O III]
+      is the same defect seen as contrast rather than as blocks.
+- [ ] **15.4c** **No lattice.** On that same [O III] frame, zoom into faint sky inside the patch. It
+      must be grain, not a regular diagonal mesh of soft diamonds about 1' across. That mesh is the
+      C0 bilinear fallback showing HEALPix cell edges, and it means zeros on the measured plane are
+      being read as gaps again.
 - [ ] **15.3** **NOT M42.** Both all-sky H-alpha surveys carry a detector bleed streak through it
       (31% of one cutout row, a bright horizontal spike), and its patch rim disagrees with the base
       map by 392%. The packer warns about it. Use the Lagoon (rim 10%), the Horsehead (8%), the Flame
@@ -570,6 +590,13 @@ smooth ellipses, which is what §13 already covers.
       one that still looks like a galaxy. `tools/galaxy-image-tests` checks it numerically.
 - [ ] **21.10** **A galaxy with no map still works.** Nothing about the fallback changed; a frame
       mixing the two must draw both, and the readout must count them separately.
+- [ ] **21.11** **A mutually-covering pair is drawn once, not zero times.** M51 and NGC 5195 each
+      sit inside the *other's* map in the shipped data, and the deposit loop used to skip any
+      covered galaxy whose owner is in frame, which for a mutual pair skipped both and removed the
+      pair from the photograph entirely. The brighter catalogued total now deposits (its map total
+      already folds the companion's flux in) and the fainter defers. `tools/galaxy-pair-tests`
+      proves the selection headless against the shipped data and must print `ALL CHECKS PASSED`;
+      in game, 21.2 showing the pair at all is the check.
 
 ## 22. The target search panel
 
@@ -996,6 +1023,13 @@ Then in game, with a telescope in orbit and the observatory panel open at the sp
       through click a target near where the boresight has got to. The new slew must be short,
       because it starts from where the vehicle actually is and not from either endpoint.
 
+- [ ] **24d.11b Switching channels follows the filters.** On the part (PAW) and from the
+      observatory panel, "Switch camera to WFC3/IR" must: change the filter row to the IR set,
+      change the plate scale and zoom range (the 24c.8 slider), discard the captured frame and the
+      stack, and survive a save/load. From the space centre it must refuse without an antenna
+      link. The exposure time rescales with nothing (same aperture), but the reachable exposure
+      range changes to the MULTIACCUM one.
+
 - [ ] **24d.12 Switching spacecraft commands the new one.** With two telescopes in orbit and a
       target selected, switch between them in the spacecraft list. The one just selected must slew
       to the target rather than sitting wherever it was last sent.
@@ -1009,6 +1043,79 @@ It is listed so it is not mistaken for working:
   displayed correctly; nothing waits for them, queues behind them, or is prevented by them. Note
   that this is now the *only* one left of the three that used to be here: electric charge and the
   pointing hold are both wired, and §24d is how they are checked.
+
+## 26. Supernovae
+
+The occurrence model, the templates and the photometric chain have a headless harness; the
+discovery loop needs eyes in game.
+
+Headless first:
+
+    cd tools/supernova-tests && dotnet run -c Release -p:Core=../../ExoInstruments/Core
+
+39 checks: the Ia template's 19-day rise and Delta m15 of 0.97 against Phillips' fiducial; the
+deceleration onto the 56Co tail above its 0.98 mag/100d trapping floor; the II-P declining less
+than half as fast as the II-L; H-alpha in emission in the II-P shape and absent from the Ia; the
+narrowband identity at the 5556 A anchor; the Fitzpatrick screen's colour excess recovered
+through the integral; Li et al. Table 4 reproduced exactly with its rate-size law; their own
+Milky Way estimate matched within its error; determinism, the Poisson mean, the class shares and
+Richardson's magnitude distributions over thousands of drawn events.
+
+The same harness answers the balance question on the shipped catalogue rather than by argument:
+
+    EXO_GALCAT=<KSP>/GameData/ExoInstruments/PluginData/GalaxyCatalog.galcat \
+        dotnet run -c Release -p:Core=../../ExoInstruments/Core -- --census
+
+18 events per year sky-wide, 3.2 brighter than V 16 at any instant, and the number a player cares
+about: photographing the 25 best hosts, a 25 per cent chance one of them is currently showing
+something brighter than V 16. That census is what caught the AGN rows (section 12 item 98).
+
+Then in game (needs the v2 galaxy catalogue with distances; setup_data rebuilds a v1 install
+automatically):
+
+- [ ] **26.1 Nothing announces itself.** A fresh save shows no supernova anywhere: no chart
+      marker, no list. They exist only in frames.
+
+- [ ] **26.1b Find yours without waiting.** Open the observatory once so the save writes its
+      `supernovaSeed`, read it from `saves/<name>/persistent.sfs`, then run the harness with
+      `--forecast <seed> --ut <current UT>`. It prints every event of the next ten years with its
+      host, class, peak apparent V, coordinates and the UT of maximum. Warp to one and point
+      there: that turns 26.2 from a wait into a check.
+
+- [ ] **26.1c A searched galaxy appears on the chart however faint it is.** Search "IC4808"
+      (B = 12.9, well below the chart's B = 11 marker cut). It must get a marker and be clickable,
+      not merely appear in the results list. Clear the search and it must disappear again, so
+      browsing stays legible. Same for IC5267 and NGC3705, the two brightest supernova hosts of
+      the shipped forecast, both of which the cut used to hide.
+
+- [ ] **26.1d A supernova on its host's nucleus is honest about being invisible.** The shipped
+      forecast's first event (IC4808, 8" from centre) sits on the core. The frame readout must give
+      its pixel position and SNR, and say it is buried when the host outshines it there. Before the
+      per-event noise fix the log claimed 25866 e- against 4 e- (6500 sigma) for an event nobody
+      could see, because the noise reference was the frame's sky rather than the galaxy under it.
+
+- [ ] **26.2 Find one.** Warp months, photographing a few bright spirals between other missions
+      (M101, M51, NGC5247 class hosts; expect roughly one event per game-year somewhere in the
+      149 imaged galaxies, so warp far). When a frame catches one above 5 sigma:
+      "Supernova discovered! SN {year}{letter}..." with Science, and the designation appears on
+      the chart at the event's position as a magenta cross.
+
+- [ ] **26.3 It is where its population lives.** A core-collapse SN sits on the host's arms
+      (blue light), an Ia anywhere in the disc or bulge. Compare against the galaxy's own map.
+
+- [ ] **26.4 The light curve moves.** Re-photograph the same discovery days apart: rising before
+      peak, fading after, a II-P declining slowly for months. Same exposure and filter, and the
+      change is the sky's, not the detector's.
+
+- [ ] **26.5 The colours are the spectrum's.** Shoot a discovered II-P in H-alpha and in a
+      broadband red filter: the narrowband must catch it far above what a star of the same V
+      would give. An Ia in H-alpha shows no such excess.
+
+- [ ] **26.6 History survives.** Save, quit, reload: the same supernova at the same position and
+      phase, the discovery still credited, the designation unchanged.
+
+- [ ] **26.7 Clicking the marker points the telescope.** From chart to slew to frame, like any
+      catalogue target, with the designation as the FITS OBJECT.
 
 ## 25. The full-sky chart, and the planet that is the mask
 
@@ -1066,3 +1173,18 @@ In game, in one pass:
 11. Ground capture gating is untouched: a target the chart shows just above the true (dipped)
     horizon but below 0 degrees of altitude is still refused by the RC20 gate, the deliberate
     1-degree band documented in TECHNICAL_REFERENCE §8.1.
+
+## 27. The two planet masses on the target card
+
+The RV amplitude is computed from Mp*sin(i) rather than from the true mass (TECHNICAL_REFERENCE
+§3.1, pinned headless by `tools/rv-tests`). The only part of that a running game shows is the
+info card, which used to label a true mass "(min)".
+
+- [ ] **27.1** Select 51 Peg b. The card reads `Planet mass: 0.610 M_jup   (Mp*sin i: 0.460 M_jup)`.
+      Both numbers, because the catalogue measured both and the gap between them is the
+      inclination.
+- [ ] **27.2** Select a target the catalogue gives one mass for, any transiting Kepler or TESS
+      planet. The card reads `Planet mass (min): ...`, the single-value wording, unchanged.
+- [ ] **27.3** Run an RV campaign on 51 Peg to a detection. The scan report's fitted
+      `K = ... m/s` lands near 56 m/s, not near 75, and the `Implied Mp*sin(i)` line below it
+      lands near the card's 0.46 M_jup rather than near 0.61.

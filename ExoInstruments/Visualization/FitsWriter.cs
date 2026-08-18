@@ -95,6 +95,7 @@ namespace ExoInstruments.Visualization
             public double LineSurfaceBrightnessRayleighs;
             /// <summary>Which line that was, and where the map came from.</summary>
             public string EmissionLineName;
+            public string EmissionMeasuredLines;
             public string EmissionMapSource;
             /// <summary>Which published map that reddening came from, for the header's own record.</summary>
             public string DustMapSource;
@@ -318,6 +319,12 @@ namespace ExoInstruments.Visualization
                            "mean diffuse line surface brightness (rayleighs)");
                 if (!string.IsNullOrEmpty(info.EmissionLineName))
                     AppendStringCard(sb, "LINE", info.EmissionLineName, "emission line imaged");
+
+                // Which of them a survey measured here, rather than a ratio model deriving from
+                // H-alpha. The distinction decides what the frame can be used to claim.
+                if (!string.IsNullOrEmpty(info.EmissionMeasuredLines))
+                    AppendStringCard(sb, "LINEMEAS", info.EmissionMeasuredLines,
+                                     "lines measured by survey, not derived");
                 if (!string.IsNullOrEmpty(info.EmissionMapSource))
                     AppendCommentaryCard(sb, "COMMENT", "LINEBRIT from " + info.EmissionMapSource);
             }

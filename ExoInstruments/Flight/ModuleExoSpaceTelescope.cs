@@ -48,6 +48,15 @@ namespace ExoInstruments.Flight
         public string instrumentName = "Hubble Space Telescope (OTA)";
 
         /// <summary>
+        /// Catalogue name of the OTHER channel this instrument can send the beam to, or empty for
+        /// a single-channel telescope. WFC3's Channel Select Mechanism is a mirror that feeds the
+        /// UVIS CCDs or the IR array, never both, and switching is a normal on-orbit operation.
+        /// Persistent for the same reason instrumentName is.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public string alternateInstrumentName = "";
+
+        /// <summary>
         /// Name of the transform whose +Z axis is the optical boresight and whose position is the
         /// centre of the entrance pupil. The occlusion rays start here and the pointing solver
         /// aims this.
@@ -291,6 +300,8 @@ namespace ExoInstruments.Flight
                              + "' is a ground instrument and carries no SpacePlatform; this part will not observe.");
                 Instrument = null;
             }
+
+            UpdateChannelEvent();
 
             boresight = part.FindModelTransform(boresightTransformName);
             if (boresight == null) boresight = CreateBoresightTransform();
@@ -870,6 +881,34 @@ namespace ExoInstruments.Flight
         // then read as long finished, free, and instantaneous. The whole point of
         // TelescopeCommandState is that these fields are one record with one writer, and
         // GroundStation.CommandDirection / CommandBody are it.
+
+        /// <summary>
+        /// Swaps the beam to the other channel. Everything from the detector inwards changes
+        /// (filters, plate scale, noise, exposure range); the imaging side reacts through
+        /// SetActiveTelescope when the registry republishes the link.
+        /// </summary>
+        [KSPEvent(guiActive = true, guiActiveEditor = true, guiName = "Switch camera", active = false)]
+        public void SwitchChannel()
+        {
+            VisualTelescopeSpec target = FindInstrument(alternateInstrumentName);
+            if (target == null || target.SpacePlatform == null) return;
+
+            string previous = instrumentName;
+            instrumentName = alternateInstrumentName;
+            alternateInstrumentName = previous;
+            Instrument = target;
+            UpdateChannelEvent();
+        }
+
+        private void UpdateChannelEvent()
+        {
+            VisualTelescopeSpec alt = FindInstrument(alternateInstrumentName);
+            bool has = alt != null && alt.SpacePlatform != null;
+            Events["SwitchChannel"].active = has;
+            if (has)
+                Events["SwitchChannel"].guiName =
+                    "Switch camera to " + (string.IsNullOrEmpty(alt.CameraName) ? alt.Name : alt.CameraName);
+        }
 
         [KSPEvent(guiActive = true, guiName = "Release pointing hold", active = true)]
         public void ReleasePointing()

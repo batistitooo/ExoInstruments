@@ -312,6 +312,52 @@ namespace ExoInstruments.Flight
             return true;
         }
 
+        /// <summary>
+        /// Switches a two-channel instrument to its other detector, through the same command gate
+        /// as a repoint. On an unloaded vessel the swap is written into the protovessel node; the
+        /// registry's next rescan republishes the link with the new spec, and the imaging side
+        /// reacts through SetActiveTelescope.
+        /// </summary>
+        public static bool TrySwitchChannel(SpaceTelescopeLink link, out string message)
+        {
+            message = null;
+            if (link == null || link.Vessel == null) { message = "no telescope selected"; return false; }
+
+            bool flyingIt = HighLogic.LoadedSceneIsFlight
+                         && FlightGlobals.ActiveVessel != null
+                         && FlightGlobals.ActiveVessel.id == link.Vessel.id;
+            if (!flyingIt && !HasCommandPath(link))
+            {
+                message = "no antenna link: fly the spacecraft, or give it an antenna";
+                return false;
+            }
+
+            if (link.Module != null)
+            {
+                link.Module.SwitchChannel();
+                return true;
+            }
+
+            ConfigNode node = link.ProtoModule != null ? link.ProtoModule.moduleValues : null;
+            if (node == null) { message = "telescope state unavailable"; return false; }
+
+            string current = node.GetValue("instrumentName");
+            string alternate = node.GetValue("alternateInstrumentName");
+            if (string.IsNullOrEmpty(alternate)) alternate = link.AlternateInstrumentName;
+            if (string.IsNullOrEmpty(current)) current = link.Instrument != null ? link.Instrument.Name : "";
+
+            VisualTelescopeSpec target = SpaceTelescopeRegistry.FindInstrument(alternate);
+            if (target == null || target.SpacePlatform == null)
+            {
+                message = "this telescope has no second channel";
+                return false;
+            }
+
+            if (!node.SetValue("instrumentName", alternate, false)) node.AddValue("instrumentName", alternate);
+            if (!node.SetValue("alternateInstrumentName", current, false)) node.AddValue("alternateInstrumentName", current);
+            return true;
+        }
+
         // ---------------------------------------------------------------- readout
 
         /// <summary>

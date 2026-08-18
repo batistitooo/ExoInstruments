@@ -348,22 +348,47 @@ def build_images(ctx):
                 "--bmax", str(ctx.image_bmax), "--out", "GalaxyImages.galimg"])
 
 
+def gaia_band_fault(path):
+    """Names a broken declination index in a star catalogue, or returns None.
+
+    WHY THE MAGIC NUMBER IS NOT ENOUGH HERE. Every other check in this script asks whether the
+    file arrived intact. This one asks whether it is USABLE, which for this format is a different
+    question: RenderedStarCatalog.Search reads only the declination bands the requested cone
+    overlaps, so a catalogue whose stars are filed under the wrong bands loads cleanly, reports
+    its full star count, decodes every record correctly, and returns nothing from every search.
+    The sky renders empty, in the game and everywhere else, with no error logged anywhere, and an
+    empty frame is indistinguishable from a genuinely empty field.
+
+    That is not a hypothetical failure. A version-3 build of 7,369,627 stars shipped with 91 of
+    1800 bands populated and 4.87 million stars, two thirds of the file, in the band at dec +89.9,
+    because the reddening column was inserted into the middle of the tuple the band sort read
+    from. The check costs one header read.
+    """
+    from pack_gaia_catalog import header_band_fault   # same directory; stdlib only
+    return header_band_fault(path)
+
+
 class Product:
-    def __init__(self, key, filename, magic, summary, builder, default, needs=(), needs_venv=True):
+    def __init__(self, key, filename, magic, summary, builder, default, needs=(), needs_venv=True,
+                 min_version=None, validate=None):
         self.key = key
         self.filename = filename
         self.magic = magic
+        self.min_version = min_version
         self.summary = summary
         self.builder = builder
         self.default = default
         self.needs = needs
         self.needs_venv = needs_venv
+        # Optional deeper check, run on a freshly built file before it is installed and on an
+        # already-installed one before it is skipped. Returns a sentence, or None when sound.
+        self.validate = validate
 
 
 PRODUCTS = [
     Product("stars", "GaiaStarCatalog.starcat", b"EXOSTAR1",
             "the star field behind every photograph, from Gaia DR3",
-            build_gaia, default=True, needs_venv=False),
+            build_gaia, default=True, needs_venv=False, validate=gaia_band_fault),
     Product("dust", "DustMap.dustmap", b"EXODUST1",
             "interstellar reddening and the extinction readout, from SFD98",
             build_dust, default=True),
@@ -371,10 +396,11 @@ PRODUCTS = [
             "diffuse H-alpha, [N II] and [S II] in narrowband, from Finkbeiner (2003)",
             build_halpha, default=True),
     Product("galaxies", "GalaxyCatalog.galcat", b"EXOGALX1",
-            "galaxies drawn from their measured shape, from HyperLEDA",
-            build_galaxies, default=True),
-    Product("patches", "HalphaPatches.patchset", b"EXOPTCH1",
-            "high-resolution H-alpha patches, from SHASSA (about 2.3 GB downloaded)",
+            "galaxies drawn from their measured shape and distance, from HyperLEDA",
+            build_galaxies, default=True, min_version=2),
+    Product("patches", "HalphaPatches.patchset", b"EXOPTCH3",
+            "high-resolution H-alpha, [O III] and [S II] patches, from SHASSA in the south and "
+            "NSNS in the north (about 2.3 GB downloaded)",
             build_patches, default=False, needs=("halpha",)),
     Product("images", "GalaxyImages.galimg", b"EXOGIMG1",
             "real survey imagery for the brightest galaxies (hours, gigabytes fetched)",
@@ -394,6 +420,10 @@ def install(product, ctx):
     if head != product.magic:
         die(f"{product.key}: {built} does not start with {product.magic.decode()}, so it is "
             "truncated or is not the format it claims to be. It is not being installed.")
+    if product.validate:
+        fault = product.validate(built)
+        if fault:
+            die(f"{product.key}: {fault} It is not being installed.")
     target = ctx.plugin_data / product.filename
     shutil.copy2(built, target)
     log(f"Installed {target} ({target.stat().st_size / 1e6:.1f} MB)")
@@ -479,6 +509,28 @@ def main():
     for product in selected:
         target = ctx.plugin_data / product.filename
         if target.exists() and not args.force:
+            # A file can be present, valid and still OUTDATED: the v1 galaxy catalogue predates
+            # the distance-modulus column the supernova model needs. Version-aware products say
+            # what the minimum acceptable on-disk version is, and an older file rebuilds.
+            if product.min_version is not None:
+                with open(target, "rb") as fh:
+                    fh.read(len(product.magic))
+                    version = int.from_bytes(fh.read(4), "little")
+                if version < product.min_version:
+                    log(f"{product.filename} is format v{version}, needs v{product.min_version} "
+                        f"(the distance column); rebuilding.")
+                    todo.append(product)
+                    continue
+            # A file can also be present, current and UNUSABLE. This is where that gets caught,
+            # rather than only on the way in: someone who already installed a bad build would
+            # otherwise be told "already installed" on every future run while the sky stayed
+            # empty, which is the one outcome this script must not produce.
+            if product.validate:
+                fault = product.validate(target)
+                if fault:
+                    log(f"{product.filename}: {fault} Rebuilding.")
+                    todo.append(product)
+                    continue
             log(f"Already installed, skipping: {product.filename} "
                 f"({target.stat().st_size / 1e6:.1f} MB). Use --force to rebuild.")
             continue

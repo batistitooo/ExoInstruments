@@ -125,6 +125,8 @@ PS1_CUTOUT = "https://ps1images.stsci.edu/cgi-bin/fitscut.cgi"
 PS1_PIXEL_ARCSEC = 0.25
 PS1_MAX_PIXELS = 6000
 
+
+
 SURVEYS = [
     {
         "id": "legacy-dr10",
@@ -216,7 +218,8 @@ def read_catalog(path):
     r = Reader(open(path, "rb").read())
     if r.take(8) != CATALOG_MAGIC:
         raise SystemExit(path + " is not an ExoInstruments packed galaxy catalogue")
-    if r.i32() != 1:
+    version = r.i32()
+    if version not in (1, 2):
         raise SystemExit("unsupported galaxy catalogue version")
     count = r.i32()
     source = r.string()
@@ -224,6 +227,8 @@ def read_catalog(path):
     for _ in range(count):
         g = {"name": r.string(), "ra": r.f64(), "dec": r.f64(), "bt": r.f32(), "bv": r.f32(),
              "d25": r.f32(), "axis": r.f32(), "pa": r.f32(), "t": r.f32(), "n": r.f32()}
+        if version >= 2:
+            g["mod"] = r.f32()
         r.u8()
         out.append(g)
     return source, out
@@ -757,6 +762,53 @@ def process_band(image, header, galaxy, others, companions, stars, args, report)
     #    ones left are inside genuinely detected structure (a dust lane against a bright arm).
     filled = np.clip(filled, 0.0, None)
 
+    # 6b. THE SKY REGION HOLDS NO LIGHT, because the map is the GALAXY and past the isophote what
+    #     the survey shows is its own sky: photon noise rectified by the clip above, and the
+    #     foreground stars this packer deliberately leaves in. Both were assumed bounded. They are
+    #     not. Measured on M31, whose box is two D25 across, 67 per cent of the packed map's flux
+    #     sat beyond 1.4 semi-major axes -- the very radius step 1 uses to MEASURE the sky, so the
+    #     file was calling that region sky and packing it as galaxy at the same time. The header's
+    #     own fluxInsideD25 said so all along: 0.333 for a galaxy whose light is, by the definition
+    #     of the isophote, almost all inside it.
+    #
+    #     It is also what drew survey boundaries across the frames. SDSS9 does not cover M31's box;
+    #     a quarter of it is outside the footprint and packs as exact zero, while the observed side
+    #     keeps that pedestal, so the footprint edge became a step and rendered as hard-edged tiles
+    #     across the sky beside the galaxy. Removing the pedestal removes the step with it: both
+    #     sides of a coverage edge are zero when neither carries sky. That is the general fix, and
+    #     it holds for any survey edge crossing any box, not just this one.
+    #
+    #     Tapered rather than cut, over the annulus between --sky-taper and --sky-inner, so the
+    #     galaxy's own outskirts fade instead of ending on the edge this is here to remove.
+    #
+    #     COMPANIONS ARE PROTECTED, AND LOCALLY. A galaxy whose centre falls inside the box is not
+    #     masked, is recorded as swallowed, and gets no entry of its own -- so if the taper reached
+    #     it, it would vanish from the sky entirely. The first version of this pushed the taper's
+    #     inner radius out past the farthest companion, which for M31's five swallowed neighbours
+    #     put it beyond the box and left 59 per cent of the flux still sitting in the sky. So each
+    #     companion instead keeps a disc of its own, with its own fade, and the taper closes over
+    #     everything between them.
+    if args.sky_taper > 0.0:
+        inner = args.sky_taper * semi_major_px
+        outer = args.sky_inner * semi_major_px
+        keep = 0.5 * (1.0 + np.cos(math.pi * np.clip((radius - inner) / max(1e-9, outer - inner),
+                                                     0.0, 1.0)))
+        for c in companions:
+            try:
+                cxp, cyp = wcs.all_world2pix(c["ra"], c["dec"], 0)
+            except Exception:                                       # noqa: BLE001
+                continue
+            if not (np.isfinite(cxp) and np.isfinite(cyp)):
+                continue
+            crad = elliptical_radius(image.shape, (float(cxp), float(cyp)), c["axis"], c["pa"])
+            csemi = max(1.0, (c["d25"] * 60.0 * 0.5) / scale_arcsec)
+            ckeep = 0.5 * (1.0 + np.cos(math.pi * np.clip(
+                (crad - args.sky_taper * csemi) / max(1e-9, (args.sky_inner - args.sky_taper) * csemi),
+                0.0, 1.0)))
+            keep = np.maximum(keep, ckeep)
+        filled = filled * keep
+        report["sky_taper_inner_axes"] = float(args.sky_taper)
+
     # 7. Apodise to zero over the outer margin so the map joins the sky continuously instead of
     #    ending on a step, exactly as the emission patches do.
     edge = np.maximum(np.abs(xx - centre[0]), np.abs(yy - centre[1]))
@@ -863,6 +915,10 @@ def main():
                    help="fraction of the semi-major axis around the centre no star mask may touch")
     p.add_argument("--sky-inner", type=float, default=1.4,
                    help="inner edge of the sky region, in semi-major axes")
+    p.add_argument("--sky-taper", type=float, default=1.0,
+                   help="semi-major axes at which the map starts fading to zero, reaching it at "
+                        "--sky-inner; 0 packs the survey's sky as galaxy light, which is what put "
+                        "survey footprint edges into the frames")
     p.add_argument("--profile-bins", type=int, default=96)
     p.add_argument("--max-core-ratio", type=float, default=5.0,
                    help="largest disagreement allowed between two bands on the light in the core; "
@@ -1042,6 +1098,15 @@ def main():
                 # ones still get their turn: NGC1566's Legacy g is clipped while DES right behind
                 # it has both bands clean, and stopping at the first partial answer would keep the
                 # worse map. Ties in band count go to the earlier survey.
+                #
+                # RANKING COVERAGE ABOVE BAND COUNT WAS TRIED HERE, and it is the wrong lever. It
+                # moved M31 off SDSS9's four bands -- a quarter of that box is outside the SDSS
+                # footprint -- onto the Pan-STARRS g HiPS, which covers all of it. The tiles went
+                # away and so did the galaxy: the PS1 g HiPS is too shallow to hold M31's disc, and
+                # the surface brightness between 5 and 20 arcmin fell by a factor of three and a
+                # half, 343 ADU to 101 on a 300 s RedCat frame, against 776 for SDSS with the sky
+                # taper. The defect was never WHICH survey answered, it was two bad fields inside
+                # the answer, and step 3b removes those where they are. Deeper data wins.
                 if len(planes) == len(survey["bands"]):
                     chosen = (survey, planes, reports)
                     break

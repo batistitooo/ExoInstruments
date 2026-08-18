@@ -61,6 +61,9 @@ namespace ExoInstruments.Core
         /// <summary>Extra multiplier on the per-planet award when multiple real planets are confirmed in one campaign. Additive, not compounded with the instrument multiplier again: 3 planets gives (1 + 2 x 0.5) x base, not base cubed.</summary>
         public const double JackpotMultiplierPerExtraPlanet = 0.5;
 
+        /// <summary>One-time award for spotting a supernova in a frame, priced beside the Rossiter-McLaughlin measurement: one discovery, one payout, no aperture scaling.</summary>
+        public const float ScienceRewardSupernovaDiscovery = 30.0f;
+
         /// <summary>
         /// The first-scan award once <paramref name="scansAlreadyCompleted"/> stars have been
         /// surveyed. Kept here rather than in the GUI so the curve is stated once, next to the
