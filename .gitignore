@@ -38,6 +38,8 @@ tools/*.emission
 tools/*.patchset
 tools/*.dustmap
 tools/galaxy_image_cache/
+tools/shassa_cache/
+tools/sn_template_cache/
 tools/*.log
 tools/*.err
 
