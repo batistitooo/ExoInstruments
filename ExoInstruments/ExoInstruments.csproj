@@ -17,7 +17,7 @@
         the ksp_version fields CKAN indexes. Bump ModVersion here and nowhere else.
     -->
     <PropertyGroup>
-        <ModVersion>0.3.0</ModVersion>
+        <ModVersion>0.4.0</ModVersion>
         <KspVersionMin>1.8.0</KspVersionMin>
         <KspVersionMax>1.12.5</KspVersionMax>
         <Version>$(ModVersion)</Version>
