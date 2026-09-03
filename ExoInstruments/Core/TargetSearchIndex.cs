@@ -304,18 +304,17 @@ namespace ExoInstruments.Core
             return 0;
         }
 
-        /// <summary>Score first, then the brighter target, then alphabetically so the order never depends on catalogue order.</summary>
+        // Score first, then the brighter target, then alphabetically so the order never depends on catalogue
+        // order.
         private static int CompareRanked(SearchResult a, SearchResult b)
         {
             if (a.Score != b.Score) return b.Score.CompareTo(a.Score);
             return CompareBrowsing(a, b);
         }
 
-        /// <summary>
-        /// Browsing order: solar-system bodies first, because they are what a telescope in the back
-        /// garden points at, then everything by brightness. A target with no measured magnitude
-        /// sorts as if it were faint, which is where an unmeasured object belongs.
-        /// </summary>
+        // Browsing order: solar-system bodies first, because they are what a telescope in the back garden
+        // points at, then everything by brightness. A target with no measured magnitude sorts as if it were
+        // faint, which is where an unmeasured object belongs.
         private static int CompareBrowsing(SearchResult a, SearchResult b)
         {
             bool aLocal = TargetKinds.IsSolarSystem(a.Target.Kind);

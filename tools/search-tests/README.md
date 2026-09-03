@@ -18,15 +18,15 @@ is wrong in ways nobody notices. The four failure modes this directory exists to
    identification and IAU name tables are added to the index *after* the stars, which is exactly the
    shape of a bug that hands a withheld identity straight back.
 
-Each of those is a section below. The harness compiles the shipped `Core` sources directly — the
-same files the mod builds — so there is no test copy to drift.
+Each of those is a section below. The harness compiles the shipped `Core` sources directly, the
+same files the mod builds, so there is no test copy to drift.
 
 ## What it checks
 
 | section | what must hold |
 |---|---|
 | 1. Designation keys | five spellings of NGC 224 give one key; NGC 24, 240 and 2400 stay three objects; a suffix (`NGC 4038A`) is not its parent; `Sh2-155` survives its hyphen; `M104` is **not** read as prefix `M1` + number 4 |
-| 2. Every name | 17 objects found under a name other than the one their catalogue stores, including M13 — a globular cluster no installed catalogue carries at all |
+| 2. Every name | 17 objects found under a name other than the one their catalogue stores, including M13, a globular cluster no installed catalogue carries at all |
 | 3. Substrings | the exact designation ranks first for `NGC 24`, `NGC 300`, `IC 10`, `M 1`, while the longer ones stay reachable |
 | 4. Duplicates | M31, M51, M81, M87, M104 each resolve to exactly one target, and that target is the row with the **measurements** |
 | 5. Filters | `type:` covers the right kinds and accepts plurals; a misspelt filter is reported, not ignored; `in:Ori`, `in:Orion` and `in:Orionis` agree; `mag:<9` excludes unknown magnitudes; filters AND together |
@@ -56,7 +56,7 @@ is a visible freeze on the game's runtime, and 2.3 ms is a keystroke.
 - **Not the constellations.** `in:Ori` is only as good as `Core/Constellations.cs`, which
   `tools/constellation-tests` cross-validates against astropy.
 - **Nothing about the interface.** Whether the panel lays out, whether a click points the telescope,
-  whether the sky chart highlights what the search matched — all of that needs the game, and lives
+  whether the sky chart highlights what the search matched, all of that needs the game, and lives
   in `TESTING.md`.
 
 ## Running

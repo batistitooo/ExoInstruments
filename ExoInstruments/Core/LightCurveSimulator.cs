@@ -169,7 +169,8 @@ namespace ExoInstruments.Core
             return Math.Abs(phaseCentered) <= halfDurationPhase ? depthFraction : 0.0;
         }
 
-        /// <summary>Fractional flux deficit for planet radius ratio p at separation z, with quadratic limb darkening. Mandel &amp; Agol 2002 small-planet approximation.</summary>
+        // Fractional flux deficit for planet radius ratio p at separation z, with quadratic limb darkening.
+        // Mandel & Agol 2002 small-planet approximation.
         private static double LimbDarkenedDip(double z, double p, double u1, double u2)
         {
             if (z >= 1.0 + p) return 0.0;
@@ -182,7 +183,7 @@ namespace ExoInstruments.Core
                 return p * p * LocalIntensity(mu, u1, u2) / meanIntensity;
             }
 
-            // Ingress/egress: circle-overlap area × limb intensity (mu → 0 at the limb, giving the smooth shallow shoulders).
+            // Ingress/egress: circle-overlap area * limb intensity (mu goes to 0 at the limb, giving the smooth shallow shoulders).
             double coveredFraction = CircleOverlapArea(z, p) / (Math.PI * p * p);
             double rEdge = Math.Min(1.0, z);
             double muEdge = Math.Sqrt(Math.Max(0.0, 1.0 - rEdge * rEdge));
@@ -195,7 +196,8 @@ namespace ExoInstruments.Core
             return 1.0 - u1 * oneMinusMu - u2 * oneMinusMu * oneMinusMu;
         }
 
-        /// <summary>Intersection area of the stellar disk (radius 1) and the planet disk (radius p) at center separation d.</summary>
+        // Intersection area of the stellar disk (radius 1) and the planet disk (radius p) at center separation
+        // d.
         private static double CircleOverlapArea(double d, double p)
         {
             if (d >= 1.0 + p) return 0.0;
@@ -211,7 +213,8 @@ namespace ExoInstruments.Core
                  - 0.5 * Math.Sqrt(Math.Max(0.0, kernel));
         }
 
-        /// <summary>Quadratic limb-darkening coefficients vs Teff, interpolated from Claret &amp; Bloemen 2011. Falls back to solar values for unknown Teff.</summary>
+        // Quadratic limb-darkening coefficients vs Teff, interpolated from Claret & Bloemen 2011. Falls back to
+        // solar values for unknown Teff.
         private static void QuadraticLimbDarkening(double? effectiveTempK, out double u1, out double u2)
         {
             double teff = effectiveTempK ?? 5800.0;

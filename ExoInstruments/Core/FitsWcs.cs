@@ -64,24 +64,18 @@ namespace ExoInstruments.Core
         public double ScaleXArcsecPerPixel => Math.Sqrt(Cd11 * Cd11 + Cd21 * Cd21) * 3600.0;
         public double ScaleYArcsecPerPixel => Math.Sqrt(Cd12 * Cd12 + Cd22 * Cd22) * 3600.0;
 
-        /// <summary>
-        /// Angular offset used to measure the Jacobian, in degrees.
-        ///
-        /// The usual tension over a finite-difference step (small enough to be linear, large
-        /// enough to beat rounding) does not apply here, because the map being differentiated is
-        /// EXACTLY linear: GnomonicProjection turns a direction into a pixel through
-        /// xi = (d.right)/(d.boresight) and then an affine scaling, so a central difference at any
-        /// step returns the same Jacobian up to rounding. That makes a LARGER step strictly better,
-        /// and the step is set by the one place precision does bite.
-        ///
-        /// Near the celestial pole, recovering a declination from a direction vector goes through
-        /// asin(z) with z within 1e-14 of 1, where the derivative is of order 1e7 and double
-        /// precision buys only about 3e-8 degrees. Against a 1e-5 degree step that is a 0.3% error
-        /// in the measured scale, and it showed up exactly there: a field centred on the pole
-        /// came back with its plate scale 0.44% wrong while every other pointing was right to
-        /// 3e-6. At 1e-3 degrees the same absolute error is a part in 1e5 of the step, so the pole
-        /// is as accurate as anywhere else. Verified in tools/bandpass-wcs-tests.
-        /// </summary>
+        // Angular offset used to measure the Jacobian, in degrees. The usual tension over a finite-difference
+        // step (small enough to be linear, large enough to beat rounding) does not apply here, because the map
+        // being differentiated is EXACTLY linear: GnomonicProjection turns a direction into a pixel through xi
+        // = (d.right)/(d.boresight) and then an affine scaling, so a central difference at any step returns the
+        // same Jacobian up to rounding. That makes a LARGER step strictly better, and the step is set by the
+        // one place precision does bite. Near the celestial pole, recovering a declination from a direction
+        // vector goes through asin(z) with z within 1e-14 of 1, where the derivative is of order 1e7 and double
+        // precision buys only about 3e-8 degrees. Against a 1e-5 degree step that is a 0.3% error in the
+        // measured scale, and it showed up exactly there: a field centred on the pole came back with its plate
+        // scale 0.44% wrong while every other pointing was right to 3e-6. At 1e-3 degrees the same absolute
+        // error is a part in 1e5 of the step, so the pole is as accurate as anywhere else. Verified in
+        // tools/bandpass-wcs-tests.
         private const double JacobianStepDeg = 1e-3;
 
         /// <summary>
@@ -265,14 +259,10 @@ namespace ExoInstruments.Core
         /// </summary>
         public bool FlippedParity => (Cd11 * Cd22 - Cd12 * Cd21) > 0.0;
 
-        /// <summary>
-        /// Where the sky point at tangent-plane offset (xiDeg east, etaDeg north) from
-        /// (raDeg, decDeg) lands on the sensor.
-        ///
-        /// The offset is applied as a real displacement of the direction vector in the equatorial
-        /// frame, which is the exact inverse gnomonic projection rather than an approximation to
-        /// it, and is well behaved at the pole where stepping in right ascension is not.
-        /// </summary>
+        // Where the sky point at tangent-plane offset (xiDeg east, etaDeg north) from (raDeg, decDeg) lands on
+        // the sensor. The offset is applied as a real displacement of the direction vector in the equatorial
+        // frame, which is the exact inverse gnomonic projection rather than an approximation to it, and is well
+        // behaved at the pole where stepping in right ascension is not.
         private static bool TryProjectSky(GnomonicProjection projection,
                                           double raDeg, double decDeg, double xiDeg, double etaDeg,
                                           double meridianRaDeg, double observerLatitudeDeg,

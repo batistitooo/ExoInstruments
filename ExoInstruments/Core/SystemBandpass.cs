@@ -62,25 +62,20 @@ namespace ExoInstruments.Core
     /// </summary>
     public sealed class SystemResponse
     {
-        /// <summary>
-        /// Quadrature nodes across the passband (Simpson's rule, so this must be even). 64 is
-        /// set by the widest band in the roster rather than by the narrowest: FORS2's unfiltered
-        /// Luminance position spans 7700 Angstrom, across which both the QE curve and the
-        /// extinction coefficient change substantially, while a 5.5nm H-alpha filter is
-        /// essentially grey across its own width and would be converged at four.
-        /// </summary>
+        // Quadrature nodes across the passband (Simpson's rule, so this must be even). 64 is set by the widest
+        // band in the roster rather than by the narrowest: FORS2's unfiltered Luminance position spans 7700
+        // Angstrom, across which both the QE curve and the extinction coefficient change substantially, while a
+        // 5.5nm H-alpha filter is essentially grey across its own width and would be converged at four.
         private const int IntegrationSteps = 64;
 
-        /// <summary>Coolest and hottest blackbody the colour table covers, and how many log-spaced entries it holds.</summary>
+        // Coolest and hottest blackbody the colour table covers, and how many log-spaced entries it holds.
         private const double TableMinTeffK = 1500.0;
         private const double TableMaxTeffK = 60000.0;
-        /// <summary>
-        /// Entries in the colour table. Set by accuracy rather than by taste: interpolation error
-        /// falls as the square of the log-temperature spacing, and at 48 entries the table
-        /// reproduced the directly-integrated colour term to only 0.14%, which is visible in a
-        /// harness check asserting equivalence with the model this replaced. 160 brings it under
-        /// 0.02% at a build cost still well inside a millisecond, paid once per capture.
-        /// </summary>
+        // Entries in the colour table. Set by accuracy rather than by taste: interpolation error falls as the
+        // square of the log-temperature spacing, and at 48 entries the table reproduced the directly-integrated
+        // colour term to only 0.14%, which is visible in a harness check asserting equivalence with the model
+        // this replaced. 160 brings it under 0.02% at a build cost still well inside a millisecond, paid once
+        // per capture.
         private const int TableEntries = 160;
 
         private readonly double centralWavelengthMeters;
@@ -113,27 +108,20 @@ namespace ExoInstruments.Core
         /// <summary>Central wavelength of the fitted filter, in metres: carried so callers need not hold it separately.</summary>
         public double CentralWavelengthMeters => centralWavelengthMeters;
 
-        /// <summary>
-        /// Builds the response for one filter on one instrument at one airmass.
-        ///
-        /// greyOpticsTransmission is everything with no published wavelength dependence in this
-        /// roster: the filter's own peak transmission, the mirror-coating and relay-optics
-        /// throughput (see VisualTelescopeSpec.OpticsTransmission), and any neutral-density
-        /// filter. Passing them pre-multiplied rather than as separate arguments keeps this class
-        /// from having an opinion about which factors an instrument happens to have.
-        ///
-        /// quantumEfficiencyCurve may be null, in which case scalarQuantumEfficiency is used
-        /// across the band, the honest treatment for a detector whose manufacturer publishes
-        /// only a peak figure, which is the case for this roster's amateur camera.
-        /// </summary>
-        /// <summary>Measured filter transmission, or null for the published-numbers-only top-hat.</summary>
+        // Builds the response for one filter on one instrument at one airmass. greyOpticsTransmission is
+        // everything with no published wavelength dependence in this roster: the filter's own peak
+        // transmission, the mirror-coating and relay-optics throughput (see
+        // VisualTelescopeSpec.OpticsTransmission), and any neutral-density filter. Passing them pre-multiplied
+        // rather than as separate arguments keeps this class from having an opinion about which factors an
+        // instrument happens to have. quantumEfficiencyCurve may be null, in which case scalarQuantumEfficiency
+        // is used across the band, the honest treatment for a detector whose manufacturer publishes only a peak
+        // figure, which is the case for this roster's amateur camera. Measured filter transmission, or null for
+        // the published-numbers-only top-hat.
         private readonly SpectralCurve filterTransmissionCurve;
 
-        /// <summary>
-        /// Quadrature nodes when a measured curve is used. Four times the top-hat count: the
-        /// support is an 870 nm range rather than one passband, and it contains a steep-shouldered
-        /// peak plus a red leak, so the integrand is far from the smooth product a rectangle gives.
-        /// </summary>
+        // Quadrature nodes when a measured curve is used. Four times the top-hat count: the support is an 870
+        // nm range rather than one passband, and it contains a steep-shouldered peak plus a red leak, so the
+        // integrand is far from the smooth product a rectangle gives.
         private const int CurveIntegrationSteps = 256;
 
         public SystemResponse(
@@ -355,10 +343,8 @@ namespace ExoInstruments.Core
             return table[i] + frac * (table[i + 1] - table[i]);
         }
 
-        /// <summary>
-        /// Simpson's rule over the filter's top-hat support. Returns Angstrom, since that is the
-        /// unit the V-band photon flux density (948 photons/cm^2/s/Angstrom) is quoted per.
-        /// </summary>
+        // Simpson's rule over the filter's top-hat support. Returns Angstrom, since that is the unit the V-band
+        // photon flux density (948 photons/cm^2/s/Angstrom) is quoted per.
         private double Integrate(double teffK, bool includeExtinction, double eBv = 0.0)
         {
             if (greyTransmission <= 0.0) return 0.0;
@@ -398,10 +384,8 @@ namespace ExoInstruments.Core
             return integralMeters * 1e10; // metres -> Angstrom
         }
 
-        /// <summary>
-        /// The integrand: the source's photon spectral shape normalised at Johnson V, times the
-        /// system's response at this wavelength.
-        /// </summary>
+        // The integrand: the source's photon spectral shape normalised at Johnson V, times the system's
+        // response at this wavelength.
         private double Integrand(double lambda, double teffK, bool includeExtinction, double eBv)
         {
             double shape = 1.0;

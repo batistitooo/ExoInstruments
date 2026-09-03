@@ -88,10 +88,8 @@ namespace ExoInstruments.Core
             zBar = CubicAt(CieColourMatchingTable.ZBar, i, f);
         }
 
-        /// <summary>
-        /// Catmull-Rom cubic through the four samples around index i, at fraction f between i and
-        /// i+1. Clamped at the table's ends, where the curves are already at the 1e-4 level.
-        /// </summary>
+        // Catmull-Rom cubic through the four samples around index i, at fraction f between i and i+1. Clamped
+        // at the table's ends, where the curves are already at the 1e-4 level.
         private static double CubicAt(double[] table, int i, double f)
         {
             if (f <= 0.0) return table[i];
@@ -231,13 +229,10 @@ namespace ExoInstruments.Core
             return t;
         }
 
-        /// <summary>
-        /// How far toward the luminance a component has to move to land inside [0, 1].
-        ///
-        /// Below zero it has to rise to zero; above one it has to fall to one. Both are the same
-        /// lerp, and the second is only solvable while the luminance itself is at most one; above
-        /// that the colour is simply brighter than the display and clips.
-        /// </summary>
+        // How far toward the luminance a component has to move to land inside [0, 1]. Below zero it has to rise
+        // to zero; above one it has to fall to one. Both are the same lerp, and the second is only solvable
+        // while the luminance itself is at most one; above that the colour is simply brighter than the display
+        // and clips.
         private static double NeededDesaturation(double component, double luminance, bool limitHighlights = true)
         {
             if (component < 0.0)

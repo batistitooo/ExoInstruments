@@ -2,19 +2,19 @@
 
 Headless verification of five pieces of `Core/`:
 
-- **`SystemBandpass.cs`** — the integrated system response that replaced the grey-band photometry
+- **`SystemBandpass.cs`**, the integrated system response that replaced the grey-band photometry
   (`W = FWHM x QE_peak x T(lambda_c)`) with an integral of the source spectrum against the real
   filter, optical throughput, detector QE curve and wavelength-dependent extinction.
-- **`FitsWcs.cs`** — the TAN world coordinate system written into exported FITS frames, measured
+- **`FitsWcs.cs`**, the TAN world coordinate system written into exported FITS frames, measured
   from the same `GnomonicProjection` that places the stars in the image.
-- **`RadialPsfProfile.cs`** — the exact annular-pupil diffraction pattern as a sampled radial
+- **`RadialPsfProfile.cs`**, the exact annular-pupil diffraction pattern as a sampled radial
   profile, which replaced the Gaussian core and invented ring envelope the high-contrast imaging
   display used to synthesise its own PSF from.
-- **`PupilDiffraction.cs`** — the full two-dimensional pattern of a real pupil, vanes included,
+- **`PupilDiffraction.cs`**, the full two-dimensional pattern of a real pupil, vanes included,
   which replaced the three invented constants that used to draw the display's diffraction spikes.
-- **`FilterCurves.cs`** — ESO's measured FORS2 filter transmission curves, which replaced the
+- **`FilterCurves.cs`**, ESO's measured FORS2 filter transmission curves, which replaced the
   top-hats of published FWHM the bandpass integral used to assume a shape from.
-- **`GaiaPhotometry.cs`** and the packed-catalogue format — the Gaia-to-Johnson transformations
+- **`GaiaPhotometry.cs`** and the packed-catalogue format, the Gaia-to-Johnson transformations
   and the binary the user-built star catalogue is written in.
 
 No Unity, no KSP, no game. Everything under test is pure `Core/` C#.
@@ -82,7 +82,7 @@ and narrows the core from 8.64 to 8.28 mas, the classic signature of an annular 
 point sampling by 4×10⁻⁷ of the peak at a plate scale of `λ/D`/1000, and halving the pixel divides
 that departure by 4.00 twice over, which is the convergence order an area average must have and
 which a coincidentally small number would not show. Against a brute-force two-dimensional average
-of a real square pixel — written independently, in the test file — the profile agrees to 7×10⁻⁴ of
+of a real square pixel, written independently, in the test file, the profile agrees to 7×10⁻⁴ of
 the peak across plate scales from 0.1 to 4 `λ/D` per pixel, about a twentieth of one of the
 display's 256 levels. The crossover between the two-dimensional and radial regimes leaves a step no
 larger than that residual, so it adds nothing to the error budget.
@@ -92,12 +92,12 @@ consecutive point samples land on ring maxima and nulls and differ by up to 59.8
 profile varies by at most 4.28× over the same pixels, a 14× reduction in swing, while still falling
 as steeply as the real `θ⁻³` envelope. The tabulated profile carries the same integrated light as
 direct evaluation to 0.34% over a full 400 px raster, and the peak pixel dilutes monotonically as
-the plate scale coarsens — recovering 0.9989 of the point peak at 0.05 `λ/D` per pixel and holding
+the plate scale coarsens, recovering 0.9989 of the point peak at 0.05 `λ/D` per pixel and holding
 0.077 of it at 4 `λ/D` per pixel, which is detector physics rather than a modelling loss.
 
 **Spikes and rings now come from one pupil.** With its vanes removed, `PupilDiffraction` reproduces
 the published closed-form annular pattern to **7.8×10⁻¹⁶** of peak over the core and twenty rings,
-and is azimuthally flat to 3.3×10⁻¹⁶ — two independent routes to the same physics agreeing to
+and is azimuthally flat to 3.3×10⁻¹⁶, two independent routes to the same physics agreeing to
 machine precision. With them in place, on-axis intensity is exactly 1, the vanes remove the
 3.789 % of the open pupil their real geometry removes, and the spikes land **perpendicular** to the
 vanes that cast them, standing 9.6×10⁶ above the faintest azimuth at 6 λ/D. The simulator's
@@ -108,9 +108,9 @@ Rayleigh criterion's 10.245 mas.
 otherwise get, the real shape changes the effective width by −12.7 % (B), −10.2 % (V) and −4.2 %
 (R), and the B band's colour term between an M dwarf and a hot star by 18 %. Fed a literal
 rectangle the curve path reproduces the top-hat to 0.26 %, the residual being Simpson's rule
-crossing the rectangle's discontinuities. The curves are carried over their full 330–1200 nm range
+crossing the rectangle's discontinuities. The curves are carried over their full 330-1200 nm range
 because the red leak is real (0.77 / 1.34 / 3.21 % of each band), and the CCD's own QE curve is
-measured to suppress 61 % of R's — an interaction only the integrated product can show.
+measured to suppress 61 % of R's, an interaction only the integrated product can show.
 
 ## Note on the sibling harness
 

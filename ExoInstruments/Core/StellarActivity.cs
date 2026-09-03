@@ -5,13 +5,16 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Astrophysical noise intrinsic to the star: RV jitter (spots, granulation,
     /// p-modes) and photometric spot modulation. Each star gets a persistent
-    /// activity level from a deterministic hash — same star, same noise, every session,
+    /// activity level from a deterministic hash, same star, same noise, every session,
     /// without storing anything. The catalog carries no activity indicators, so
     /// you don't know which targets are quiet until you observe them.
     /// </summary>
     public static class StellarActivity
     {
-        /// <summary>Persistent activity multiplier, log-uniform in [0.5, 2.5]. Applied to both RV jitter and spot amplitude — an active star is loud in both.</summary>
+        /// <summary>
+        /// Persistent activity multiplier, log-uniform in [0.5, 2.5]. Applied to both RV jitter and spot
+        /// amplitude; an active star is loud in both.
+        /// </summary>
         public static double ActivityFactor(StarTarget star)
         {
             return LogUniform(Hash01(star, "activity"), 0.5, 2.5);
@@ -47,7 +50,10 @@ namespace ExoInstruments.Core
             return LogUniform(Hash01(star, "spots"), 120.0, 1200.0) * ActivityFactor(star);
         }
 
-        /// <summary>Fractional flux offset from spot rotation: fundamental + half-amplitude first harmonic (the classic two-spot-group shape). Deterministic in (star, ut).</summary>
+        /// <summary>
+        /// Fractional flux offset from spot rotation: fundamental + half-amplitude first harmonic (the classic
+        /// two-spot-group shape). Deterministic in (star, ut).
+        /// </summary>
         public static double SpotModulationFlux(StarTarget star, double ut)
         {
             double amplitude = SpotAmplitudePpm(star) / 1_000_000.0;
@@ -57,7 +63,8 @@ namespace ExoInstruments.Core
             return amplitude * (Math.Sin(omega + phase1) + 0.5 * Math.Sin(2.0 * omega + phase2));
         }
 
-        /// <summary>Deterministic uniform draw in [0,1) from the star's identity + a salt string. FNV-1a hash, stable across runtimes.</summary>
+        // Deterministic uniform draw in [0,1) from the star's identity + a salt string. FNV-1a hash, stable
+        // across runtimes.
         private static double Hash01(StarTarget star, string salt)
         {
             string identity = (star.CatalogKey ?? star.HostStarName ?? star.Name ?? "") + "|" + salt;

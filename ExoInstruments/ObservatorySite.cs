@@ -33,7 +33,11 @@ namespace ExoInstruments
         public const double StockKscLatitudeDeg = -0.0972;
         public const double StockKscLongitudeDeg = -74.6002;
 
-        /// <summary>Elevation above the datum used when converting the site to a world position. The instrument's own real site altitude is a separate, physical quantity (VisualTelescopeSpec.SiteAltitudeMeters) and is not this.</summary>
+        /// <summary>
+        /// Elevation above the datum used when converting the site to a world position. The instrument's own
+        /// real site altitude is a separate, physical quantity (VisualTelescopeSpec.SiteAltitudeMeters) and is
+        /// not this.
+        /// </summary>
         public const double SiteElevationMeters = 100.0;
 
         private static bool resolved;
@@ -50,12 +54,10 @@ namespace ExoInstruments
         /// <summary>True once the position came from the running game rather than the stock fallback.</summary>
         public static bool ResolvedFromGame { get { Resolve(); return fromGame; } }
 
-        /// <summary>
-        /// Resolves the site once and remembers it. KSP's SpaceCenter object only populates its
-        /// coordinates in scenes where it exists, so a value obtained once is kept rather than
-        /// re-queried; the space centre does not move during a game, and falling back to stock
-        /// coordinates mid-session on a modded install would be worse than a stale-but-correct one.
-        /// </summary>
+        // Resolves the site once and remembers it. KSP's SpaceCenter object only populates its coordinates in
+        // scenes where it exists, so a value obtained once is kept rather than re-queried; the space centre
+        // does not move during a game, and falling back to stock coordinates mid-session on a modded install
+        // would be worse than a stale-but-correct one.
         private static void Resolve()
         {
             if (resolved) return;

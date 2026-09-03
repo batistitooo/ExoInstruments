@@ -22,20 +22,22 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// Moonlight as an observing constraint: occultation (moon disk over the target —
+    /// Moonlight as an observing constraint: occultation (moon disk over the target,
     /// target simply gone) and sky-background pollution (Krisciunas &amp; Schaefer 1991
-    /// scattering shape). Only transit photometry pays the sky-noise penalty —
+    /// scattering shape). Only transit photometry pays the sky-noise penalty,
     /// RV and H-band imaging are immune.
     /// </summary>
     public static class MoonlightPollution
     {
-        /// <summary>Reference flux for a full Mün at zenith (albedo 0.12, 200 km at 12,000 km).</summary>
+        // Reference flux for a full Mün at zenith (albedo 0.12, 200 km at 12,000 km).
         private const double ReferenceMoonFlux = 0.12 * (200000.0 / 12000000.0) * (200000.0 / 12000000.0);
 
-        /// <summary>Separation at which a full Mün yields MoonSkyFactor = 1, i.e. doubles the variance of an observation at the instrument's reference magnitude.</summary>
+        // Separation at which a full Mün yields MoonSkyFactor = 1, i.e. doubles the variance of an observation
+        // at the instrument's reference magnitude.
         private const double ReferenceSeparationDeg = 30.0;
 
-        /// <summary>Moon contribution ramps in as it clears the horizon (scattering path shortens); fully counted above this altitude.</summary>
+        // Moon contribution ramps in as it clears the horizon (scattering path shortens); fully counted above
+        // this altitude.
         private const double FullContributionAltitudeDeg = 10.0;
 
         /// <summary>Per-moon geometry at one instant, for the conditions snapshot and the UI status line.</summary>
@@ -52,7 +54,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// RA of a moon in the fictional sky frame. No +180 flip (that's only for the Sun,
-        /// which sits opposite the home body's orbit). Dec 0 for all moons — Minmus' 6 deg
+        /// which sits opposite the home body's orbit). Dec 0 for all moons; Minmus' 6 deg
         /// inclination is neglected, same approximation as the no-axial-tilt Sun.
         /// </summary>
         public static double ComputeMoonRaDeg(double ut, MoonContext moon)
@@ -71,7 +73,10 @@ namespace ExoInstruments.Core
             return Math.Asin(ratio) * 180.0 / Math.PI;
         }
 
-        /// <summary>Illuminated fraction from solar elongation: (1 - cos(elongation))/2. Elongation is simply the RA difference since both sun and moons are at Dec 0.</summary>
+        /// <summary>
+        /// Illuminated fraction from solar elongation: (1 - cos(elongation))/2. Elongation is simply the RA
+        /// difference since both sun and moons are at Dec 0.
+        /// </summary>
         public static double IlluminatedFraction(double moonRaDeg, double sunRaDeg)
         {
             double elongationRad = (moonRaDeg - sunRaDeg) * Math.PI / 180.0;
@@ -133,7 +138,7 @@ namespace ExoInstruments.Core
 
                 double angularRadiusDeg = AngularRadiusDeg(moon);
                 double separationDeg = SeparationDeg(raDeg, targetRaDeg, targetDecDeg);
-                // Occultation is geometry, not illumination — a new moon still blocks the sky.
+                // Occultation is geometry, not illumination; a new moon still blocks the sky.
                 if (separationDeg < angularRadiusDeg)
                 {
                     occulted = true;
@@ -169,7 +174,10 @@ namespace ExoInstruments.Core
             moonSkyFactor = Math.Sqrt(totalExcess);
         }
 
-        /// <summary>Sky-noise excess (sigma) from moonlight, to add in quadrature. Zero for space-based instruments and non-transit methods. Scales as 10^(0.4*dm).</summary>
+        /// <summary>
+        /// Sky-noise excess (sigma) from moonlight, to add in quadrature. Zero for space-based instruments and
+        /// non-transit methods. Scales as 10^(0.4*dm).
+        /// </summary>
         public static double ExcessNoiseSigma(InstrumentSpec instrument, double apparentMagnitude, double moonSkyFactor)
         {
             if (moonSkyFactor <= 0.0) return 0.0;

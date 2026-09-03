@@ -160,12 +160,9 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// Lambert-shaded sphere point under this pixel: the near intersection of the sight line
-        /// with the body (unit observer distance, radius sin(alpha) - the geometry is scale-free),
-        /// its outward normal, and the Sun. The terminator falls where the normal turns from the
-        /// Sun, exactly where the real one is.
-        /// </summary>
+        // Lambert-shaded sphere point under this pixel: the near intersection of the sight line with the body
+        // (unit observer distance, radius sin(alpha) - the geometry is scale-free), its outward normal, and the
+        // Sun. The terminator falls where the normal turns from the Sun, exactly where the real one is.
         private static void ShadeDisc(double cosSep, double ux, double uy, double uz,
                                       in OverlayHost host, double sinAlpha,
                                       out double r, out double g, out double b)
@@ -189,12 +186,10 @@ namespace ExoInstruments.Core
             b = host.TintB / 255.0 * shade;
         }
 
-        /// <summary>
-        /// The glow past the limb, out to the avoidance angle for the limb the pixel is actually
-        /// nearest: the tangent point is constructed (same construction as
-        /// OrbitalVisibility.NearestLimbIsSunlit) and its illumination blends the wide warm
-        /// sunlit-limb glow into the narrow cool dark-limb one across the terminator.
-        /// </summary>
+        // The glow past the limb, out to the avoidance angle for the limb the pixel is actually nearest: the
+        // tangent point is constructed (same construction as OrbitalVisibility.NearestLimbIsSunlit) and its
+        // illumination blends the wide warm sunlit-limb glow into the narrow cool dark-limb one across the
+        // terminator.
         private static void AddLimbGlow(double cosSep, double ux, double uy, double uz,
                                         in OverlayHost host, double alphaRad, double sinAlpha, double cosAlpha,
                                         ref double pr, ref double pg, ref double pb, ref double pa)

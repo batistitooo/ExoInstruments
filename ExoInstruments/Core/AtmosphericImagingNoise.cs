@@ -5,14 +5,14 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Physics for the solar-system camera pipeline: atmospheric extinction (Bouguer's law)
     /// and CCD sensor noise (shot noise, dark current). Pure C#, no Unity dependency.
-    /// Sensor numbers (full well, dark current, read noise) are NOT hardcoded here — callers
+    /// Sensor numbers (full well, dark current, read noise) are NOT hardcoded here; callers
     /// pass in the active telescope's own VisualTelescopeSpec values, so this stays correct
     /// for whichever camera VisualTelescopeCatalog says is attached.
-    /// Cloud cover is handled separately by EveCloudIntegration — no procedural fallback.
+    /// Cloud cover is handled separately by EveCloudIntegration, no procedural fallback.
     /// </summary>
     public static class AtmosphericImagingNoise
     {
-        // Broadband extinction at a decent mid-altitude site — 0.20 mag/airmass is a
+        // Broadband extinction at a decent mid-altitude site; 0.20 mag/airmass is a
         // representative average. Separate from ImagingObservingConditions (which only
         // gates whether imaging is allowed, not how bright the result looks).
         public const double ExtinctionMagPerAirmass = 0.20;
@@ -26,26 +26,22 @@ namespace ExoInstruments.Core
             return Math.Pow(10.0, -0.4 * ExtinctionMagPerAirmass * (airmass - 1.0));
         }
 
-        /// <summary>Pressure scale height of the atmosphere: how the Rayleigh column above a site thins with altitude.</summary>
+        // Pressure scale height of the atmosphere: how the Rayleigh column above a site thins with altitude.
         private const double PressureScaleHeightMeters = 8000.0;
 
-        /// <summary>
-        /// Angstrom (1929) turbidity exponent for the aerosol term. 1.3 is the standard
-        /// continental-aerosol value used throughout atmospheric optics.
-        /// </summary>
+        // Angstrom (1929) turbidity exponent for the aerosol term. 1.3 is the standard continental-aerosol
+        // value used throughout atmospheric optics.
         private const double AerosolAngstromExponent = 1.3;
 
-        /// <summary>Extinction is quoted in magnitudes but computed as an optical depth; 2.5/ln(10) converts between them.</summary>
+        // Extinction is quoted in magnitudes but computed as an optical depth; 2.5/ln(10) converts between
+        // them.
         private const double OpticalDepthToMagnitudes = 1.0857362;
 
-        /// <summary>
-        /// Rayleigh-scattering optical depth of the full sea-level atmospheric column at
-        /// wavelength lambda (micrometres), from the standard parameterisation
-        ///     tau = 0.008569 * l^-4 * (1 + 0.0113 * l^-2 + 0.00013 * l^-4)
-        /// (Hansen &amp; Travis 1974, Space Sci. Rev. 16, 527; the same form tabulated by
-        /// Bucholtz 1995, Appl. Opt. 34, 2765). At 550nm this gives 0.106 mag, the textbook
-        /// sea-level Rayleigh extinction at V.
-        /// </summary>
+        // Rayleigh-scattering optical depth of the full sea-level atmospheric column at wavelength lambda
+        // (micrometres), from the standard parameterisation tau = 0.008569 * l^-4 * (1 + 0.0113 * l^-2 +
+        // 0.00013 * l^-4) (Hansen & Travis 1974, Space Sci. Rev. 16, 527; the same form tabulated by Bucholtz
+        // 1995, Appl. Opt. 34, 2765). At 550nm this gives 0.106 mag, the textbook sea-level Rayleigh extinction
+        // at V.
         private static double RayleighOpticalDepthSeaLevel(double wavelengthMicrons)
         {
             double l2 = wavelengthMicrons * wavelengthMicrons;
@@ -98,12 +94,10 @@ namespace ExoInstruments.Core
             return Math.Pow(10.0, -0.4 * k * (airmass - 1.0));
         }
 
-        /// <summary>
-        /// Effective height of the dominant turbulent layer, used to project a source's
-        /// angular size into a linear size at that layer (see ScintillationExcessSigma).
-        /// Same order of magnitude as the pressure scale height above; both trace to
-        /// where the bulk of the atmosphere (and its turbulence) actually sits.
-        /// </summary>
+        // Effective height of the dominant turbulent layer, used to project a source's angular size into a
+        // linear size at that layer (see ScintillationExcessSigma). Same order of magnitude as the pressure
+        // scale height above; both trace to where the bulk of the atmosphere (and its turbulence) actually
+        // sits.
         private const double TurbulenceLayerHeightMeters = 8000.0;
 
         /// <summary>

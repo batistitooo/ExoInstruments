@@ -42,12 +42,12 @@ namespace ExoInstruments.Core
 
         private const double NiiCoefficient = 1.63e5;
         private const double NiiTemperatureExponent = 0.426;
-        /// <summary>Excitation energy of the N+ 1D term, in units of 10^4 K.</summary>
+        // Excitation energy of the N+ 1D term, in units of 10^4 K.
         private const double NiiExcitationT4 = 2.18;
 
         private const double SiiCoefficient = 7.64e5;
         private const double SiiTemperatureExponent = 0.307;
-        /// <summary>Excitation energy of the S+ 2D term, in units of 10^4 K.</summary>
+        // Excitation energy of the S+ 2D term, in units of 10^4 K.
         private const double SiiExcitationT4 = 2.14;
 
         // --- Gas-phase abundances, the values Madsen et al. (2006) adopt for the WIM ---------
@@ -109,10 +109,10 @@ namespace ExoInstruments.Core
             return FaintTemperatureK + t * (BrightTemperatureK - FaintTemperatureK);
         }
 
-        /// <summary>Bright anchor: a classical H II region, 1000 R, at the 6500 K such regions are measured at.</summary>
+        // Bright anchor: a classical H II region, 1000 R, at the 6500 K such regions are measured at.
         private const double BrightAnchorLogRayleighs = 3.0;
         private const double BrightTemperatureK = 6500.0;
-        /// <summary>Faint anchor: high-latitude diffuse gas, 1 R, at 10000 K.</summary>
+        // Faint anchor: high-latitude diffuse gas, 1 R, at 10000 K.
         private const double FaintAnchorLogRayleighs = 0.0;
         private const double FaintTemperatureK = 10000.0;
 

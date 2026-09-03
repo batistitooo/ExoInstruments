@@ -96,19 +96,14 @@ namespace ExoInstruments.Core
             return g;
         }
 
-        /// <summary>
-        /// Whether the point on the limb nearest the line of sight is on the body's day side.
-        ///
-        /// THE POINT IS FOUND, NOT ASSUMED. A tempting shortcut is to ask whether the observer
-        /// is over the day side, or whether the target is roughly sunward; both are wrong near
-        /// the terminator, which is exactly where the answer matters, because that is where a
-        /// telescope skims from a dark limb to a bright one within a single exposure.
-        ///
-        /// The tangent point is constructed instead. It lies in the plane spanned by the
-        /// direction to the body centre and the line of sight, at the tangent angle from the
-        /// centre direction. Its outward surface normal is what the Sun either does or does not
-        /// illuminate, and the sign of one dot product settles it.
-        /// </summary>
+        // Whether the point on the limb nearest the line of sight is on the body's day side. THE POINT IS
+        // FOUND, NOT ASSUMED. A tempting shortcut is to ask whether the observer is over the day side, or
+        // whether the target is roughly sunward; both are wrong near the terminator, which is exactly where the
+        // answer matters, because that is where a telescope skims from a dark limb to a bright one within a
+        // single exposure. The tangent point is constructed instead. It lies in the plane spanned by the
+        // direction to the body centre and the line of sight, at the tangent angle from the centre direction.
+        // Its outward surface normal is what the Sun either does or does not illuminate, and the sign of one
+        // dot product settles it.
         private static bool NearestLimbIsSunlit(SkyVector observerFromBody, SkyVector lineOfSight,
                                                 double bodyRadiusMeters, SkyVector sunFromBody,
                                                 double r, SkyVector toCentre, double cosSep)

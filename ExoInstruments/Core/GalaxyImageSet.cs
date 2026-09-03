@@ -221,7 +221,10 @@ namespace ExoInstruments.Core
         public int Count => byName.Count;
         public string Source { get; private set; }
 
-        /// <summary>How many galaxies' pixels are held in memory at once. Four is a frame's worth several times over: a field rarely holds two mapped galaxies, and an evicted one is a disk read away.</summary>
+        /// <summary>
+        /// How many galaxies' pixels are held in memory at once. Four is a frame's worth several times over: a
+        /// field rarely holds two mapped galaxies, and an evicted one is a disk read away.
+        /// </summary>
         public int ResidentLimit { get; set; } = 4;
 
         public void Load(string filePath)

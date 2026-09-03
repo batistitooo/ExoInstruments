@@ -28,34 +28,32 @@ namespace ExoInstruments
     {
         private TargetSearchIndex targetIndex;
         private Task<TargetSearchIndex> targetIndexTask;
-        /// <summary>Set when something happened that changes what the index should contain: a career scan revealing a star, or a catalogue arriving late.</summary>
+        // Set when something happened that changes what the index should contain: a career scan revealing a
+        // star, or a catalogue arriving late.
         private bool targetIndexStale = true;
 
         private string targetSearchText = "";
-        /// <summary>Every match, which is what the chart highlights.</summary>
+        // Every match, which is what the chart highlights.
         private List<SearchResult> targetSearchMatches = new List<SearchResult>();
-        /// <summary>The first MaxSearchResultsShown of them, which is what the list draws.</summary>
+        // The first MaxSearchResultsShown of them, which is what the list draws.
         private List<SearchResult> targetSearchResults = new List<SearchResult>();
         private TargetQuery targetSearchQuery = TargetQuery.Parse("");
         private int targetSearchTotal;
         private Vector2 scrollPosSearch;
-        /// <summary>Why the last click on a result did not point the telescope, or null.</summary>
+        // Why the last click on a result did not point the telescope, or null.
         private string searchSelectionError;
 
-        /// <summary>
-        /// The query text changed and the results have not caught up yet.
-        ///
-        /// The re-run is deferred to the next Layout event rather than done where the change is
-        /// noticed. IMGUI builds its layout once per frame and replays it for every other event, so
-        /// changing the NUMBER of rows in the middle of a key or mouse event is the classic way to
-        /// desynchronise a GUILayout group from the layout it was measured with.
-        /// </summary>
+        // The query text changed and the results have not caught up yet. The re-run is deferred to the next
+        // Layout event rather than done where the change is noticed. IMGUI builds its layout once per frame and
+        // replays it for every other event, so changing the NUMBER of rows in the middle of a key or mouse
+        // event is the classic way to desynchronise a GUILayout group from the layout it was measured with.
         private bool targetSearchDirty;
 
-        /// <summary>Rows drawn at once. IMGUI lays out every row it is given whether or not it is inside the scroll view, so this is a real cost, not a cosmetic cap.</summary>
+        // Rows drawn at once. IMGUI lays out every row it is given whether or not it is inside the scroll view,
+        // so this is a real cost, not a cosmetic cap.
         private const int MaxSearchResultsShown = 120;
 
-        /// <summary>The one-click type filters, chosen as the categories an observer picks an instrument for.</summary>
+        // The one-click type filters, chosen as the categories an observer picks an instrument for.
         private static readonly string[] QuickFilters = { "planet", "moon", "star", "galaxy", "nebula", "cluster" };
 
         // What the chart should light up: the search results, by identity for catalogue stars and
@@ -66,7 +64,7 @@ namespace ExoInstruments
         private readonly HashSet<CelestialBody> highlightedBodies = new HashSet<CelestialBody>();
         private bool searchHighlightActive;
 
-        /// <summary>Quantised sky position, a tenth of an arcsecond, used to match a result against a chart marker.</summary>
+        // Quantised sky position, a tenth of an arcsecond, used to match a result against a chart marker.
         private static long SkyPositionKey(double raDeg, double decDeg)
         {
             if (double.IsNaN(raDeg) || double.IsNaN(decDeg)) return long.MinValue;
@@ -325,7 +323,10 @@ namespace ExoInstruments
             if (rerenderChart && windowVisible) RefreshSkyChartHighlights();
         }
 
-        /// <summary>Whether a chart point should be drawn as a search match. With no search running, everything is a match, which is what keeps every star clickable.</summary>
+        /// <summary>
+        /// Whether a chart point should be drawn as a search match. With no search running, everything is a
+        /// match, which is what keeps every star clickable.
+        /// </summary>
         bool IsSearchHighlighted(SkyChartPoint point)
         {
             if (!searchHighlightActive) return true;
@@ -409,7 +410,8 @@ namespace ExoInstruments
             GUILayout.EndScrollView();
         }
 
-        /// <summary>As much of the column as the panel's own controls leave, so a taller screen shows more results rather than more empty panel.</summary>
+        // As much of the column as the panel's own controls leave, so a taller screen shows more results rather
+        // than more empty panel.
         private float SearchResultsHeight => Mathf.Max(240f, ColumnContentHeight - 260f);
 
         string DescribeResultCount()

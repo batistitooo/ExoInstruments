@@ -36,19 +36,32 @@ namespace ExoInstruments.Core
     /// </summary>
     public sealed class Pcg32 : Random
     {
-        /// <summary>LCG multiplier from the reference implementation. Not adjustable: the period and equidistribution properties are proved for this constant.</summary>
+        // LCG multiplier from the reference implementation. Not adjustable: the period and equidistribution
+        // properties are proved for this constant.
         private const ulong Multiplier = 6364136223846793005UL;
 
-        /// <summary>Stream identifiers used by the imaging pipeline, so its independent stochastic processes cannot correlate through a shared sequence.</summary>
+        /// <summary>
+        /// Stream identifiers used by the imaging pipeline, so its independent stochastic processes cannot
+        /// correlate through a shared sequence.
+        /// </summary>
         public const ulong StreamShotNoise = 1UL;
         public const ulong StreamReadNoise = 2UL;
         public const ulong StreamCosmicRays = 3UL;
         public const ulong StreamDefectMap = 4UL;
         public const ulong StreamScintillation = 5UL;
-        /// <summary>The sensor's fixed photo-response and readout-offset maps. Their own streams because they are drawn from the SERIAL seed rather than the exposure's, and must not shift when an exposure's own draws change.</summary>
+        /// <summary>
+        /// The sensor's fixed photo-response and readout-offset maps. Their own streams because they are drawn
+        /// from the SERIAL seed rather than the exposure's, and must not shift when an exposure's own draws
+        /// change.
+        /// </summary>
         public const ulong StreamPhotoResponse = 6UL;
         public const ulong StreamOffsetFpn = 7UL;
-        /// <summary>The speckle field's two halves, and they must be separate streams for a physical reason rather than a tidiness one: the static one is drawn from a seed that does not change between exposures and the temporal one from a seed that does, which is the whole of what makes a speckle pattern removable by differential imaging.</summary>
+        /// <summary>
+        /// The speckle field's two halves, and they must be separate streams for a physical reason rather than
+        /// a tidiness one: the static one is drawn from a seed that does not change between exposures and the
+        /// temporal one from a seed that does, which is the whole of what makes a speckle pattern removable by
+        /// differential imaging.
+        /// </summary>
         public const ulong StreamSpeckleStatic = 8UL;
         public const ulong StreamSpeckleTemporal = 9UL;
         /// <summary>The dither pattern's own stream, so that changing how a sequence is dithered cannot shift the noise inside any of its frames.</summary>
@@ -76,7 +89,10 @@ namespace ExoInstruments.Core
             NextUInt32();
         }
 
-        /// <summary>One 32-bit draw: advance the LCG, then apply the XSH-RR output permutation to the PREVIOUS state (which is what decorrelates the low bits an LCG alone leaves poor).</summary>
+        /// <summary>
+        /// One 32-bit draw: advance the LCG, then apply the XSH-RR output permutation to the PREVIOUS state
+        /// (which is what decorrelates the low bits an LCG alone leaves poor).
+        /// </summary>
         public uint NextUInt32()
         {
             ulong old = state;
@@ -148,14 +164,10 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// A uniform value in [0, bound), by the reference implementation's rejection method.
-        ///
-        /// The naive `NextUInt32() % bound` is biased whenever bound does not divide 2^32: the
-        /// first (2^32 mod bound) values come up one time more often than the rest. Discarding
-        /// draws below that threshold removes the bias exactly, at the cost of a retry whose
-        /// probability is below (bound / 2^32).
-        /// </summary>
+        // A uniform value in [0, bound), by the reference implementation's rejection method. The naive
+        // `NextUInt32() % bound` is biased whenever bound does not divide 2^32: the first (2^32 mod bound)
+        // values come up one time more often than the rest. Discarding draws below that threshold removes the
+        // bias exactly, at the cost of a retry whose probability is below (bound / 2^32).
         private uint BoundedUInt32(uint bound)
         {
             uint threshold = (uint)((0x100000000UL - bound) % bound);

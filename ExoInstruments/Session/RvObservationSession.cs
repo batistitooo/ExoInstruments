@@ -12,7 +12,10 @@ namespace ExoInstruments.Session
     /// </summary>
     public class RvObservationSession
     {
-        /// <summary>High-cadence epoch spacing inside a scheduled transit window, the dense sequence a real Rossiter-McLaughlin run takes across one transit night.</summary>
+        /// <summary>
+        /// High-cadence epoch spacing inside a scheduled transit window, the dense sequence a real Rossiter-
+        /// McLaughlin run takes across one transit night.
+        /// </summary>
         public const double RmBurstCadenceSeconds = 600.0;
 
         public StarTarget Target { get; private set; }
@@ -23,7 +26,11 @@ namespace ExoInstruments.Session
         public List<RvSample> Samples { get; private set; }
         public bool IsRunning { get; private set; }
 
-        /// <summary>Transiting planets this session schedules an RM burst around — sampled at RmBurstCadenceSeconds during transit windows. Empty means no scheduling (RM is always in the physics, but a real observatory can only plan around a known ephemeris).</summary>
+        /// <summary>
+        /// Transiting planets this session schedules an RM burst around, sampled at RmBurstCadenceSeconds
+        /// during transit windows. Empty means no scheduling (RM is always in the physics, but a real
+        /// observatory can only plan around a known ephemeris).
+        /// </summary>
         public List<StarTarget> TransitBurstPlanets { get; private set; }
 
         /// <summary>True while the current epoch spacing is the high-cadence RM sequence, for the UI status line.</summary>
@@ -121,7 +128,8 @@ namespace ExoInstruments.Session
                 : Instrument.CadenceSeconds;
         }
 
-        /// <summary>A burst window spans mid-transit +/- one full duration, enough out-of-transit shoulder on both sides to anchor the anomaly's baseline.</summary>
+        // A burst window spans mid-transit +/- one full duration, enough out-of-transit shoulder on both sides
+        // to anchor the anomaly's baseline.
         private bool IsInBurstWindow(double ut)
         {
             for (int i = 0; i < TransitBurstPlanets.Count; i++)
@@ -140,7 +148,7 @@ namespace ExoInstruments.Session
             return false;
         }
 
-        /// <summary>Earliest upcoming burst-window start strictly after ut; PositiveInfinity when none is scheduled.</summary>
+        // Earliest upcoming burst-window start strictly after ut; PositiveInfinity when none is scheduled.
         private double NextBurstWindowStartUt(double ut)
         {
             double earliest = double.PositiveInfinity;

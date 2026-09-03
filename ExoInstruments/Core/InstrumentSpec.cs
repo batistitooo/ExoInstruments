@@ -98,13 +98,19 @@ namespace ExoInstruments.Core
         /// <summary>One-time Funds cost to unlock this instrument in career mode.</summary>
         public double UnlockCostFunds { get; set; }
 
-        /// <summary>Cumulative Science this mod has awarded (see ExoInstrumentsScenario.TotalScienceEarned) needed before the instrument is purchasable — a track record gate, not an immediate affordability check.</summary>
+        /// <summary>
+        /// Cumulative Science this mod has awarded (see ExoInstrumentsScenario.TotalScienceEarned) needed
+        /// before the instrument is purchasable: a track record gate, not an immediate affordability check.
+        /// </summary>
         public double UnlockScienceThreshold { get; set; }
 
-        /// <summary>Funds charged per observation in career mode — keeps scans from being free spam. Scales with instrument class.</summary>
+        /// <summary>Funds charged per observation in career mode; keeps scans from being free spam. Scales with instrument class.</summary>
         public double ScanCostFunds { get; set; }
 
-        /// <summary>Multiplier on the detection Science award. Set explicitly alongside unlock cost — NOT derived from precision, which would perversely make the free starter (SPECULOOS) pay more than TESS.</summary>
+        /// <summary>
+        /// Multiplier on the detection Science award. Set explicitly alongside unlock cost, NOT derived from
+        /// precision, which would perversely make the free starter (SPECULOOS) pay more than TESS.
+        /// </summary>
         public double ScienceRewardMultiplier { get; set; } = 1.0;
 
         /// <summary>

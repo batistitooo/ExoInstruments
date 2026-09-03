@@ -8,7 +8,7 @@ that both return "the same survey" can disagree about it.
 These are the two tools that decide, and they are kept rather than run once, because the next survey
 added to the packer has to pass them too.
 
-## `check_transfer.py` — the transfer curve, against the survey's own stack
+## `check_transfer.py`, the transfer curve, against the survey's own stack
 
 Compares a HiPS cutout against the Pan-STARRS stack image of the same sky, pixel by pixel. A linear
 service traces a straight line whatever its units are; a compressed one bends, hardest exactly where
@@ -35,7 +35,7 @@ looked like a galaxy. So the packer does not use the Pan-STARRS r and i HiPS; it
 own stack service for those bands, and falls back to the g HiPS alone where the box is too large to
 fetch at 0.25″.
 
-## `check_linearity.py` — the same question against a catalogue
+## `check_linearity.py`, the same question against a catalogue
 
 Aperture photometry on the service's own cutouts against the Gaia DR3 Synthetic Photometry
 Catalogue (I/360): all-sky, star-only, SDSS-system ugriz. A linear image gives a straight line of

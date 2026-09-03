@@ -291,11 +291,8 @@ namespace ExoInstruments.Core
             => CubicInterpolationWeights(nside, (90.0 - latitudeDeg) * Math.PI / 180.0,
                                          longitudeDeg * Math.PI / 180.0, pixels, weights);
 
-        /// <summary>
-        /// The four pixels of one ring bracketing an azimuth, with that ring's Catmull-Rom weights
-        /// already scaled by the ring's own weight, so the sixteen taps a caller reads are the
-        /// finished tensor product.
-        /// </summary>
+        // The four pixels of one ring bracketing an azimuth, with that ring's Catmull-Rom weights already
+        // scaled by the ring's own weight, so the sixteen taps a caller reads are the finished tensor product.
         private static void FillRingCubic(double phi, long start, long ringPix, bool shifted, double dPhi,
                                           long[] pixels, double[] weights, int slot, double ringWeight)
         {
@@ -316,19 +313,14 @@ namespace ExoInstruments.Core
             weights[slot + 3] = ringWeight * c3;
         }
 
-        /// <summary>
-        /// The same answer Mod(v, m) gives, for a v that is already within one period of the range.
-        ///
-        /// EXACT, not approximate, and the range is guaranteed by the caller rather than assumed:
-        /// phi lies in [0, 2*pi) so phi/dPhi lies in [0, ringPix), which puts the stencil's four
-        /// consecutive indices between -2 and ringPix+1. Every ring HEALPix defines holds at least
-        /// four pixels, so a single add or subtract brings any of them into [0, ringPix), which is
-        /// what the remainder would have returned.
-        ///
-        /// Worth writing out because it replaces a 64-bit integer division, the one operation on
-        /// this path that the processor cannot pipeline: sixteen of them per sample, and a capture
-        /// takes one sample per native pixel of the sensor.
-        /// </summary>
+        // The same answer Mod(v, m) gives, for a v that is already within one period of the range. EXACT, not
+        // approximate, and the range is guaranteed by the caller rather than assumed: phi lies in [0, 2*pi) so
+        // phi/dPhi lies in [0, ringPix), which puts the stencil's four consecutive indices between -2 and
+        // ringPix+1. Every ring HEALPix defines holds at least four pixels, so a single add or subtract brings
+        // any of them into [0, ringPix), which is what the remainder would have returned. Worth writing out
+        // because it replaces a 64-bit integer division, the one operation on this path that the processor
+        // cannot pipeline: sixteen of them per sample, and a capture takes one sample per native pixel of the
+        // sensor.
         private static long WrapOnce(long v, long m)
         {
             if (v < 0L) return v + m;
@@ -336,11 +328,9 @@ namespace ExoInstruments.Core
             return v;
         }
 
-        /// <summary>
-        /// Catmull-Rom basis at a fractional position between the middle two of four uniform
-        /// samples. Sums to one at every t, returns (0,1,0,0) at t=0 and (0,0,1,0) at t=1, which is
-        /// what makes the scheme interpolating rather than approximating.
-        /// </summary>
+        // Catmull-Rom basis at a fractional position between the middle two of four uniform samples. Sums to
+        // one at every t, returns (0,1,0,0) at t=0 and (0,0,1,0) at t=1, which is what makes the scheme
+        // interpolating rather than approximating.
         private static void CatmullRom(double t, out double w0, out double w1, out double w2, out double w3)
         {
             double t2 = t * t, t3 = t2 * t;
@@ -350,7 +340,10 @@ namespace ExoInstruments.Core
             w3 = 0.5 * (t3 - t2);
         }
 
-        /// <summary>Converts one RING index on a known ring into NESTED, by way of the pixel centre, which lies strictly inside the pixel, so the containing-pixel lookup returns the pixel itself.</summary>
+        /// <summary>
+        /// Converts one RING index on a known ring into NESTED, by way of the pixel centre, which lies strictly
+        /// inside the pixel, so the containing-pixel lookup returns the pixel itself.
+        /// </summary>
         public static long RingToNested(int nside, long ringPixel)
         {
             CheckNside(nside);
@@ -373,7 +366,8 @@ namespace ExoInstruments.Core
             weights[slot + 1] = w;
         }
 
-        /// <summary>Index of the ring immediately above (smaller theta than) the given z, 0 meaning "above the topmost ring".</summary>
+        // Index of the ring immediately above (smaller theta than) the given z, 0 meaning "above the topmost
+        // ring".
         private static long RingAbove(int nside, double z)
         {
             double az = Math.Abs(z);
@@ -382,29 +376,21 @@ namespace ExoInstruments.Core
             return z > 0.0 ? ring : 4L * nside - ring - 1L;
         }
 
-        /// <summary>
-        /// Ring geometry a stencil has already asked for, remembered so it is computed once.
-        ///
-        /// WHY THIS IS NOT A SHORTCUT. RingInfo is a pure function of (nside, ring): given the
-        /// two, its four outputs are determined, so returning a remembered set is returning the
-        /// same numbers and not an estimate of them. What makes it worth remembering is the
-        /// ratio between how many times it is asked and how many distinct answers exist. It
-        /// costs an inverse trigonometric call, a stencil needs four per sample, and a frame is
-        /// FAR smaller than a map cell: the RC20 at 4x4 with its Barlow spans 4.75 arcmin, where
-        /// the Finkbeiner composite's rings lie 2.6 arcmin apart, so its 11.7 million samples
-        /// (one per native pixel, see the emission fill) fall across three rings and ask for
-        /// them 47 million times. Measured on that frame, the four calls per sample were 43
-        /// percent of the whole lookup.
-        ///
-        /// DIRECT-MAPPED ON THE RING INDEX, sixteen slots, because the rings a frame touches are
-        /// consecutive: any field narrower than sixteen rings (every instrument in the roster on
-        /// every map this project ships) never evicts anything. A wider one still gets the right
-        /// answer, just more misses.
-        ///
-        /// THREAD-STATIC, so a parallel frame fill gives each worker its own and no lock is
-        /// needed. It holds no state a caller can observe: nside is checked on every use and the
-        /// table cleared if it changed, so two maps of different resolutions cannot mix.
-        /// </summary>
+        // Ring geometry a stencil has already asked for, remembered so it is computed once. WHY THIS IS NOT A
+        // SHORTCUT. RingInfo is a pure function of (nside, ring): given the two, its four outputs are
+        // determined, so returning a remembered set is returning the same numbers and not an estimate of them.
+        // What makes it worth remembering is the ratio between how many times it is asked and how many distinct
+        // answers exist. It costs an inverse trigonometric call, a stencil needs four per sample, and a frame
+        // is FAR smaller than a map cell: the RC20 at 4x4 with its Barlow spans 4.75 arcmin, where the
+        // Finkbeiner composite's rings lie 2.6 arcmin apart, so its 11.7 million samples (one per native pixel,
+        // see the emission fill) fall across three rings and ask for them 47 million times. Measured on that
+        // frame, the four calls per sample were 43 percent of the whole lookup. DIRECT-MAPPED ON THE RING
+        // INDEX, sixteen slots, because the rings a frame touches are consecutive: any field narrower than
+        // sixteen rings (every instrument in the roster on every map this project ships) never evicts anything.
+        // A wider one still gets the right answer, just more misses. THREAD-STATIC, so a parallel frame fill
+        // gives each worker its own and no lock is needed. It holds no state a caller can observe: nside is
+        // checked on every use and the table cleared if it changed, so two maps of different resolutions cannot
+        // mix.
         private sealed class RingCache
         {
             private const int Slots = 16;
@@ -450,11 +436,9 @@ namespace ExoInstruments.Core
 
         [ThreadStatic] private static RingCache ringCache;
 
-        /// <summary>
-        /// First pixel, pixel count, colatitude, azimuthal pixel width and half-pixel offset of a
-        /// ring, numbered 1 at the north pole to 4*nside-1 at the south. Answered from the
-        /// per-thread memo above; see RingCache for why that is exact.
-        /// </summary>
+        // First pixel, pixel count, colatitude, azimuthal pixel width and half-pixel offset of a ring, numbered
+        // 1 at the north pole to 4*nside-1 at the south. Answered from the per-thread memo above; see RingCache
+        // for why that is exact.
         private static void RingInfo(int nside, long ring, out long startPix, out long ringPix,
                                      out double theta, out double deltaPhi, out bool shifted)
         {
@@ -463,7 +447,7 @@ namespace ExoInstruments.Core
             cache.Get(nside, ring, out startPix, out ringPix, out theta, out deltaPhi, out shifted);
         }
 
-        /// <summary>The geometry itself, computed rather than remembered.</summary>
+        // The geometry itself, computed rather than remembered.
         private static void RingInfoUncached(int nside, long ring, out long startPix, out long ringPix,
                                              out double theta, out bool shifted)
         {
@@ -494,7 +478,10 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Centre of a RING pixel, in the map's own frame, degrees. The inverse of SphericalDegreesToRing, for a caller that has a pixel and needs the direction it stands for.</summary>
+        /// <summary>
+        /// Centre of a RING pixel, in the map's own frame, degrees. The inverse of SphericalDegreesToRing, for
+        /// a caller that has a pixel and needs the direction it stands for.
+        /// </summary>
         public static void RingPixelCentreDegrees(int nside, long pixel, out double longitudeDeg, out double latitudeDeg)
         {
             CheckNside(nside);
@@ -503,7 +490,7 @@ namespace ExoInstruments.Core
             latitudeDeg = 90.0 - theta * 180.0 / Math.PI;
         }
 
-        /// <summary>Centre of a RING pixel, in the map's own frame.</summary>
+        // Centre of a RING pixel, in the map's own frame.
         private static void RingCentre(int nside, long pixel, out double theta, out double phi)
         {
             long npix = PixelCount(nside);
@@ -572,7 +559,7 @@ namespace ExoInstruments.Core
                 : PixelCount(nside) - 2L * irCap * (irCap + 1) + ipCap;
         }
 
-        /// <summary>Bit-interleaves x and y into the Morton (Z-order) index the nested scheme uses within a face.</summary>
+        // Bit-interleaves x and y into the Morton (Z-order) index the nested scheme uses within a face.
         private static long Interleave(long x, long y)
         {
             return Spread(x) | (Spread(y) << 1);

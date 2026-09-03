@@ -68,23 +68,16 @@ namespace ExoInstruments.Core
             return (ushort)(sign | (ushort)((exponent + 15) << 10) | (ushort)frac);
         }
 
-        /// <summary>
-        /// The thirty-two scale factors a binary16 exponent field can select, 2^-15 through 2^16.
-        ///
-        /// A TABLE RATHER THAN Math.Pow, and the two are the same number rather than nearly the
-        /// same: every entry is a power of two, which a double represents EXACTLY, and
-        /// Math.Pow(2, n) for an integer n in this range returns that same exact value. Nothing
-        /// is rounded here that was not rounded before.
-        ///
-        /// It matters because this decoder is the innermost operation of every map read. The
-        /// interpolation stencil that reads the H-alpha composite is sixteen taps wide and a
-        /// capture takes one sample per native pixel, so an RC20 frame decodes 187 million half
-        /// floats; at one Math.Pow each that was measured at 2.4 of the 5.5 seconds the emission
-        /// fill took, for an exponentiation whose answer is one of thirty-two constants.
-        ///
-        /// Written out as literals so the values are visible and cannot drift with whatever
-        /// evaluates them: 2^-15 through 2^16, the biased exponent read straight off the field.
-        /// </summary>
+        // The thirty-two scale factors a binary16 exponent field can select, 2^-15 through 2^16. A TABLE RATHER
+        // THAN Math.Pow, and the two are the same number rather than nearly the same: every entry is a power of
+        // two, which a double represents EXACTLY, and Math.Pow(2, n) for an integer n in this range returns
+        // that same exact value. Nothing is rounded here that was not rounded before. It matters because this
+        // decoder is the innermost operation of every map read. The interpolation stencil that reads the
+        // H-alpha composite is sixteen taps wide and a capture takes one sample per native pixel, so an RC20
+        // frame decodes 187 million half floats; at one Math.Pow each that was measured at 2.4 of the 5.5
+        // seconds the emission fill took, for an exponentiation whose answer is one of thirty-two constants.
+        // Written out as literals so the values are visible and cannot drift with whatever evaluates them:
+        // 2^-15 through 2^16, the biased exponent read straight off the field.
         private static readonly double[] ExponentScale =
         {
             //  e = 0 is the subnormal case and shares 2^-14 with e = 1; the rest are 2^(e-15).
@@ -122,7 +115,7 @@ namespace ExoInstruments.Core
             6.5536e+04,                // 2^16, the infinity/NaN slot, never scaled by
         };
 
-        /// <summary>2^-14, the fixed exponent of the subnormals.</summary>
+        // 2^-14, the fixed exponent of the subnormals.
         private const double SubnormalScale = 6.103515625e-05;
 
         /// <summary>

@@ -84,7 +84,7 @@ namespace ExoInstruments
         // is discarded instead of overwriting the new session's texture.
         private int imagingRenderGeneration = 0;
 
-        /// <summary>Everything a background imaging refresh produces, applied to fields together once the Task completes.</summary>
+        // Everything a background imaging refresh produces, applied to fields together once the Task completes.
         private struct ImagingRenderResult
         {
             public Color[] Pixels;
@@ -141,7 +141,8 @@ namespace ExoInstruments
             public byte[] Overlay;
             public Color32[] Pixels;
         }
-        /// <summary>The zoom/pan the outstanding refresh is rasterising for, so a result that landed after the player kept panning can be spotted and re-rastered instead of snapping the view back.</summary>
+        // The zoom/pan the outstanding refresh is rasterising for, so a result that landed after the player
+        // kept panning can be spotted and re-rastered instead of snapping the view back.
         private SkyChartView skyChartRenderTaskView;
 
         // A pan is not one event per frame: IMGUI delivers every MouseDrag the OS produced, and a
@@ -255,7 +256,8 @@ namespace ExoInstruments
         private readonly AstroImageStack astroStack = new AstroImageStack();
         private int stackBatchSize = 5;
         private int stackBatchRemaining = 0;
-        /// <summary>Exposures started in the current batch, and subs collected from it. Tracked separately because the series pipelines: an exposure starts while the previous frame is still being reduced.</summary>
+        // Exposures started in the current batch, and subs collected from it. Tracked separately because the
+        // series pipelines: an exposure starts while the previous frame is still being reduced.
         private int stackBatchQueued;
         private int stackBatchCollected;
         private bool stackAlignSubs = true;
@@ -271,7 +273,7 @@ namespace ExoInstruments
         private string stackBatchInterruptedMessage;
         private SkyTarget selectedPhotographyTarget;
 
-        /// <summary>The target's body, or null when the telescope is pointed at a fixed sky position.</summary>
+        // The target's body, or null when the telescope is pointed at a fixed sky position.
         private CelestialBody selectedPhotographyBody => selectedPhotographyTarget.Body;
 
         // Hand-entered coordinates, so the telescope can be pointed at anything with a published
@@ -343,15 +345,11 @@ namespace ExoInstruments
             return MergeWithBackgroundStars(exoplanetTargets);
         }
 
-        /// <summary>
-        /// Loads the Tycho-2 catalogue that gets DRAWN into photographs.
-        ///
-        /// Entirely separate from the Bright Star Catalogue loaded below, which stays exactly as
-        /// it is: the exoplanet instruments deliberately search a small, sparse list so that
-        /// finding a transit remains a tractable game. This one exists only so that a photograph
-        /// has a real star field behind its subject, and nothing in the detection pipeline ever
-        /// reads it. A missing or unreadable file simply means no star field.
-        /// </summary>
+        // Loads the Tycho-2 catalogue that gets DRAWN into photographs. Entirely separate from the Bright Star
+        // Catalogue loaded below, which stays exactly as it is: the exoplanet instruments deliberately search a
+        // small, sparse list so that finding a transit remains a tractable game. This one exists only so that a
+        // photograph has a real star field behind its subject, and nothing in the detection pipeline ever reads
+        // it. A missing or unreadable file simply means no star field.
         private void LoadRenderedStarCatalog()
         {
             // The star catalogue is USER-SUPPLIED and nothing ships. A Tycho-2 file used to,
@@ -383,10 +381,8 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// Optional all-sky reddening map. Like the star catalogue nothing ships, and with no file
-        /// installed every query returns NaN and the header simply omits the keywords.
-        /// </summary>
+        // Optional all-sky reddening map. Like the star catalogue nothing ships, and with no file installed
+        // every query returns NaN and the header simply omits the keywords.
         private void LoadDustMap()
         {
             string path = KSPUtil.ApplicationRootPath
@@ -411,7 +407,7 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Optional all-sky emission-line map. Same treatment as the dust map: nothing ships, absence is silent.</summary>
+        // Optional all-sky emission-line map. Same treatment as the dust map: nothing ships, absence is silent.
         private void LoadEmissionMap()
         {
             string path = KSPUtil.ApplicationRootPath
@@ -519,12 +515,9 @@ namespace ExoInstruments
             LoadGalaxyImages();
         }
 
-        /// <summary>
-        /// The measured shape maps, which are optional: without them a galaxy is drawn from its
-        /// Sersic profile and comes out a smooth ellipse, which is all four catalogued numbers can
-        /// say. Only the index is read here; the pixels are read per frame for the galaxies a
-        /// frame actually contains.
-        /// </summary>
+        // The measured shape maps, which are optional: without them a galaxy is drawn from its Sersic profile
+        // and comes out a smooth ellipse, which is all four catalogued numbers can say. Only the index is read
+        // here; the pixels are read per frame for the galaxies a frame actually contains.
         private void LoadGalaxyImages()
         {
             string path = KSPUtil.ApplicationRootPath
@@ -596,12 +589,9 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// Folds the Yale Bright Star Catalogue into the target list as decoy
-        /// stars (HasPlanet = false), deduplicated against real planet hosts by
-        /// StarCatalogMerger. On any failure the exoplanet catalog alone is
-        /// returned; the mod stays fully usable without decoys.
-        /// </summary>
+        // Folds the Yale Bright Star Catalogue into the target list as decoy stars (HasPlanet = false),
+        // deduplicated against real planet hosts by StarCatalogMerger. On any failure the exoplanet catalog
+        // alone is returned; the mod stays fully usable without decoys.
         private List<StarTarget> MergeWithBackgroundStars(List<StarTarget> exoplanetTargets)
         {
             string path = KSPUtil.ApplicationRootPath + "GameData/ExoInstruments/PluginData/BrightStarCatalog.tsv";
@@ -1049,7 +1039,10 @@ namespace ExoInstruments
             TimeWarp.SetRate(index, false, false);
         }
 
-        /// <summary>Invariant formatting on purpose: a machine locale that prints decimal commas would put "1,5kx" in the middle of an otherwise English panel.</summary>
+        /// <summary>
+        /// Invariant formatting on purpose: a machine locale that prints decimal commas would put "1,5kx" in
+        /// the middle of an otherwise English panel.
+        /// </summary>
         static string DescribeWarpRate(float rate)
         {
             if (rate >= 1e6f) return (rate / 1e6f).ToString("0.###", CultureInfo.InvariantCulture) + "Mx";
@@ -1427,7 +1420,10 @@ namespace ExoInstruments
             return schedulable;
         }
 
-        /// <summary>Longest RV-detectable catalog period in the system, the baseline driver, since the slowest planet is the last to close two full orbits.</summary>
+        /// <summary>
+        /// Longest RV-detectable catalog period in the system, the baseline driver, since the slowest planet is
+        /// the last to close two full orbits.
+        /// </summary>
         static double LongestRvPeriodDays(List<StarTarget> planets)
         {
             double longest = 0.0;
@@ -1523,7 +1519,10 @@ namespace ExoInstruments
             DrawHabitableZoneLines(target);
         }
 
-        /// <summary>Same card slot as DrawTargetInfoCard, for a solar-system body target instead of a catalog star: real radius, current alt/az, and the observability line.</summary>
+        /// <summary>
+        /// Same card slot as DrawTargetInfoCard, for a solar-system body target instead of a catalog star: real
+        /// radius, current alt/az, and the observability line.
+        /// </summary>
         void DrawPhotographyTargetInfoCard(SkyTarget target)
         {
             GUILayout.Label(target.DisplayName, sectionHeaderStyle);
@@ -1646,12 +1645,10 @@ namespace ExoInstruments
             return true;
         }
 
-        /// <summary>
-        /// Everything the chart needs to know about the active observer, snapshot on the main
-        /// thread: the equatorial frame, the observer's true world position, every body as a
-        /// potential occluder, and the occlusion overlay's inputs (host body cap, limb glare,
-        /// avoidance halos). Plain data; the background refresh task reads it freely.
-        /// </summary>
+        // Everything the chart needs to know about the active observer, snapshot on the main thread: the
+        // equatorial frame, the observer's true world position, every body as a potential occluder, and the
+        // occlusion overlay's inputs (host body cap, limb glare, avoidance halos). Plain data; the background
+        // refresh task reads it freely.
         private struct ChartObserverSnapshot
         {
             public ObservingPlatform.EquatorialFrameSnapshot Frame;
@@ -1664,7 +1661,8 @@ namespace ExoInstruments
             public OverlayGlow[] Glows;
         }
 
-        /// <summary>Marker radius for a body whose true disc is below chart resolution: a bright star's own size. It only has to say "I am here"; the search list and dropdown carry the rest.</summary>
+        // Marker radius for a body whose true disc is below chart resolution: a bright star's own size. It only
+        // has to say "I am here"; the search list and dropdown carry the rest.
         private const float BodyMarkerFloorPx = 2.5f;
 
         bool TryBuildChartObserver(out ChartObserverSnapshot snap)
@@ -2246,7 +2244,10 @@ namespace ExoInstruments
         // larger, native sensor resolution (see SolarSystemCameraTexture.BinningFactor).
         private const int PreviewDisplaySize = 480;
 
-        /// <summary>Centers a sub-rect matching the real sensor's aspect ratio (4144x2822, non-square) inside a bounding box, so the image letterboxes instead of stretching.</summary>
+        /// <summary>
+        /// Centers a sub-rect matching the real sensor's aspect ratio (4144x2822, non-square) inside a bounding
+        /// box, so the image letterboxes instead of stretching.
+        /// </summary>
         static Rect AspectFitRect(Rect bounds)
         {
             float aspect = (float)SolarSystemCameraTexture.TextureWidth / SolarSystemCameraTexture.TextureHeight;
@@ -2260,7 +2261,11 @@ namespace ExoInstruments
             return new Rect(bounds.x + (bounds.width - w) / 2f, bounds.y + (bounds.height - h) / 2f, w, h);
         }
 
-        /// <summary>Real sensor binning selector (1x1 native resolution down to 4x4), the real trade-off amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-processing-cost problem.</summary>
+        /// <summary>
+        /// Real sensor binning selector (1x1 native resolution down to 4x4), the real trade-off
+        /// amateur/professional acquisition software (SharpCap, NINA) exposes for exactly this resolution-vs-
+        /// processing-cost problem.
+        /// </summary>
         void DrawResolutionControls()
         {
             GUILayout.BeginHorizontal();
@@ -3182,7 +3187,10 @@ namespace ExoInstruments
             stackedCompositeTexture.Apply();
         }
 
-        /// <summary>Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file, same scheme as SaveSolarSystemPhoto.</summary>
+        /// <summary>
+        /// Writes the composed LRGB stack to KSP's screenshot folder as a PNG and a real 16-bit FITS file, same
+        /// scheme as SaveSolarSystemPhoto.
+        /// </summary>
         /// <summary>
         /// Writes the stack out in whichever of the three products the export selector asks for, into
         /// one timestamped folder per session.
@@ -3483,7 +3491,10 @@ namespace ExoInstruments
             info.EffectiveWidthAngstrom = solarSystemCamera.LastEffectiveWidthAngstrom;
         }
 
-        /// <summary>Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit container. Not a calibration; see FitsHeaderInfo.IsCalibratedAdu.</summary>
+        /// <summary>
+        /// Spreads a processed [0,1] composite over the converter's range, purely so it survives a 16-bit
+        /// container. Not a calibration; see FitsHeaderInfo.IsCalibratedAdu.
+        /// </summary>
         static float[] ToAduScale(Color[] pixels)
         {
             if (pixels == null) return null;
@@ -3511,7 +3522,10 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Channels the stacked-subs readout lists, in enum order: the active instrument's own wheel, plus any filter that still holds subs (a telescope swapped mid-session).</summary>
+        /// <summary>
+        /// Channels the stacked-subs readout lists, in enum order: the active instrument's own wheel, plus any
+        /// filter that still holds subs (a telescope swapped mid-session).
+        /// </summary>
         List<CameraFilter> StackReadoutFilters()
         {
             var listed = new List<CameraFilter>(SolarSystemCameraTexture.ActiveTelescope.AvailableFilters);
@@ -3575,7 +3589,10 @@ namespace ExoInstruments
             GUILayout.Label(sky + "  " + targetLine, smallCaptionStyle);
         }
 
-        /// <summary>Writes the finished captured photo to KSP's screenshot folder as a PNG (quick preview) and a real 16-bit FITS file (the same format a real RC20+camera would actually produce).</summary>
+        /// <summary>
+        /// Writes the finished captured photo to KSP's screenshot folder as a PNG (quick preview) and a real
+        /// 16-bit FITS file (the same format a real RC20+camera would actually produce).
+        /// </summary>
         void SaveSolarSystemPhoto()
         {
             Texture2D frame = solarSystemCamera.CapturedPhoto;
@@ -3818,7 +3835,10 @@ namespace ExoInstruments
             return hit != null;
         }
 
-        /// <summary>Selects a body as the photography target (clearing any star selection), resets any in-progress capture for the old target, and updates the chart's selection ring immediately.</summary>
+        /// <summary>
+        /// Selects a body as the photography target (clearing any star selection), resets any in-progress
+        /// capture for the old target, and updates the chart's selection ring immediately.
+        /// </summary>
         void SelectPhotographyBody(CelestialBody body)
         {
             SelectPhotographyTarget(SkyTarget.FromBody(body), clearStarSelection: true);
@@ -4141,7 +4161,10 @@ namespace ExoInstruments
             lastComposedPixels = null;
         }
 
-        /// <summary>Refreshes IsSelectedTarget on the plotted points to match the current selection and re-rasters, so the ring moves the instant a target is picked instead of waiting for the next refresh.</summary>
+        /// <summary>
+        /// Refreshes IsSelectedTarget on the plotted points to match the current selection and re-rasters, so
+        /// the ring moves the instant a target is picked instead of waiting for the next refresh.
+        /// </summary>
         void UpdateBodySelectionRingAndRerender()
         {
             for (int i = 0; i < cachedBodyPoints.Count && i < cachedChartBodies.Count; i++)
@@ -4233,7 +4256,10 @@ namespace ExoInstruments
             return sb.ToString();
         }
 
-        /// <summary>Whether the telescope is pointed at this catalogue star, matched on coordinates rather than identity so a reloaded catalogue still rings the right marker.</summary>
+        /// <summary>
+        /// Whether the telescope is pointed at this catalogue star, matched on coordinates rather than identity
+        /// so a reloaded catalogue still rings the right marker.
+        /// </summary>
         static bool IsPhotographyTarget(StarTarget star, SkyTarget pointing)
         {
             if (star == null || !pointing.IsEquatorial) return false;
@@ -4312,15 +4338,12 @@ namespace ExoInstruments
             GUILayout.EndScrollView();
         }
 
-        /// <summary>
-        /// Converts a duration in real seconds to whatever "day" KSP itself is
-        /// currently displaying, 6h Kerbin days by default (GameSettings.KERBIN_TIME),
-        /// or 24h Earth days if the player enabled that setting. Session/detector math
-        /// stays in real seconds/days throughout (astronomically correct, matches the
-        /// catalog's real orbital periods); this only affects operational labels the
-        /// player reads alongside KSP's own "T-" warp countdown and mission clock, so
-        /// the numbers agree instead of appearing to disagree by exactly 4x.
-        /// </summary>
+        // Converts a duration in real seconds to whatever "day" KSP itself is currently displaying, 6h Kerbin
+        // days by default (GameSettings.KERBIN_TIME), or 24h Earth days if the player enabled that setting.
+        // Session/detector math stays in real seconds/days throughout (astronomically correct, matches the
+        // catalog's real orbital periods); this only affects operational labels the player reads alongside
+        // KSP's own "T-" warp countdown and mission clock, so the numbers agree instead of appearing to
+        // disagree by exactly 4x.
         private static double ToDisplayDays(double seconds)
         {
             double kspDaySeconds = GameSettings.KERBIN_TIME ? 21600.0 : 86400.0;
@@ -4337,58 +4360,46 @@ namespace ExoInstruments
         // include science sandbox. Both used to ride this one flag, so the mode whose entire
         // currency is Science was the mode in which this mod awarded none of it.
 
-        /// <summary>Outcome of the most recent completed scan, shown in the scan report.</summary>
+        // Outcome of the most recent completed scan, shown in the scan report.
         private float lastScanScienceAwarded;
         private bool lastScanWasFirstForStar;
         private int lastScanJackpotPlanetCount;
         private bool lastScanCharacterized;
 
-        /// <summary>
-        /// The fog of war and the Funds economy, both of which need a career game. Science
-        /// Sandbox has no Funds at all, so nothing priced can apply to it.
-        /// </summary>
+        // The fog of war and the Funds economy, both of which need a career game. Science Sandbox has no Funds
+        // at all, so nothing priced can apply to it.
         private static bool CareerFogActive =>
             HighLogic.CurrentGame != null && HighLogic.CurrentGame.Mode == Game.Modes.CAREER;
 
-        /// <summary>
-        /// Whether discoveries pay Science. Separate from CareerFogActive on purpose: Science
-        /// Sandbox is the mode where Science is the ONLY currency, and riding the fog's gate meant
-        /// the whole mod paid nothing there. Hiding a star's identity and paying for finding out
-        /// what it is are two different decisions, and only the first one needs Funds to exist.
-        /// </summary>
+        // Whether discoveries pay Science. Separate from CareerFogActive on purpose: Science Sandbox is the
+        // mode where Science is the ONLY currency, and riding the fog's gate meant the whole mod paid nothing
+        // there. Hiding a star's identity and paying for finding out what it is are two different decisions,
+        // and only the first one needs Funds to exist.
         private static bool ScienceEconomyActive =>
             HighLogic.CurrentGame != null
             && (HighLogic.CurrentGame.Mode == Game.Modes.CAREER
                 || HighLogic.CurrentGame.Mode == Game.Modes.SCIENCE_SANDBOX);
 
-        /// <summary>
-        /// Applies the game's own Science reward slider before anything is credited, the way a
-        /// stock experiment's subject value does. A career set to 50% Science was getting 100% of
-        /// this mod's, which made the difficulty setting a lie for anyone playing it.
-        /// </summary>
+        // Applies the game's own Science reward slider before anything is credited, the way a stock
+        // experiment's subject value does. A career set to 50% Science was getting 100% of this mod's, which
+        // made the difficulty setting a lie for anyone playing it.
         private static float ApplyScienceDifficulty(float award)
         {
             var p = HighLogic.CurrentGame?.Parameters?.Career;
             return p == null ? award : award * p.ScienceGainMultiplier;
         }
 
-        /// <summary>
-        /// The Funds counterpart, for money the programme is PAID. Costs are deliberately not run
-        /// through it: KSP's own multiplier applies to income, and discounting the price of
-        /// telescope time on an easy setting would flatten the acquisition ladder instead of
-        /// softening it.
-        /// </summary>
+        // The Funds counterpart, for money the programme is PAID. Costs are deliberately not run through it:
+        // KSP's own multiplier applies to income, and discounting the price of telescope time on an easy
+        // setting would flatten the acquisition ladder instead of softening it.
         private static double ApplyFundsDifficulty(double reward)
         {
             var p = HighLogic.CurrentGame?.Parameters?.Career;
             return p == null ? reward : reward * p.FundsGainMultiplier;
         }
 
-        /// <summary>
-        /// True when the star's identity must be withheld from the player. If the
-        /// scenario state is unavailable in career (shouldn't happen; it's added
-        /// to all games), fail toward hiding rather than leaking.
-        /// </summary>
+        // True when the star's identity must be withheld from the player. If the scenario state is unavailable
+        // in career (shouldn't happen; it's added to all games), fail toward hiding rather than leaking.
         private static bool IsIdentityHidden(StarTarget star)
         {
             if (!CareerFogActive) return false;
@@ -4396,12 +4407,9 @@ namespace ExoInstruments
             return scenario == null || !scenario.IsScanned(star.CatalogKey);
         }
 
-        /// <summary>
-        /// What the player is allowed to call this star right now: its real
-        /// designation once revealed, else a positional provisional designation
-        /// ("Unscanned J2257+2046"), the naming a real survey would use for a
-        /// source it hasn't identified.
-        /// </summary>
+        // What the player is allowed to call this star right now: its real designation once revealed, else a
+        // positional provisional designation ("Unscanned J2257+2046"), the naming a real survey would use for a
+        // source it hasn't identified.
         private static string GetDisplayName(StarTarget star)
         {
             if (!IsIdentityHidden(star)) return star.Name;
@@ -4410,26 +4418,17 @@ namespace ExoInstruments
                 : "Unscanned target";
         }
 
-        /// <summary>
-        /// Career bookkeeping when a detection analysis completes: reveals the
-        /// star's identity whatever the outcome (a null result still charts the
-        /// sky) and awards Science, once per star for the scan itself, plus a
-        /// one-time bonus per host for a confirmed real detection. The detection
-        /// bonus is gated on the catalog truth as well as the analysis verdict so
-        /// a statistical false positive on a decoy's noise can't be farmed.
-        ///
-        /// The detection bonus is scaled by the observing instrument's explicit
-        /// ScienceRewardMultiplier (bigger telescope, bigger payoff; see
-        /// InstrumentSpec) and, when realPlanetsDetectedCount is more than 1 (an
-        /// RV campaign resolving several catalog planets at once), by the jackpot
-        /// bonus, the single biggest payout the survey loop offers, by design.
-        ///
-        /// stellarCharacterization additionally claims the one-time
-        /// characterization award (direct imaging of a star with a measurable
-        /// temperature), flat, tracked separately from the scan reveal so a
-        /// star identified earlier by transit/RV still pays out the first time
-        /// it's actually imaged.
-        /// </summary>
+        // Career bookkeeping when a detection analysis completes: reveals the star's identity whatever the
+        // outcome (a null result still charts the sky) and awards Science, once per star for the scan itself,
+        // plus a one-time bonus per host for a confirmed real detection. The detection bonus is gated on the
+        // catalog truth as well as the analysis verdict so a statistical false positive on a decoy's noise
+        // can't be farmed. The detection bonus is scaled by the observing instrument's explicit
+        // ScienceRewardMultiplier (bigger telescope, bigger payoff; see InstrumentSpec) and, when
+        // realPlanetsDetectedCount is more than 1 (an RV campaign resolving several catalog planets at once),
+        // by the jackpot bonus, the single biggest payout the survey loop offers, by design.
+        // stellarCharacterization additionally claims the one-time characterization award (direct imaging of a
+        // star with a measurable temperature), flat, tracked separately from the scan reveal so a star
+        // identified earlier by transit/RV still pays out the first time it's actually imaged.
         private void RegisterScanCompleted(StarTarget target, InstrumentSpec instrument, bool confirmedRealDetection,
             int realPlanetsDetectedCount = 1, bool stellarCharacterization = false)
         {
@@ -4491,7 +4490,7 @@ namespace ExoInstruments
             lastScanScienceAwarded = award;
         }
 
-        /// <summary>Career lines at the top of a scan report: the reveal and what it paid.</summary>
+        // Career lines at the top of a scan report: the reveal and what it paid.
         private void DrawCareerScanOutcome(StarTarget target)
         {
             if (!ScienceEconomyActive) return;
@@ -4669,7 +4668,7 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>Catalog-status report line, decoy-aware, a background star has no planet status to report.</summary>
+        // Catalog-status report line, decoy-aware, a background star has no planet status to report.
         private static string CatalogStatusLine(StarTarget target)
         {
             if (!target.HasPlanet) return "Catalog status: no catalogued planet on this star";
@@ -4780,7 +4779,8 @@ namespace ExoInstruments
             return n;
         }
 
-        /// <summary>Bundles everything the background transit-analysis Task computes, applied to fields together once it lands.</summary>
+        // Bundles everything the background transit-analysis Task computes, applied to fields together once it
+        // lands.
         private struct TransitAnalysisPayload
         {
             public List<TransitDetectionStage> Stages;
@@ -4869,12 +4869,9 @@ namespace ExoInstruments
             RegisterTtvOutcome();
         }
 
-        /// <summary>
-        /// One-time TTV Science: requires the measured O-C sinusoid to clear the
-        /// threshold AND the catalog to actually carry a perturbing companion for
-        /// some transiting member of this system; an O-C wobble fit onto pure
-        /// noise can't be farmed, same truth-gating as the detection bonus.
-        /// </summary>
+        // One-time TTV Science: requires the measured O-C sinusoid to clear the threshold AND the catalog to
+        // actually carry a perturbing companion for some transiting member of this system; an O-C wobble fit
+        // onto pure noise can't be farmed, same truth-gating as the detection bonus.
         private float lastTtvScienceAwarded;
 
         void RegisterTtvOutcome()
@@ -4952,7 +4949,8 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Fixed real-time top-up used by the "Warp +N days" button, a physically meaningful week of extra epochs, independent of display convention.</summary>
+        // Fixed real-time top-up used by the "Warp +N days" button, a physically meaningful week of extra
+        // epochs, independent of display convention.
         private const double RvTopUpRealDays = 7.0;
 
         void DrawRvObservation()
@@ -5088,7 +5086,8 @@ namespace ExoInstruments
 
         // --- Rossiter-McLaughlin: scheduling and analysis ----------------------
 
-        /// <summary>Next fully observable transit window among the session's schedulable planets, cached, recomputed on the 1s plot-refresh throttle (the search re-runs the conditions evaluator across upcoming transits).</summary>
+        // Next fully observable transit window among the session's schedulable planets, cached, recomputed on
+        // the 1s plot-refresh throttle (the search re-runs the conditions evaluator across upcoming transits).
         private double rmNextTransitUt = double.NaN;
         private StarTarget rmNextTransitPlanet;
         private float lastRmScienceAwarded;
@@ -5151,7 +5150,8 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Bundles everything the background RV-analysis Task computes, applied to fields together once it lands.</summary>
+        // Bundles everything the background RV-analysis Task computes, applied to fields together once it
+        // lands.
         private struct RvAnalysisPayload
         {
             public List<RvDetectionStage> Stages;
@@ -5822,11 +5822,9 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// Inverts the K = 28.4329*(Mp*sini/Mjup)*(Mtot/Msun)^(-2/3)*(P/yr)^(-1/3)*(1-e^2)^(-1/2)
-        /// mass function for Mp*sin(i), approximating Mtot ~ Ms (planet mass is always
-        /// a small fraction of stellar mass across the range this method can detect).
-        /// </summary>
+        // Inverts the K = 28.4329*(Mp*sini/Mjup)*(Mtot/Msun)^(-2/3)*(P/yr)^(-1/3)*(1-e^2)^(-1/2) mass function
+        // for Mp*sin(i), approximating Mtot ~ Ms (planet mass is always a small fraction of stellar mass across
+        // the range this method can detect).
         private static double ImpliedMinimumMassJupiter(double semiAmplitudeMps, double periodDays, double stellarMassSolar, double eccentricity)
         {
             double periodYears = periodDays / 365.25;
@@ -5896,7 +5894,10 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>Period of an earlier detected stage this one sits at a near-integer ratio of (within 5%, ratios 1:1 to 3:1), else null, mirrors RvDetector.FindHarmonicParentPeriodDays.</summary>
+        /// <summary>
+        /// Period of an earlier detected stage this one sits at a near-integer ratio of (within 5%, ratios 1:1
+        /// to 3:1), else null, mirrors RvDetector.FindHarmonicParentPeriodDays.
+        /// </summary>
         static double? FindTransitHarmonicParent(List<TransitDetectionStage> stages, int stageIndex)
         {
             double periodDays = stages[stageIndex].Result.BestPeriodDays;
@@ -6007,7 +6008,10 @@ namespace ExoInstruments
             rvPhaseFoldedRanges.Clear();
         }
 
-        /// <summary>One-off synchronous refresh, for the rare calls that aren't on the periodic timer (session start/stop); a single hitch on a user-triggered action is imperceptible, unlike a repeating one.</summary>
+        /// <summary>
+        /// One-off synchronous refresh, for the rare calls that aren't on the periodic timer (session
+        /// start/stop); a single hitch on a user-triggered action is imperceptible, unlike a repeating one.
+        /// </summary>
         void RefreshImagingTexture()
         {
             if (imagingSession == null) return;
@@ -6066,7 +6070,10 @@ namespace ExoInstruments
             });
         }
 
-        /// <summary>Applies a completed background render (see StartImagingRefresh), the only part of the pipeline that's allowed to touch the Texture2D.</summary>
+        /// <summary>
+        /// Applies a completed background render (see StartImagingRefresh), the only part of the pipeline
+        /// that's allowed to touch the Texture2D.
+        /// </summary>
         void PollImagingRenderTask()
         {
             if (imagingRenderTask == null || !imagingRenderTask.IsCompleted) return;
@@ -6265,7 +6272,8 @@ namespace ExoInstruments
             return kind + ", " + size + note;
         }
 
-        /// <summary>Beam of the Finkbeiner (2003) H-alpha composite, arcminutes FWHM. Coarser than its 3.4' HEALPix sampling, which is what actually limits what a frame can show.</summary>
+        // Beam of the Finkbeiner (2003) H-alpha composite, arcminutes FWHM. Coarser than its 3.4' HEALPix
+        // sampling, which is what actually limits what a frame can show.
         private const double EmissionMapBeamArcmin = 6.0;
 
         /// <summary>
@@ -6351,10 +6359,12 @@ namespace ExoInstruments
             return points;
         }
 
-        /// <summary>Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut; it draws whatever clears the frame's own noise floor.</summary>
+        // Faintest total B magnitude a galaxy is drawn on the sky chart at. The camera itself has no such cut;
+        // it draws whatever clears the frame's own noise floor.
         private const double ChartGalaxyMagnitudeLimit = 11.0;
 
-        /// <summary>How faint a galaxy may be and still be drawn when the player has SEARCHED for it: the whole catalogue, whose own packing limit is the real bound.</summary>
+        // How faint a galaxy may be and still be drawn when the player has SEARCHED for it: the whole
+        // catalogue, whose own packing limit is the real bound.
         private const double FaintestSearchableGalaxyMag = 99.0;
 
         /// <summary>
@@ -6606,7 +6616,10 @@ namespace ExoInstruments
             GUILayout.Label("Compiles: twilight, target altitude and airmass seeing efficiency (1/X^2), the same real variable behind the camera's own atmospheric blur. No weather term: stock KSP has none to read.", smallCaptionStyle);
         }
 
-        /// <summary>Recomputes the body forecast (synchronous, cheap enough) when the target changed or the clock moved a quarter-night since the last compute.</summary>
+        /// <summary>
+        /// Recomputes the body forecast (synchronous, cheap enough) when the target changed or the clock moved
+        /// a quarter-night since the last compute.
+        /// </summary>
         void RefreshPhotographyForecastIfStale()
         {
             if (!selectedPhotographyTarget.HasTarget) return;
@@ -6808,19 +6821,10 @@ namespace ExoInstruments
 
             return result;
         }
-/// <summary>
-        /// Position monde absolue d'un corps céleste à une UT future.
-        ///
-        /// Il ne faut pas utiliser directement getPositionAtUT() pour le
-        /// forecast d'une lune : Mun et Minmus orbitent Kerbin, et Kerbin se
-        /// déplace lui-même autour de Kerbol. Une position correcte doit être :
-        ///
-        ///     position future du parent
-        ///   + position orbitale future relative au parent.
-        ///
-        /// La récursion couvre aussi les systèmes moddés avec plusieurs niveaux
-        /// de satellites.
-        /// </summary>
+// Position monde absolue d'un corps céleste à une UT future. Il ne faut pas utiliser directement
+// getPositionAtUT() pour le forecast d'une lune : Mun et Minmus orbitent Kerbin, et Kerbin se déplace lui-même
+// autour de Kerbol. Une position correcte doit être : position future du parent + position orbitale future
+// relative au parent. La récursion couvre aussi les systèmes moddés avec plusieurs niveaux de satellites.
         private static Vector3d GetBodyPositionAtUt(CelestialBody body, double ut)
         {
             if (body == null)
@@ -6880,11 +6884,8 @@ namespace ExoInstruments
             return parentPositionAtUt + relativeOrbitPositionWorld;
         }
 
-        /// <summary>
-        /// Les vecteurs fournis par Orbit dans KSP ont Y et Z inversés par
-        /// rapport aux coordonnées monde Unity/KSP utilisées par CelestialBody
-        /// .position, transform.up, GetWorldSurfacePosition, etc.
-        /// </summary>
+        // Les vecteurs fournis par Orbit dans KSP ont Y et Z inversés par rapport aux coordonnées monde
+        // Unity/KSP utilisées par CelestialBody .position, transform.up, GetWorldSurfacePosition, etc.
         private static Vector3d ConvertOrbitVectorToWorld(Vector3d orbitVector)
         {
             return new Vector3d(
@@ -6892,7 +6893,10 @@ namespace ExoInstruments
                 orbitVector.z,
                 orbitVector.y);
         }
-        /// <summary>What the forecast folds together for this method, honest about what each pipeline actually pays for, and about the absence of weather.</summary>
+        /// <summary>
+        /// What the forecast folds together for this method, honest about what each pipeline actually pays for,
+        /// and about the absence of weather.
+        /// </summary>
         static string DescribeForecastInputs(InstrumentSpec instrument)
         {
             string methodInputs;

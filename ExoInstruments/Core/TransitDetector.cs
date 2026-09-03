@@ -5,7 +5,7 @@ namespace ExoInstruments.Core
 {
     /// <summary>
     /// Simplified BLS transit search (Kovacs et al. 2002). No false-alarm calibration
-    /// or ingress/egress shape — treat SNR as relative confidence. Phase bins are
+    /// or ingress/egress shape, so treat SNR as relative confidence. Phase bins are
     /// adaptive: tied to the data cadence so the bin width stays physically meaningful
     /// across the full range of trial periods.
     /// </summary>
@@ -23,22 +23,15 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int MinInTransitPoints = 12;
 
-        /// <summary>
-        /// Longest trial box as a fraction of the period. Real transit duties
-        /// top out near 0.1-0.15 (a/R_star >= ~2); wider boxes stop being
-        /// transit-shaped and start absorbing slow trends and window structure.
-        /// </summary>
+        // Longest trial box as a fraction of the period. Real transit duties top out near 0.1-0.15 (a/R_star >=
+        // ~2); wider boxes stop being transit-shaped and start absorbing slow trends and window structure.
         private const double MaxTransitDuty = 0.15;
 
-        /// <summary>
-        /// Period-dependent duty ceiling, duty_max = C * P_days^(-2/3): a
-        /// transit's duration scales as P^(1/3) while the period grows as P, so
-        /// duty shrinks as P^(-2/3) (Kepler's third law through T14 ~ P/(pi*a/R*);
-        /// the same q ~ P^(-2/3) envelope BLS implementations use). C = 0.23 is
-        /// ~3x the solar-density value, room for giants and grazing chords,
-        /// but a 54-hour "transit" on a 15-day period (exactly what a starspot
-        /// rotation signal tries to book itself as) stays rejected.
-        /// </summary>
+        // Period-dependent duty ceiling, duty_max = C * P_days^(-2/3): a transit's duration scales as P^(1/3)
+        // while the period grows as P, so duty shrinks as P^(-2/3) (Kepler's third law through T14 ~
+        // P/(pi*a/R*); the same q ~ P^(-2/3) envelope BLS implementations use). C = 0.23 is ~3x the solar-
+        // density value, room for giants and grazing chords, but a 54-hour "transit" on a 15-day period
+        // (exactly what a starspot rotation signal tries to book itself as) stays rejected.
         private const double DutyEnvelopeCoeff = 0.23;
 
         private const int MinPhaseBins = 50;
@@ -224,7 +217,8 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int MaxPlanetsPerSearch = 4;
 
-        /// <summary>Masking margin around the detected box, in box durations, covers ingress/egress wings and modest period error.</summary>
+        // Masking margin around the detected box, in box durations, covers ingress/egress wings and modest
+        // period error.
         private const double MaskMarginFactor = 0.6;
 
         public static List<TransitDetectionStage> DetectMultiple(
@@ -332,11 +326,9 @@ namespace ExoInstruments.Core
             return detrended;
         }
 
-        /// <summary>
-        /// Bin width scales with the trial period so a fixed count never
-        /// gets coarser than the data can support: width = medianCadence / BinsPerCadence,
-        /// clamped to [MinPhaseBins, MaxPhaseBins] to bound the O(periodSteps * phaseBins^2 / 4) search cost.
-        /// </summary>
+        // Bin width scales with the trial period so a fixed count never gets coarser than the data can support:
+        // width = medianCadence / BinsPerCadence, clamped to [MinPhaseBins, MaxPhaseBins] to bound the
+        // O(periodSteps * phaseBins^2 / 4) search cost.
         private static int ComputeAdaptivePhaseBins(double periodSeconds, double medianCadenceSeconds)
         {
             if (medianCadenceSeconds <= 0) return MinPhaseBins;
@@ -345,7 +337,8 @@ namespace ExoInstruments.Core
             return Math.Max(MinPhaseBins, Math.Min(MaxPhaseBins, bins));
         }
 
-        /// <summary>Samples arrive in increasing Ut order (see ObservationSession.Tick); median of consecutive gaps is robust to any stray irregular spacing.</summary>
+        // Samples arrive in increasing Ut order (see ObservationSession.Tick); median of consecutive gaps is
+        // robust to any stray irregular spacing.
         private static double ComputeMedianCadenceSeconds(List<FluxSample> samples)
         {
             if (samples.Count < 2) return 0.0;

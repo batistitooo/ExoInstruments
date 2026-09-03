@@ -8,13 +8,13 @@ namespace ExoInstruments
     /// <summary>
     /// Routes all "Warp to..." calls through BetterTimeWarpContinued's fastest rate set
     /// when the jump is long enough to benefit. Soft dependency via reflection.
-    /// Restores the player's original rate table when the warp ends — leaving a sparse
+    /// Restores the player's original rate table when the warp ends, leaving a sparse
     /// custom set in place broke ordinary short warps (they'd overshoot with no fine
     /// deceleration steps).
     /// </summary>
     public static class BetterTimeWarpIntegration
     {
-        /// <summary>Below this threshold, stock 100,000x is fast enough — no need to swap rate sets.</summary>
+        // Below this threshold, stock 100,000x is fast enough, no need to swap rate sets.
         private const double EngageThresholdSeconds = 216000.0; // 10 Kerbin days
 
         private static bool initialized;
@@ -48,7 +48,7 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Call once per frame — restores the original rate table when the warp ends.
+        /// Call once per frame; restores the original rate table when the warp ends.
         /// Waits for at least one active frame before restoring, so it doesn't fire
         /// before the game has ramped up off rate index 0.
         /// </summary>
@@ -68,7 +68,8 @@ namespace ExoInstruments
             warpObservedActive = false;
         }
 
-        /// <summary>Installs BetterTimeWarp's fastest non-physics rate set; 0 if unavailable or nothing faster. Falls back to stock permanently on any reflection failure.</summary>
+        // Installs BetterTimeWarp's fastest non-physics rate set; 0 if unavailable or nothing faster. Falls
+        // back to stock permanently on any reflection failure.
         private static double TryEngageFastestRates()
         {
             try
@@ -99,7 +100,7 @@ namespace ExoInstruments
 
                 if (bestSet != null)
                 {
-                    // Don't overwrite pendingRestoreRates if a restore is already pending —
+                    // Don't overwrite pendingRestoreRates if a restore is already pending,
                     // currentRates would already be our substitute, not the player's original.
                     if (pendingRestoreRates == null)
                     {

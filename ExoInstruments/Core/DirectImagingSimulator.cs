@@ -5,8 +5,8 @@ namespace ExoInstruments.Core
     /// <summary>
     /// ELT high-contrast direct imaging in H band (1.6 µm, D=39.3 m). Planet flux
     /// uses the catalog temperature when available, else equilibrium Teq with Bond
-    /// albedo 0.3. Contrast = Planck ratio × (Rp/R*)². Speckle floor scales as
-    /// base × (λ/D / θ)², improving as sqrt(time). Order-of-magnitude estimates.
+    /// albedo 0.3. Contrast = Planck ratio * (Rp/R*)^2. Speckle floor scales as
+    /// base * (lambda/D / theta)^2, improving as sqrt(time). Order-of-magnitude estimates.
     /// </summary>
     public static class DirectImagingSimulator
     {
@@ -125,7 +125,7 @@ namespace ExoInstruments.Core
             return a;
         }
 
-        /// <summary>Teq = Teff × sqrt(R*/(2a)) × (1-A)^(1/4). Zero-redistribution equilibrium estimate.</summary>
+        /// <summary>Teq = Teff * sqrt(R*/(2a)) * (1-A)^(1/4). Zero-redistribution equilibrium estimate.</summary>
         public static double EquilibriumTempK(double starTeffK, double starRadiusSolar, double semiMajorAxisAU)
         {
             double starRadiusAU = starRadiusSolar / SolarRadiiPerAU;

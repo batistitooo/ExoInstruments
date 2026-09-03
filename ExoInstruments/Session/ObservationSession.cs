@@ -8,13 +8,16 @@ namespace ExoInstruments.Session
     /// Transit photometry campaign. Ground-based instruments only expose at night with the
     /// target above the altitude limit; noise carries airmass scintillation. Space-based
     /// (TESS) observes continuously. The diurnal gaps give ground data an honest window
-    /// function — exactly the aliasing real BLS searches have to deal with.
+    /// function, exactly the aliasing real BLS searches have to deal with.
     /// </summary>
     public class ObservationSession
     {
         public StarTarget Target { get; private set; }
 
-        /// <summary>Every planet sharing this host, target first. Photometry observes the star, so all transits superpose on the same light curve whether or not the player knew about them.</summary>
+        /// <summary>
+        /// Every planet sharing this host, target first. Photometry observes the star, so all transits
+        /// superpose on the same light curve whether or not the player knew about them.
+        /// </summary>
         public List<StarTarget> SystemPlanets { get; private set; }
 
         public InstrumentSpec Instrument { get; private set; }
@@ -39,7 +42,10 @@ namespace ExoInstruments.Session
         // (e.g. 6h on 6h-day Kerbin) can never lock every slot into daylight.
         private double nextSampleUt;
 
-        /// <summary>The seed every noise draw in this campaign came from, so the run can be repeated. See RvObservationSession.RandomSeed for why this exists.</summary>
+        /// <summary>
+        /// The seed every noise draw in this campaign came from, so the run can be repeated. See
+        /// RvObservationSession.RandomSeed for why this exists.
+        /// </summary>
         public int RandomSeed { get; }
 
         public ObservationSession(StarTarget target, List<StarTarget> systemPlanets, InstrumentSpec instrument, double startUt, ImagingObserverContext observerContext,
@@ -67,7 +73,7 @@ namespace ExoInstruments.Session
         }
 
         // Prevents a single Tick from grinding through millions of 60s search steps on a
-        // long warp jump across an unobservable stretch — that stalls the main thread for seconds.
+        // long warp jump across an unobservable stretch, which stalls the main thread for seconds.
         // Catch-up spreads across multiple Update() frames; nextSampleUt tracks where we left off.
         private const int MaxStepsPerTick = 20000;
 

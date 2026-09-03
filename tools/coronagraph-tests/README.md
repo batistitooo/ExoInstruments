@@ -33,8 +33,8 @@ the light last passed through rather than from the telescope's own.
 at **0.3 to 0.4 arcsec**. Nothing about the ring was an input.
 
 **The mask attenuations** reproduce the paper's prose spans exactly, because they are ratios of its
-own Table 8 counts: CLC-S-WF 111–150 against a quoted "110–150", CLC-M-WF 307–601 against
-"300–600", CLC-XL-WF 1064–2894 against "1000–3000".
+own Table 8 counts: CLC-S-WF 111-150 against a quoted "110-150", CLC-M-WF 307-601 against
+"300-600", CLC-XL-WF 1064-2894 against "1000-3000".
 
 ## 2. Against the statistics the physics demands
 
@@ -43,7 +43,7 @@ own Table 8 counts: CLC-S-WF 111–150 against a quoted "110–150", CLC-M-WF 30
 | Modified Rician mean and variance, 2 M draws, four static fractions | matches the closed form to 0.2 % |
 | Averaging *n* realisations divides the variance by *n* | exact to 1 % at n = 4, 16, 64, 256 |
 | The temporal decomposition sums to one | 0.713 + 0.059 + 0.228 |
-| Atmospheric lifetime 0.6 D/v at 3–4 m/s | 1.64 s and 1.23 s, against Milli et al.'s "≤ 1.6 s" |
+| Atmospheric lifetime 0.6 D/v at 3-4 m/s | 1.64 s and 1.23 s, against Milli et al.'s "≤ 1.6 s" |
 | An hour of exposure still carries the whole static term | 0.7131 against a floor of 0.713 |
 | Student t threshold → Gaussian 5 for a large sample | 5.0035 at 10 000 elements |
 
@@ -68,7 +68,7 @@ VIP (`vip_hci`) is the package high-contrast papers compute their detection limi
 | comparison | verdict | detail |
 |---|---|---|
 | Small-sample threshold | **equal** | our Student t quantile, built on a continued-fraction incomplete beta, reproduces SciPy's `t.ppf` at a tail probability of 2.87e-7 to **4.4e-8 relative** |
-| Annulus noise estimator | **equal** | median ratio **1.029** over 14 annuli, scatter 0.027 — same construction, different aperture phase |
+| Annulus noise estimator | **equal** | median ratio **1.029** over 14 annuli, scatter 0.027, same construction, different aperture phase |
 | Contrast curve end to end | **equal** | agrees to **0.095 mag at worst** over 14 separations |
 | ADI throughput calibration | **equal** | both inject a companion at fixed S/N and recover it after the reduction; ours is §D3 below, and it is what bounded the analytic form |
 | Post-processing algorithms | worse | VIP implements PCA/KLIP, LOCI, LLSG, NMF, ANDROMEDA; this runs median-subtraction ADI and nothing else |
@@ -93,7 +93,7 @@ look:
 
 # ADI, run rather than parameterised
 
-`SelfSubtractionThroughput` was an **analytic form** — a declared shape with the right limits,
+`SelfSubtractionThroughput` was an **analytic form**, a declared shape with the right limits,
 checked against one published data point from a *three-frame* median. `AngularDifferentialImaging`
 now carries the reduction itself, so the throughput can be measured the way VIP measures it: inject
 a companion of known flux, reduce, recover it.
@@ -119,7 +119,7 @@ The declared form is **substantially too optimistic below ~3 λ/D of arc** and s
 above it. §12 item 66 is rewritten accordingly.
 
 **A variable the form does not have:** at a fixed 12° of rotation the throughput still depends on
-frame count — 0.514 at 3, 0.391 at 7, 0.323 at 15, 0.271 at 31. The direction contradicts the
+frame count, 0.514 at 3, 0.391 at 7, 0.323 at 15, 0.271 at 31. The direction contradicts the
 obvious guess. Reported rather than fitted.
 
 ## What the reduction buys
@@ -131,7 +131,7 @@ obvious guess. Reported rather than fitted.
 | 220 mas | 3.93×10⁻⁴ | 3.81×10⁻⁴ | **9.98×10⁻⁶** | 3.95 mag |
 | 300 mas | 2.16×10⁻⁴ | 2.16×10⁻⁴ | **4.98×10⁻⁶** | 4.09 mag |
 
-**Stacking 21 frames does nothing** — the third column is the first — and ADI buys four magnitudes.
+**Stacking 21 frames does nothing**, the third column is the first, and ADI buys four magnitudes.
 That is the 71 %-static speckle field made a measurement rather than an assertion.
 
 ## Two things caught by failing
@@ -139,4 +139,4 @@ That is the 71 %-static speckle field made a measurement rather than an assertio
 A companion injected beyond the frame's half-width (346 mas) is outside the detector; the first
 version reported a throughput of exactly zero at 500 and 700 mas and thought it had measured
 something. And sweeping *separation* rather than *rotation* confounds the variable under test with
-the halo profile — the arc length is what the form is a claim about.
+the halo profile, the arc length is what the form is a claim about.

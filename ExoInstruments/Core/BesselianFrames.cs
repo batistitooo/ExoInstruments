@@ -39,11 +39,9 @@ namespace ExoInstruments.Core
         private const double DegToRad = Math.PI / 180.0;
         private const double RadToDeg = 180.0 / Math.PI;
 
-        /// <summary>
-        /// FK4 B1950 to FK5 J2000, Murray (1989, A&amp;A 218, 325) eq. 28: the rotation between the
-        /// two fundamental systems, with the E-terms already removed (this is the matrix that acts
-        /// on FK4 positions from which the elliptic aberration has been subtracted).
-        /// </summary>
+        // FK4 B1950 to FK5 J2000, Murray (1989, A&A 218, 325) eq. 28: the rotation between the two fundamental
+        // systems, with the E-terms already removed (this is the matrix that acts on FK4 positions from which
+        // the elliptic aberration has been subtracted).
         private static readonly double[] B1950ToJ2000 =
         {
             +0.9999256794956877, -0.0111814832204662, -0.0048590038153592,
@@ -51,16 +49,13 @@ namespace ExoInstruments.Core
             +0.0048590037723143, -0.0000271702937440, +0.9999881946023742,
         };
 
-        /// <summary>
-        /// Murray's eq. 29 correction, per Julian century from 1950. FK4 is a ROTATING system with
-        /// respect to FK5 (its equinox creeps), so the relation between the two is not one fixed
-        /// matrix but depends on the epoch the FK4 coordinates belong to. Over the 75 years from
-        /// B1950 back to B1875 this reaches 1.6e-6 in the matrix elements, about a third of an
-        /// arcsecond on the sky: below the 1.5 arcsec that Roman's own right-ascension quantisation
-        /// carries, but included because leaving it out would be a choice to be wrong by a known
-        /// amount, and because including it makes this an exact reimplementation of astropy's own
-        /// FK4NoETerms chain rather than an approximation of it.
-        /// </summary>
+        // Murray's eq. 29 correction, per Julian century from 1950. FK4 is a ROTATING system with respect to
+        // FK5 (its equinox creeps), so the relation between the two is not one fixed matrix but depends on the
+        // epoch the FK4 coordinates belong to. Over the 75 years from B1950 back to B1875 this reaches 1.6e-6
+        // in the matrix elements, about a third of an arcsecond on the sky: below the 1.5 arcsec that Roman's
+        // own right-ascension quantisation carries, but included because leaving it out would be a choice to be
+        // wrong by a known amount, and because including it makes this an exact reimplementation of astropy's
+        // own FK4NoETerms chain rather than an approximation of it.
         private static readonly double[] Fk4RotationPerCentury =
         {
             -0.0026455262e-6, -1.1539918689e-6, +2.1111346190e-6,

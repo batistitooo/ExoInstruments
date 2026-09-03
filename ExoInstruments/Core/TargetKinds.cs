@@ -161,11 +161,8 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// English plurals, to the extent this vocabulary needs them: a trailing "s" is dropped
-        /// unless the word ends in "ss". Nothing here is irregular except "nebulae", which is
-        /// listed as its own case above.
-        /// </summary>
+        // English plurals, to the extent this vocabulary needs them: a trailing "s" is dropped unless the word
+        // ends in "ss". Nothing here is irregular except "nebulae", which is listed as its own case above.
         private static string Singular(string word)
         {
             if (word.Length > 2 && word[word.Length - 1] == 's' && word[word.Length - 2] != 's')

@@ -6,21 +6,22 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Transit Timing Variations: mutual gravitational perturbation near a first-order
     /// mean-motion resonance j:(j-1) shifts each transit by a sinusoid at the
-    /// super-period P_ttv = 1/|j/P_out − (j-1)/P_in|. Amplitude scales as
-    /// P × (m_perturber/M*) / (j^(2/3) × |Δ|). Order-of-magnitude honest.
+    /// super-period P_ttv = 1/|j/P_out - (j-1)/P_in|. Amplitude scales as
+    /// P * (m_perturber/M*) / (j^(2/3) * |delta|). Order-of-magnitude honest.
     /// </summary>
     public static class TransitTimingVariations
     {
         private const double SecondsPerDay = 86400.0;
         private const double JupiterMassInSolarMasses = 0.0009543;
 
-        /// <summary>Highest j checked: covers 2:1 through 5:4 resonances.</summary>
+        // Highest j checked: covers 2:1 through 5:4 resonances.
         private const int MaxResonanceIndex = 5;
 
-        /// <summary>|Δ| floor — exactly on-resonance would diverge (real dynamics saturate into libration there).</summary>
+        // |delta| floor: exactly on-resonance would diverge (real dynamics saturate into libration there).
         private const double MinResonanceDistance = 0.01;
 
-        /// <summary>Amplitude cap as a fraction of the transiter's period; beyond this the sinusoidal approximation has no business being trusted.</summary>
+        // Amplitude cap as a fraction of the transiter's period; beyond this the sinusoidal approximation has
+        // no business being trusted.
         private const double MaxAmplitudeFractionOfPeriod = 0.02;
 
         /// <summary>Sinusoidal TTV of one transiting planet: transit k occurs at linear ephemeris + this shift.</summary>
@@ -43,7 +44,7 @@ namespace ExoInstruments.Core
         /// <summary>
         /// TTV signal from the strongest perturber (one dominant near-resonant pair is
         /// the typical observed regime). Returns a non-significant signal for single-planet
-        /// systems or unknown masses — a detected TTV is always genuine dynamical evidence.
+        /// systems or unknown masses, so a detected TTV is always genuine dynamical evidence.
         /// </summary>
         public static TtvSignal ComputeSignal(StarTarget transiter, IList<StarTarget> systemPlanets)
         {
@@ -94,7 +95,8 @@ namespace ExoInstruments.Core
             return best;
         }
 
-        /// <summary>Nearest first-order resonance j:j-1 to the pair's period ratio, and the fractional distance Delta = (P_out/P_in)*(j-1)/j - 1.</summary>
+        // Nearest first-order resonance j:j-1 to the pair's period ratio, and the fractional distance Delta =
+        // (P_out/P_in)*(j-1)/j - 1.
         private static void FindNearestFirstOrderResonance(double innerPeriodDays, double outerPeriodDays, out int bestJ, out double bestDelta)
         {
             double ratio = outerPeriodDays / innerPeriodDays;
@@ -111,7 +113,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Deterministic phase for a (transiter, perturber) pair, same FNV-1a idiom as StellarActivity.</summary>
+        // Deterministic phase for a (transiter, perturber) pair, same FNV-1a idiom as StellarActivity.
         private static double PairHash01(StarTarget a, StarTarget b)
         {
             string identity = (a.Name ?? "") + "|ttv|" + (b.Name ?? "");
@@ -147,7 +149,7 @@ namespace ExoInstruments.Core
             public double Snr;
             public double RmsSeconds;             // scatter of the O-C series, after the linear re-fit
 
-            /// <summary>Period from a linear re-fit to measured mid-times — far finer than the BLS grid, which is how real surveys refine ephemerides.</summary>
+            /// <summary>Period from a linear re-fit to measured mid-times, far finer than the BLS grid, which is how real surveys refine ephemerides.</summary>
             public double RefinedPeriodDays;
 
             public int EpochCount => Measurements.Count;
@@ -159,8 +161,8 @@ namespace ExoInstruments.Core
         private const int ShiftGridSteps = 60;
 
         /// <summary>
-        /// Measures individual transit mid-times by chi² template scan, then searches the
-        /// O-C series for a sinusoid. Derives everything from the player's detection —
+        /// Measures individual transit mid-times by chi-squared template scan, then searches the
+        /// O-C series for a sinusoid. Derives everything from the player's detection,
         /// no catalog truth consumed.
         /// </summary>
         public static TtvAnalysisResult Analyze(List<FluxSample> samples, DetectionResult detection)
@@ -169,7 +171,7 @@ namespace ExoInstruments.Core
             if (samples == null || samples.Count == 0 || detection == null) return result;
             if (!detection.Detected || detection.BestPeriodDays <= 0 || detection.BestDurationHours <= 0) return result;
 
-            // Detrend first — a starspot slope across a transit window biases mid-times at the rotation period, creating a spurious TTV signal.
+            // Detrend first: a starspot slope across a transit window biases mid-times at the rotation period, creating a spurious TTV signal.
             samples = TransitDetector.DetrendSamples(samples);
 
             double periodSec = detection.BestPeriodDays * SecondsPerDay;
@@ -225,11 +227,9 @@ namespace ExoInstruments.Core
             return result;
         }
 
-        /// <summary>
-        /// Re-fits and subtracts the linear ephemeris from measured mid-times. A coarse
-        /// BLS period leaves a monotonic O-C drift that would be mistaken for a long-period
-        /// TTV — "O-C" always means observed minus a fresh linear fit.
-        /// </summary>
+        // Re-fits and subtracts the linear ephemeris from measured mid-times. A coarse BLS period leaves a
+        // monotonic O-C drift that would be mistaken for a long-period TTV; "O-C" always means observed minus a
+        // fresh linear fit.
         private static void SubtractLinearEphemeris(TtvAnalysisResult result, double detectedPeriodSec)
         {
             var m = result.Measurements;
@@ -262,7 +262,8 @@ namespace ExoInstruments.Core
             result.RefinedPeriodDays = detectedPeriodSec * (1.0 + slope) / SecondsPerDay;
         }
 
-        /// <summary>Chi² template scan for one epoch. Uncertainty from the local curvature (Δχ²=1), floored at a quarter grid step. Rejects epochs where the minimum pins the edge.</summary>
+        // Chi-squared template scan for one epoch. Uncertainty from the local curvature (delta chi-squared =
+        // 1), floored at a quarter grid step. Rejects epochs where the minimum pins the edge.
         private static bool MeasureOneEpoch(List<FluxSample> window, double centerUt, double durationSec,
             double depthFraction, double maxShift, out double bestShift, out double uncertainty, out int inTransitPoints)
         {
@@ -295,7 +296,7 @@ namespace ExoInstruments.Core
                 }
             }
 
-            // Grid-edge minimum means the transit is outside this window — skip it.
+            // Grid-edge minimum means the transit is outside this window, skip it.
             if (bestShift <= -maxShift + step / 2.0 || bestShift >= maxShift - step / 2.0) return false;
 
             for (int i = 0; i < window.Count; i++)
@@ -339,7 +340,8 @@ namespace ExoInstruments.Core
             result.RmsSeconds = Math.Sqrt(sumSq / Math.Max(1, n - 1));
         }
 
-        /// <summary>Sinusoid search over the O-C series, same idiom as RvDetector. Super-period range: 4× transit period up to the O-C baseline (a longer period is degenerate with drift).</summary>
+        // Sinusoid search over the O-C series, same idiom as RvDetector. Super-period range: 4* transit period
+        // up to the O-C baseline (a longer period is degenerate with drift).
         private static void SearchSinusoid(TtvAnalysisResult result, double transitPeriodSec)
         {
             var m = result.Measurements;

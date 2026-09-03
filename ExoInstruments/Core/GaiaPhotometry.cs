@@ -24,7 +24,7 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class GaiaPhotometry
     {
-        /// <summary>Gaia DR3 Table 5.9, G - V as a polynomial in (G_BP - G_RP), constant term first.</summary>
+        // Gaia DR3 Table 5.9, G - V as a polynomial in (G_BP - G_RP), constant term first.
         private static readonly double[] GMinusVCoefficients = { -0.02704, 0.01424, -0.2156, 0.01426 };
 
         /// <summary>Residual scatter of that relation, in magnitudes (Gaia DR3 Table 5.9).</summary>

@@ -14,7 +14,7 @@ namespace ExoInstruments.Visualization
 
     /// <summary>
     /// Renders FluxSample data into Texture2D scatter plots for IMGUI display.
-    /// Unity-dependent by design — kept separate from Core so Core stays
+    /// Unity-dependent by design, kept separate from Core so Core stays
     /// engine-agnostic and testable.
     /// </summary>
     public static class LightCurveTexture
@@ -24,10 +24,13 @@ namespace ExoInstruments.Visualization
         private static readonly Color ErrorBarColor = new Color(0.4f, 0.85f, 1f, 0.45f);
         private static readonly Color BaselineColor = new Color(0.5f, 0.9f, 0.5f, 0.6f);
 
-        /// <summary>Phase bins for the folded view — enough to resolve transit shape, few enough that error bars don't visually pile up (raw sample counts run into the hundreds+ per orbit).</summary>
+        // Phase bins for the folded view: enough to resolve transit shape, few enough that error bars don't
+        // visually pile up (raw sample counts run into the hundreds+ per orbit).
         private const int PhaseFoldBinCount = 100;
 
-        /// <summary>Bins under this count are dropped rather than drawn: their uncertainty barely shrinks from the raw per-sample value (matches TransitDetector's own nIn/nOut &gt;= 3 cutoff), so next to a well-populated neighbor bin they render as a lone full-scale error bar instead of useful signal.</summary>
+        // Bins under this count are dropped rather than drawn: their uncertainty barely shrinks from the raw
+        // per-sample value (matches TransitDetector's own nIn/nOut >= 3 cutoff), so next to a well-populated
+        // neighbor bin they render as a lone full-scale error bar instead of useful signal.
         private const int MinBinSampleCount = 3;
 
         /// <summary>Raw flux vs. time (universal time, seconds), x-axis spans the full observation.</summary>
@@ -121,12 +124,10 @@ namespace ExoInstruments.Visualization
             public int Count;
         }
 
-        /// <summary>
-        /// Bins raw samples by orbital phase and reduces each bin to a mean flux plus the
-        /// standard error of that mean: sigma_bin = sqrt(sum(sigma_i^2)) / n, i.e. formal
-        /// propagation of each sample's own photometric uncertainty rather than empirical
-        /// scatter — this is what shrinks the error bars as points accumulate per bin.
-        /// </summary>
+        // Bins raw samples by orbital phase and reduces each bin to a mean flux plus the standard error of that
+        // mean: sigma_bin = sqrt(sum(sigma_i^2)) / n, i.e. formal propagation of each sample's own photometric
+        // uncertainty rather than empirical scatter, which is what shrinks the error bars as points accumulate
+        // per bin.
         private static PhaseBin[] BinByPhase(List<FluxSample> samples, double periodSeconds, int binCount)
         {
             var sumFlux = new double[binCount];
@@ -218,7 +219,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Vertical whisker from (flux - sigma) to (flux + sigma), with short horizontal caps at each end.</summary>
+        // Vertical whisker from (flux - sigma) to (flux + sigma), with short horizontal caps at each end.
         private static void DrawErrorBar(Color[] pixels, int width, int height, int x, double flux, double sigma, double minFlux, double maxFlux)
         {
             if (sigma <= 0) return;

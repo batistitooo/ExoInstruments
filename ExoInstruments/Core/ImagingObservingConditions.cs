@@ -68,18 +68,18 @@ namespace ExoInstruments.Core
     /// Ground-based observing gates used by all sessions:
     /// - Night: Sun below -12 deg (nautical twilight).
     /// - Altitude: target above 20 deg (airmass below ~3).
-    /// - Airmass weighting: SNR^2 accumulates at 1/X^2 (one hour at X=2 ≈ 15 min at zenith).
-    /// Weather is excluded by design — random dome closures are frustrating, not educational.
+    /// - Airmass weighting: SNR^2 accumulates at 1/X^2 (one hour at X=2 ~ 15 min at zenith).
+    /// Weather is excluded by design: random dome closures are frustrating, not educational.
     /// </summary>
     public static class ImagingObservingConditions
     {
         public const double TwilightSunAltitudeDeg = -12.0;
         public const double MinTelescopeAltitudeDeg = 20.0;
 
-        /// <summary>Fallback altitude for targets with no catalog RA/Dec — the catalog gap is ours, not the player's fault.</summary>
+        /// <summary>Fallback altitude for targets with no catalog RA/Dec; the catalog gap is ours, not the player's fault.</summary>
         public const double FallbackAltitudeDeg = 45.0;
 
-        /// <summary>Sun's RA in the fictional sky frame (home body orbital angle + 180 deg). Circular orbit — exact for stock Kerbin.</summary>
+        /// <summary>Sun's RA in the fictional sky frame (home body orbital angle + 180 deg). Circular orbit, exact for stock Kerbin.</summary>
         public static double ComputeSunRaDeg(double ut, ImagingObserverContext ctx)
         {
             double meanAnomalyRad = ctx.SunMeanAnomalyAtEpochRad
@@ -125,7 +125,7 @@ namespace ExoInstruments.Core
 
             s.TargetUp = s.TargetAltitudeDeg >= MinTelescopeAltitudeDeg;
 
-            // Moon geometry is only evaluated when both other gates pass — it's expensive
+            // Moon geometry is only evaluated when both other gates pass; it's expensive
             // enough per frame to stall sample collection under time warp otherwise.
             if (s.IsNight && s.TargetUp && targetRaDeg.HasValue && targetDecDeg.HasValue)
             {

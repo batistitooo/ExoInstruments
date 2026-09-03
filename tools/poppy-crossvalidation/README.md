@@ -8,7 +8,7 @@ the annular-pupil diffraction pattern of `Core/OpticalPsf.cs`.
 
 ## What is compared, and why it is a real check
 
-**POPPY** (Perrin et al., the engine under WebbPSF) propagates a numerically sampled pupil to a
+**POPPY** (Perrin et al. the engine under WebbPSF) propagates a numerically sampled pupil to a
 focal plane by matrix Fourier transform. `Core/OpticalPsf.AiryIntensity` evaluates the closed form
 for an obstructed circular aperture (Born & Wolf). The two share **no code and no method**, so
 agreement is evidence about the physics rather than about a shared implementation.
@@ -40,7 +40,7 @@ radius in both codes, so neither one's array size or quadrature range can flatte
 **Radial intensity profile**: below 0.2 % everywhere except at the ring nulls, where the intensity
 passes through zero and a percentage of it is meaningless.
 
-**First null**: the reported 0.5–0.8 % spread is an artifact of *this harness*, not a disagreement.
+**First null**: the reported 0.5-0.8 % spread is an artifact of *this harness*, not a disagreement.
 POPPY's profile is binned at 0.02 λ/D, and the three values it returns (1.21000, 1.13000, 1.07000)
 land exactly on bin centres. At the resolution of the measurement the two codes agree.
 

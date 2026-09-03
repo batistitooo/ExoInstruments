@@ -4,7 +4,7 @@ The second numerical cross-validation of this project against an established sci
 the first one to reach the atmosphere.
 
 `tools/poppy-crossvalidation` settled the diffraction term. It could not touch the seeing, because
-POPPY has no Kolmogorov model — and seeing is the larger term by an order of magnitude for every
+POPPY has no Kolmogorov model, and seeing is the larger term by an order of magnitude for every
 instrument in this roster except SPHERE. This directory closes that gap against **GalSim 2.8.4**
 (Rowe et al. 2015, *Astronomy and Computing* 10, 121), the image-simulation engine behind the LSST
 DESC and Euclid shear pipelines.
@@ -22,7 +22,7 @@ codes do not share, and comparing at matched FWHM would fold that convention int
 physics measurement. The constant is measured separately, on both sides.
 
 Four instruments, at their real shipped parameters read from `VisualTelescopeCatalog` rather than
-restated: RedCat 51, RC20, CDK1000 and FORS2/UT1. SPHERE is excluded — its PSF is the two-component
+restated: RedCat 51, RC20, CDK1000 and FORS2/UT1. SPHERE is excluded; its PSF is the two-component
 AO core-plus-halo, and GalSim has no AO residual model to compare it against.
 
 ## Results
@@ -32,13 +32,13 @@ AO core-plus-halo, and GalSim has no AO residual model to compare it against.
 | comparator | result |
 |---|---|
 | peak-normalised deviation, core (θ < 2 λ/r0) | 2.3×10⁻⁴ |
-| wing ratio, 5–20 λ/r0 | ≤ 3.8 % |
+| wing ratio, 5-20 λ/r0 | ≤ 3.8 % |
 | wing power-law index, this code vs GalSim | −3.680 vs −3.706 (0.69 %) |
 | wing index vs the asymptotic −11/3 | 0.38 % |
 
 And on the kernel grid, as `BuildSeeingHaloKernel` actually builds it:
 
-| instrument | max peak-normalised deviation | encircled energy, 0.5–1.6 FWHM |
+| instrument | max peak-normalised deviation | encircled energy, 0.5-1.6 FWHM |
 |---|---|---|
 | RedCat 51 | 2.5×10⁻⁴ | ≤ 0.094 % |
 | RC20 | 4.5×10⁻⁴ | ≤ 0.007 % |
@@ -47,13 +47,13 @@ And on the kernel grid, as `BuildSeeingHaloKernel` actually builds it:
 
 **Chromatic scaling agrees exactly.** Kolmogorov turbulence gives r0 ∝ λ^(6/5) and seeing FWHM ∝
 λ^(−1/5). `ComputeGroundSeeingFwhmArcsec` applies that exponent by hand; GalSim derives it from r0.
-Across 400–800 nm the two agree to **0.0000 %** at every wavelength.
+Across 400-800 nm the two agree to **0.0000 %** at every wavelength.
 
 ## Two defects this found, and fixed
 
 **1. The atmospheric quadrature failed in the wings.** `AtmosphericIntensity` integrated with a
 fixed 512 Simpson steps. The integrand oscillates as `J0(ρu)`, so the number of oscillations grows
-linearly with ρ — with how far into the wings the profile is asked about — and a fixed step count
+linearly with ρ, with how far into the wings the profile is asked about, and a fixed step count
 runs out of resolution. Measured against a high-order adaptive quadrature of the same integral:
 
 | θ (λ/r0) | 512-step result vs exact |
@@ -71,7 +71,7 @@ oscillation* (24 points) rather than per unit interval; the fitted wing index is
 **2. The Fried constant disagreed with this code's own profile.** `FriedParameterMeters` inverted
 `FWHM = 0.98 λ/r0` (Roddier's round figure), while the exact profile evaluated three lines below has
 its half-power point at ρ = 3.0648, i.e. `FWHM = 0.97554 λ/r0`. A telescope told to deliver
-Paranal's 0.72″ therefore delivered 0.7167″ — 0.45 % narrow, systematically, on every instrument.
+Paranal's 0.72″ therefore delivered 0.7167″, 0.45 % narrow, systematically, on every instrument.
 The constant is now measured from the profile by bisection, the same way `AiryFwhmArcsec` already
 bisects the real Airy pattern instead of quoting the 1.028 λ/D rule. GalSim's independently
 tabulated value is 0.975863: the two agree to **0.033 %**.
@@ -92,14 +92,14 @@ Two independent causes, neither a difference of opinion about physics:
 
 - **Point sampling instead of pixel integration.** `OpticalPsf.SampleRadial` evaluates the profile
   at pixel *centres*; a detector integrates over the pixel's area. Harmless where the PSF is well
-  sampled, and dominant on the RedCat, whose PSF is 1.17 pixels wide. `Core.RadialPsfProfile` —
-  used by the high-contrast display, and validated for exactly this in `tools/bandpass-wcs-tests` —
+  sampled, and dominant on the RedCat, whose PSF is 1.17 pixels wide. `Core.RadialPsfProfile`,
+  used by the high-contrast display, and validated for exactly this in `tools/bandpass-wcs-tests`,
   *does* pixel-average. The camera's kernel does not use it.
 - **The diffraction term's support.** `BuildKernel` gives it `RadiusFor(airyFwhm)`, three times the
   Airy FWHM. An Airy pattern's θ^(−3) wings carry real flux far past that, and truncating then
   renormalising moves it into the core.
 
-Both make the PSF too concentrated, so the **aperture correction is optimistic** — by 3 % on FORS2
+Both make the PSF too concentrated, so the **aperture correction is optimistic**, by 3 % on FORS2
 and by 59 % on the RedCat. That propagates straight into `CcdEquation`, whose encircled-energy term
 sets every predicted photometric uncertainty.
 

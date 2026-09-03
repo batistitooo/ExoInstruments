@@ -4,8 +4,8 @@ Emission-line photometry: the physics a nebula needs, which is not the physics a
 
 ## Why it is a separate path
 
-Everything else in this pipeline integrates a **continuum** — a Planck curve, a solar spectrum, a
-flat one — and asks `SystemResponse` for an *effective width* across the band. A nebula in [S II] is
+Everything else in this pipeline integrates a **continuum**, a Planck curve, a solar spectrum, a
+flat one, and asks `SystemResponse` for an *effective width* across the band. A nebula in [S II] is
 not a continuum. Its flux arrives in lines a fraction of an Ångström wide, so the quantity that
 decides how much reaches the detector is the throughput **at** the line, not a width across a band.
 
@@ -39,8 +39,8 @@ NIST ASD and reproduced throughout Osterbrock & Ferland (2006):
 Air rather than vacuum because that is the convention every filter manufacturer and every narrowband
 observer works in; mixing the two is a 1.7 Å error, half a nanometre-class filter's own tolerance.
 
-**Narrowband, measured rather than asserted.** RC20, 100 R of Hα — the order a bright Galactic H II
-region reaches in the WHAM survey — on the model's own dark sky, peak transmission held fixed so the
+**Narrowband, measured rather than asserted.** RC20, 100 R of Hα, the order a bright Galactic H II
+region reaches in the WHAM survey, on the model's own dark sky, peak transmission held fixed so the
 comparison is about bandwidth alone:
 
 | width | T at line | line e⁻/px/s | sky e⁻/px/s | contrast | [N II] admitted |
@@ -81,7 +81,7 @@ four sidereal times: latitude **3.7×10⁻¹³ deg**, longitude 6.0×10⁻¹³ d
 - **Hα only.** [S II], [N II] and [O III] have no all-sky survey to read; they exist as filter
   positions and as photometry, with nothing behind them yet.
 - **Top-hat filters.** No measured narrowband curve is digitised here, so the filters are the
-  published FWHM and peak transmission — the same treatment `FilterCurves` replaced for FORS2's
+  published FWHM and peak transmission, the same treatment `FilterCurves` replaced for FORS2's
   broadband set, and the same thing that should happen to these.
 - **No line ratios, no diagnostics.** [S II]/Hα and [O III]/Hβ are analysis of finished frames, not
   simulation, and nothing here computes them.

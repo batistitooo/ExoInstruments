@@ -93,7 +93,7 @@ namespace ExoInstruments.Visualization
             return SampleGradient(q);
         }
 
-        /// <summary>Continuous interpolation across GradientStops, N-1 evenly spaced segments spanning [0, 1].</summary>
+        // Continuous interpolation across GradientStops, N-1 evenly spaced segments spanning [0, 1].
         private static Color SampleGradient(float t)
         {
             t = Mathf.Clamp01(t);

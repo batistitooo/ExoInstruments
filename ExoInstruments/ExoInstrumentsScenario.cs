@@ -141,7 +141,7 @@ namespace ExoInstruments
             return true;
         }
 
-        /// <summary>a..z, then aa..az.., the IAU sequence.</summary>
+        // a..z, then aa..az.., the IAU sequence.
         private static string Letters(int index)
         {
             string result = "";

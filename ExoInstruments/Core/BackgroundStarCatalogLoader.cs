@@ -146,13 +146,10 @@ namespace ExoInstruments.Core
             return result;
         }
 
-        /// <summary>
-        /// BSC Name is a 10-character fixed-width field: columns [0,3) Flamsteed
-        /// number, [3,6) Greek-letter abbreviation, [6] Bayer superscript index,
-        /// [7,10) constellation. " 21Alp And" -> 21 / Alp / "" / And;
-        /// " 50Ups1Eri" -> 50 / Ups / 1 / Eri; "   Mu 1Sco" -> "" / Mu / 1 / Sco.
-        /// Padded left because the constellation is right-anchored.
-        /// </summary>
+        // BSC Name is a 10-character fixed-width field: columns [0,3) Flamsteed number, [3,6) Greek-letter
+        // abbreviation, [6] Bayer superscript index, [7,10) constellation. " 21Alp And" -> 21 / Alp / "" / And;
+        // " 50Ups1Eri" -> 50 / Ups / 1 / Eri; " Mu 1Sco" -> "" / Mu / 1 / Sco. Padded left because the
+        // constellation is right-anchored.
         private static void ParseBscName(string rawName, out string flamsteed, out string bayer, out string constellation)
         {
             flamsteed = null;
@@ -173,11 +170,8 @@ namespace ExoInstruments.Core
             if (greek.Length > 0) bayer = greek + index;  // "Ups" + "2" -> "Ups2"
         }
 
-        /// <summary>
-        /// Human-facing designation, most-recognizable form first: Bayer
-        /// ("alp And"), else Flamsteed ("51 Peg"), else HD, else HR. Matches the
-        /// abbreviated style exoplanet.eu itself uses ("ups And", "mu2 Sco").
-        /// </summary>
+        // Human-facing designation, most-recognizable form first: Bayer ("alp And"), else Flamsteed ("51 Peg"),
+        // else HD, else HR. Matches the abbreviated style exoplanet.eu itself uses ("ups And", "mu2 Sco").
         private static string BuildFriendlyName(string flamsteed, string bayer, string constellation, int? hd, int hr)
         {
             if (bayer != null) return bayer.ToLowerInvariant() + " " + constellation;
@@ -203,11 +197,8 @@ namespace ExoInstruments.Core
             return keys;
         }
 
-        /// <summary>
-        /// A handful of visual-binary components share one Bayer/Flamsteed name in
-        /// BSC (e.g. HR 8085/8086 are both "61 Cyg"); append the HR number so
-        /// the player-facing list never shows two identical entries.
-        /// </summary>
+        // A handful of visual-binary components share one Bayer/Flamsteed name in BSC (e.g. HR 8085/8086 are
+        // both "61 Cyg"); append the HR number so the player-facing list never shows two identical entries.
         private static void DisambiguateDuplicateNames(List<BackgroundStarEntry> entries)
         {
             var counts = new Dictionary<string, int>();

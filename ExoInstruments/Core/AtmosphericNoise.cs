@@ -5,14 +5,17 @@ namespace ExoInstruments.Core
     /// <summary>
     /// Atmospheric scintillation for ground-based photometry (Young 1967).
     /// ReferencePrecision already bakes in typical-conditions scintillation,
-    /// so only the excess above the zenith value is added here in quadrature —
+    /// so only the excess above the zenith value is added here in quadrature,
     /// airmass 1 changes nothing, low targets get penalized. RV instruments excluded.
     /// </summary>
     public static class AtmosphericNoise
     {
         private const double AtmosphericScaleHeightMeters = 8000.0;
 
-        /// <summary>Scintillation RMS above the zenith value at the given airmass: sqrt(sigma(X)^2 - sigma(1)^2). Zero for space-based or non-transit instruments.</summary>
+        /// <summary>
+        /// Scintillation RMS above the zenith value at the given airmass: sqrt(sigma(X)^2 - sigma(1)^2). Zero
+        /// for space-based or non-transit instruments.
+        /// </summary>
         public static double ScintillationExcessSigma(InstrumentSpec instrument, double airmass)
         {
             if (instrument.IsSpaceBased) return 0.0;

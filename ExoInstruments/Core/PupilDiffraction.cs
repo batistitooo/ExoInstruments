@@ -347,12 +347,9 @@ namespace ExoInstruments.Core
             return Math.Max(1, Math.Min(cap, n));
         }
 
-        /// <summary>
-        /// Whether a set of vane LINES maps onto itself under an angular map. Lines, not
-        /// directions, so angles compare modulo pi: a vane pair lies along one line and its two
-        /// ends are the same obscuration. An empty set (no vanes) is invariant under everything,
-        /// which is the correct answer for a bare annulus.
-        /// </summary>
+        // Whether a set of vane LINES maps onto itself under an angular map. Lines, not directions, so angles
+        // compare modulo pi: a vane pair lies along one line and its two ends are the same obscuration. An
+        // empty set (no vanes) is invariant under everything, which is the correct answer for a bare annulus.
         private static bool LineSetInvariant(double[] angles, Func<double, double> map)
         {
             for (int i = 0; i < angles.Length; i++)
@@ -375,7 +372,8 @@ namespace ExoInstruments.Core
             return r < 0.0 ? r + m : r;
         }
 
-        /// <summary>Fourier transform of a filled disc of radius a, evaluated at spatial frequency u. Equals the disc's area at u = 0.</summary>
+        // Fourier transform of a filled disc of radius a, evaluated at spatial frequency u. Equals the disc's
+        // area at u = 0.
         private static double DiscTransform(double a, double u)
         {
             if (a <= 0.0) return 0.0;
@@ -384,7 +382,7 @@ namespace ExoInstruments.Core
             return Math.PI * a * a * (2.0 * OpticalPsf.BesselJ1(x) / x);
         }
 
-        /// <summary>sin(x)/x, with its removable singularity at zero.</summary>
+        // sin(x)/x, with its removable singularity at zero.
         private static double Sinc(double x)
         {
             if (Math.Abs(x) < 1e-9) return 1.0;

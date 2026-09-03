@@ -28,13 +28,19 @@ namespace ExoInstruments.Visualization
 
         // --- Solar-system body points -------------------------------------
         public bool IsBody;
-        /// <summary>Marker radius when the body's true disc is too small to draw, px at zoom 1. A star's own size: the body is only saying "I am here".</summary>
+        /// <summary>
+        /// Marker radius when the body's true disc is too small to draw, px at zoom 1. A star's own size: the
+        /// body is only saying "I am here".
+        /// </summary>
         public float BodyMarkerRadiusPx;
         /// <summary>The body's true angular radius from the observer, degrees. Drawn as its real disc whenever that beats the marker.</summary>
         public double BodyAngularRadiusDeg;
         /// <summary>True when the body lies in front of the host body's disc (a transiting moon): drawn above the overlay instead of below it.</summary>
         public bool BodyInFront;
-        /// <summary>Sun direction in the disc's local frame: x along +RA, y along +Dec, z toward the observer. Drives the terminator on a real-size disc.</summary>
+        /// <summary>
+        /// Sun direction in the disc's local frame: x along +RA, y along +Dec, z toward the observer. Drives
+        /// the terminator on a real-size disc.
+        /// </summary>
         public Vector3 BodySunLocal;
         public Color BodyColor;
         /// <summary>True only for the body currently selected as the photography target, the sole condition that draws its ring.</summary>
@@ -105,10 +111,13 @@ namespace ExoInstruments.Visualization
         private static readonly Color32 GridColor32 = GridColor;
         private static readonly Color32 HighlightRingColor32 = HighlightRingColor;
 
-        /// <summary>Cull margin for marker-sized points; real-size body discs carry their own extent.</summary>
+        // Cull margin for marker-sized points; real-size body discs carry their own extent.
         private const float MaxMarkerExtentPx = 48f;
 
-        /// <summary>Pulls a raw-space point inside the sky ellipse (with a small margin); identity when it already is. Used to keep pan and declutter nudges on the map.</summary>
+        /// <summary>
+        /// Pulls a raw-space point inside the sky ellipse (with a small margin); identity when it already is.
+        /// Used to keep pan and declutter nudges on the map.
+        /// </summary>
         public static Vector2 ClampToSkyEllipse(Vector2 raw, int width, int height, float marginPx)
         {
             SkyChartProjection.EllipseHalfAxes(width, height, out double a, out double b);
@@ -268,12 +277,10 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// Blends the raw-space occlusion overlay through the view's affine transform: per screen
-        /// pixel, an inverse affine (two multiplies), a bilinear fetch and a source-over blend.
-        /// No trigonometry: this runs on the main thread during a drag. Bilinear sampling is what
-        /// keeps the limb readable at zoom 15, where one raw pixel spans 15 screen pixels.
-        /// </summary>
+        // Blends the raw-space occlusion overlay through the view's affine transform: per screen pixel, an
+        // inverse affine (two multiplies), a bilinear fetch and a source-over blend. No trigonometry: this runs
+        // on the main thread during a drag. Bilinear sampling is what keeps the limb readable at zoom 15, where
+        // one raw pixel spans 15 screen pixels.
         private static void CompositeOverlay(Color32[] pixels, int width, int height,
                                              SkyChartView view, byte[] overlay)
         {
@@ -317,7 +324,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>One bilinear tap, accumulated premultiplied so the weighted sum blends in one pass.</summary>
+        // One bilinear tap, accumulated premultiplied so the weighted sum blends in one pass.
         private static void Accumulate(byte[] overlay, int width, int height, int ix, int iy, float w,
                                        ref int sr, ref int sg, ref int sb, ref int sa)
         {
@@ -481,14 +488,11 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// A solar-system body: its real disc whenever the true angular size wins over the
-        /// marker at this zoom, a star-sized dot otherwise. The real disc is drawn as the exact
-        /// local footprint of the spherical cap: each pixel offset is pulled back to arc
-        /// coordinates through the inverse of the projection's local Jacobian
-        /// (SkyChartProjection.LocalBasis; Hammer shears and scales anisotropically off-centre),
-        /// and shaded with its real terminator from the Sun's direction.
-        /// </summary>
+        // A solar-system body: its real disc whenever the true angular size wins over the marker at this zoom,
+        // a star-sized dot otherwise. The real disc is drawn as the exact local footprint of the spherical cap:
+        // each pixel offset is pulled back to arc coordinates through the inverse of the projection's local
+        // Jacobian (SkyChartProjection.LocalBasis; Hammer shears and scales anisotropically off-centre), and
+        // shaded with its real terminator from the Sun's direction.
         private static void PlotBody(Color32[] pixels, int width, int height, SkyChartPoint p,
                                      float zoom, float offsetX, float offsetY, bool dimmed)
         {

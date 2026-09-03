@@ -6,7 +6,7 @@ namespace ExoInstruments.Session
     /// <summary>
     /// Direct-imaging campaign. Accumulates EffectiveExposureSeconds: on-sky integration
     /// normalized to zenith conditions (what DirectImagingSimulator's sqrt(t) consumes).
-    /// Each tick integrates by midpoint subsampling over [LastUt, currentUt] — conditions
+    /// Each tick integrates by midpoint subsampling over [LastUt, currentUt]; conditions
     /// are deterministic in UT, so the same integrator also drives forward prediction.
     /// </summary>
     public class ImagingObservationSession
@@ -67,7 +67,7 @@ namespace ExoInstruments.Session
             return ImagingObservingConditions.Evaluate(ut, Target.RaDeg, Target.DecDeg, observer);
         }
 
-        /// <summary>Midpoint-rule integral of Efficiency(t) dt over [fromUt, toUt].</summary>
+        // Midpoint-rule integral of Efficiency(t) dt over [fromUt, toUt].
         private double IntegrateEffective(double fromUt, double toUt)
         {
             double interval = toUt - fromUt;
@@ -83,7 +83,10 @@ namespace ExoInstruments.Session
             return accumulated;
         }
 
-        /// <summary>UT at which EffectiveExposureSeconds will reach targetEffectiveSeconds. PositiveInfinity when it won't happen within maxWallSeconds (target unobservable or requirement unreachable).</summary>
+        /// <summary>
+        /// UT at which EffectiveExposureSeconds will reach targetEffectiveSeconds. PositiveInfinity when it
+        /// won't happen within maxWallSeconds (target unobservable or requirement unreachable).
+        /// </summary>
         public double PredictUtForEffectiveExposure(double targetEffectiveSeconds, double maxWallSeconds)
         {
             if (targetEffectiveSeconds <= EffectiveExposureSeconds) return LastUt;
@@ -105,7 +108,10 @@ namespace ExoInstruments.Session
             return double.PositiveInfinity;
         }
 
-        /// <summary>Next UT when the target becomes observable, scanning up to one home body orbit. PositiveInfinity means it's never visible from this site.</summary>
+        /// <summary>
+        /// Next UT when the target becomes observable, scanning up to one home body orbit. PositiveInfinity
+        /// means it's never visible from this site.
+        /// </summary>
         public double PredictNextObservableUt()
         {
             if (CurrentConditions.Observable) return LastUt;

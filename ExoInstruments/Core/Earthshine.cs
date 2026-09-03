@@ -76,21 +76,17 @@ namespace ExoInstruments.Core
         /// </summary>
         public const double PlateauLimbAngleDeg = 25.0;
 
-        /// <summary>
-        /// WFC3 IHB Table 9.3 wavelength grid, Angstrom. Note the step changes from 500 to 1000
-        /// Angstrom at 6000; the grid is used as published rather than resampled.
-        /// </summary>
+        // WFC3 IHB Table 9.3 wavelength grid, Angstrom. Note the step changes from 500 to 1000 Angstrom at
+        // 6000; the grid is used as published rather than resampled.
         private static readonly double[] WavelengthAngstrom =
         {
             2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 7000,
             8000, 9000, 10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000,
         };
 
-        /// <summary>
-        /// WFC3 IHB Table 9.3, earth-shine column, erg cm^-2 s^-1 Angstrom^-1 arcsec^-2, at the
-        /// 24 degree reference limb angle. The steep fall below 3000 Angstrom is real and is the
-        /// reason the near-UV is the one band where pointing near the bright limb costs little.
-        /// </summary>
+        // WFC3 IHB Table 9.3, earth-shine column, erg cm^-2 s^-1 Angstrom^-1 arcsec^-2, at the 24 degree
+        // reference limb angle. The steep fall below 3000 Angstrom is real and is the reason the near-UV is the
+        // one band where pointing near the bright limb costs little.
         private static readonly double[] EarthshineFluxDensity =
         {
             7.69e-22, 1.53e-21, 1.43e-19, 8.33e-19, 1.66e-18, 2.59e-18, 2.63e-18, 2.55e-18,
@@ -236,7 +232,8 @@ namespace ExoInstruments.Core
         private const double PlanckConstantErgSeconds = 6.62607015e-27;
         private const double SpeedOfLightCmPerSecond = 2.99792458e10;
 
-        /// <summary>Log-linear interpolation of the tabulated spectrum; the values span four decades, so interpolating them linearly would be wrong by a lot between the widely spaced UV points.</summary>
+        // Log-linear interpolation of the tabulated spectrum; the values span four decades, so interpolating
+        // them linearly would be wrong by a lot between the widely spaced UV points.
         private static double SampleFluxDensity(double angstrom)
         {
             var w = WavelengthAngstrom;

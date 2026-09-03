@@ -42,15 +42,13 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class TransitPhotometry
     {
-        /// <summary>
-        /// Airmass beyond which the seeing power law is held flat. X = 6 is about 9.5 degrees of
-        /// altitude, already below where anyone observes and far below where the plane-parallel
-        /// atmosphere the X^(3/5) law assumes still holds. Same cap, for the same reason, as
-        /// SolarSystemCameraTexture's MaxSeeingAirmass.
-        /// </summary>
+        // Airmass beyond which the seeing power law is held flat. X = 6 is about 9.5 degrees of altitude,
+        // already below where anyone observes and far below where the plane-parallel atmosphere the X^(3/5) law
+        // assumes still holds. Same cap, for the same reason, as SolarSystemCameraTexture's MaxSeeingAirmass.
         private const double MaxSeeingAirmass = 6.0;
 
-        /// <summary>Wavelength every published seeing figure is referred to, and so the wavelength MedianZenithSeeingArcsec is quoted at.</summary>
+        // Wavelength every published seeing figure is referred to, and so the wavelength
+        // MedianZenithSeeingArcsec is quoted at.
         private const double SeeingReferenceWavelengthNm = 500.0;
 
         /// <summary>
@@ -210,20 +208,15 @@ namespace ExoInstruments.Core
 
         // ---------------------------------------------------------------- Sky
 
-        /// <summary>
-        /// Sky electrons in one pixel over the exposure, summed from the published surface
-        /// brightnesses in SkyBrightnessModel and attenuated per term.
-        ///
-        /// This mirrors SolarSystemCameraTexture.GatherSkyBackground deliberately, so the transit
-        /// and imaging halves agree about how bright the night sky is. The terms are summed in two
-        /// spectral groups because they do not share a spectrum: moonlight and zodiacal light are
-        /// sunlight scattered off something and carry the solar shape, while airglow is atmospheric
-        /// line emission with no continuum this pipeline could integrate and is integrated flat.
-        ///
-        /// Twilight is not included: a transit run is scheduled inside the observing window
-        /// ImagingObservingConditions defines, which already requires the Sun below astronomical
-        /// twilight, where SkyBrightnessModel's own twilight term returns no contribution anyway.
-        /// </summary>
+        // Sky electrons in one pixel over the exposure, summed from the published surface brightnesses in
+        // SkyBrightnessModel and attenuated per term. This mirrors SolarSystemCameraTexture.GatherSkyBackground
+        // deliberately, so the transit and imaging halves agree about how bright the night sky is. The terms
+        // are summed in two spectral groups because they do not share a spectrum: moonlight and zodiacal light
+        // are sunlight scattered off something and carry the solar shape, while airglow is atmospheric line
+        // emission with no continuum this pipeline could integrate and is integrated flat. Twilight is not
+        // included: a transit run is scheduled inside the observing window ImagingObservingConditions defines,
+        // which already requires the Sun below astronomical twilight, where SkyBrightnessModel's own twilight
+        // term returns no contribution anyway.
         private static double SkyElectronsPerPixel(
             PhotometricDetector detector, InstrumentSpec instrument, SystemResponse response,
             double airmass, double moonSkyExcess, double planetRadiusMeters,
@@ -284,21 +277,14 @@ namespace ExoInstruments.Core
 
         // ---------------------------------------------------------------- PSF
 
-        /// <summary>
-        /// Delivered PSF FWHM (arcsec) at this airmass and this filter's wavelength.
-        ///
-        /// Two standard Kolmogorov scalings, both following from r0 proportional to
-        /// lambda^(6/5) cos(z)^(3/5) (Roddier 1981, Progress in Optics 19, 281) and
-        /// FWHM = 0.98 lambda / r0:
-        ///
-        ///     FWHM(X, lambda) = FWHM(zenith, 500nm) * X^(3/5) * (lambda / 500nm)^(-1/5)
-        ///
-        /// The wavelength term is small but has the right sign and is free: a red band sees a
-        /// sharper image through the same air than a blue one, which is why it is applied rather
-        /// than dropped. The diffraction core is NOT convolved in here; for every ground
-        /// instrument this model applies to it is far inside the seeing disc; so for a space
-        /// instrument the detector's own delivered figure is used directly instead.
-        /// </summary>
+        // Delivered PSF FWHM (arcsec) at this airmass and this filter's wavelength. Two standard Kolmogorov
+        // scalings, both following from r0 proportional to lambda^(6/5) cos(z)^(3/5) (Roddier 1981, Progress in
+        // Optics 19, 281) and FWHM = 0.98 lambda / r0: FWHM(X, lambda) = FWHM(zenith, 500nm) * X^(3/5) *
+        // (lambda / 500nm)^(-1/5) The wavelength term is small but has the right sign and is free: a red band
+        // sees a sharper image through the same air than a blue one, which is why it is applied rather than
+        // dropped. The diffraction core is NOT convolved in here; for every ground instrument this model
+        // applies to it is far inside the seeing disc; so for a space instrument the detector's own delivered
+        // figure is used directly instead.
         private static double DeliveredFwhmArcsec(PhotometricDetector detector, InstrumentSpec instrument, double airmass)
         {
             if (instrument.IsSpaceBased) return detector.DeliveredPsfFwhmArcsec.Value;
@@ -319,30 +305,23 @@ namespace ExoInstruments.Core
 
         // ------------------------------------------------- Response caching
 
-        /// <summary>
-        /// Airmass grid the system response is tabulated on. Building one response costs a 160-entry
-        /// colour table of 64-node Simpson quadratures, under a millisecond, but a light curve
-        /// asks for thousands of samples, so it is built once per grid point and interpolated
-        /// between. The effective width varies smoothly and monotonically with airmass (it is an
-        /// integral of 10^(-0.4 k(lambda) X)), so linear interpolation on a 0.1 grid is accurate to
-        /// well under a tenth of a percent, far inside the 0.03 mag scatter of the Gaia
-        /// photometric transformations feeding the catalogue in the first place.
-        /// </summary>
+        // Airmass grid the system response is tabulated on. Building one response costs a 160-entry colour
+        // table of 64-node Simpson quadratures, under a millisecond, but a light curve asks for thousands of
+        // samples, so it is built once per grid point and interpolated between. The effective width varies
+        // smoothly and monotonically with airmass (it is an integral of 10^(-0.4 k(lambda) X)), so linear
+        // interpolation on a 0.1 grid is accurate to well under a tenth of a percent, far inside the 0.03 mag
+        // scatter of the Gaia photometric transformations feeding the catalogue in the first place.
         private const double AirmassGridStep = 0.1;
 
         private static readonly Dictionary<PhotometricDetector, SystemResponse[]> responseGrids
             = new Dictionary<PhotometricDetector, SystemResponse[]>();
         private static readonly object cacheLock = new object();
 
-        /// <summary>
-        /// The system response for this detector at (or bracketing) the given airmass.
-        ///
-        /// Returns the grid point at or below the requested airmass rather than interpolating two
-        /// SystemResponse objects, which cannot be blended: what interpolates cleanly is the scalar
-        /// effective width they produce, and at a 0.1 grid step the difference between the two is
-        /// smaller than the quantities either one is built from. A space instrument needs one
-        /// response only, since it looks through no air.
-        /// </summary>
+        // The system response for this detector at (or bracketing) the given airmass. Returns the grid point at
+        // or below the requested airmass rather than interpolating two SystemResponse objects, which cannot be
+        // blended: what interpolates cleanly is the scalar effective width they produce, and at a 0.1 grid step
+        // the difference between the two is smaller than the quantities either one is built from. A space
+        // instrument needs one response only, since it looks through no air.
         private static SystemResponse ResponseFor(PhotometricDetector detector, InstrumentSpec instrument, double airmass)
         {
             int index = instrument.IsSpaceBased

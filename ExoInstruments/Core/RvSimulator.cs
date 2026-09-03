@@ -16,7 +16,11 @@ namespace ExoInstruments.Core
             return signal + noise;
         }
 
-        /// <summary>1-sigma scatter per epoch: instrument precision and stellar activity jitter added in quadrature. Sessions report only the instrument term — the jitter shows up as excess residuals, exactly as in real surveys.</summary>
+        /// <summary>
+        /// 1-sigma scatter per epoch: instrument precision and stellar activity jitter added in quadrature.
+        /// Sessions report only the instrument term; the jitter shows up as excess residuals, exactly as in
+        /// real surveys.
+        /// </summary>
         public static double TotalNoiseSigmaMps(StarTarget star, InstrumentSpec instrument)
         {
             double instrumentSigma = instrument.EstimatePrecision(star.ApparentMagnitude);
@@ -24,7 +28,11 @@ namespace ExoInstruments.Core
             return Math.Sqrt(instrumentSigma * instrumentSigma + jitterSigma * jitterSigma);
         }
 
-        /// <summary>Keplerian reflex from every system planet (signals superpose linearly) plus the RM anomaly of any transiting companion that happens to be in transit at this epoch — always in the physics whether the observer planned for it or not.</summary>
+        /// <summary>
+        /// Keplerian reflex from every system planet (signals superpose linearly) plus the RM anomaly of any
+        /// transiting companion that happens to be in transit at this epoch, always in the physics whether the
+        /// observer planned for it or not.
+        /// </summary>
         public static double GenerateSystemVelocityAtTime(IList<StarTarget> systemPlanets, InstrumentSpec instrument, double ut, Random rng)
         {
             double signal = RossiterMcLaughlin.SystemAnomalyMps(systemPlanets, ut);
@@ -66,7 +74,7 @@ namespace ExoInstruments.Core
             return k * (Math.Cos(trueAnomaly + omegaRad) + e * Math.Cos(omegaRad));
         }
 
-        /// <summary>Newton-Raphson solve of M = E - e*sin(E) for E, given mean anomaly M (radians).</summary>
+        // Newton-Raphson solve of M = E - e*sin(E) for E, given mean anomaly M (radians).
         private static double SolveKeplerEquation(double meanAnomaly, double eccentricity)
         {
             double e = eccentricity;

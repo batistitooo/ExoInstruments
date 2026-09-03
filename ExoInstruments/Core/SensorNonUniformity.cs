@@ -113,24 +113,21 @@ namespace ExoInstruments.Core
         public static ushort[] BuildPhotoResponseMap(ulong sensorSerialSeed, int pixelCount, double sigma)
             => BuildDeviationMap(sensorSerialSeed, Pcg32.StreamPhotoResponse, pixelCount, sigma);
 
-        /// <summary>The per-pixel readout offsets o_i in electrons, mean 0 and standard deviation sigma. Same storage argument as the photo-response map above.</summary>
+        /// <summary>
+        /// The per-pixel readout offsets o_i in electrons, mean 0 and standard deviation sigma. Same storage
+        /// argument as the photo-response map above.
+        /// </summary>
         public static ushort[] BuildOffsetMap(ulong sensorSerialSeed, int pixelCount, double sigmaElectrons)
             => BuildDeviationMap(sensorSerialSeed, Pcg32.StreamOffsetFpn, pixelCount, sigmaElectrons);
 
-        /// <summary>
-        /// A zero-mean Gaussian deviation per pixel, packed to half precision.
-        ///
-        /// The draws are made in index order from one generator on its own stream, so the map is a
-        /// function of the seed alone: the same silicon on any machine, any runtime and any session,
-        /// which is what makes a stored master flat or master bias meaningful across them.
-        ///
-        /// The sample mean is subtracted afterwards. A finite draw of N samples has a mean of order
-        /// sigma/sqrt(N) rather than exactly zero, and leaving it in would put a constant scale
-        /// error into every frame that no flat could remove, since the flat carries the same error.
-        /// It is a small number (at 11.7 megapixels and 0.31%, about 1e-6), and removing it costs
-        /// one pass; the point is that the map's mean is then exactly the value the physics says it
-        /// is rather than approximately it.
-        /// </summary>
+        // A zero-mean Gaussian deviation per pixel, packed to half precision. The draws are made in index order
+        // from one generator on its own stream, so the map is a function of the seed alone: the same silicon on
+        // any machine, any runtime and any session, which is what makes a stored master flat or master bias
+        // meaningful across them. The sample mean is subtracted afterwards. A finite draw of N samples has a
+        // mean of order sigma/sqrt(N) rather than exactly zero, and leaving it in would put a constant scale
+        // error into every frame that no flat could remove, since the flat carries the same error. It is a
+        // small number (at 11.7 megapixels and 0.31%, about 1e-6), and removing it costs one pass; the point is
+        // that the map's mean is then exactly the value the physics says it is rather than approximately it.
         private static ushort[] BuildDeviationMap(ulong sensorSerialSeed, ulong stream, int pixelCount, double sigma)
         {
             if (pixelCount <= 0) return null;
@@ -154,7 +151,10 @@ namespace ExoInstruments.Core
             return map;
         }
 
-        /// <summary>The gain multiplier of pixel i: 1 + p_i, from a map built above. Returns 1 for a null map, which is what "this device's PRNU is not published" has to mean.</summary>
+        /// <summary>
+        /// The gain multiplier of pixel i: 1 + p_i, from a map built above. Returns 1 for a null map, which is
+        /// what "this device's PRNU is not published" has to mean.
+        /// </summary>
         public static float PhotoResponse(ushort[] map, int index)
         {
             if (map == null || index < 0 || index >= map.Length) return 1f;

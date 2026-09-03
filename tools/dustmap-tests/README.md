@@ -26,7 +26,7 @@ RING and NESTED, at eight resolutions:
 | resolution | 58.6° | 29.3° | 14.7° | 3.66° | 55.0′ | 13.7′ | 3.44′ | 0.86′ |
 | mismatches | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
-Directions are drawn uniformly on the sphere (uniform in `z`, not a lattice — a lattice can sit on
+Directions are drawn uniformly on the sphere (uniform in `z`, not a lattice, a lattice can sit on
 pixel boundaries at every nside and miss the branch cuts entirely), plus the boundaries the scheme
 is piecewise across: the cap/band transition at `|z| = 2/3` approached from both sides, both poles,
 and `φ` at each quadrant edge. Pixel counts and resolutions match `healpy` exactly.
@@ -34,7 +34,7 @@ and `φ` at each quadrant edge. Pixel counts and resolutions match `healpy` exac
 Getting there found one real thing. The nested index was first derived by converting a RING index,
 and that conversion was wrong at every nside above 4 while RING itself was exact. Nested numbering
 is a Morton code of the pixel's position *within its base face*, so the face and the two in-face
-coordinates fall straight out of the same projection RING uses — computing them directly is both
+coordinates fall straight out of the same projection RING uses, computing them directly is both
 shorter and correct, where going through RING means inverting that numbering first.
 
 **The Galactic frame is the IAU one.**
@@ -50,17 +50,17 @@ shorter and correct, where going through RING means inverting that numbering fir
 The pole is the ICRS realisation of the IAU 1958 frame from the Hipparcos documentation (ESA 1997,
 SP-1200, Vol. 1, Sect. 1.5.3): α_NGP = 192.85948°, δ_NGP = 27.12825°, l_NCP = 122.93192°. The
 residual against astropy is 3×10⁻⁶ deg because astropy carries more digits of the same constants,
-which is 0.01″ — a thousandth of the finest map pixel anyone publishes.
+which is 0.01″, a thousandth of the finest map pixel anyone publishes.
 
 Sgr A\* landing on the Galactic origin to 2×10⁻⁶ deg is the check that the frame is the IAU
 definition rather than a fit: the definition is *what places it there*.
 
-Three checks are about signs rather than tolerances — Sgr A\* at the origin, and both Galactic poles
-at exactly ±90° — because a frame with a flipped longitude sense passes every round-trip test ever
+Three checks are about signs rather than tolerances, Sgr A\* at the origin, and both Galactic poles
+at exactly ±90°, because a frame with a flipped longitude sense passes every round-trip test ever
 written and puts the Galactic plane sweeping the wrong way across the sky.
 
 **The packed map format round-trips.** `make_test_map.py` writes a synthetic map whose value is a
-known analytic function of Galactic latitude — `0.02 + 1.98 exp(-|b|/8°)` — and the C# side reads it
+known analytic function of Galactic latitude, `0.02 + 1.98 exp(-|b|/8°)`, and the C# side reads it
 back and queries 3000 random directions. The expectation is recomputed from the *queried position*
 alone, so the map file is never consulted: this checks the pixel lookup, not the file's contents.
 
@@ -97,7 +97,7 @@ and every NaN.
 
 The first version of the format stored fixed-point counts of 10⁻⁴ magnitudes, saturating at 6.5535.
 SFD98 reaches **135.25 magnitudes** in the inner plane, so that version silently marked 48 615
-pixels "no value" — every one at |b| below a degree, which is to say exactly the dust worth having.
+pixels "no value", every one at |b| below a degree, which is to say exactly the dust worth having.
 A query toward the Galactic centre returned NaN.
 
 No fixed-point scale spans 0.00037 to 135 magnitudes in 16 bits: any scale fine enough for the poles

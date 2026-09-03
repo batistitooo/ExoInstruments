@@ -198,10 +198,8 @@ namespace ExoInstruments.Flight
             return link;
         }
 
-        /// <summary>
-        /// The unloaded path: walk the protovessel's parts for our module and read its persistent
-        /// fields out of the saved ConfigNode.
-        /// </summary>
+        // The unloaded path: walk the protovessel's parts for our module and read its persistent fields out of
+        // the saved ConfigNode.
         private static SpaceTelescopeLink FromProto(Vessel v)
         {
             if (v.protoVessel == null || v.protoVessel.protoPartSnapshots == null) return null;
@@ -255,11 +253,9 @@ namespace ExoInstruments.Flight
             return null;
         }
 
-        /// <summary>
-        /// The instrument name off the part's prefab module, which is the part config as loaded.
-        /// Null when the prefab is unavailable, which is a part whose config failed to load and
-        /// which cannot be observed through anyway.
-        /// </summary>
+        // The instrument name off the part's prefab module, which is the part config as loaded. Null when the
+        // prefab is unavailable, which is a part whose config failed to load and which cannot be observed
+        // through anyway.
         private static string PrefabInstrumentName(ProtoPartSnapshot part)
         {
             ModuleExoSpaceTelescope prefab = PrefabModule(part);
@@ -280,11 +276,9 @@ namespace ExoInstruments.Flight
             return prefabs != null && prefabs.Count > 0 ? prefabs[0] : null;
         }
 
-        /// <summary>
-        /// The parts of the state that come from the vessel rather than from the module: its
-        /// power and its radio link. Both work on an unloaded vessel, which is why they are not
-        /// cached in the module the way the geometry is.
-        /// </summary>
+        // The parts of the state that come from the vessel rather than from the module: its power and its radio
+        // link. Both work on an unloaded vessel, which is why they are not cached in the module the way the
+        // geometry is.
         private static void FillVesselState(SpaceTelescopeLink link, Vessel v)
         {
             GroundStation.TotalElectricCharge(v, out double charge, out double capacity);
@@ -299,14 +293,10 @@ namespace ExoInstruments.Flight
             }
         }
 
-        /// <summary>
-        /// The vessel's best antenna data rate, bits per second.
-        ///
-        /// KSP publishes antenna performance as packetSize (in Mits, its own unit) per
-        /// packetInterval (seconds), so the rate is one divided by the other; the "Mit" is a
-        /// megabit and the conversion is the game's own. The BEST antenna is used rather than the
-        /// sum, because a downlink runs over one link at a time.
-        /// </summary>
+        // The vessel's best antenna data rate, bits per second. KSP publishes antenna performance as packetSize
+        // (in Mits, its own unit) per packetInterval (seconds), so the rate is one divided by the other; the
+        // "Mit" is a megabit and the conversion is the game's own. The BEST antenna is used rather than the
+        // sum, because a downlink runs over one link at a time.
         private static double AntennaBitsPerSecond(Vessel v)
         {
             double best = 0.0;

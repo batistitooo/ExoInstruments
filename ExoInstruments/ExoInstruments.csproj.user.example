@@ -1,7 +1,7 @@
 <Project>
     <!--
         Copy this file to ExoInstruments.csproj.user (same folder) and fill in the
-        paths for your own machine. That file is git-ignored — it never gets committed,
+        paths for your own machine. That file is git-ignored - it never gets committed,
         so everyone's local KSP install path stays out of the shared project.
 
         MSBuild loads *.csproj.user automatically if present, no other wiring needed.

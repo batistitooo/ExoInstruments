@@ -12,7 +12,7 @@ namespace ExoInstruments.Core
         public double Snr { get; set; }
         public int SampleCount { get; set; }
 
-        // Presentation stats for the scan report — not a pass/fail conclusion.
+        // Presentation stats for the scan report, not a pass/fail conclusion.
         public int InTransitPointCount { get; set; }
         public double BaselineDays { get; set; }
         public double PhotometricPrecisionPpm { get; set; }   // empirical std of the full light curve

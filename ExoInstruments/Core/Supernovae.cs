@@ -20,7 +20,10 @@ namespace ExoInstruments.Core
 
         public SupernovaClass Class;
 
-        /// <summary>True for the 12 per cent of SNe II that are IIb: rendered with the Ibc template (a IIb sheds its hydrogen within days) at IIb's own peak magnitude.</summary>
+        /// <summary>
+        /// True for the 12 per cent of SNe II that are IIb: rendered with the Ibc template (a IIb sheds its
+        /// hydrogen within days) at IIb's own peak magnitude.
+        /// </summary>
         public bool IsIIb;
 
         /// <summary>Peak absolute B magnitude, drawn from the class's measured distribution.</summary>
@@ -61,32 +64,27 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class Supernovae
     {
-        /// <summary>Seconds per 200-year block of event generation, in Earth days as every timescale here (nuclear decay does not care whose calendar it is).</summary>
+        /// <summary>
+        /// Seconds per 200-year block of event generation, in Earth days as every timescale here (nuclear decay
+        /// does not care whose calendar it is).
+        /// </summary>
         public const double BlockSeconds = 200.0 * 365.25 * 86400.0;
 
         private const double SolarAbsoluteBMag = 5.44;   // Willmer 2018, ApJS 236, 47 (Johnson B)
 
-        /// <summary>
-        /// Brightest absolute B a row may claim and still be treated as a galaxy.
-        ///
-        /// The brightest cD galaxies reach about M_B = -23; brighter than that, a catalogued
-        /// "galaxy" whose photometry says -27 is an ACTIVE NUCLEUS, and its B_T is quasar light
-        /// rather than the stellar population Li's SNuB is per unit of. The shipped catalogue
-        /// carries three (SDSS J102724.35+413820.2 at M_B = -27.8 among them), and unbounded they
-        /// produced 650 supernovae per century each: a thousand of the catalogue's three thousand,
-        /// concentrated in three objects nobody can resolve. Half a magnitude of headroom past the
-        /// physical limit, then the row hosts nothing.
-        /// </summary>
+        // Brightest absolute B a row may claim and still be treated as a galaxy. The brightest cD galaxies
+        // reach about M_B = -23; brighter than that, a catalogued "galaxy" whose photometry says -27 is an
+        // ACTIVE NUCLEUS, and its B_T is quasar light rather than the stellar population Li's SNuB is per unit
+        // of. The shipped catalogue carries three (SDSS J102724.35+413820.2 at M_B = -27.8 among them), and
+        // unbounded they produced 650 supernovae per century each: a thousand of the catalogue's three
+        // thousand, concentrated in three objects nobody can resolve. Half a magnitude of headroom past the
+        // physical limit, then the row hosts nothing.
         private const double BrightestPlausibleGalaxyAbsoluteB = -23.5;
 
-        /// <summary>
-        /// Luminosity span the rate-size relation is extrapolated over, in units of L_B0.
-        ///
-        /// Li et al. fit RSS over their own sample; the relation is a power law with no physics
-        /// forbidding its continuation, but a rate quoted 100x outside the calibrated range is an
-        /// extrapolation and not a measurement. The factor of ten each way covers the sample and
-        /// is where the clamp bites, which section 12 records.
-        /// </summary>
+        // Luminosity span the rate-size relation is extrapolated over, in units of L_B0. Li et al. fit RSS over
+        // their own sample; the relation is a power law with no physics forbidding its continuation, but a rate
+        // quoted 100x outside the calibrated range is an extrapolation and not a measurement. The factor of ten
+        // each way covers the sample and is where the clamp bites, which section 12 records.
         private const double RateSizeSpan = 10.0;
         private const double FiducialL10 = 2.0;          // Li 2011 Table 4: L_B0 = 2x10^10 L_sun
         private const double RssIa = -0.23;              // Li 2011 Table 4, RSS_B per class
@@ -122,7 +120,8 @@ namespace ExoInstruments.Core
         private const double FractionIIb = 0.12;
         private const double FractionIIn = 0.09;
 
-        /// <summary>Ic as a fraction of SNe Ibc (Li et al. 2011, LOSS II: "SNe Ic are the most abundant SNe Ibc, 54% of all").</summary>
+        // Ic as a fraction of SNe Ibc (Li et al. 2011, LOSS II: "SNe Ic are the most abundant SNe Ibc, 54% of
+        // all").
         private const double FractionIcOfIbc = 0.54;
 
         private static int HubbleBin(double t)
@@ -302,7 +301,8 @@ namespace ExoInstruments.Core
             return e;
         }
 
-        /// <summary>Rejection sampling over a light plane. The plane sums to one and its peak bounds the density, so acceptance is exact.</summary>
+        // Rejection sampling over a light plane. The plane sums to one and its peak bounds the density, so
+        // acceptance is exact.
         private static void SampleMap(Pcg32 rng, GalaxyImage map, bool youngPopulation,
                                       out double u, out double v)
         {
@@ -335,7 +335,7 @@ namespace ExoInstruments.Core
             return PeakMeanMag[(int)row] + NoiseSampler.Gaussian(rng, PeakSigmaMag[(int)row]);
         }
 
-        /// <summary>FNV-1a over the parts, so the stream depends on the save, the host and the block and nothing else.</summary>
+        // FNV-1a over the parts, so the stream depends on the save, the host and the block and nothing else.
         private static ulong Mix(long seed, string name, long block)
         {
             ulong h = 14695981039346656037UL;

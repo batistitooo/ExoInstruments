@@ -54,7 +54,10 @@ namespace ExoInstruments.Core
             return bits / effective;
         }
 
-        /// <summary>Electric charge one exposure consumes: the instrument's exposure draw over the open-shutter time, plus its idle draw over the readout.</summary>
+        /// <summary>
+        /// Electric charge one exposure consumes: the instrument's exposure draw over the open-shutter time,
+        /// plus its idle draw over the readout.
+        /// </summary>
         public static double ExposureCharge(double exposureSeconds, double readoutSeconds,
                                             double exposureChargePerSecond, double idleChargePerSecond)
         {

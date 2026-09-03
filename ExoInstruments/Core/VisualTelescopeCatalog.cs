@@ -49,7 +49,10 @@ namespace ExoInstruments.Core
         /// </summary>
         public string CameraName;
 
-        /// <summary>The observatory this instrument stands at, for the FITS OBSERVAT keyword. The same site the altitude and seeing figures below are measured at, named rather than implied.</summary>
+        /// <summary>
+        /// The observatory this instrument stands at, for the FITS OBSERVAT keyword. The same site the altitude
+        /// and seeing figures below are measured at, named rather than implied.
+        /// </summary>
         public string SiteName;
 
         /// <summary>
@@ -70,7 +73,10 @@ namespace ExoInstruments.Core
         /// <summary>True when this instrument observes from orbit. Ground instruments carry no platform at all.</summary>
         public bool IsSpaceBased => SpacePlatform != null;
 
-        /// <summary>Detector operating temperature in Celsius, the one the dark current below was measured at. NaN when the instrument's is not modelled.</summary>
+        /// <summary>
+        /// Detector operating temperature in Celsius, the one the dark current below was measured at. NaN when
+        /// the instrument's is not modelled.
+        /// </summary>
         public double DetectorTemperatureCelsius = double.NaN;
 
         /// <summary>
@@ -278,7 +284,10 @@ namespace ExoInstruments.Core
         /// </summary>
         public double RelayOpticsTransmission;
 
-        /// <summary>Reflection and relay losses combined: r^N times the relay factor. The aperture obstruction is NOT here; it is already in EffectiveApertureAreaM2, which is where the collecting area belongs.</summary>
+        /// <summary>
+        /// Reflection and relay losses combined: r^N times the relay factor. The aperture obstruction is NOT
+        /// here; it is already in EffectiveApertureAreaM2, which is where the collecting area belongs.
+        /// </summary>
         public double OpticsTransmission
         {
             get
@@ -311,7 +320,10 @@ namespace ExoInstruments.Core
         public SpectralCurve QuantumEfficiencyCurve;
         public double FullWellElectrons;
         public double ReadNoiseElectrons;
-        /// <summary>Dark current at this sensor's own real cooled operating temperature (see each entry's comment for the actual temperature; it varies by instrument, so it doesn't belong in the field name).</summary>
+        /// <summary>
+        /// Dark current at this sensor's own real cooled operating temperature (see each entry's comment for
+        /// the actual temperature; it varies by instrument, so it doesn't belong in the field name).
+        /// </summary>
         public double DarkCurrentElectronsPerSecond;
 
         /// <summary>
@@ -424,7 +436,11 @@ namespace ExoInstruments.Core
         /// </summary>
         public Coronagraph.LyotStop CoronagraphLyotStop;
 
-        /// <summary>Actuators across the deformable mirror of the adaptive-optics system in front of this instrument, or 0 where there is none. Sets the AO control radius, and with it where the speckle ring falls (see Core.SpeckleField).</summary>
+        /// <summary>
+        /// Actuators across the deformable mirror of the adaptive-optics system in front of this instrument, or
+        /// 0 where there is none. Sets the AO control radius, and with it where the speckle ring falls (see
+        /// Core.SpeckleField).
+        /// </summary>
         public int AdaptiveOpticsActuatorsAcrossPupil;
 
         /// <summary>
@@ -594,7 +610,11 @@ namespace ExoInstruments.Core
         // Capture range
         public float MinExposureSeconds;
         public float MaxExposureSeconds;
-        /// <summary>Continuously-variable electronic gain range. Set MinGain == MaxGain for a real instrument whose gain is fixed by its readout electronics rather than player-adjustable (e.g. a professional CCD with no ISO-like control); see VisualTelescopeCatalog.Fors2Vlt.</summary>
+        /// <summary>
+        /// Continuously-variable electronic gain range. Set MinGain == MaxGain for a real instrument whose gain
+        /// is fixed by its readout electronics rather than player-adjustable (e.g. a professional CCD with no
+        /// ISO-like control); see VisualTelescopeCatalog.Fors2Vlt.
+        /// </summary>
         public float MinGain;
         public float MaxGain;
 
@@ -687,7 +707,10 @@ namespace ExoInstruments.Core
         /// </summary>
         public double AdaptiveOpticsStrehlRatio;
 
-        /// <summary>Seeing FWHM (arcsec) of the uncorrected halo the AO leaves behind, the site's own real median seeing, since the halo is simply the light the correction failed to gather.</summary>
+        /// <summary>
+        /// Seeing FWHM (arcsec) of the uncorrected halo the AO leaves behind, the site's own real median
+        /// seeing, since the halo is simply the light the correction failed to gather.
+        /// </summary>
         public double AdaptiveOpticsHaloSeeingFwhmArcsec;
 
         /// <summary>
@@ -751,34 +774,28 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class VisualTelescopeCatalog
     {
-        /// <summary>
-        /// Every broadband position plus H-alpha. FORS2 stays on this set: ESO publishes a real
-        /// narrowband list for it, and until those central wavelengths, widths and transmissions
-        /// are read off the instrument manual it carries no narrowband position rather than one
-        /// with numbers borrowed from an amateur filter.
-        /// </summary>
+        // Every broadband position plus H-alpha. FORS2 stays on this set: ESO publishes a real narrowband list
+        // for it, and until those central wavelengths, widths and transmissions are read off the instrument
+        // manual it carries no narrowband position rather than one with numbers borrowed from an amateur
+        // filter.
         private static readonly CameraFilter[] AllFilters =
             { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue, CameraFilter.HAlpha };
 
-        /// <summary>
-        /// The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the
-        /// three positions an amateur narrowband wheel is actually sold with. [N II], [O II] and
-        /// [O I] are deliberately absent; [N II] at a width that separates it from H-alpha is a
-        /// specialist item, [O II] at 372 nm is below where a CMOS sensor has usable quantum
-        /// efficiency, and neither is a filter these telescopes would have.
-        /// </summary>
+        // The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the three positions
+        // an amateur narrowband wheel is actually sold with. [N II], [O II] and [O I] are deliberately absent;
+        // [N II] at a width that separates it from H-alpha is a specialist item, [O II] at 372 nm is below
+        // where a CMOS sensor has usable quantum efficiency, and neither is a filter these telescopes would
+        // have.
         private static readonly CameraFilter[] AmateurNarrowbandFilters =
         {
             CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue,
             CameraFilter.HAlpha, CameraFilter.OIII, CameraFilter.SII,
         };
 
-        /// <summary>
-        /// The amateur narrowband set, at the same 7 nm the H-alpha position already carries.
-        /// Peak transmission is left at 1.0, which by this file's convention means the figure is
-        /// NOT PUBLISHED for these and the loss is unmodelled rather than a claim of a perfect
-        /// filter; the same treatment the H-alpha position already gets.
-        /// </summary>
+        // The amateur narrowband set, at the same 7 nm the H-alpha position already carries. Peak transmission
+        // is left at 1.0, which by this file's convention means the figure is NOT PUBLISHED for these and the
+        // loss is unmodelled rather than a claim of a perfect filter; the same treatment the H-alpha position
+        // already gets.
         private static readonly NarrowbandFilterSpec[] AmateurNarrowbandSet =
         {
             new NarrowbandFilterSpec
@@ -2072,7 +2089,10 @@ namespace ExoInstruments.Core
             },
         };
 
-        /// <summary>Every visual telescope available to the in-game instrument selector (the Observatory dropdown in ExoInstrumentsGUI; see InstrumentSpec.VisualTelescope), in unlock/display order.</summary>
+        /// <summary>
+        /// Every visual telescope available to the in-game instrument selector (the Observatory dropdown in
+        /// ExoInstrumentsGUI; see InstrumentSpec.VisualTelescope), in unlock/display order.
+        /// </summary>
         /// <summary>
         /// The SECOND CHANNEL OF THE SAME INSTRUMENT ON THE SAME TELESCOPE. Not a second telescope:
         /// WFC3 has a Channel Select Mechanism, and light goes to the UVIS CCDs or to the IR array,

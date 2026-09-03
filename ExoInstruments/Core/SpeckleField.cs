@@ -71,7 +71,10 @@ namespace ExoInstruments.Core
         /// <summary>Fraction in the fast, instrumental component, from their Lambda.</summary>
         public const double FastVarianceFraction = 0.059;
 
-        /// <summary>Decay time of that fast component in seconds, from their tau. Instrumental rather than atmospheric: it is present with the internal lamp.</summary>
+        /// <summary>
+        /// Decay time of that fast component in seconds, from their tau. Instrumental rather than atmospheric:
+        /// it is present with the internal lamp.
+        /// </summary>
         public const double FastDecorrelationSeconds = 3.5;
 
         /// <summary>
@@ -375,16 +378,12 @@ namespace ExoInstruments.Core
             for (int i = 0; i < n; i++) modulation[i] *= inv;
         }
 
-        /// <summary>
-        /// White Gaussian noise, band-limited by a separable Gaussian blur, renormalised to the
-        /// requested standard deviation.
-        ///
-        /// The renormalisation is analytic and not measured: smoothing white noise with a
-        /// normalised kernel w multiplies its standard deviation by the kernel's root sum of
-        /// squares, and separably in two dimensions that is (sum w^2) rather than its root. Dividing
-        /// it out restores exactly the requested width, which is what lets the caller state the
-        /// field's power as a physical quantity instead of a tuning parameter.
-        /// </summary>
+        // White Gaussian noise, band-limited by a separable Gaussian blur, renormalised to the requested
+        // standard deviation. The renormalisation is analytic and not measured: smoothing white noise with a
+        // normalised kernel w multiplies its standard deviation by the kernel's root sum of squares, and
+        // separably in two dimensions that is (sum w^2) rather than its root. Dividing it out restores exactly
+        // the requested width, which is what lets the caller state the field's power as a physical quantity
+        // instead of a tuning parameter.
         private static void FillBandLimited(
             float[] field, int width, int height, double kernelSigma, double targetSigma, Random rng)
         {

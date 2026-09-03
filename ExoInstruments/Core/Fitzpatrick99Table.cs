@@ -2,48 +2,38 @@ using System;
 
 namespace ExoInstruments.Core
 {
-    /// <summary>
-    /// Fitzpatrick (1999, PASP 111, 63) A(lambda)/A(V), tabulated.
-    ///
-    /// GENERATED FILE. Produced by tools/dust-crossvalidation/generate_f99_table.py from the
-    /// dust_extinction package's reference implementation of the published law; do not edit by
-    /// hand, regenerate. That directory's harness checks this table against the same reference,
-    /// so a drift between them is caught rather than assumed away.
-    ///
-    /// WHY IT IS A TABLE. F99 defines its optical and near-infrared curve as a cubic spline through
-    /// published anchor points, not as a formula. Reimplementing the spline construction would be a
-    /// way to introduce an error that looks like physics; sampling the law on a grid finer than any
-    /// structure it contains is the law, not an approximation of it. Same treatment, and the same
-    /// reason, as FilterCurves carrying ESO's measured transmissions rather than assuming top-hats.
-    ///
-    /// The grid is uniform in wavenumber x = 1/lambda (inverse microns), which is the variable the
-    /// spline is built in. Interpolation is bilinear in (x, R_V), and its error is measured rather
-    /// than asserted: see the harness.
-    ///
-    /// Generated from dust_extinction 1.5, grid x = 0.3 to 3.4 step 0.01 inverse
-    /// microns, R_V = 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0.
-    /// </summary>
+    // Fitzpatrick (1999, PASP 111, 63) A(lambda)/A(V), tabulated. GENERATED FILE. Produced by tools/dust-
+    // crossvalidation/generate_f99_table.py from the dust_extinction package's reference implementation of the
+    // published law; do not edit by hand, regenerate. That directory's harness checks this table against the
+    // same reference, so a drift between them is caught rather than assumed away. WHY IT IS A TABLE. F99
+    // defines its optical and near-infrared curve as a cubic spline through published anchor points, not as a
+    // formula. Reimplementing the spline construction would be a way to introduce an error that looks like
+    // physics; sampling the law on a grid finer than any structure it contains is the law, not an approximation
+    // of it. Same treatment, and the same reason, as FilterCurves carrying ESO's measured transmissions rather
+    // than assuming top-hats. The grid is uniform in wavenumber x = 1/lambda (inverse microns), which is the
+    // variable the spline is built in. Interpolation is bilinear in (x, R_V), and its error is measured rather
+    // than asserted: see the harness. Generated from dust_extinction 1.5, grid x = 0.3 to 3.4 step 0.01 inverse
+    // microns, R_V = 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7,
+    // 3.8, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8,
+    // 5.9, 6.0.
     internal static class Fitzpatrick99Table
     {
-        /// <summary>Wavenumber of the first column, inverse microns.</summary>
+        // Wavenumber of the first column, inverse microns.
         private const double XMin = 0.3;
 
-        /// <summary>Wavenumber step between columns, inverse microns.</summary>
+        // Wavenumber step between columns, inverse microns.
         private const double XStep = 0.01;
 
-        /// <summary>Number of wavenumber columns.</summary>
+        // Number of wavenumber columns.
         private const int XCount = 311;
 
-        /// <summary>R_V values the rows are tabulated at. Ascending, and not evenly spaced: 3.1 is included exactly because it is the Galactic average every dust map is calibrated to.</summary>
+        // R_V values the rows are tabulated at. Ascending, and not evenly spaced: 3.1 is included exactly
+        // because it is the Galactic average every dust map is calibrated to.
         private static readonly double[] RvValues = { 2, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6 };
 
-        /// <summary>
-        /// A(lambda)/A(V), row-major as [R_V index * XCount + x index].
-        ///
-        /// Flat rather than jagged on purpose: this is read once per source per capture on a
-        /// background thread, and a flat array keeps that one bounds-checked indexing operation
-        /// rather than two dereferences.
-        /// </summary>
+        // A(lambda)/A(V), row-major as [R_V index * XCount + x index]. Flat rather than jagged on purpose: this
+        // is read once per source per capture on a background thread, and a flat array keeps that one bounds-
+        // checked indexing operation rather than two dereferences.
         private static readonly double[] Kappa =
         {
             // R_V = 2.0
@@ -2221,13 +2211,10 @@ namespace ExoInstruments.Core
             1.370709936, 1.372529293, 1.374360157, 1.376202888, 1.378057849
         };
 
-        /// <summary>
-        /// A(lambda)/A(V) at the given wavelength and R_V, bilinear in (x, R_V).
-        ///
-        /// Clamps in R_V rather than extrapolating: outside 2.0 to 6.0 there is no observed
-        /// Galactic sight line to extrapolate toward. Returns 0 outside the wavelength grid, which
-        /// InterstellarExtinction reads as "not modelled"; see the range discussion there.
-        /// </summary>
+        // A(lambda)/A(V) at the given wavelength and R_V, bilinear in (x, R_V). Clamps in R_V rather than
+        // extrapolating: outside 2.0 to 6.0 there is no observed Galactic sight line to extrapolate toward.
+        // Returns 0 outside the wavelength grid, which InterstellarExtinction reads as "not modelled"; see the
+        // range discussion there.
         internal static double Evaluate(double wavelengthMeters, double rv)
         {
             if (!(wavelengthMeters > 0.0)) return 0.0;

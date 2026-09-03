@@ -35,7 +35,8 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class Airglow
     {
-        /// <summary>Mean radius of the Earth, kilometres. IUGG mean radius; the van Rhijn function needs only the ratio to the layer height.</summary>
+        // Mean radius of the Earth, kilometres. IUGG mean radius; the van Rhijn function needs only the ratio
+        // to the layer height.
         private const double EarthRadiusKm = 6371.0;
 
         /// <summary>
@@ -57,7 +58,7 @@ namespace ExoInstruments.Core
         /// <summary>The [O I] red doublet, air wavelengths in nanometres, which get the higher layer.</summary>
         public const double RedLine1Nm = 630.030;
         public const double RedLine2Nm = 636.378;
-        /// <summary>Half-width in nanometres within which a wavelength counts as part of the red doublet.</summary>
+        // Half-width in nanometres within which a wavelength counts as part of the red doublet.
         private const double RedLineWindowNm = 0.6;
 
         /// <summary>
@@ -165,24 +166,19 @@ namespace ExoInstruments.Core
             return weight > 0.0 ? total / weight * BandNormalisation : 0.0;
         }
 
-        /// <summary>
-        /// Multiplies the throughput-weighted mean density back into a brightness. One, because
-        /// dividing the integral by the integral of the throughput already leaves a density, and the
-        /// caller wants the total in the band: the factor is here so the intent is written down
-        /// rather than implied by the absence of one.
-        /// </summary>
+        // Multiplies the throughput-weighted mean density back into a brightness. One, because dividing the
+        // integral by the integral of the throughput already leaves a density, and the caller wants the total
+        // in the band: the factor is here so the intent is written down rather than implied by the absence of
+        // one.
         private const double BandNormalisation = 1.0;
 
         // ------------------------------------------------------------------ V surface brightness
 
-        /// <summary>
-        /// Johnson-Cousins V passband, Bessell (1990, PASP 102, 1181) Table 2, 470-700 nm at 10 nm,
-        /// normalised to unit peak. Tabulated here because the airglow's V surface brightness is a
-        /// band integral and the mod's monochromatic V zero point cannot take one alone. The
-        /// transcription is not trusted: tools/airglow-tests compares it point by point against the
-        /// speclite package's own Bessell V curve, and its effective wavelength and width against
-        /// the published 551 and 88 nm.
-        /// </summary>
+        // Johnson-Cousins V passband, Bessell (1990, PASP 102, 1181) Table 2, 470-700 nm at 10 nm, normalised
+        // to unit peak. Tabulated here because the airglow's V surface brightness is a band integral and the
+        // mod's monochromatic V zero point cannot take one alone. The transcription is not trusted:
+        // tools/airglow-tests compares it point by point against the speclite package's own Bessell V curve,
+        // and its effective wavelength and width against the published 551 and 88 nm.
         private static readonly double[] BessellV =
         {
             0.000, 0.030, 0.163, 0.458, 0.780, 0.967, 1.000, 0.973,
@@ -202,7 +198,7 @@ namespace ExoInstruments.Core
             return BessellV[i] * (1.0 - f) + BessellV[i + 1] * f;
         }
 
-        /// <summary>Steradians in one square arcsecond.</summary>
+        // Steradians in one square arcsecond.
         private const double SrPerArcsec2 = 2.35044305391e-11;
 
         /// <summary>

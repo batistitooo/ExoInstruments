@@ -21,12 +21,15 @@ namespace ExoInstruments.Core
         private const double MaxPlausibleAmplitudeFactor = 8.0;
 
         // Periods near an integer multiple of the sampling cadence make sin(ωt_i) vanish at
-        // every sample — the fit goes degenerate and produces phantom high-SNR signals. Skip them.
-        // (Verified with a 51 Peg b simulation: real period at SNR ~110, phantom at 2× cadence SNR ~33.)
+        // every sample; the fit goes degenerate and produces phantom high-SNR signals. Skip them.
+        // (Verified with a 51 Peg b simulation: real period at SNR ~110, phantom at 2* cadence SNR ~33.)
         private const double CadenceAliasToleranceFraction = 0.03;
         private const int MaxCadenceAliasMultiple = 6;
 
-        /// <summary>Minimum baseline before a given period is testable — mirrors the effectiveMaxPeriodDays/2 clamp in Detect. Lets the GUI estimate observing time before the player commits.</summary>
+        /// <summary>
+        /// Minimum baseline before a given period is testable; mirrors the effectiveMaxPeriodDays/2 clamp in
+        /// Detect. Lets the GUI estimate observing time before the player commits.
+        /// </summary>
         public static double EstimateRequiredBaselineDays(double catalogPeriodDays, double cadenceSeconds)
         {
             double periodBaseline = catalogPeriodDays > 0 ? catalogPeriodDays * 2.0 : 0.0;
@@ -189,7 +192,7 @@ namespace ExoInstruments.Core
             return stages;
         }
 
-        /// <summary>Prior detection whose period this one sits within 5% of a 1:1–3:1 ratio with; null otherwise.</summary>
+        // Prior detection whose period this one sits within 5% of a 1:1 to 3:1 ratio with; null otherwise.
         private static double? FindHarmonicParentPeriodDays(double periodDays, List<RvDetectionStage> priorStages)
         {
             if (periodDays <= 0) return null;
@@ -205,7 +208,8 @@ namespace ExoInstruments.Core
             return null;
         }
 
-        /// <summary>See CadenceAliasToleranceFraction. medianCadenceSeconds &lt;= 0 (fewer than 2 samples) disables the guard.</summary>
+        // See CadenceAliasToleranceFraction. medianCadenceSeconds <= 0 (fewer than 2 samples) disables the
+        // guard.
         private static bool IsNearCadenceAlias(double periodSec, double medianCadenceSeconds)
         {
             if (medianCadenceSeconds <= 0) return false;
@@ -217,7 +221,8 @@ namespace ExoInstruments.Core
             return false;
         }
 
-        /// <summary>Samples arrive in increasing Ut order; median of consecutive gaps is robust to any stray irregular spacing. Mirrors TransitDetector's helper of the same name.</summary>
+        // Samples arrive in increasing Ut order; median of consecutive gaps is robust to any stray irregular
+        // spacing. Mirrors TransitDetector's helper of the same name.
         private static double ComputeMedianCadenceSeconds(List<RvSample> samples)
         {
             if (samples.Count < 2) return 0.0;
@@ -230,7 +235,7 @@ namespace ExoInstruments.Core
             return gaps.Length % 2 == 0 ? (gaps[mid - 1] + gaps[mid]) / 2.0 : gaps[mid];
         }
 
-        /// <summary>Least-squares fit of v(t) = A*cos(wt) + B*sin(wt) + C via the 3x3 normal equations (Cramer's rule).</summary>
+        // Least-squares fit of v(t) = A*cos(wt) + B*sin(wt) + C via the 3x3 normal equations (Cramer's rule).
         private static bool FitSinusoid(List<RvSample> samples, double omega, out double a, out double b, out double c, out double residualStd)
         {
             a = b = c = 0.0;

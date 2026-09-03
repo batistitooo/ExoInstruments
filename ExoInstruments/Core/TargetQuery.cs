@@ -155,7 +155,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>"mag:&lt;9", "mag:&gt;12", or "mag:9" read as "no fainter than 9", which is what an observer means.</summary>
+        // "mag:<9", "mag:>12", or "mag:9" read as "no fainter than 9", which is what an observer means.
         private static bool ApplyMagnitude(TargetQuery query, string value)
         {
             if (!SplitComparison(value, out char comparison, out double number)) return false;
@@ -164,7 +164,8 @@ namespace ExoInstruments.Core
             return true;
         }
 
-        /// <summary>"alt:&gt;30" or "alt:30", both meaning at least thirty degrees up. "alt:&lt;x" is refused: nobody asks for targets that are lower.</summary>
+        // "alt:>30" or "alt:30", both meaning at least thirty degrees up. "alt:<x" is refused: nobody asks for
+        // targets that are lower.
         private static bool ApplyAltitude(TargetQuery query, string value)
         {
             if (!SplitComparison(value, out char comparison, out double number)) return false;

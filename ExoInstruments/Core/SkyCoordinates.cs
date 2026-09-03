@@ -191,14 +191,14 @@ namespace ExoInstruments.Core
         private static double DegToRad(double deg) => deg * Math.PI / 180.0;
         private static double RadToDeg(double rad) => rad * 180.0 / Math.PI;
 
-        /// <summary>Wraps to [0, 360).</summary>
+        // Wraps to [0, 360).
         private static double NormalizeDegrees(double deg)
         {
             double d = deg % 360.0;
             return d < 0 ? d + 360.0 : d;
         }
 
-        /// <summary>Wraps to (-180, 180]; keeps the hour angle small near the meridian.</summary>
+        // Wraps to (-180, 180]; keeps the hour angle small near the meridian.
         private static double NormalizeSigned(double deg)
         {
             double d = NormalizeDegrees(deg);

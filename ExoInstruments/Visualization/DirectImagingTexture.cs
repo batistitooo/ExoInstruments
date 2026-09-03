@@ -70,7 +70,11 @@ namespace ExoInstruments.Visualization
             public double FovArcsec;
         }
 
-        /// <summary>Pure computation — safe to call off the main thread. The 400×400 raster with per-pixel transcendentals is the mod's most expensive refresh; running it in a background Task (see ExoInstrumentsGUI's async refresh) keeps it off the game frame.</summary>
+        /// <summary>
+        /// Pure computation, safe to call off the main thread. The 400x400 raster with per-pixel
+        /// transcendentals is the mod's most expensive refresh; running it in a background Task (see
+        /// ExoInstrumentsGUI's async refresh) keeps it off the game frame.
+        /// </summary>
         public static PixelResult ComputePixels(StarTarget star, DirectImagingAssessment assessment, double effectiveExposureSeconds, int size)
         {
             double thetaDiff = assessment.DiffractionLimitArcsec;
@@ -88,7 +92,7 @@ namespace ExoInstruments.Visualization
                 : 12.0 * lambdaOverD;
             double arcsecPerPixel = fovArcsec / size;
 
-            // Session just opened (dome closed, daytime): only readout noise and hot pixels — no photons yet.
+            // Session just opened (dome closed, daytime): only readout noise and hot pixels, no photons yet.
             if (effectiveExposureSeconds < MinStarlightExposureSeconds)
             {
                 var darkPixels = new Color[size * size];
@@ -177,7 +181,7 @@ namespace ExoInstruments.Visualization
 
                     double theta = Math.Atan2(dys, dxs);
 
-                    // Speckle halo: fades as sqrt(t_eff) — what visually uncovers the planet over a session.
+                    // Speckle halo: fades as sqrt(t_eff), which is what visually uncovers the planet over a session.
                     // cos^2 modulation = the classic AO wind-butterfly (residuals pile along the wind axis).
                     double floorHere = DirectImagingSimulator.SpeckleFloorAtSeparation(assessment.BaseFloor5Sigma1Hr, Math.Max(r, lambdaOverD));
                     double sigmaNow = floorHere / 5.0 / sqrtHours;
@@ -245,10 +249,8 @@ namespace ExoInstruments.Visualization
             return tex;
         }
 
-        /// <summary>
-        /// Log stretch over LogStretchDecades decades, then black -> tint -> white:
-        /// the source's blackbody color carries the midtones, hot cores burn to white.
-        /// </summary>
+        // Log stretch over LogStretchDecades decades, then black -> tint -> white: the source's blackbody color
+        // carries the midtones, hot cores burn to white.
         private static Color MapIntensityTinted(double intensity, double r, double g, double b)
         {
             float v = LogStretch(intensity);
@@ -268,7 +270,8 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Neutral black-orange-white heat ramp (near-IR imaging convention), kept for stars with no measured color.</summary>
+        // Neutral black-orange-white heat ramp (near-IR imaging convention), kept for stars with no measured
+        // color.
         private static Color MapIntensityHeatRamp(double intensity)
         {
             float v = LogStretch(intensity);
@@ -290,12 +293,9 @@ namespace ExoInstruments.Visualization
             return Mathf.Clamp01((float)((logI + LogStretchDecades) / LogStretchDecades));
         }
 
-        /// <summary>
-        /// Uncorrected bad detector pixels: fixed positions per target (the same
-        /// physical detector would put them at fixed positions per instrument, but
-        /// per-target keeps each frame visually distinct). Rendered neutral white;
-        /// they're electronics, not light, so no false-color tint.
-        /// </summary>
+        // Uncorrected bad detector pixels: fixed positions per target (the same physical detector would put
+        // them at fixed positions per instrument, but per-target keeps each frame visually distinct). Rendered
+        // neutral white; they're electronics, not light, so no false-color tint.
         private static void DrawHotPixels(Color[] pixels, int size, int seed)
         {
             var hot = new Color(0.95f, 0.95f, 0.95f, 1f);
@@ -308,7 +308,8 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Faint marker ring at the diffraction limit, centered on the star's actual position; inside it, nothing is resolvable no matter the exposure.</summary>
+        // Faint marker ring at the diffraction limit, centered on the star's actual position; inside it,
+        // nothing is resolvable no matter the exposure.
         private static void DrawDiffractionLimitRing(Color[] pixels, int size, double centerX, double centerY, double radiusPixels)
         {
             var ringColor = new Color(0.3f, 0.6f, 0.7f, 1f);
@@ -335,13 +336,14 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Deterministic [0,1) from a string, per-target angles and offsets.</summary>
+        // Deterministic [0,1) from a string, per-target angles and offsets.
         private static double Hash01(string name)
         {
             return (DeterministicSeed(name) % 100000) / 100000.0;
         }
 
-        /// <summary>Deterministic per-pixel noise in [0,1), a fixed speckle pattern per target, so refreshes don't strobe.</summary>
+        // Deterministic per-pixel noise in [0,1), a fixed speckle pattern per target, so refreshes don't
+        // strobe.
         private static double HashNoise01(int x, int y, int seed)
         {
             unchecked

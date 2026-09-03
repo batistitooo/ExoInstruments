@@ -47,8 +47,8 @@ namespace ExoInstruments.Core
     /// PHOTOMETRIC PRECISION: every transit instrument here still uses the fitted magnitude
     /// scaling (InstrumentSpec.EstimatePrecision), because none of them yet carries a
     /// PhotometricDetector. The machinery to compute precision from the real electron budget
-    /// instead — the CCD equation of Merline &amp; Howell (1995) over the same integrated bandpass,
-    /// sky model and extinction the imaging half already uses — is implemented in CcdEquation and
+    /// instead (the CCD equation of Merline &amp; Howell (1995) over the same integrated bandpass,
+    /// sky model and extinction the imaging half already uses) is implemented in CcdEquation and
     /// TransitPhotometry, and switches on per instrument the moment a complete detector block is
     /// added here. It stays off until then by design: PhotometricDetector explains why a partly
     /// sourced block is worse than the empirical relation it would replace, and MissingFields()
@@ -370,7 +370,7 @@ namespace ExoInstruments.Core
             Name = "RedCat51",
             DisplayName = "William Optics RedCat 51 (Wide-Field Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            // Exoplanet-detection fields zeroed out; this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,
@@ -403,7 +403,7 @@ namespace ExoInstruments.Core
             Name = "RC20",
             DisplayName = "PlaneWave RC20 (Amateur Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            // Exoplanet-detection fields zeroed out; this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,
@@ -434,7 +434,7 @@ namespace ExoInstruments.Core
             Name = "CDK1000",
             DisplayName = "PlaneWave CDK1000 (Research Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            // Exoplanet-detection fields zeroed out; this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,
@@ -466,7 +466,7 @@ namespace ExoInstruments.Core
             Name = "VLT FORS2",
             DisplayName = "VLT UT1 + FORS2 (Flagship Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            // Exoplanet-detection fields zeroed out; this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,
@@ -500,7 +500,7 @@ namespace ExoInstruments.Core
             Name = "VLT SPHERE",
             DisplayName = "VLT UT3 + SPHERE (Adaptive-Optics Astrograph)",
             Method = DetectionMethod.SolarSystemPhotography,
-            // Exoplanet-detection fields zeroed out — this instrument doesn't do exoplanet science.
+            // Exoplanet-detection fields zeroed out; this instrument doesn't do exoplanet science.
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
             PrecisionExponent = 0.0,

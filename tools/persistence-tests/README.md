@@ -18,7 +18,7 @@ pipeline hold state between frames. The full account is `TECHNICAL_REFERENCE.md`
 
 **A. Capture has the shape the measurements have.** Every published measurement reports residual
 images following *saturated* sources and reports nothing below that, so capture is thresholded
-rather than proportional — a proportional model would put a ghost under every source in the frame.
+rather than proportional, a proportional model would put a ghost under every source in the frame.
 And the interface has a finite density of states, so capture saturates: a pixel driven to 100× full
 well does not trap 100× the charge, which is what the WFPC2 handbook's behaviour after exactly such
 an overexposure requires. Both are asserted, along with the degenerate cases returning zero rather
@@ -55,7 +55,7 @@ being off stay distinct:
   result, not an absence of one, so it is carried as its own flag rather than as another `NaN`, and
   the harness asserts exactly one instrument carries it and that it carries no amplitude beside it.
 - **Everything else is unpublished.** The IMX492 (a pinned-photodiode CMOS, whose architecture makes
-  lag small by construction — but an architectural expectation is not a measurement), FORS2's MIT/LL
+  lag small by construction, but an architectural expectation is not a measurement), FORS2's MIT/LL
   CCID-20, and ZIMPOL's CCDs.
 
 A parameter appearing on any instrument without a citation should break section D. That is what it is

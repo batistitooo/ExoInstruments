@@ -5,7 +5,7 @@ The constellation a target sits in, cross-validated against **astropy**.
 ## Why
 
 Naming a constellation looks like a table lookup and is really a frame change. Delporte's
-boundaries — adopted by the IAU in 1928, published 1930, unchanged since — are lines of constant
+boundaries, adopted by the IAU in 1928, published 1930, unchanged since, are lines of constant
 right ascension and declination **in the mean equinox of B1875 and in no other frame**. In J2000
 they are slanted curves. So the lookup is:
 
@@ -18,7 +18,7 @@ J2000 (FK5/ICRS)
 ```
 
 Get the frame change wrong and the answer is right in the middle of every constellation and wrong
-along every edge — wrong exactly where it is interesting, and never obviously wrong at all.
+along every edge, wrong exactly where it is interesting, and never obviously wrong at all.
 
 ## The three references
 
@@ -26,7 +26,7 @@ along every edge — wrong exactly where it is interesting, and never obviously 
 |---|---|---|
 | 1 | astropy `FK4NoETerms(equinox=B1875)` | the frame change itself, the **same** chain, so this is an arithmetic check |
 | 2 | Roman's own worked examples in the VI/42 ReadMe | the Newcomb precession and the table scan, against the table author's own answers |
-| 3 | astropy `get_constellation` | the end-to-end answer, by a **different** chain — see below |
+| 3 | astropy `get_constellation` | the end-to-end answer, by a **different** chain, see below |
 
 Reference 3 is deliberately not the same route: `get_constellation` precesses with the modern IAU
 2006 model to the Julian date of B1875 rather than going through FK4, which its own docstring calls
@@ -52,7 +52,7 @@ smallest, are the ones that would go first.
 
 The 107 disagreements are not errors on either side. Every one of them is a position closer to a
 boundary than the two frame realisations are to each other, which is to say a position where "which
-constellation" is genuinely ambiguous at the precision the published table carries — its right
+constellation" is genuinely ambiguous at the precision the published table carries; its right
 ascensions are quantised to 0.0001 h, itself 1.5 arcsec at the equator.
 
 ## What this does NOT establish

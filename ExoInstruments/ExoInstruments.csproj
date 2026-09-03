@@ -3,7 +3,7 @@
     <!--
         OutputPath and the Reference HintPaths below are intentionally left unset here.
         Each developer's local KSP install path is machine-specific (and differs between
-        macOS and Windows setups) — set it in a local ExoInstruments.csproj.user file,
+        macOS and Windows setups) - set it in a local ExoInstruments.csproj.user file,
         which is git-ignored. See ExoInstruments.csproj.user.example for the template.
     -->
     <PropertyGroup>
@@ -142,8 +142,8 @@
         runtime) to GameData/ExoInstruments/PluginData/ on every build. Without this the
         mod builds and loads but has zero targets to observe.
 
-        Only the two catalogues the repo carries move here. The packed sky products —
-        GaiaStarCatalog.starcat, DustMap.dustmap, HalphaMap.emission, GalaxyCatalog.galcat —
+        Only the two catalogues the repo carries move here. The packed sky products -
+        GaiaStarCatalog.starcat, DustMap.dustmap, HalphaMap.emission, GalaxyCatalog.galcat -
         are built by tools/ straight into the install and are not in the repo, so this
         never has an opinion about them and never removes them.
     -->
@@ -228,7 +228,7 @@
         this target is the only thing that produces an artefact someone can be handed.
 
         The layout is what both audiences already expect. A player unzips and drags GameData
-        onto the KSP folder — no file to move, no folder to create, no step to get wrong.
+        onto the KSP folder - no file to move, no folder to create, no step to get wrong.
         CKAN reads ExoInstruments.netkan, which says `find: ExoInstruments, install_to:
         GameData`, and finds that directory at GameData/ExoInstruments/ inside the zip.
 
@@ -236,8 +236,8 @@
         developer's half-finished export or hand-copied file cannot leak into a release.
 
         What deliberately does NOT ship: the four packed sky products. They are 138 MB of
-        someone else's published survey data, every one of them optional, and README.md —
-        included in the zip for this reason — has the script and the command for each. The
+        someone else's published survey data, every one of them optional, and README.md -
+        included in the zip for this reason - has the script and the command for each. The
         mod loads and photographs the solar system without them and says in the log which
         ones it did not find.
 
@@ -292,6 +292,6 @@
                       DestinationFile="$(DistDir)$(PackageZipName)"
                       Overwrite="true" />
 
-        <Message Importance="high" Text="Packaged $(DistDir)$(PackageZipName) — unzip over the KSP folder, or feed it to a GitHub release for CKAN." />
+        <Message Importance="high" Text="Packaged $(DistDir)$(PackageZipName) - unzip over the KSP folder, or feed it to a GitHub release for CKAN." />
     </Target>
 </Project>

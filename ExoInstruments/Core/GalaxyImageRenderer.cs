@@ -31,7 +31,8 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class GalaxyImageRenderer
     {
-        /// <summary>Ceiling on the supersampling per axis inside one frame pixel. 8x8 covers a frame pixel spanning 64 map pixels, which is past any instrument in the roster.</summary>
+        // Ceiling on the supersampling per axis inside one frame pixel. 8x8 covers a frame pixel spanning 64
+        // map pixels, which is past any instrument in the roster.
         private const int MaxSupersample = 8;
 
         /// <summary>

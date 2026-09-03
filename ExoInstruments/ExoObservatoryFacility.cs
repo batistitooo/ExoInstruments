@@ -97,13 +97,10 @@ namespace ExoInstruments
             GameEvents.onLevelWasLoaded.Add(HandleLevelWasLoaded);
         }
 
-        /// <summary>
-        /// Injects a PSystemSetup.SpaceCenterFacility entry named FacilityName;
-        /// SpaceCenterBuilding.SetupFacility() looks a building's facility up by
-        /// this name via PSystemSetup.GetSpaceCenterFacility() and aborts its
-        /// whole setup coroutine (colliders, renderers, highlight) if it's
-        /// missing, which is what silently kept the observatory invisible.
-        /// </summary>
+        // Injects a PSystemSetup.SpaceCenterFacility entry named FacilityName;
+        // SpaceCenterBuilding.SetupFacility() looks a building's facility up by this name via
+        // PSystemSetup.GetSpaceCenterFacility() and aborts its whole setup coroutine (colliders, renderers,
+        // highlight) if it's missing, which is what silently kept the observatory invisible.
         private void RegisterSpaceCenterFacility()
         {
             var trackingStation = PSystemSetup.Instance.GetSpaceCenterFacility("TrackingStation");
@@ -129,7 +126,7 @@ namespace ExoInstruments
             PSystemSetup.Instance.SpaceCenterFacilities = newFacilities;
         }
 
-        /// <summary>Clones a real UpgradeableFacility and gives it our two levels. Runs once, before any scene renders.</summary>
+        // Clones a real UpgradeableFacility and gives it our two levels. Runs once, before any scene renders.
         private void BuildFacility()
         {
             PSystemManager.Instance.OnPSystemReady.Remove(BuildFacility);
@@ -267,15 +264,11 @@ namespace ExoInstruments
         // building; that's just a starting-point guess here, not measured for ours.
         private static readonly Vector3 GroundBaseOffset = new Vector3(15f, -9f, -10f);
 
-        /// <summary>
-        /// Clones the ground patch mesh every stock KSC facility sits on (a flat,
-        /// terrain-blending base) from Mission Control's own prefab, since it
-        /// isn't a separate asset on disk anywhere; it's baked into the
-        /// compiled KSC scene. Same technique ResearchBodies uses for its own
-        /// Observatory: find Mission Control's UpgradeableFacility in memory,
-        /// grab the child tagged "KSC_Mission_Control_Grounds" off its level-0
-        /// facilityPrefab, and clone that.
-        /// </summary>
+        // Clones the ground patch mesh every stock KSC facility sits on (a flat, terrain-blending base) from
+        // Mission Control's own prefab, since it isn't a separate asset on disk anywhere; it's baked into the
+        // compiled KSC scene. Same technique ResearchBodies uses for its own Observatory: find Mission
+        // Control's UpgradeableFacility in memory, grab the child tagged "KSC_Mission_Control_Grounds" off its
+        // level-0 facilityPrefab, and clone that.
         private void AddGroundBase(GameObject targetPrefab, Transform attachPosition)
         {
             var missionControl = Resources.FindObjectsOfTypeAll<Upgradeables.UpgradeableFacility>()
@@ -315,7 +308,8 @@ namespace ExoInstruments
             LogDebug($"AddGroundBase: cloned '{groundSource.name}' from MissionControl, parented under '{targetPrefab.name}' at localPosition={GroundBaseOffset}.");
         }
 
-        /// <summary>Once real stock buildings exist in the scene (so we have a tooltip prefab to borrow), attach the clickable/hoverable component. Idempotent; runs at most once.</summary>
+        // Once real stock buildings exist in the scene (so we have a tooltip prefab to borrow), attach the
+        // clickable/hoverable component. Idempotent; runs at most once.
         private void HandleLevelWasLoaded(GameScenes scene)
         {
             if (scene != GameScenes.SPACECENTER) return;
@@ -460,15 +454,12 @@ namespace ExoInstruments
         private const string LocalAnimationName = "LocalAnimation";
         private const string DomeOpenClipName = "domeOpen";
 
-        /// <summary>
-        /// Finds the dome/telescope/pivot nodes inside the spawned model and attaches
-        /// ExoObservatoryTelescopeTracker, which continuously points them at
-        /// ExoObservatoryTelescopeTracker.TrackedBody (set from ExoInstrumentsGUI
-        /// whenever the RC20 photography target changes). Degrades gracefully: azimuth
-        /// tracking needs dome+Telescope+CenterVerticalAxis; altitude tracking
-        /// additionally needs altitude_sensitive+CenterHorizontalAxis; missing pieces
-        /// just get skipped (logged), not a hard failure.
-        /// </summary>
+        // Finds the dome/telescope/pivot nodes inside the spawned model and attaches
+        // ExoObservatoryTelescopeTracker, which continuously points them at
+        // ExoObservatoryTelescopeTracker.TrackedBody (set from ExoInstrumentsGUI whenever the RC20 photography
+        // target changes). Degrades gracefully: azimuth tracking needs dome+Telescope+CenterVerticalAxis;
+        // altitude tracking additionally needs altitude_sensitive+CenterHorizontalAxis; missing pieces just get
+        // skipped (logged), not a hard failure.
         private void SetupTelescopeTracking()
         {
             var facilityInstance = _facility.CurrentLevel?.facilityInstance;
@@ -536,12 +527,9 @@ namespace ExoInstruments
             return null;
         }
 
-        /// <summary>
-        /// The stock "[BuildingPicker]: Facility Name Mismatch" error means
-        /// BuildingPicker.faciltyInfos has no entry for our facility name;
-        /// clone the ResearchAndDevelopment entry's sprite set rather than
-        /// requiring our own 4-quadrant icon art, and append it.
-        /// </summary>
+        // The stock "[BuildingPicker]: Facility Name Mismatch" error means BuildingPicker.faciltyInfos has no
+        // entry for our facility name; clone the ResearchAndDevelopment entry's sprite set rather than
+        // requiring our own 4-quadrant icon art, and append it.
         private void RegisterBuildingPicker()
         {
             var picker = FindObjectOfType<KSP.UI.Screens.SpaceCenter.BuildingPicker>();
@@ -582,13 +570,10 @@ namespace ExoInstruments
             LogDebug($"BuildingPicker.ConstructBuildingList() returned {constructed}.");
         }
 
-        /// <summary>
-        /// Live scale/rotation tuning via the debug console (Alt+F12 -> Console,
-        /// or backtick), so scale/orientation can be dialed in with a rebuild+
-        /// restart-free feedback loop instead of re-exporting the .mu each time.
-        /// Neither persists; re-run after each KSP restart until the numbers
-        /// are baked back into the .mu's own transform.
-        /// </summary>
+        // Live scale/rotation tuning via the debug console (Alt+F12 -> Console, or backtick), so
+        // scale/orientation can be dialed in with a rebuild+ restart-free feedback loop instead of re-exporting
+        // the .mu each time. Neither persists; re-run after each KSP restart until the numbers are baked back
+        // into the .mu's own transform.
         private void RegisterTuningConsoleCommands()
         {
             DebugScreenConsole.AddConsoleCommand(
@@ -642,7 +627,8 @@ namespace ExoInstruments
             return sb.ToString();
         }
 
-        /// <summary>Same lookup ResearchBodies uses: scan every PQSCity in the scene for one that has a "SpaceCenter" child; only the KSC's does.</summary>
+        // Same lookup ResearchBodies uses: scan every PQSCity in the scene for one that has a "SpaceCenter"
+        // child; only the KSC's does.
         private static Transform FindKscSpaceCenterTransform()
         {
             var pqsCities = Resources.FindObjectsOfTypeAll<PQSCity>();
@@ -665,7 +651,10 @@ namespace ExoInstruments
     /// </summary>
     public class ExoObservatoryBuilding : SpaceCenterBuilding
     {
-        /// <summary>Static because this building outlives any single SpaceCentre-scene addon instance (it's DontDestroyOnLoad); ExoInstrumentsGUI subscribes/unsubscribes each scene load.</summary>
+        /// <summary>
+        /// Static because this building outlives any single SpaceCentre-scene addon instance (it's
+        /// DontDestroyOnLoad); ExoInstrumentsGUI subscribes/unsubscribes each scene load.
+        /// </summary>
         public static event Action Clicked;
 
         public override bool IsOpen()
@@ -803,7 +792,10 @@ namespace ExoInstruments
     /// </summary>
     public class ExoObservatoryTelescopeTracker : MonoBehaviour
     {
-        /// <summary>Set from ExoInstrumentsGUI wherever the photography target changes. Null = idle/parked, or a fixed sky position (see TrackedAltDeg).</summary>
+        /// <summary>
+        /// Set from ExoInstrumentsGUI wherever the photography target changes. Null = idle/parked, or a fixed
+        /// sky position (see TrackedAltDeg).
+        /// </summary>
         public static CelestialBody TrackedBody;
 
         /// <summary>Where a fixed equatorial target currently sits, when TrackedBody is null. Refreshed by the GUI; null = nothing to track.</summary>
@@ -816,29 +808,19 @@ namespace ExoInstruments
         // AzimuthOffsetDeg and an AltitudeOffsetDeg here, plus an axis sign flag;
         // each was fitted to one observed symptom and broke another.
 
-        /// <summary>
-        /// The tube's optical (pointing) axis expressed in altitude_sensitive's own
-        /// local frame. Model-specific to ExoObservatoryLVL1.mu; re-measure if the
-        /// tube is re-exported.
-        ///
-        /// Identified from logged altitudes of all three local axes while the tilt
-        /// was driven by a known angle: forward stayed pinned at altitude 0 (that's
-        /// the trunnion), right tracked the applied angle 1:1, and up tracked
-        /// 90-minus-that. Azimuth cannot tell right from up here; every axis in the
-        /// tilt plane shares the same azimuth, which is why an earlier reading of
-        /// "-right, because its azimuth matches" was wrong. Altitude discriminates:
-        /// aiming -right at a target at the zenith left the visible barrel on the
-        /// horizon (90 - 90), so the barrel lies in the up direction.
-        ///
-        /// It is not exactly up, though: logged at rest, up sits dead on the local
-        /// vertical (dot 1.000), which would put the barrel at the zenith when
-        /// parked, but the barrel is modelled at 54 deg above the horizon (measured
-        /// in Blender), i.e. mounted TubeOpticalTiltFromUpDeg away from up inside the
-        /// tilt plane, toward the side the scope looks out of. Aiming up itself
-        /// therefore left a constant pointing error of about that size across the
-        /// whole track. Flip the sign of TubeOpticalTiltFromUpDeg if the tube ends up
-        /// off by twice this in the other direction.
-        /// </summary>
+        // The tube's optical (pointing) axis expressed in altitude_sensitive's own local frame. Model-specific
+        // to ExoObservatoryLVL1.mu; re-measure if the tube is re-exported. Identified from logged altitudes of
+        // all three local axes while the tilt was driven by a known angle: forward stayed pinned at altitude 0
+        // (that's the trunnion), right tracked the applied angle 1:1, and up tracked 90-minus-that. Azimuth
+        // cannot tell right from up here; every axis in the tilt plane shares the same azimuth, which is why an
+        // earlier reading of "-right, because its azimuth matches" was wrong. Altitude discriminates: aiming
+        // -right at a target at the zenith left the visible barrel on the horizon (90 - 90), so the barrel lies
+        // in the up direction. It is not exactly up, though: logged at rest, up sits dead on the local vertical
+        // (dot 1.000), which would put the barrel at the zenith when parked, but the barrel is modelled at 54
+        // deg above the horizon (measured in Blender), i.e. mounted TubeOpticalTiltFromUpDeg away from up
+        // inside the tilt plane, toward the side the scope looks out of. Aiming up itself therefore left a
+        // constant pointing error of about that size across the whole track. Flip the sign of
+        // TubeOpticalTiltFromUpDeg if the tube ends up off by twice this in the other direction.
         private const float TubeOpticalTiltFromUpDeg = 36f;
         private static readonly Vector3 TubeOpticalAxisLocal =
             Quaternion.AngleAxis(TubeOpticalTiltFromUpDeg, Vector3.forward) * Vector3.up;
@@ -856,20 +838,14 @@ namespace ExoInstruments
         private const float DiagnosticSweepDegPerSec = 20f;
         private float _diagnosticSweepDeg;
 
-        /// <summary>
-        /// The trunnion (altitude hinge) axis in world space: perpendicular to both
-        /// the local vertical and the tube's current optical axis, which is the
-        /// definition of an alt-az mount's altitude axis.
-        ///
-        /// Computed rather than picked from the dome's own local axes: the earlier
-        /// "whichever local axis is most perpendicular to vertical" rule is ambiguous;
-        /// two of the dome's three axes satisfy it equally, so the tie-break was
-        /// arbitrary. It happened to pick the pointing axis itself, leaving the
-        /// optical axis exactly parallel to the supposed hinge (logged dot = -1.000),
-        /// which made the altitude projection degenerate and froze the tube at rest.
-        /// The cross product has no such ambiguity, and rides along with the azimuth
-        /// swing for free since the optical axis does.
-        /// </summary>
+        // The trunnion (altitude hinge) axis in world space: perpendicular to both the local vertical and the
+        // tube's current optical axis, which is the definition of an alt-az mount's altitude axis. Computed
+        // rather than picked from the dome's own local axes: the earlier "whichever local axis is most
+        // perpendicular to vertical" rule is ambiguous; two of the dome's three axes satisfy it equally, so the
+        // tie-break was arbitrary. It happened to pick the pointing axis itself, leaving the optical axis
+        // exactly parallel to the supposed hinge (logged dot = -1.000), which made the altitude projection
+        // degenerate and froze the tube at rest. The cross product has no such ambiguity, and rides along with
+        // the azimuth swing for free since the optical axis does.
         private Vector3 CurrentAltitudeAxisWorld()
         {
             Vector3 axis = Vector3.Cross(_verticalAxisWorld, OpticalAxisWorld());
@@ -920,7 +896,8 @@ namespace ExoInstruments
             _verticalAxisWorld = ChooseClosestAxis(centerVertical, worldVertical, out _);
         }
 
-        /// <summary>Picks whichever of t's own local axes is closest to targetWorldDir, sign-matched so positive RotateAround angles go the expected way.</summary>
+        // Picks whichever of t's own local axes is closest to targetWorldDir, sign-matched so positive
+        // RotateAround angles go the expected way.
         private static Vector3 ChooseClosestAxis(Transform t, Vector3 targetWorldDir, out string axisName)
         {
             float dotUp = Vector3.Dot(t.up, targetWorldDir);
@@ -999,19 +976,17 @@ namespace ExoInstruments
             SetDoorsOpen(haveTarget);
         }
 
-        /// <summary>The tube's optical (pointing) axis in world space right now.</summary>
+        // The tube's optical (pointing) axis in world space right now.
         private Vector3 OpticalAxisWorld()
         {
             Transform t = _altitudeSensitive != null ? _altitudeSensitive : _telescope;
             return t.TransformDirection(TubeOpticalAxisLocal);
         }
 
-        /// <summary>
-        /// The rotation about <paramref name="axis"/> that best takes <paramref name="from"/>
-        /// onto <paramref name="to"/>, both projected onto the plane the axis is normal
-        /// to, since only that component is reachable by rotating about it. 0 when either
-        /// projection degenerates (direction parallel to the axis).
-        /// </summary>
+        // The rotation about <paramref name="axis"/> that best takes <paramref name="from"/> onto <paramref
+        // name="to"/>, both projected onto the plane the axis is normal to, since only that component is
+        // reachable by rotating about it. 0 when either projection degenerates (direction parallel to the
+        // axis).
         private static float SignedAngleAbout(Vector3 from, Vector3 to, Vector3 axis)
         {
             Vector3 f = Vector3.ProjectOnPlane(from, axis);
@@ -1052,12 +1027,9 @@ namespace ExoInstruments
             azDeg = (Math.Atan2(e, n) * 180.0 / Math.PI + 360.0) % 360.0;
         }
 
-        /// <summary>
-        /// Plays the "domeOpen" legacy Animation clip forward to open, or the same
-        /// clip in reverse (negative speed, starting from its end) to close, same
-        /// trick real KSP facility door animations use, no separate "close" clip
-        /// needed. Only actually calls Play() on a state change, not every frame.
-        /// </summary>
+        // Plays the "domeOpen" legacy Animation clip forward to open, or the same clip in reverse (negative
+        // speed, starting from its end) to close, same trick real KSP facility door animations use, no separate
+        // "close" clip needed. Only actually calls Play() on a state change, not every frame.
         private void SetDoorsOpen(bool open)
         {
             if (_domeAnimation == null || string.IsNullOrEmpty(_domeOpenClipName)) return;
@@ -1077,7 +1049,8 @@ namespace ExoInstruments
             Debug.Log($"[Exoplanets] TelescopeTracker: playing '{_domeOpenClipName}' {(open ? "forward (opening)" : "in reverse (closing)")}.");
         }
 
-        /// <summary>Same alt/az convention as ExoInstrumentsGUI.TryComputeBodyAltAz: azimuth from North, clockwise through East; altitude negative below the horizon.</summary>
+        // Same alt/az convention as ExoInstrumentsGUI.TryComputeBodyAltAz: azimuth from North, clockwise
+        // through East; altitude negative below the horizon.
         private static bool TryComputeAltAz(CelestialBody body, out double altDeg, out double azDeg)
         {
             altDeg = 0.0; azDeg = 0.0;

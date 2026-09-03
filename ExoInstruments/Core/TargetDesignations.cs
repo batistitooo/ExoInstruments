@@ -98,11 +98,9 @@ namespace ExoInstruments.Core
             return prefix + number + suffix;
         }
 
-        /// <summary>
-        /// Splits a catalogue designation into its canonical prefix, its number with leading zeros
-        /// removed, and any single-letter suffix. False when the text is not a catalogue
-        /// designation at all, which is the common case for a star's Bayer or Flamsteed name.
-        /// </summary>
+        // Splits a catalogue designation into its canonical prefix, its number with leading zeros removed, and
+        // any single-letter suffix. False when the text is not a catalogue designation at all, which is the
+        // common case for a star's Bayer or Flamsteed name.
         private static bool TrySplit(string normalised, out string prefix, out string number, out string suffix)
         {
             prefix = number = suffix = null;

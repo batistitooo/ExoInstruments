@@ -35,7 +35,7 @@ Both are recorded in `TECHNICAL_REFERENCE.md` rather than worked around:
 
 - **WFC3 IHB Table 6.7's 1100 nm row gives a delivered PSF narrower than a 2.4 m aperture's own
   diffraction limit** (0.089″ against 0.092″), which no telescope can deliver. It sits one row past
-  the detector's published 200–1000 nm range, so it is the handbook's optical model run outside the
+  the detector's published 200-1000 nm range, so it is the handbook's optical model run outside the
   band rather than a measurement. Excluded from the assertion; the pipeline correctly leaves that
   wavelength diffraction-limited.
 - **The HST Primer's stated 500 km altitude and its stated 24° continuous viewing zone are not

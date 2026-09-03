@@ -5,7 +5,10 @@ using ExoInstruments.Core;
 
 namespace ExoInstruments.Visualization
 {
-    /// <summary>Result of AstroImageStack.AddSub, lets the caller give the player a clear reason when a sub was rejected instead of silently dropping it.</summary>
+    /// <summary>
+    /// Result of AstroImageStack.AddSub, lets the caller give the player a clear reason when a sub was rejected
+    /// instead of silently dropping it.
+    /// </summary>
     public enum AstroSubResult
     {
         Added,
@@ -13,7 +16,10 @@ namespace ExoInstruments.Visualization
         FovMismatch,
     }
 
-    /// <summary>One captured sub: its pixels plus the settings it was shot under, kept alongside the pixels so a later sub can be checked for compatibility (FOV) and so the stack can report real integration time.</summary>
+    /// <summary>
+    /// One captured sub: its pixels plus the settings it was shot under, kept alongside the pixels so a later
+    /// sub can be checked for compatibility (FOV) and so the stack can report real integration time.
+    /// </summary>
     /// <summary>
     /// What an export writes.
     ///
@@ -57,7 +63,10 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public Core.FitsWcs Wcs;
 
-        /// <summary>True when the sky turned under the sensor during this sub, so its sources are trailed and its WCS describes the exposure's start only.</summary>
+        /// <summary>
+        /// True when the sky turned under the sensor during this sub, so its sources are trailed and its WCS
+        /// describes the exposure's start only.
+        /// </summary>
         public bool Trailed;
 
         /// <summary>Variance-of-Laplacian sharpness score (see AstroImageStack.ComputeSharpness), the lucky-imaging selection metric for this sub.</summary>
@@ -84,22 +93,16 @@ namespace ExoInstruments.Visualization
         private const int MinSubsPerFilter = 3;
         private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning, diminishing returns past this many subs
 
-        /// <summary>
-        /// What one stored pixel costs, and why it is two bytes rather than four.
-        ///
-        /// The frame this class receives is SolarSystemCameraTexture's normalised display frame:
-        /// (adu - bias) / (adcMax - bias), where adu is the integer count an ADC of at most sixteen
-        /// bits produced (AdcBits is 14 on the ASI294MM instruments, 16 on FORS2 and ZIMPOL). It
-        /// therefore holds at most 65536 distinct values however it is stored, and a 32-bit float
-        /// spends twice the memory carrying none of them. Quantising back onto a 16-bit grid is
-        /// what a real acquisition chain does with its own subs: raw frames are written BITPIX=16
-        /// unsigned, and every reduction package (PixInsight, IRAF/ccdproc, ESO Reflex) reads them
-        /// at that width. SubScale (65535) is at least as fine as the widest converter's own grid,
-        /// so distinct ADU levels stay distinct and the round trip costs under half a count.
-        ///
-        /// This is what sets MaxSubsPerFilter, so it is also the difference between a batch of 4
-        /// and a batch of 8 fitting at 1x1 binning on a full-frame sensor.
-        /// </summary>
+        // What one stored pixel costs, and why it is two bytes rather than four. The frame this class receives
+        // is SolarSystemCameraTexture's normalised display frame: (adu - bias) / (adcMax - bias), where adu is
+        // the integer count an ADC of at most sixteen bits produced (AdcBits is 14 on the ASI294MM instruments,
+        // 16 on FORS2 and ZIMPOL). It therefore holds at most 65536 distinct values however it is stored, and a
+        // 32-bit float spends twice the memory carrying none of them. Quantising back onto a 16-bit grid is
+        // what a real acquisition chain does with its own subs: raw frames are written BITPIX=16 unsigned, and
+        // every reduction package (PixInsight, IRAF/ccdproc, ESO Reflex) reads them at that width. SubScale
+        // (65535) is at least as fine as the widest converter's own grid, so distinct ADU levels stay distinct
+        // and the round trip costs under half a count. This is what sets MaxSubsPerFilter, so it is also the
+        // difference between a batch of 4 and a batch of 8 fitting at 1x1 binning on a full-frame sensor.
         private const int StoredBytesPerPixel = sizeof(ushort);
 
         private const float SubScale = 65535f;
@@ -127,12 +130,12 @@ namespace ExoInstruments.Visualization
         private const float StretchStrength = 5f;
 
         // Background estimated from a border band (target is near center, so border is real sky)
-        // and subtracted before LRGB composition — prevents the three independent noisy R/G/B
+        // and subtracted before LRGB composition, which prevents the three independent noisy R/G/B
         // stacks from blowing up as color confetti at near-zero background pixels.
         private const int BackgroundBorderPx = 20;
         private const float BackgroundTrimFraction = 0.15f; // trim brightest border pixels (planet limb or hot pixel) before median
 
-        // Cap at 4× — real planetary color ratios sit close to 1, so this preserves the signal
+        // Cap at 4x. Real planetary color ratios sit close to 1, so this preserves the signal
         // while stopping leftover background noise from dividing into an unbounded color spike.
         private const float MaxLuminanceScale = 4f;
 
@@ -166,7 +169,7 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Adds a raw grayscale sub for the given filter. Rejects if MaxSubsPerFilter is
-        /// reached or if fovDeg doesn't match the existing subs — mixing FOVs makes alignment
+        /// reached or if fovDeg doesn't match the existing subs, since mixing FOVs makes alignment
         /// meaningless. defectPixelIndices (SolarSystemCameraTexture.GetDefectPixelIndices) is
         /// cosmetically corrected out before the sub is stored; see CosmeticCorrect.
         /// </summary>
@@ -222,7 +225,8 @@ namespace ExoInstruments.Visualization
             return AstroSubResult.Added;
         }
 
-        /// <summary>Normalised [0,1] pixels onto the 16-bit storage grid; see StoredBytesPerPixel for why that is the right width.</summary>
+        // Normalised [0,1] pixels onto the 16-bit storage grid; see StoredBytesPerPixel for why that is the
+        // right width.
         private static ushort[] Pack(float[] gray)
         {
             var packed = new ushort[gray.Length];
@@ -236,7 +240,8 @@ namespace ExoInstruments.Visualization
             return packed;
         }
 
-        /// <summary>The inverse of Pack, for the callers that hand a whole frame out (SubFrame) rather than reading it pixel by pixel.</summary>
+        // The inverse of Pack, for the callers that hand a whole frame out (SubFrame) rather than reading it
+        // pixel by pixel.
         private static float[] Unpack(ushort[] packed)
         {
             var gray = new float[packed.Length];
@@ -244,18 +249,14 @@ namespace ExoInstruments.Visualization
             return gray;
         }
 
-        /// <summary>
-        /// Bad-pixel-map cosmetic correction: each known defect pixel (the sensor's fixed
-        /// hot/dead map, known ahead of time the same way a real calibration dark-frame
-        /// characterizes one) is replaced by the mean of its immediate orthogonal neighbors,
-        /// skipping any neighbor that's itself a known defect. This is the standard
-        /// professional calibration step real pipelines run before registration/stacking
-        /// (PixInsight's CosmeticCorrection process, IRAF/ccdproc's fixpix, ESO Reflex
-        /// bad-pixel handling), run here, once per sub, before alignment. Doing it before
-        /// alignment matters: a fixed sensor defect co-added with per-sub alignment shifts
-        /// would scatter into a cloud of artifacts at different composite positions instead
-        /// of being corrected once at its one true location.
-        /// </summary>
+        // Bad-pixel-map cosmetic correction: each known defect pixel (the sensor's fixed hot/dead map, known
+        // ahead of time the same way a real calibration dark-frame characterizes one) is replaced by the mean
+        // of its immediate orthogonal neighbors, skipping any neighbor that's itself a known defect. This is
+        // the standard professional calibration step real pipelines run before registration/stacking
+        // (PixInsight's CosmeticCorrection process, IRAF/ccdproc's fixpix, ESO Reflex bad-pixel handling), run
+        // here, once per sub, before alignment. Doing it before alignment matters: a fixed sensor defect co-
+        // added with per-sub alignment shifts would scatter into a cloud of artifacts at different composite
+        // positions instead of being corrected once at its one true location.
         private static float[] CosmeticCorrect(float[] gray, int[] defectPixelIndices)
         {
             if (defectPixelIndices == null || defectPixelIndices.Length == 0) return gray;
@@ -278,17 +279,13 @@ namespace ExoInstruments.Visualization
             return corrected;
         }
 
-        /// <summary>
-        /// Variance-of-Laplacian focus/sharpness measure (Pech-Pacheco et al. 2000,
-        /// "Diatom autofocusing in brightfield microscopy: a comparative study", the
-        /// top-performing general-purpose sharpness operator in the Pertuz, Puig &amp; Garcia
-        /// 2013 survey of focus measures). A sharp, well-resolved frame has strong local
-        /// contrast everywhere (high Laplacian variance); a seeing-blurred one is smoothed
-        /// out (low variance). Computed only over the central SharpnessRegionFraction of
-        /// the frame (see its doc comment), with the SharpnessTrimFraction largest-magnitude
-        /// values excluded before the variance is taken, so an isolated cosmic-ray hit or
-        /// hot pixel can't be mistaken for genuine sharpness.
-        /// </summary>
+        // Variance-of-Laplacian focus/sharpness measure (Pech-Pacheco et al. 2000, "Diatom autofocusing in
+        // brightfield microscopy: a comparative study", the top-performing general-purpose sharpness operator
+        // in the Pertuz, Puig & Garcia 2013 survey of focus measures). A sharp, well-resolved frame has strong
+        // local contrast everywhere (high Laplacian variance); a seeing-blurred one is smoothed out (low
+        // variance). Computed only over the central SharpnessRegionFraction of the frame (see its doc comment),
+        // with the SharpnessTrimFraction largest-magnitude values excluded before the variance is taken, so an
+        // isolated cosmic-ray hit or hot pixel can't be mistaken for genuine sharpness.
         private static float ComputeSharpness(float[] gray)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
@@ -387,7 +384,10 @@ namespace ExoInstruments.Visualization
             return list[index].Wcs;
         }
 
-        /// <summary>True when that sub was taken unguided long enough to trail; its header says so, because a plate solve of a trailed frame will not converge.</summary>
+        /// <summary>
+        /// True when that sub was taken unguided long enough to trail; its header says so, because a plate
+        /// solve of a trailed frame will not converge.
+        /// </summary>
         public bool SubTrailed(CameraFilter filter, int index)
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return false;
@@ -395,7 +395,10 @@ namespace ExoInstruments.Visualization
             return list[index].Trailed;
         }
 
-        /// <summary>Total real exposure time stacked into this filter so far, in seconds, the actual integration time a real stack of this many subs represents.</summary>
+        /// <summary>
+        /// Total real exposure time stacked into this filter so far, in seconds, the actual integration time a
+        /// real stack of this many subs represents.
+        /// </summary>
         public float TotalExposureSeconds(CameraFilter filter)
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return 0f;
@@ -420,12 +423,9 @@ namespace ExoInstruments.Visualization
         public void ClearAll() => rawSubs.Clear();
 
 
-        /// <summary>
-        /// Normalized arcsinh stretch: 0 -> 0, 1 -> 1, monotonic, lifting
-        /// shadows more than it compresses highlights, the standard
-        /// astrophotography "make the faint stacked detail visible" curve.
-        /// Display-only; never applied to stored sub or stack data.
-        /// </summary>
+        // Normalized arcsinh stretch: 0 -> 0, 1 -> 1, monotonic, lifting shadows more than it compresses
+        // highlights, the standard astrophotography "make the faint stacked detail visible" curve. Display-
+        // only; never applied to stored sub or stack data.
         private static float AsinhStretch(float v)
         {
             const float k = StretchStrength;
@@ -468,17 +468,18 @@ namespace ExoInstruments.Visualization
         /// <summary>Largest registration shift applied, pixels.</summary>
         public double LastAlignmentShiftPx { get; private set; }
 
-        /// <summary>Fraction of the composed frame every sub contributed to. Below one means the registration shifts left a border that fewer subs reached.</summary>
+        /// <summary>
+        /// Fraction of the composed frame every sub contributed to. Below one means the registration shifts
+        /// left a border that fewer subs reached.
+        /// </summary>
         public double LastFullCoverageFraction { get; private set; } = 1.0;
 
         private static bool HasRegistration(AstroSub sub)
             => !double.IsNaN(sub.RegistrationX) && !double.IsNaN(sub.RegistrationY);
 
-        /// <summary>
-        /// Adds a shifted sub into the accumulator and marks which pixels it reached, so the average
-        /// can divide by what actually landed. Pixels the shift vacated are left untouched in BOTH
-        /// arrays rather than filled with zeros, which is the whole point.
-        /// </summary>
+        // Adds a shifted sub into the accumulator and marks which pixels it reached, so the average can divide
+        // by what actually landed. Pixels the shift vacated are left untouched in BOTH arrays rather than
+        // filled with zeros, which is the whole point.
         private static void AccumulateShifted(float[] sum, float[] coverage, ushort[] pixels, int dx, int dy)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
@@ -588,14 +589,15 @@ namespace ExoInstruments.Visualization
             }
             LastFullCoverageFraction = (double)full / Math.Max(1, n);
 
-            // Subtract background once on the averaged stack, not per-sub — avoids uneven amplification from noisy individual estimates.
+            // Subtract background once on the averaged stack, not per-sub, to avoid uneven amplification from noisy individual estimates.
             float background = EstimateBackground(sum);
             for (int i = 0; i < n; i++) sum[i] = Mathf.Max(0f, sum[i] - background);
 
             return sum;
         }
 
-        /// <summary>Robust sky background from the image border: sorts samples, trims the brightest BackgroundTrimFraction (limb/hot pixel), returns the median of what's left.</summary>
+        // Robust sky background from the image border: sorts samples, trims the brightest
+        // BackgroundTrimFraction (limb/hot pixel), returns the median of what's left.
         private static float EstimateBackground(float[] gray)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
@@ -620,7 +622,9 @@ namespace ExoInstruments.Visualization
             return samples[keep / 2];
         }
 
-        /// <summary>Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls back to the frame center when nothing exceeds it (target too faint/absent to detect, avoids a divide-by-zero and just skips alignment for that sub).</summary>
+        // Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls
+        // back to the frame center when nothing exceeds it (target too faint/absent to detect, avoids a divide-
+        // by-zero and just skips alignment for that sub).
         private static (double cx, double cy) ComputeCentroid(ushort[] pixels)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
@@ -641,7 +645,7 @@ namespace ExoInstruments.Visualization
             return (sumX / sumW, sumY / sumW);
         }
 
-        /// <summary>Integer pixel shift, zero-filling pixels that shift in from outside the frame.</summary>
+        // Integer pixel shift, zero-filling pixels that shift in from outside the frame.
         private static float[] ShiftImage(float[] src, int dx, int dy)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;

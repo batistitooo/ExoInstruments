@@ -16,7 +16,7 @@ modelled is `TECHNICAL_REFERENCE.md` §13.75.
 against a published table, or an assertion against a *prose statement* in the report that published
 the model. The persistence section is the clearest case: ISR 2015-15 reads four trends out of its own
 Table 2 and quotes two amplitudes and a decay slope in the surrounding text, and those seven
-statements are what the interpolated model is tested against — not against values this code produced
+statements are what the interpolated model is tested against, not against values this code produced
 earlier.
 
 ## A. The Fermi persistence model (ISR 2015-15)
@@ -38,8 +38,8 @@ Asserting monotonicity there would be asserting something about the data that is
 Then the numbers quoted in prose: ~0.3 e⁻/s at 1000 s for a 10⁵ e⁻ fluence, ~0.03 e⁻/s at 10⁴ s, a
 decay slope "of approximately −1" (measured −0.98), and "very little persistence (< 0.05 e/s) below a
 fluence of 30,000 e ... beyond about 500 s". Plus: the Fermi knee makes the rise near saturation
-steeper than proportional, and the parameters are **clamped** outside the table's 49–1402 s span
-rather than extrapolated — a linear extrapolation of γ reaches zero at a finite exposure time, which
+steeper than proportional, and the parameters are **clamped** outside the table's 49-1402 s span
+rather than extrapolated, a linear extrapolation of γ reaches zero at a finite exposure time, which
 would be persistence that never decays.
 
 ## B. Integrating the rate over an exposure
@@ -60,21 +60,21 @@ exposure taken soon after a bright one the rate changes by a large factor from s
 ## C. Interpixel capacitance (ISR 2011-10)
 
 The kernel is checked cell by cell against Table 2, for its **published 0.9985 sum** (it is *not*
-renormalised to 1 — that sum is the report's own), and for the anisotropy the report resolves:
+renormalised to 1; that sum is the report's own), and for the anisotropy the report resolves:
 identical above and below, identical left and right, the two pairs differing.
 
 Then three behavioural checks:
 
 - **A point source spreads by exactly the kernel.** This is the check that caught a real bug: the
   coupling was first written as a correlation rather than a convolution, which flips the kernel. On a
-  kernel this nearly symmetric that is the 0.0001 between the left and right couplings — invisible in
+  kernel this nearly symmetric that is the 0.0001 between the left and right couplings, invisible in
   a frame, wrong in principle, and caught by asserting the response cell by cell.
 - **A uniform frame stays uniform**, which is what proves the edges replicate rather than zero-pad.
   Zero-padding would darken the border by the coupling fraction and put a one-pixel ring around every
   image.
 - **Agreement with an independent device.** Seshadri et al. (2008) measured a very similar HgCdTe
-  array by resetting individual pixels: 1.4–1.55 % adjacent, 0.13 % corner, against this kernel's
-  1.27–1.64 % and 0.11 %.
+  array by resetting individual pixels: 1.4-1.55 % adjacent, 0.13 % corner, against this kernel's
+  1.27-1.64 % and 0.11 %.
 
 ## D. Count-rate non-linearity (ISR 2019-01)
 
@@ -88,14 +88,14 @@ leaves the rate untouched rather than poisoning the frame.
 
 Both published anchors reproduced exactly (20.0 e⁻ at 2 reads, 12.0 e⁻ at 15), monotonic and bracketed
 in between, clamped beyond NSAMP = 15 rather than extrapolated toward zero, and consistent with the
-20.2–21.4 e⁻ the handbook quotes separately for CDS alone.
+20.2-21.4 e⁻ the handbook quotes separately for CDS alone.
 
 ## F. The shipped catalogue entry
 
 Checks the **shipped** spec, not a restatement of it.
 
 - Its `Name` is unique, or the flight module could not resolve a saved telescope through it.
-- **Everything upstream of the channel-select mechanism is identical to the shipped UVIS entry** —
+- **Everything upstream of the channel-select mechanism is identical to the shipped UVIS entry**,
   aperture, obstruction, spider, and every platform constraint. A divergence there would be a
   transcription error, not a design choice.
 - The detector against the handbook: 1014² and not 1024² (the outer rim is reference pixels), 18 µm,
@@ -105,7 +105,7 @@ Checks the **shipped** spec, not a restatement of it.
   measured axes, and the field it implies (129.6″) falls between the handbook's own 123″ and 136″.
 - Nothing is multiplied on top of the measured end-to-end throughput.
 - The four wide filters at their published pivots, **no H-alpha slot** (the line is at 656 nm and this
-  channel starts above 900 nm), and every band beyond the CIE observer's 830 nm red end — which is
+  channel starts above 900 nm), and every band beyond the CIE observer's 830 nm red end, which is
   why composites cannot claim to be true colour.
 - Persistence is **on**, uniquely on this roster; it does *not* also carry the CCD surface-trap model;
   and **no CCD on the roster carries infrared-array physics**.

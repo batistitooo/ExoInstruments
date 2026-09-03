@@ -1,4 +1,4 @@
-# psf-cost — what the PSF kernel costs, and what a cheaper one is worth
+# psf-cost, what the PSF kernel costs, and what a cheaper one is worth
 
 Baptiste's report, 2026-08-07: a galaxy photograph through the orbital Hubble at 4×4 binning took
 about seven minutes on a Mac and about one on a desktop PC. The shipped per-stage log answered
@@ -10,7 +10,7 @@ galaxies 625 ms, smear 0 ms, stars + emission 10764 ms, PSF kernel 410724 ms,
 PSF convolution 481 ms, coronagraph + speckles 624 ms, detector 1239 ms
 ```
 
-**96.7 per cent of the exposure was building the kernel.** Not convolving with it — building it.
+**96.7 per cent of the exposure was building the kernel.** Not convolving with it, building it.
 
 ## Why it got expensive
 
@@ -22,7 +22,7 @@ two together had made Hubble's spikes invisible.
 What did not follow was the cost model. That support is 257×257 = 66049 pixels, each a midpoint
 average over up to 12×12 nodes, so **one sub-band kernel is 9.5 million evaluations of
 `PupilDiffraction.Intensity`**, each of which is five Bessel functions and fifteen other
-transcendentals. A capture built twelve of those for the passband — and, before this, twelve more
+transcendentals. A capture built twelve of those for the passband, and, before this, twelve more
 inside `GaussianFwhmForDelivered`, which built a full kernel per bisection step and then read one
 row of it. At 1×1 that solve does not exit early, so it built **three hundred** of them.
 
@@ -39,21 +39,21 @@ that would have been was measured and rejected, and is recorded at the bottom.
 1. **The FWHM solvers build only the support they read.** `GaussianFwhmForDelivered` and
    `AtmosphericFwhmForDelivered` measure a half-power crossing on one row. Normalisation is a
    single scale factor, so it divides out of that ratio, and the convolutions after the
-   diffraction term reach only their own radius — so a row sample is complete as soon as the
+   diffraction term reach only their own radius, so a row sample is complete as soon as the
    support extends past the crossing by that reach. The bound is sized from the width being
    solved for and *checked*: if the crossing did not fall inside it, the full kernel is built.
 2. **The sampler folds the grid on symmetries the pupil proves.** `|A|²` is even for any real
    pupil, always, so half the grid is a copy. A pupil symmetric about both axes and both
-   diagonals — four vanes at 0° and 90°, no pads, which is every ground instrument here — leaves
+   diagonals, four vanes at 0° and 90°, no pads, which is every ground instrument here, leaves
    one octant determining the pattern. `PupilDiffraction` works out which reflections it has from
    its own vane angles and pad positions and reports them; Hubble's three pads sit at 120° and
    break all of them, so it keeps the central symmetry alone.
 3. **Kernel terms are composed through a transform above a work budget** rather than by direct
-   sum — the convolution theorem, agreeing with the sum it replaces to 3.4e-14 of the peak. See
+   sum, the convolution theorem, agreeing with the sum it replaces to 3.4e-14 of the peak. See
    the next section; this is the largest single saving and only the ground instruments pay it.
 4. **The few dozen pixels holding the light are sampled far better than before**, at sixteen
    nodes per ring period and a ceiling of 48 rather than four and 12. This is not a saving at
-   all — it is a cost, taken deliberately, because it is what makes the finished kernel more
+   all; it is a cost, taken deliberately, because it is what makes the finished kernel more
    accurate than the one it replaces. It applies to 81 pixels of 66049, so it is nearly free.
 
 ## The other half, which only the ground instruments pay
@@ -65,7 +65,7 @@ At the full budget it is a 257×257 grid against a 183×183 profile: **2.2 billi
 sub-band, twelve sub-bands per capture.**
 
 `tools/capture-profile` did not see it, because it was passing `vaneCount = 0` and timing
-`OpticalPsf`'s radial path — a kernel the shipped RC20 has not built since the visual roster's PSF
+`OpticalPsf`'s radial path, a kernel the shipped RC20 has not built since the visual roster's PSF
 learned about spiders. Given the instrument's real spider, its own numbers say:
 
 | RC20, M51 from OHP | before | after |
@@ -121,7 +121,7 @@ decisions it judges:
 
 `tools/spacecraft-tests` sees the same thing from the other side. It reproduces WFC3 IHB Table 6.7
 by measuring the finished kernel's own FWHM, and one of its nine rows moved: **1000 nm, 0.0883316″
-→ 0.0891814″**. Sampling the same central row at rising node counts says which is right — the
+→ 0.0891814″**. Sampling the same central row at rising node counts says which is right, the
 measurement converges from below to **0.0892373″**, so the old number was 1.0 % low and the new one
 is 0.06 % low, sixteen times closer. It sits marginally further from the handbook's 0.084″ ± 0.006,
 which is the correct outcome and not a regression: HST is diffraction-limited past about 900 nm, and
@@ -151,7 +151,7 @@ place, so the wings keep their full node count. Hubble's kernel is 2268 ms rathe
 
 **Tabulating the pupil transform: 1.82×, rejected.** `PupilDiffraction.Intensity` costs ~19
 transcendental calls, and replacing the disc transforms, the sinc factors and the pad phases with
-linearly interpolated tables takes it from 185 ns to 94 ns — for 5.3 MB of tables and a 0.155 %
+linearly interpolated tables takes it from 185 ns to 94 ns, for 5.3 MB of tables and a 0.155 %
 error on the pattern. That is five orders of magnitude above the 6.7e-16 at which the vane-free
 pupil currently reproduces `OpticalPsf.AiryIntensity`, which is the reducibility standard
 `tools/bandpass-wcs-tests` holds this class to. What was kept is the exact part: Hubble's three
@@ -161,7 +161,7 @@ Two **exact** speedups remain unspent, if the time is ever wanted without giving
 twelve sub-bands are parallelised one band per worker, so nine workers run them in two rounds at
 about 67 % occupancy; flattening that to (band, row) work items would recover roughly 1.5× and
 each output cell is still written by exactly one worker, which is the rule in `Core/ParallelWork.cs`.
-And the radial part of the amplitude — the annulus and the pads, which depend only on |u| — could
+And the radial part of the amplitude, the annulus and the pads, which depend only on |u|, could
 be tabulated with **cubic** interpolation at about 80 samples per ring period for an error near
 1e-9, three orders below the accuracy standard the linear table failed; that is the same
 tabulate-and-interpolate discipline `SampleRadial` already uses, applied where it is still exact
@@ -173,7 +173,7 @@ enough to pass the reducibility check.
 periods, so the grid's ceiling of 12 nodes is less than one node per period and the spike arms are
 sampling noise either way (85.9 % against the reference now, 119.6 % before). Sampling that
 honestly needs about 72 nodes per axis over the whole grid, thirty-six times the work, to recover
-structure carrying 1e-8 of the light. The core is fixed — 8.23e-2 of the peak down to 2.13e-3 —
+structure carrying 1e-8 of the light. The core is fixed, 8.23e-2 of the peak down to 2.13e-3,
 because that is where the light is and where the high node cap now applies.
 
 ## Run
@@ -199,7 +199,7 @@ shipped path now avoids. Expect several minutes.
 
 **The solve agrees to within its own last bisection step, not bit for bit.** The measurement reads
 a float32 kernel that `Normalise` has divided by its own total, and a smaller support has a
-different total, so the two rows differ in the last bits of float32 — about 1e-7 relative. Where a
+different total, so the two rows differ in the last bits of float32, about 1e-7 relative. Where a
 bisection midpoint sits within that of the target the comparison can fall the other way, and the
 answer lands one step of the bracket away: 24 halvings, so ~5e-8 arcsec against a width of order an
 arcsecond. Neither answer is the more correct one.

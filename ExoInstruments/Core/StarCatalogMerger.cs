@@ -49,10 +49,16 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class StarCatalogMerger
     {
-        /// <summary>Positional match radius (20 arcsec). Absorbs exoplanet.eu's RA rounding (~13 arcsec drift on 51 Peg) while staying below resolved binary separations — verified against 83 Leo A/B (27 arcsec apart).</summary>
+        /// <summary>
+        /// Positional match radius (20 arcsec). Absorbs exoplanet.eu's RA rounding (~13 arcsec drift on 51 Peg)
+        /// while staying below resolved binary separations, verified against 83 Leo A/B (27 arcsec apart).
+        /// </summary>
         public const double PositionalToleranceArcsec = 20.0;
 
-        /// <summary>Magnitude sanity check on positional matches — loose because exoplanet.eu may report a different band for red stars, but 3 magnitudes off is a different star.</summary>
+        /// <summary>
+        /// Magnitude sanity check on positional matches, loose because exoplanet.eu may report a different band
+        /// for red stars, but 3 magnitudes off is a different star.
+        /// </summary>
         public const double MagnitudeSanityTolerance = 1.5;
 
         /// <summary>BSC is nominally complete to V = 6.5 with stragglers slightly fainter; review unmatched hosts up to here.</summary>
@@ -163,7 +169,7 @@ namespace ExoInstruments.Core
 
                 // Positional fallback forbidden for non-primary components ("83 Leo B"): the BSC
                 // entry there is the primary, not the planet host. A B component in BSC has its
-                // own HD number and must match through identifiers (16 Cyg B → HD 186427).
+                // own HD number and must match through identifiers (16 Cyg B is HD 186427).
                 if (match == null && !IsNonPrimaryComponent(planets))
                 {
                     match = NearestWithinTolerance(backgroundStars, planets[0]);
@@ -179,7 +185,7 @@ namespace ExoInstruments.Core
                     result.MatchLog.Add($"{hostKey} -> HR {match.HrNumber} ({match.Target.Name}) via {via}");
                     consumed.Add(match);
 
-                    // Backfill Teff from BSC B-V when exoplanet.eu forgot it (HR 8799) — without a
+                    // Backfill Teff from BSC B-V when exoplanet.eu forgot it (HR 8799). Without a
                     // temperature the direct-imaging pipeline can't compute contrast and reports missing data.
                     if (match.DerivedTeffK.HasValue)
                     {
@@ -227,7 +233,8 @@ namespace ExoInstruments.Core
             return designations.ToArray();
         }
 
-        /// <summary>Normalized name variants for the host: own name + alternate names, with trailing " a" stripped ("tau boo a" → "tau boo"). Never strips " b"/" c" — those may be distinct BSC entries.</summary>
+        // Normalized name variants for the host: own name + alternate names, with trailing " a" stripped ("tau
+        // boo a" becomes "tau boo"). Never strips " b"/" c"; those may be distinct BSC entries.
         private static List<string> CollectNameKeys(List<StarTarget> planets, string hostKey)
         {
             var keys = new List<string> { hostKey };
@@ -253,7 +260,8 @@ namespace ExoInstruments.Core
             if (key != null && !keys.Contains(key)) keys.Add(key);
         }
 
-        /// <summary>True when any host-level designation ends in an explicit non-primary component letter (" b"/" c"/" d" after normalization).</summary>
+        // True when any host-level designation ends in an explicit non-primary component letter (" b"/" c"/" d"
+        // after normalization).
         private static bool IsNonPrimaryComponent(List<StarTarget> planets)
         {
             foreach (var p in planets)
@@ -272,7 +280,8 @@ namespace ExoInstruments.Core
                    (normalizedKey.EndsWith(" b") || normalizedKey.EndsWith(" c") || normalizedKey.EndsWith(" d"));
         }
 
-        /// <summary>Of several candidates sharing an HD number (binary components), take the positionally closest; first if the host has no coordinates.</summary>
+        // Of several candidates sharing an HD number (binary components), take the positionally closest; first
+        // if the host has no coordinates.
         private static BackgroundStarEntry PickClosest(List<BackgroundStarEntry> candidates, StarTarget host)
         {
             if (candidates.Count == 1 || !host.RaDeg.HasValue || !host.DecDeg.HasValue)
@@ -304,7 +313,8 @@ namespace ExoInstruments.Core
             return best;
         }
 
-        /// <summary>Small-angle separation with cos(dec) RA foreshortening and wraparound — exact enough for the arcsecond tolerances here.</summary>
+        // Small-angle separation with cos(dec) RA foreshortening and wraparound, exact enough for the arcsecond
+        // tolerances here.
         private static double SeparationArcsec(StarTarget a, StarTarget b)
         {
             if (!a.RaDeg.HasValue || !a.DecDeg.HasValue || !b.RaDeg.HasValue || !b.DecDeg.HasValue)

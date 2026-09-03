@@ -7,7 +7,7 @@ namespace ExoInstruments.Visualization
 {
     /// <summary>
     /// Reads real cloud cover from an installed EVE (Environmental Visual Enhancements)
-    /// cloud config via reflection. Soft dependency — builds and runs without EVE;
+    /// cloud config via reflection. Soft dependency: builds and runs without EVE;
     /// returns 0 when EVE isn't installed. Never falls back to procedural clouds.
     /// API verified by decompiling EVE-Redux 1.11.7.2 with ilspycmd.
     /// </summary>
@@ -127,7 +127,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Loads (and caches) the 6 cubemap faces for the body's first cloud layer.</summary>
+        // Loads (and caches) the 6 cubemap faces for the body's first cloud layer.
         private static void EnsureFacesForBody(string bodyName)
         {
             if (cacheValid && string.Equals(cachedBodyName, bodyName, StringComparison.OrdinalIgnoreCase)) return;
@@ -172,7 +172,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Standard cube-face/UV selection from a direction vector: index 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.</summary>
+        // Standard cube-face/UV selection from a direction vector: index 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
         private static void SelectCubeFace(Vector3 dir, out int face, out float u, out float v)
         {
             float ax = Mathf.Abs(dir.x), ay = Mathf.Abs(dir.y), az = Mathf.Abs(dir.z);

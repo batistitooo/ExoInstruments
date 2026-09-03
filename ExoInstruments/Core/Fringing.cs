@@ -66,16 +66,12 @@ namespace ExoInstruments.Core
         /// </summary>
         public const double Ccid20ThicknessMicrons = 40.0;
 
-        /// <summary>
-        /// Refractive index of crystalline silicon at 300 K, from Green (2008, "Self-consistent
-        /// optical parameters of intrinsic silicon at 300K including temperature coefficients",
-        /// Solar Energy Materials and Solar Cells 92, 1305), which is the standard modern
-        /// tabulation and supersedes Aspnes and Studna for this purpose.
-        ///
-        /// Only the range fringes exist in is carried. Below 700 nm the absorption length is far
-        /// shorter than any thinned layer and there is no second surface to interfere with, so the
-        /// index there would be describing an effect that does not occur.
-        /// </summary>
+        // Refractive index of crystalline silicon at 300 K, from Green (2008, "Self-consistent optical
+        // parameters of intrinsic silicon at 300K including temperature coefficients", Solar Energy Materials
+        // and Solar Cells 92, 1305), which is the standard modern tabulation and supersedes Aspnes and Studna
+        // for this purpose. Only the range fringes exist in is carried. Below 700 nm the absorption length is
+        // far shorter than any thinned layer and there is no second surface to interfere with, so the index
+        // there would be describing an effect that does not occur.
         private static readonly double[] IndexWavelengthNm = { 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0, 1050.0, 1100.0 };
         private static readonly double[] IndexValue = { 3.785, 3.726, 3.681, 3.646, 3.618, 3.585, 3.565, 3.548, 3.531 };
 
@@ -83,16 +79,12 @@ namespace ExoInstruments.Core
         public static double SiliconRefractiveIndex(double wavelengthNm)
             => Interpolate(IndexWavelengthNm, IndexValue, wavelengthNm);
 
-        /// <summary>
-        /// Peak-to-peak fringe amplitude at one wavelength, as a fraction, from Walsh et al.'s six
-        /// monochromatic flats.
-        ///
-        /// Zero below 774 nm, which is a measurement rather than an assumption: their 774 nm flat
-        /// showed no fringes at all, and the physics says the same, since the absorption length in
-        /// silicon there is still short against 40 um. Held flat above 986 nm rather than
-        /// extrapolated; their own text notes the rise "levels off to higher wavelength", and the
-        /// detector's quantum efficiency has collapsed by then anyway.
-        /// </summary>
+        // Peak-to-peak fringe amplitude at one wavelength, as a fraction, from Walsh et al.'s six monochromatic
+        // flats. Zero below 774 nm, which is a measurement rather than an assumption: their 774 nm flat showed
+        // no fringes at all, and the physics says the same, since the absorption length in silicon there is
+        // still short against 40 um. Held flat above 986 nm rather than extrapolated; their own text notes the
+        // rise "levels off to higher wavelength", and the detector's quantum efficiency has collapsed by then
+        // anyway.
         private static readonly double[] AmplitudeWavelengthNm = { 774.0, 876.0, 906.0, 926.1, 956.1, 986.0 };
         private static readonly double[] AmplitudeValue = { 0.000, 0.022, 0.030, 0.051, 0.070, 0.075 };
 

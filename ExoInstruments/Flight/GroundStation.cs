@@ -230,7 +230,10 @@ namespace ExoInstruments.Flight
             return SlewDynamics.ReactionWheelChargeUnits(in profile, ReactionWheelChargePerSecond(link.Vessel));
         }
 
-        /// <summary>Charge the attitude control draws while a manoeuvre is running, units per second. Zero under thruster control, which spends propellant instead.</summary>
+        /// <summary>
+        /// Charge the attitude control draws while a manoeuvre is running, units per second. Zero under
+        /// thruster control, which spends propellant instead.
+        /// </summary>
         public static double SlewDrawPerSecond(SpaceTelescopeLink link)
         {
             if (link == null || link.ControlMode != AttitudeControlMode.MomentumExchange) return 0.0;
@@ -435,7 +438,7 @@ namespace ExoInstruments.Flight
             return Math.Atan(halfExtentMeters / spec.FocalLengthMeters) * (180.0 / Math.PI);
         }
 
-        /// <summary>The direction the boresight is on right now, measured when possible and interpolated when not.</summary>
+        // The direction the boresight is on right now, measured when possible and interpolated when not.
         private static Vector3d CurrentDirection(SpaceTelescopeLink link, in TelescopeCommandState state)
         {
             if (link.Module != null)
@@ -461,14 +464,10 @@ namespace ExoInstruments.Flight
             return Slerp(from, to, SlewDynamics.FractionOfAngleCovered(in profile, elapsed));
         }
 
-        /// <summary>
-        /// The manoeuvre currently in flight, rebuilt from what was stored when it was commanded.
-        ///
-        /// Not replanned from the angle: the vehicle's torque may have changed since (a wheel
-        /// switched off, a stage dropped), and the slew running is the one that was planned, not
-        /// the one that would be planned now. Only the peak rate has to be recovered, by solving
-        /// the stored duration for it.
-        /// </summary>
+        // The manoeuvre currently in flight, rebuilt from what was stored when it was commanded. Not replanned
+        // from the angle: the vehicle's torque may have changed since (a wheel switched off, a stage dropped),
+        // and the slew running is the one that was planned, not the one that would be planned now. Only the
+        // peak rate has to be recovered, by solving the stored duration for it.
         private static SlewProfile RebuildProfile(SpaceTelescopeLink link, in TelescopeCommandState state)
         {
             Vector3d to = ResolveCommandedDirection(link, in state);
@@ -500,7 +499,7 @@ namespace ExoInstruments.Flight
             return profile;
         }
 
-        /// <summary>The direction currently commanded: recomputed for a body, held fixed for a catalogue position.</summary>
+        // The direction currently commanded: recomputed for a body, held fixed for a catalogue position.
         private static Vector3d ResolveCommandedDirection(SpaceTelescopeLink link, in TelescopeCommandState state)
         {
             if (!string.IsNullOrEmpty(state.TargetBodyName))
@@ -534,11 +533,9 @@ namespace ExoInstruments.Flight
             return true;
         }
 
-        /// <summary>
-        /// Great-circle interpolation between two directions. Not a lerp: a lerp between two unit
-        /// vectors crosses the chord rather than the sphere, so it moves fastest in the middle and
-        /// would put the boresight off the arc a real eigenaxis rotation traverses.
-        /// </summary>
+        // Great-circle interpolation between two directions. Not a lerp: a lerp between two unit vectors
+        // crosses the chord rather than the sphere, so it moves fastest in the middle and would put the
+        // boresight off the arc a real eigenaxis rotation traverses.
         private static Vector3d Slerp(Vector3d from, Vector3d to, double t)
         {
             double dot = Vector3d.Dot(from, to);
@@ -706,10 +703,8 @@ namespace ExoInstruments.Flight
             return solar * SolarFluxMultiplier(v) + generators;
         }
 
-        /// <summary>
-        /// A protovessel panel's deploy state, falling back to the prefab's. A fixed panel is
-        /// authored EXTENDED and never changes, so the fallback is right for it.
-        /// </summary>
+        // A protovessel panel's deploy state, falling back to the prefab's. A fixed panel is authored EXTENDED
+        // and never changes, so the fallback is right for it.
         private static bool ProtoPanelExtended(ProtoPartSnapshot part, ModuleDeployableSolarPanel prefab)
         {
             if (part.modules != null)
@@ -740,11 +735,9 @@ namespace ExoInstruments.Flight
             return rate;
         }
 
-        /// <summary>
-        /// Inverse-square scaling of a panel's rated output against the distance it is rated at,
-        /// which for KSP is the home body's orbit. Plain 1/r^2 rather than the panel's powerCurve,
-        /// because only some parts carry one while the falloff applies to all of them.
-        /// </summary>
+        // Inverse-square scaling of a panel's rated output against the distance it is rated at, which for KSP
+        // is the home body's orbit. Plain 1/r^2 rather than the panel's powerCurve, because only some parts
+        // carry one while the falloff applies to all of them.
         private static double SolarFluxMultiplier(Vessel v)
         {
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
@@ -917,16 +910,12 @@ namespace ExoInstruments.Flight
             }
         }
 
-        /// <summary>
-        /// Writes a protovessel resource amount.
-        ///
-        /// THE FIELD IS WHAT PERSISTS, which is the opposite of the obvious guess.
-        /// ProtoPartResourceSnapshot carries both an `amount` field and a `resourceValues` node,
-        /// inviting the assumption that the node is the save. ProtoPartSnapshot.Save makes a FRESH
-        /// RESOURCE node and hands it to ProtoPartResourceSnapshot.Save, which copies resourceValues
-        /// in and then overwrites amount/maxAmount/flowState from the fields. UpdateConfigNodeAmounts
-        /// is still called for the reverse direction, since other code paths read the node.
-        /// </summary>
+        // Writes a protovessel resource amount. THE FIELD IS WHAT PERSISTS, which is the opposite of the
+        // obvious guess. ProtoPartResourceSnapshot carries both an `amount` field and a `resourceValues` node,
+        // inviting the assumption that the node is the save. ProtoPartSnapshot.Save makes a FRESH RESOURCE node
+        // and hands it to ProtoPartResourceSnapshot.Save, which copies resourceValues in and then overwrites
+        // amount/maxAmount/flowState from the fields. UpdateConfigNodeAmounts is still called for the reverse
+        // direction, since other code paths read the node.
         private static void SetProtoResource(ProtoPartResourceSnapshot res, double amount)
         {
             if (res == null) return;
@@ -985,10 +974,8 @@ namespace ExoInstruments.Flight
             return rate;
         }
 
-        /// <summary>
-        /// Moment arm the thrusters act at: the same bounding radius ModuleExoSpaceTelescope used
-        /// to turn thrust into torque, so the two agree by construction.
-        /// </summary>
+        // Moment arm the thrusters act at: the same bounding radius ModuleExoSpaceTelescope used to turn thrust
+        // into torque, so the two agree by construction.
         private static double ThrusterMomentArmMeters(SpaceTelescopeLink link)
         {
             if (link == null || !(link.ControlTorqueNm > 0.0)) return 1.0;
@@ -1005,7 +992,8 @@ namespace ExoInstruments.Flight
             return thrust > 0.0 ? Math.Max(0.5, link.ControlTorqueNm / thrust) : 1.0;
         }
 
-        /// <summary>The best specific impulse among the vessel's thrusters, seconds; KSP's stock monopropellant default when none can be read.</summary>
+        // The best specific impulse among the vessel's thrusters, seconds; KSP's stock monopropellant default
+        // when none can be read.
         private static double ThrusterSpecificImpulseSeconds(Vessel v)
         {
             const double StockMonopropVacuumIsp = 240.0;

@@ -14,7 +14,7 @@ dotnet run -p:Core=../../ExoInstruments/Core -- --out .
 **The layer, twice.** A fringe period of 2.9 nm at 950 nm implies a 43.4 µm silicon layer; Downing
 et al. (2006) state the CCID-20 is 40 µm thick. Two papers, two methods, **8.5 %**.
 
-**Walsh's curve, returned unchanged**, and no fringes below 774 nm — which is a measurement (their
+**Walsh's curve, returned unchanged**, and no fringes below 774 nm, which is a measurement (their
 774 nm flat showed none) as much as physics.
 
 **All three of the manual's prose statements, from one integral:**
@@ -29,5 +29,5 @@ et al. (2006) state the CCID-20 is 40 µm thick. Two papers, two methods, **8.5 
 washes out monotonically with bandwidth. The smooth one follows the **sinc envelope** of a top-hat
 against a 3.19 nm fringe period, collapsing to 0.185 % at a 3 nm band and reviving to 0.461 % at
 10 nm. The real one adds its OH bands, which sample the cosine at particular phases rather than
-averaging over it — **11 times harder at that same bandwidth**. Fringing has no safe bandwidth, and
+averaging over it, **11 times harder at that same bandwidth**. Fringing has no safe bandwidth, and
 that is why it is measured per filter rather than predicted.

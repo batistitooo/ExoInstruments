@@ -89,7 +89,10 @@ namespace ExoInstruments.Visualization
             public double DiffractionFwhmArcsec;
             /// <summary>Sky background, V mag/arcsec^2: the quantity SkyBrightnessModel computes and publishes in.</summary>
             public double SkyBrightnessVMagPerArcsec2;
-            /// <summary>Total Galactic E(B-V) toward the field, or NaN with no dust map installed. The whole column, so it describes what lies beyond the Galaxy rather than any star in the frame.</summary>
+            /// <summary>
+            /// Total Galactic E(B-V) toward the field, or NaN with no dust map installed. The whole column, so
+            /// it describes what lies beyond the Galaxy rather than any star in the frame.
+            /// </summary>
             public double GalacticReddeningEBv;
             /// <summary>Mean diffuse line surface brightness the filter collected, rayleighs, or NaN when no emission map contributed.</summary>
             public double LineSurfaceBrightnessRayleighs;
@@ -250,12 +253,10 @@ namespace ExoInstruments.Visualization
             stream.Write(headerBytes, 0, headerBytes.Length);
         }
 
-        /// <summary>
-        /// Which telescope, which detector, which site. Keyword names follow the conventions real
-        /// acquisition software writes and real reduction software reads (TELESCOP/INSTRUME/
-        /// OBSERVAT from the FITS standard's own reserved list; SITELAT/SITELONG/XBINNING/CCD-TEMP
-        /// from the SBIG-derived vocabulary that SharpCap, NINA, MaxIm DL and PixInsight all use).
-        /// </summary>
+        // Which telescope, which detector, which site. Keyword names follow the conventions real acquisition
+        // software writes and real reduction software reads (TELESCOP/INSTRUME/ OBSERVAT from the FITS
+        // standard's own reserved list; SITELAT/SITELONG/XBINNING/CCD-TEMP from the SBIG-derived vocabulary
+        // that SharpCap, NINA, MaxIm DL and PixInsight all use).
         private static void WriteInstrumentCards(StringBuilder sb, FitsHeaderInfo info)
         {
             AppendStringCard(sb, "TELESCOP", info.TelescopeName, "telescope");
@@ -283,11 +284,9 @@ namespace ExoInstruments.Visualization
                 AppendCard(sb, "CCD-TEMP", info.DetectorTemperatureCelsius.ToString("F1", CultureInfo.InvariantCulture), "detector temperature (C)");
         }
 
-        /// <summary>
-        /// What the sky was doing. Recorded because it is irrecoverable: a reduction can re-derive
-        /// a plate scale from the WCS, but nothing downstream can reconstruct the airmass, seeing
-        /// or sky brightness this particular exposure was taken through.
-        /// </summary>
+        // What the sky was doing. Recorded because it is irrecoverable: a reduction can re-derive a plate scale
+        // from the WCS, but nothing downstream can reconstruct the airmass, seeing or sky brightness this
+        // particular exposure was taken through.
         private static void WriteConditionCards(StringBuilder sb, FitsHeaderInfo info)
         {
             if (IsFinite(info.Airmass) && info.Airmass >= 1.0)
@@ -361,13 +360,10 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// Provenance: what made this frame, and how to make it again.
-        ///
-        /// A simulated data product can offer something a real one cannot: exact reproducibility,
-        /// and it is worth almost nothing unless the seed is written down next to the result. This
-        /// is the same reason Pyxel serialises its YAML configuration into its own outputs.
-        /// </summary>
+        // Provenance: what made this frame, and how to make it again. A simulated data product can offer
+        // something a real one cannot: exact reproducibility, and it is worth almost nothing unless the seed is
+        // written down next to the result. This is the same reason Pyxel serialises its YAML configuration into
+        // its own outputs.
         private static void WriteProvenanceCards(StringBuilder sb, FitsHeaderInfo info)
         {
             if (!string.IsNullOrEmpty(info.SoftwareVersion))
@@ -381,13 +377,10 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>
-        /// The world coordinate system: a TAN (gnomonic) projection described exactly as
-        /// Calabretta &amp; Greisen (2002) prescribe. Written only when the geometry resolved; a
-        /// header claiming a pointing it does not have would send a plate solve or a catalogue
-        /// cross-match somewhere wrong and silently, which is worse than a frame that admits it
-        /// does not know where it looked.
-        /// </summary>
+        // The world coordinate system: a TAN (gnomonic) projection described exactly as Calabretta & Greisen
+        // (2002) prescribe. Written only when the geometry resolved; a header claiming a pointing it does not
+        // have would send a plate solve or a catalogue cross-match somewhere wrong and silently, which is worse
+        // than a frame that admits it does not know where it looked.
         private static void WriteWcsCards(StringBuilder sb, FitsHeaderInfo info)
         {
             if (!info.Wcs.IsValid) return;
@@ -415,7 +408,7 @@ namespace ExoInstruments.Visualization
                 AppendCommentaryCard(sb, "HISTORY", "unguided: WCS valid at DATE-OBS; sources are trailed");
         }
 
-        /// <summary>Right ascension as hours, minutes and seconds: the sexagesimal form OBJCTRA carries by convention.</summary>
+        // Right ascension as hours, minutes and seconds: the sexagesimal form OBJCTRA carries by convention.
         private static string FormatRaSexagesimal(double raDeg)
         {
             double hours = ((raDeg % 360.0) + 360.0) % 360.0 / 15.0;
@@ -426,7 +419,7 @@ namespace ExoInstruments.Visualization
             return string.Format(CultureInfo.InvariantCulture, "{0:00} {1:00} {2:00.00}", h, m, s);
         }
 
-        /// <summary>Declination as degrees, arcminutes and arcseconds, sign always explicit.</summary>
+        // Declination as degrees, arcminutes and arcseconds, sign always explicit.
         private static string FormatDecSexagesimal(double decDeg)
         {
             char sign = decDeg < 0.0 ? '-' : '+';
@@ -460,11 +453,9 @@ namespace ExoInstruments.Visualization
             sb.Append(FitCard(card));
         }
 
-        /// <summary>
-        /// A commentary card (HISTORY, COMMENT). These are NOT value cards: the FITS standard
-        /// gives them the keyword in columns 1-8 and free text from column 9, with no '= ' value
-        /// indicator, and a conforming parser will reject or mangle one written in value form.
-        /// </summary>
+        // A commentary card (HISTORY, COMMENT). These are NOT value cards: the FITS standard gives them the
+        // keyword in columns 1-8 and free text from column 9, with no '= ' value indicator, and a conforming
+        // parser will reject or mangle one written in value form.
         private static void AppendCommentaryCard(StringBuilder sb, string keyword, string text)
         {
             sb.Append(FitCard(keyword.PadRight(8) + " " + (text ?? string.Empty)));

@@ -24,7 +24,7 @@ On a noiseless frame, the aperture sum must reproduce the analytic enclosed ener
 
 The departure at small radii is **discretisation, not error**: pixel-centre membership approximates
 a circle by a jagged one whose area is wrong by of order the pixels within half a pixel of its edge,
-a fraction going as 1/r. 4.3 % at r = 2, 0.35 % at r = 4, 0.05 % at r = 6 — that law. Centre
+a fraction going as 1/r. 4.3 % at r = 2, 0.35 % at r = 4, 0.05 % at r = 6; that law. Centre
 membership is kept because it is photutils' own default, and matching the reference is worth more
 here than sub-pixel weighting.
 
@@ -45,7 +45,7 @@ realisations and comparing the scatter with the sigma predicted for one of them:
 | 1×10⁵ | 487.7 | 487.6 | 1.000 |
 | 3×10⁵ | 661.7 | 652.8 | 0.987 |
 
-**This table found a bug.** It first read 0.990 down to 0.972 — a flat 2–3 % over-prediction that
+**This table found a bug.** It first read 0.990 down to 0.972, a flat 2-3 % over-prediction that
 looked like harmless conservatism and was not: `sigma_bkg` is *measured from the annulus* and
 therefore already carries the read noise, so the textbook's separate `n_ap·sigma_read²` term was
 counting the amplifier twice. The textbook writes it separately because it assumes a *known*
@@ -55,11 +55,11 @@ significance downstream is wrong by the same factor.
 What is left after the fix straddles unity with a residual trend: **+3.5 % at the faint end, −1.3 %
 at the bright**. That is centroid jitter, and it is not in the equation. At low signal-to-noise the
 refitted centroid wanders between realisations, so the aperture moves and captures a varying
-fraction of the flux — extra variance the formula does not model, and which vanishes once the
+fraction of the flux, extra variance the formula does not model, and which vanishes once the
 centroid is well determined.
 
-The last term of the CCD equation — the noise on the *background estimate*, entering `n_ap` times
-and reduced by the annulus size — is the one most implementations drop; the annulus table shows it
+The last term of the CCD equation, the noise on the *background estimate*, entering `n_ap` times
+and reduced by the annulus size, is the one most implementations drop; the annulus table shows it
 biting, with σ falling from 509 to 356 e⁻ as the annulus grows from 208 to 4212 pixels on the same
 star.
 
@@ -83,7 +83,7 @@ known    recovered      error    residual   in sigma
 recovered to 0.0041 mag.
 
 The magnitude range is chosen so every star is *detected*. A star below the frame's own limit does
-not come back with a large error bar — it does not come back at all, and a round trip that includes
+not come back with a large error bar; it does not come back at all, and a round trip that includes
 one is testing the detection limit instead of the photometry.
 
 
@@ -103,7 +103,7 @@ handed only pixels and sky.
 | projection inverts itself | 3.2×10⁻¹⁰ px, 3.4×10⁻¹¹ arcsec |
 | exact recovery, tangent point offered **81.8″ wrong** | map agrees with truth to 4.3×10⁻⁵ ″ frame-wide |
 | centroid noise 10 → 160 stars | pointing error 0.0033″ → 0.0014″ → 0.00071″, as 1/√N |
-| one mismatched pair, no clipping | 0.68″ error — the fit is wrecked |
+| one mismatched pair, no clipping | 0.68″ error, the fit is wrecked |
 | the same with 3σ clipping | found and rejected, clean answer recovered |
 | ambiguous match | refused, not guessed |
 

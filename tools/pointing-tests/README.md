@@ -16,19 +16,19 @@ RA/Dec  ->  altitude/azimuth        SkyCoordinates.EquatorialToHorizontal
 ```
 
 A sign error anywhere in that produces a telescope that points somewhere plausible and wrong, and
-the frame still comes out full of stars — just the wrong ones. This directory is what rules that out.
+the frame still comes out full of stars, just the wrong ones. This directory is what rules that out.
 
 ## The reference is SOFA, not a rearrangement
 
 `pyerfa` wraps ERFA, the IAU SOFA library. `erfa.hd2ae` and `erfa.ae2hd` are the standard
 hour-angle/declination ↔ azimuth/elevation pair, implemented independently in C, and they measure
-azimuth **north through east** — the same convention this codebase uses. `erfa.s2c` gives the
+azimuth **north through east**, the same convention this codebase uses. `erfa.s2c` gives the
 direction cosines. Agreement is evidence about the transformation, not about a shared derivation.
 
 Astropy's full `AltAz` frame is deliberately **not** the reference: it applies precession, nutation,
 aberration, polar motion and refraction, none of which this mod models, so a disagreement there
 would measure the corrections rather than the trigonometry. Astropy is used for the one thing it is
-the right reference for — parsing what a catalogue writes.
+the right reference for, parsing what a catalogue writes.
 
 ## Results
 
@@ -46,7 +46,7 @@ The geometries span seven latitudes including both poles and the roster's real s
 −24.6°, Palomar +33.4°, OHP +43.9°), six local sidereal times, 24 right ascensions and 13
 declinations from −88° to +88°. The pole is included on purpose: it is where an implementation that
 steps in right ascension and divides by `cos(dec)` falls apart, and where the azimuth of the round
-trip is legitimately degenerate — so azimuth is compared away from the zenith and right ascension
+trip is legitimately degenerate, so azimuth is compared away from the zenith and right ascension
 away from the pole, and altitude and declination carry those cases on their own.
 
 **Three checks are about signs rather than tolerances**: due north on the horizon is `+north`, due

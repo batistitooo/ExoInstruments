@@ -37,7 +37,10 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int ScienceRewardScanHalvingCount = 50;
 
-        /// <summary>One-time bonus per host for a confirmed planet detection, on top of ScienceRewardFirstScan. Scaled by the instrument's ScienceRewardMultiplier; this is the baseline-instrument value.</summary>
+        /// <summary>
+        /// One-time bonus per host for a confirmed planet detection, on top of ScienceRewardFirstScan. Scaled
+        /// by the instrument's ScienceRewardMultiplier; this is the baseline-instrument value.
+        /// </summary>
         public const float ScienceRewardRealDetection = 40.0f;
 
         /// <summary>
@@ -52,16 +55,29 @@ namespace ExoInstruments.Core
         /// </summary>
         public const float ScienceRewardStellarCharacterization = 10.0f;
 
-        /// <summary>One-time award for a confirmed TTV signal: gravity evidence of an unseen body, truth-gated same as the detection bonus. Flat, since the discovery is in the timing, not the aperture.</summary>
+        /// <summary>
+        /// One-time award for a confirmed TTV signal: gravity evidence of an unseen body, truth-gated same as
+        /// the detection bonus. Flat, since the discovery is in the timing, not the aperture.
+        /// </summary>
         public const float ScienceRewardTtvDetection = 25.0f;
 
-        /// <summary>One-time award for a Rossiter-McLaughlin spin-orbit measurement: the cross-method payoff requiring both a transit ephemeris and a spectrograph on target during a transit.</summary>
+        /// <summary>
+        /// One-time award for a Rossiter-McLaughlin spin-orbit measurement: the cross-method payoff requiring
+        /// both a transit ephemeris and a spectrograph on target during a transit.
+        /// </summary>
         public const float ScienceRewardRossiterMcLaughlin = 30.0f;
 
-        /// <summary>Extra multiplier on the per-planet award when multiple real planets are confirmed in one campaign. Additive, not compounded with the instrument multiplier again: 3 planets gives (1 + 2 x 0.5) x base, not base cubed.</summary>
+        /// <summary>
+        /// Extra multiplier on the per-planet award when multiple real planets are confirmed in one campaign.
+        /// Additive, not compounded with the instrument multiplier again: 3 planets gives (1 + 2 x 0.5) x base,
+        /// not base cubed.
+        /// </summary>
         public const double JackpotMultiplierPerExtraPlanet = 0.5;
 
-        /// <summary>One-time award for spotting a supernova in a frame, priced beside the Rossiter-McLaughlin measurement: one discovery, one payout, no aperture scaling.</summary>
+        /// <summary>
+        /// One-time award for spotting a supernova in a frame, priced beside the Rossiter-McLaughlin
+        /// measurement: one discovery, one payout, no aperture scaling.
+        /// </summary>
         public const float ScienceRewardSupernovaDiscovery = 30.0f;
 
         /// <summary>

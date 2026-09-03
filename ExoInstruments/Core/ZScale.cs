@@ -31,16 +31,23 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class ZScale
     {
-        /// <summary>Samples drawn from the frame. IRAF's own default; more does not move the answer, because the fit is to the sorted distribution rather than to individual pixels.</summary>
+        /// <summary>
+        /// Samples drawn from the frame. IRAF's own default; more does not move the answer, because the fit is
+        /// to the sorted distribution rather than to individual pixels.
+        /// </summary>
         public const int DefaultSamples = 1000;
 
-        /// <summary>Contrast. The fitted slope is divided by it, so below 1 it stretches the limits in around the median. 0.25 is IRAF's and DS9's default.</summary>
+        /// <summary>
+        /// Contrast. The fitted slope is divided by it, so below 1 it stretches the limits in around the
+        /// median. 0.25 is IRAF's and DS9's default.
+        /// </summary>
         public const double DefaultContrast = 0.25;
 
-        /// <summary>Rejection threshold in sigma about the fitted line.</summary>
+        // Rejection threshold in sigma about the fitted line.
         private const double KRej = 2.5;
         private const int MaxIterations = 5;
-        /// <summary>Fraction of the samples that may be rejected before the fit is abandoned for the plain minimum and maximum.</summary>
+        // Fraction of the samples that may be rejected before the fit is abandoned for the plain minimum and
+        // maximum.
         private const double MaxReject = 0.5;
         private const int MinPixels = 5;
 
@@ -210,10 +217,11 @@ namespace ExoInstruments.Core
             return whitePoint > blackPoint;
         }
 
-        /// <summary>Percentile of the block-averaged frame that becomes white. 99.5% lets the very brightest extended structure clip, which is what a real exposure of a nebula core does.</summary>
+        // Percentile of the block-averaged frame that becomes white. 99.5% lets the very brightest extended
+        // structure clip, which is what a real exposure of a nebula core does.
         private const double ExtendedWhitePercentile = 0.995;
 
-        /// <summary>Ordinary least squares of value against sample rank, over the samples not yet rejected.</summary>
+        // Ordinary least squares of value against sample rank, over the samples not yet rejected.
         private static bool FitLine(double[] samples, bool[] bad, out double slope, out double intercept)
         {
             slope = 0.0;

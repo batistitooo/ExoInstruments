@@ -53,7 +53,8 @@ namespace ExoInstruments.Core
         public const int BlockSizeBytes = 2880;
         public const int CardSizeBytes = 80;
 
-        /// <summary>A header block is 36 cards; refuse a header longer than this many blocks rather than scanning forever.</summary>
+        // A header block is 36 cards; refuse a header longer than this many blocks rather than scanning
+        // forever.
         private const int MaxHeaderBlocks = 256;
 
         /// <summary>What came out of the file: the image, its shape, and the header cards verbatim.</summary>
@@ -201,14 +202,10 @@ namespace ExoInstruments.Core
                 + MaxHeaderBlocks + " header blocks; refusing to scan further.");
         }
 
-        /// <summary>
-        /// The value field of a card, with the trailing comment removed and a quoted string
-        /// unquoted.
-        ///
-        /// The slash that starts a comment does not count inside a quoted string, which is why this
-        /// walks the field rather than calling IndexOf('/'): a FILTER card reading 'Ha 3nm / OIII'
-        /// is one string value, not a value and a comment.
-        /// </summary>
+        // The value field of a card, with the trailing comment removed and a quoted string unquoted. The slash
+        // that starts a comment does not count inside a quoted string, which is why this walks the field rather
+        // than calling IndexOf('/'): a FILTER card reading 'Ha 3nm / OIII' is one string value, not a value and
+        // a comment.
         private static string ParseValue(string field)
         {
             int i = 0;

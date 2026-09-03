@@ -42,7 +42,7 @@ namespace ExoInstruments.Core
             return r;
         }
 
-        /// <summary>Where one basis vector lands, as a Galactic unit vector.</summary>
+        // Where one basis vector lands, as a Galactic unit vector.
         private static void ImageOf(double n, double e, double u,
                                     double localMeridianRaDeg, double observerLatitudeDeg,
                                     out double gx, out double gy, out double gz)

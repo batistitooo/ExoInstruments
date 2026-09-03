@@ -118,7 +118,10 @@ namespace ExoInstruments.Core
                        SpotTransmission = 0.0,   SuspendedOnWires = true },
         };
 
-        /// <summary>Peak count of the clear (non-coronagraphic) stop NC_WF in the ct_n6 normalisation, per filter (Schmid et al. 2018, Table 8). The denominators of every attenuation above.</summary>
+        /// <summary>
+        /// Peak count of the clear (non-coronagraphic) stop NC_WF in the ct_n6 normalisation, per filter
+        /// (Schmid et al. 2018, Table 8). The denominators of every attenuation above.
+        /// </summary>
         public const double ClearPeakCountsRPrim = 7983.0;
         public const double ClearPeakCountsIPrim = 7813.0;
 
@@ -202,11 +205,14 @@ namespace ExoInstruments.Core
             public double GeometricTransmission;
         }
 
-        /// <summary>Diameter of the coronagraphic pupil image inside SPHERE, mm (Schmid et al. 2018, Table 9), and the telescope aperture it stands for.</summary>
+        /// <summary>
+        /// Diameter of the coronagraphic pupil image inside SPHERE, mm (Schmid et al. 2018, Table 9), and the
+        /// telescope aperture it stands for.
+        /// </summary>
         public const double CoronagraphicPupilMillimetres = 5.97;
         public const double TelescopeApertureMeters = 8.2;
 
-        /// <summary>Millimetres of the internal pupil image to metres of telescope aperture.</summary>
+        // Millimetres of the internal pupil image to metres of telescope aperture.
         private static double ToTelescopeMeters(double millimetres)
             => millimetres * (TelescopeApertureMeters / CoronagraphicPupilMillimetres);
 

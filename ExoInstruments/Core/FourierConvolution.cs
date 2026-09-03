@@ -25,9 +25,9 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class FourierConvolution
     {
-        /// <summary>Smallest transform this will use; below it the per-tile overhead dominates.</summary>
+        // Smallest transform this will use; below it the per-tile overhead dominates.
         private const int MinTransformSize = 64;
-        /// <summary>Largest transform this will use, bounding the per-tile working set.</summary>
+        // Largest transform this will use, bounding the per-tile working set.
         private const int MaxTransformSize = 1024;
 
         /// <summary>
@@ -181,7 +181,10 @@ namespace ExoInstruments.Core
                 _re = re; _im = im; Nx = nx; Ny = ny; EnclosedFraction = enclosed;
             }
 
-            /// <summary>Prepares the spectrum, or returns null when the padded grid would exceed maxTransformCells so a caller can fall back and say so.</summary>
+            /// <summary>
+            /// Prepares the spectrum, or returns null when the padded grid would exceed maxTransformCells so a
+            /// caller can fall back and say so.
+            /// </summary>
             public static RadialKernelSpectrum Build(int width, int height,
                                                      Func<double, double> profileAtPixelRadius,
                                                      long maxTransformCells)
@@ -253,7 +256,10 @@ namespace ExoInstruments.Core
             return n;
         }
 
-        /// <summary>Transform size for a given kernel width: a power of two large enough that each tile carries a useful span of real pixels, within the bounds above.</summary>
+        /// <summary>
+        /// Transform size for a given kernel width: a power of two large enough that each tile carries a useful
+        /// span of real pixels, within the bounds above.
+        /// </summary>
         /// <summary>
         /// Linear convolution of two square kernels, returning the central (2*rOut+1)^2 of the
         /// result. Both inputs are (2r+1)^2, row-major, centre at the middle.
@@ -334,21 +340,16 @@ namespace ExoInstruments.Core
             return n;
         }
 
-        /// <summary>Separable 2D transform: every row, then every column. n must be a power of two.</summary>
+        // Separable 2D transform: every row, then every column. n must be a power of two.
         private static void Transform2D(double[] re, double[] im, int n, bool inverse)
             => Transform2D(re, im, n, n, inverse);
 
-        /// <summary>
-        /// The rectangular form. nx and ny must each be a power of two.
-        ///
-        /// SPREAD ACROSS CORES, AND EXACTLY. A separable transform is a set of INDEPENDENT
-        /// one-dimensional transforms: no row's result depends on another row's, and once the row
-        /// pass is finished, no column's depends on another column's. Nothing is accumulated
-        /// across workers, so each output cell is produced by the same sequence of operations on
-        /// the same inputs whichever worker ran it, and the result does not depend on the thread
-        /// count. That is the condition ParallelWork sets out, and this is the easiest place in
-        /// the pipeline to meet it.
-        /// </summary>
+        // The rectangular form. nx and ny must each be a power of two. SPREAD ACROSS CORES, AND EXACTLY. A
+        // separable transform is a set of INDEPENDENT one-dimensional transforms: no row's result depends on
+        // another row's, and once the row pass is finished, no column's depends on another column's. Nothing is
+        // accumulated across workers, so each output cell is produced by the same sequence of operations on the
+        // same inputs whichever worker ran it, and the result does not depend on the thread count. That is the
+        // condition ParallelWork sets out, and this is the easiest place in the pipeline to meet it.
         private static void Transform2D(double[] re, double[] im, int nx, int ny, bool inverse)
         {
             Twiddles rowTwiddles = TwiddlesFor(nx);
@@ -386,23 +387,19 @@ namespace ExoInstruments.Core
                                  inverse, columnTwiddles, single);
         }
 
-        /// <summary>
-        /// Columns taken at a time in the column pass: eight doubles, which is one 64-byte cache
-        /// line.
-        ///
-        /// WHY IT MATTERS AND WHAT IT DOES NOT CHANGE. Each column is still its own independent
-        /// transform over the same values, so every output is bit for bit what it was; only the
-        /// order the cells are FETCHED in changes. A column of a row-major grid is strided, so
-        /// reading one column pulls a whole cache line per element and uses one of its eight
-        /// doubles; the other seven belong to the seven neighbouring columns, which were then read
-        /// again, one line each, when their turn came. Gathering the eight together spends one
-        /// fetch where the plain loop spent eight. On a 1024x1024 tile the grid is 8 MB per plane
-        /// and nothing of it stays in cache between columns, which is why the column pass, doing
-        /// exactly the same arithmetic as the row pass, cost several times as much.
-        /// </summary>
+        // Columns taken at a time in the column pass: eight doubles, which is one 64-byte cache line. WHY IT
+        // MATTERS AND WHAT IT DOES NOT CHANGE. Each column is still its own independent transform over the same
+        // values, so every output is bit for bit what it was; only the order the cells are FETCHED in changes.
+        // A column of a row-major grid is strided, so reading one column pulls a whole cache line per element
+        // and uses one of its eight doubles; the other seven belong to the seven neighbouring columns, which
+        // were then read again, one line each, when their turn came. Gathering the eight together spends one
+        // fetch where the plain loop spent eight. On a 1024x1024 tile the grid is 8 MB per plane and nothing of
+        // it stays in cache between columns, which is why the column pass, doing exactly the same arithmetic as
+        // the row pass, cost several times as much.
         private const int ColumnBlock = 8;
 
-        /// <summary>One worker's line buffers, so the row and column passes allocate once per worker rather than once per line.</summary>
+        // One worker's line buffers, so the row and column passes allocate once per worker rather than once per
+        // line.
         private sealed class LineBuffers
         {
             internal readonly double[] Re;
@@ -452,23 +449,17 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// The roots of unity a transform of length N steps through, and its bit-reversal
-        /// permutation, computed once per length and shared by every transform of that length.
-        ///
-        /// A TABLE IS MORE ACCURATE THAN THE RECURRENCE IT REPLACES, not merely faster. The
-        /// previous form advanced the twiddle factor by repeated complex multiplication,
-        /// w_(j+1) = w_j * w, which is the textbook implementation and also the textbook example
-        /// of error accumulation: the relative error grows as the square root of the number of
-        /// steps, so the last butterflies of a 1024-point stage carry roughly thirty times the
-        /// rounding error of the first. Each entry here is evaluated directly from its own angle,
-        /// so every one is correct to a rounding, and the transform's error stops depending on
-        /// how far into the stage a butterfly sits. It is also faster, because the recurrence
-        /// serialises the inner loop behind a chain of dependent multiplications.
-        ///
-        /// One table serves both directions: the inverse transform's twiddle is the forward
-        /// one's conjugate, so only the sign of the imaginary part changes.
-        /// </summary>
+        // The roots of unity a transform of length N steps through, and its bit-reversal permutation, computed
+        // once per length and shared by every transform of that length. A TABLE IS MORE ACCURATE THAN THE
+        // RECURRENCE IT REPLACES, not merely faster. The previous form advanced the twiddle factor by repeated
+        // complex multiplication, w_(j+1) = w_j * w, which is the textbook implementation and also the textbook
+        // example of error accumulation: the relative error grows as the square root of the number of steps, so
+        // the last butterflies of a 1024-point stage carry roughly thirty times the rounding error of the
+        // first. Each entry here is evaluated directly from its own angle, so every one is correct to a
+        // rounding, and the transform's error stops depending on how far into the stage a butterfly sits. It is
+        // also faster, because the recurrence serialises the inner loop behind a chain of dependent
+        // multiplications. One table serves both directions: the inverse transform's twiddle is the forward
+        // one's conjugate, so only the sign of the imaginary part changes.
         private sealed class Twiddles
         {
             internal readonly double[] Cos;      // cos(2 pi m / N), m in [0, N/2)
@@ -499,11 +490,9 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// Tables by length. A capture uses at most a handful of lengths and reuses each of them
-        /// for every line of every tile, so they are built once and held; the largest this file
-        /// can ask for is 2048 entries, a few tens of kilobytes.
-        /// </summary>
+        // Tables by length. A capture uses at most a handful of lengths and reuses each of them for every line
+        // of every tile, so they are built once and held; the largest this file can ask for is 2048 entries, a
+        // few tens of kilobytes.
         private static readonly System.Collections.Generic.Dictionary<int, Twiddles> twiddleTables
             = new System.Collections.Generic.Dictionary<int, Twiddles>();
 
@@ -520,7 +509,8 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>In-place iterative radix-2 Cooley-Tukey FFT over n entries starting at offset. n must be a power of two. The inverse pass carries the 1/n normalisation.</summary>
+        // In-place iterative radix-2 Cooley-Tukey FFT over n entries starting at offset. n must be a power of
+        // two. The inverse pass carries the 1/n normalisation.
         private static void Transform1D(double[] re, double[] im, int n, bool inverse, Twiddles twiddles, int offset)
         {
             int[] reversed = twiddles.Reversed;

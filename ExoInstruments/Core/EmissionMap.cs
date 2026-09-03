@@ -95,17 +95,12 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// Reads count little-endian half floats in bulk.
-        ///
-        /// A BinaryReader.ReadUInt16 per value is one virtual call and one bounds check each, and at
-        /// nside 1024 that is 12.6 million of them; at nside 4096 it would be 201 million, which is
-        /// the difference between a load the player does not notice and one that stalls the scene
-        /// change. Reading into a byte buffer and reinterpreting is the same bytes in the same order.
-        ///
-        /// Byte order is asserted rather than assumed: the format is little-endian, and every
-        /// platform KSP runs on is too, so a big-endian host would silently read a scrambled sky.
-        /// </summary>
+        // Reads count little-endian half floats in bulk. A BinaryReader.ReadUInt16 per value is one virtual
+        // call and one bounds check each, and at nside 1024 that is 12.6 million of them; at nside 4096 it
+        // would be 201 million, which is the difference between a load the player does not notice and one that
+        // stalls the scene change. Reading into a byte buffer and reinterpreting is the same bytes in the same
+        // order. Byte order is asserted rather than assumed: the format is little-endian, and every platform
+        // KSP runs on is too, so a big-endian host would silently read a scrambled sky.
         internal static ushort[] ReadHalfFloats(BinaryReader reader, int count)
         {
             if (!BitConverter.IsLittleEndian)

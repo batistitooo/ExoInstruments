@@ -11,7 +11,10 @@ namespace ExoInstruments.Core
         public double DecDeg;
         /// <summary>Johnson V apparent magnitude.</summary>
         public double VMag;
-        /// <summary>Johnson B-V colour index, or NaN when the catalogue has no colour for this star. OBSERVED, so it carries the star's reddening; see ReddeningEBv.</summary>
+        /// <summary>
+        /// Johnson B-V colour index, or NaN when the catalogue has no colour for this star. OBSERVED, so it
+        /// carries the star's reddening; see ReddeningEBv.
+        /// </summary>
         public double ColorIndexBV;
 
         /// <summary>
@@ -70,20 +73,19 @@ namespace ExoInstruments.Core
         // Must match tools/pack_gaia_catalog.py, which writes the file.
         private const int FormatVersion = 3;
 
-        /// <summary>Version 2 files still load; they simply carry no reddening column, and every star reads as "not estimated".</summary>
+        // Version 2 files still load; they simply carry no reddening column, and every star reads as "not
+        // estimated".
         private const int OldestSupportedVersion = 2;
 
         private const double VMagOffset = 2.0;
         private const short BvUnknown = -32768;
         private const ushort EbvUnknown = 65535;
 
-        /// <summary>
-        /// Positions are fixed point over a full turn, not float32 degrees. A float32 near
-        /// RA = 360 deg resolves only 0.077 arcsec, which is harmless at the RC20's 1.1
-        /// arcsec/px but is forty-three pixels at SPHERE/ZIMPOL's ~1.8 mas plate scale. Fixed
-        /// point gives a uniform 360/2^32 = 0.3 mas everywhere for the same four bytes, and the
-        /// raw integers stay monotonic in RA so the binary search runs on them directly.
-        /// </summary>
+        // Positions are fixed point over a full turn, not float32 degrees. A float32 near RA = 360 deg resolves
+        // only 0.077 arcsec, which is harmless at the RC20's 1.1 arcsec/px but is forty-three pixels at
+        // SPHERE/ZIMPOL's ~1.8 mas plate scale. Fixed point gives a uniform 360/2^32 = 0.3 mas everywhere for
+        // the same four bytes, and the raw integers stay monotonic in RA so the binary search runs on them
+        // directly.
         private const double RaDegPerUnit = 360.0 / 4294967296.0;
         private const double DecDegPerUnit = 180.0 / 4294967296.0;
 
@@ -214,7 +216,8 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Exact angular test on a bracketed range; the RA/declination bracketing above only narrows the candidates, it doesn't decide membership.</summary>
+        // Exact angular test on a bracketed range; the RA/declination bracketing above only narrows the
+        // candidates, it doesn't decide membership.
         private void ScanRange(int lo, int hi, double sinCentreDec, double cosCentreDec,
                                double centreRaDeg, double cosRadius, ushort faintestMilli,
                                List<RenderedStar> results)
@@ -262,7 +265,7 @@ namespace ExoInstruments.Core
             return lo;
         }
 
-        /// <summary>Degrees to the file's fixed-point RA units, wrapping the full turn.</summary>
+        // Degrees to the file's fixed-point RA units, wrapping the full turn.
         private static uint ToRaFixed(double raDeg)
         {
             double wrapped = raDeg % 360.0;
@@ -277,29 +280,19 @@ namespace ExoInstruments.Core
             return b < 0 ? 0 : (b >= bandCount ? bandCount - 1 : b);
         }
 
-        /// <summary>
-        /// The declination inside this band at which the search cone spans the most right
-        /// ascension, which is what the RA bracket must be computed from if it is not to exclude
-        /// stars the cone really contains.
-        ///
-        /// That declination is the one CLOSEST TO THE CONE'S OWN CENTRE, because a cone's RA
-        /// extent is widest at its centre declination and shrinks to zero at its northern and
-        /// southern extremes. This previously returned the band edge nearest the EQUATOR, on the
-        /// reasoning that the RA half-width grows as 1/cos(dec). That reasoning holds for the
-        /// small-angle approximation radius/cos(dec), but not for the exact relation the search
-        /// actually uses,
-        ///
-        ///     cos(radius) = sin(dec0)sin(dec) + cos(dec0)cos(dec)cos(dRA)
-        ///
-        /// where proximity to dec0 dominates. For every band on the equator side of the cone
-        /// centre the two choices disagree, and the equator-nearest edge is the FARTHEST from the
-        /// centre, so it produced the narrowest bracket exactly where the widest was needed.
-        ///
-        /// The effect was a thin crescent of stars silently dropped at the edge of every search
-        /// cone. It went unnoticed while the catalogue then shipped put about four stars in a
-        /// frame; it surfaced immediately against Gaia, where a 0.3 degree cone holds 923 stars
-        /// and 8 of them went missing.
-        /// </summary>
+        // The declination inside this band at which the search cone spans the most right ascension, which is
+        // what the RA bracket must be computed from if it is not to exclude stars the cone really contains.
+        // That declination is the one CLOSEST TO THE CONE'S OWN CENTRE, because a cone's RA extent is widest at
+        // its centre declination and shrinks to zero at its northern and southern extremes. This previously
+        // returned the band edge nearest the EQUATOR, on the reasoning that the RA half-width grows as
+        // 1/cos(dec). That reasoning holds for the small-angle approximation radius/cos(dec), but not for the
+        // exact relation the search actually uses, cos(radius) = sin(dec0)sin(dec) + cos(dec0)cos(dec)cos(dRA)
+        // where proximity to dec0 dominates. For every band on the equator side of the cone centre the two
+        // choices disagree, and the equator-nearest edge is the FARTHEST from the centre, so it produced the
+        // narrowest bracket exactly where the widest was needed. The effect was a thin crescent of stars
+        // silently dropped at the edge of every search cone. It went unnoticed while the catalogue then shipped
+        // put about four stars in a frame; it surfaced immediately against Gaia, where a 0.3 degree cone holds
+        // 923 stars and 8 of them went missing.
         private double WidestRaDeclinationInBand(int band, double centreDecDeg)
         {
             double low = -90.0 + band * bandWidthDeg;

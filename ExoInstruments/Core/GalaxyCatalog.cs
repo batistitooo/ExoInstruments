@@ -93,7 +93,8 @@ namespace ExoInstruments.Core
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'G', (byte)'A', (byte)'L', (byte)'X', (byte)'1' };
         private const int FormatVersion = 2;
 
-        /// <summary>Version 1 files still load; they carry no distance column, and every galaxy reads as "distance unknown".</summary>
+        // Version 1 files still load; they carry no distance column, and every galaxy reads as "distance
+        // unknown".
         private const int OldestSupportedVersion = 1;
 
         private Galaxy[] galaxies;

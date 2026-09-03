@@ -55,7 +55,10 @@ namespace ExoInstruments.Core
         public double ContinuumChromaticityError { get; }
         public double LineChromaticityError { get; }
 
-        /// <summary>Median chromaticity error over the continuum training set, the typical star, rather than the worst one at the end of the temperature range.</summary>
+        /// <summary>
+        /// Median chromaticity error over the continuum training set, the typical star, rather than the worst
+        /// one at the end of the temperature range.
+        /// </summary>
         public double MedianContinuumChromaticityError { get; }
 
         /// <summary>Spectra the fit was built from.</summary>
@@ -211,16 +214,12 @@ namespace ExoInstruments.Core
                                          medianContinuum);
         }
 
-        /// <summary>
-        /// Relative weights of the two kinds of training spectrum.
-        ///
-        /// Continuum carries more because it is what a broadband filter set can actually measure and
-        /// what most of the sky is: every star, planet and galaxy. Weighting the two equally drags the
-        /// continuum fit toward line spectra it cannot reproduce anyway; an [O III] line falls in
-        /// the gap between two passbands, and no matrix recovers a colour from light that was not
-        /// collected. Both residuals are reported separately so the trade is visible rather than
-        /// buried in one number.
-        /// </summary>
+        // Relative weights of the two kinds of training spectrum. Continuum carries more because it is what a
+        // broadband filter set can actually measure and what most of the sky is: every star, planet and galaxy.
+        // Weighting the two equally drags the continuum fit toward line spectra it cannot reproduce anyway; an
+        // [O III] line falls in the gap between two passbands, and no matrix recovers a colour from light that
+        // was not collected. Both residuals are reported separately so the trade is visible rather than buried
+        // in one number.
         private const double ContinuumWeight = 4.0;
         private const double LineWeight = 1.0;
 
@@ -228,14 +227,11 @@ namespace ExoInstruments.Core
         public static ColourCalibration FitContinuumOnly(IList<Func<double, double>> bands)
             => Fit(bands, includeLines: false);
 
-        /// <summary>
-        /// Nebular line combinations, as relative photon rates in the lines the mod renders.
-        ///
-        /// Three regimes, all real: an H II region where H-alpha dominates and the forbidden lines
-        /// are a quarter of it; the diffuse warm ionised medium where [N II] rivals H-alpha; and a
-        /// high-excitation object where [O III] leads. Together they span the colours a line source
-        /// can have, which is what the fit needs, not a claim about any particular object.
-        /// </summary>
+        // Nebular line combinations, as relative photon rates in the lines the mod renders. Three regimes, all
+        // real: an H II region where H-alpha dominates and the forbidden lines are a quarter of it; the diffuse
+        // warm ionised medium where [N II] rivals H-alpha; and a high-excitation object where [O III] leads.
+        // Together they span the colours a line source can have, which is what the fit needs, not a claim about
+        // any particular object.
         private static IEnumerable<double[]> NebularCombs()
         {
             // { Hbeta, [O III] 4959, [O III] 5007, [N II] 6548, Halpha, [N II] 6584, [S II] 6716, [S II] 6731 }
@@ -295,10 +291,8 @@ namespace ExoInstruments.Core
             weights.Add(weight);
         }
 
-        /// <summary>
-        /// A band's response to a continuum: the spectrum integrated against the system's throughput,
-        /// in PHOTONS, because that is what a detector counts.
-        /// </summary>
+        // A band's response to a continuum: the spectrum integrated against the system's throughput, in
+        // PHOTONS, because that is what a detector counts.
         private static double BandResponse(Func<double, double> band, Func<double, double> spectrum)
         {
             const double stepNm = 1.0;
@@ -341,7 +335,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>Cholesky solve of a symmetric positive-definite system. False when the bands are degenerate.</summary>
+        // Cholesky solve of a symmetric positive-definite system. False when the bands are degenerate.
         private static bool SolveSymmetric(double[,] a, double[] b, out double[] solution)
         {
             int n = b.Length;

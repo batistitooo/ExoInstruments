@@ -30,7 +30,8 @@ namespace ExoInstruments.Core
         private const double DegToRad = Math.PI / 180.0;
         private const double RadToDeg = 180.0 / Math.PI;
 
-        /// <summary>Earth's radius (m) and gravitational parameter (m^3/s^2): the reference UniverseTimeScale measures against.</summary>
+        // Earth's radius (m) and gravitational parameter (m^3/s^2): the reference UniverseTimeScale measures
+        // against.
         private const double EarthRadiusMeters = 6.371e6;
         private const double EarthGravParameter = 3.986004418e14;
 
@@ -59,7 +60,10 @@ namespace ExoInstruments.Core
             return home > 0.0 ? earth / home : 1.0;   // the 2 pi cancels
         }
 
-        /// <summary>Angular acceleration a control torque gives against an inertia, deg/s^2. Zero means a vehicle that cannot slew, not one that slews instantly.</summary>
+        /// <summary>
+        /// Angular acceleration a control torque gives against an inertia, deg/s^2. Zero means a vehicle that
+        /// cannot slew, not one that slews instantly.
+        /// </summary>
         public static double AngularAccelerationDegPerSecond2(double torqueNm, double inertiaKgM2)
         {
             if (!(torqueNm > 0.0) || !(inertiaKgM2 > 0.0)) return 0.0;

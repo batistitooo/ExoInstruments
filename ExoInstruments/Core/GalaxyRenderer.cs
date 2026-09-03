@@ -29,23 +29,17 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class GalaxyRenderer
     {
-        /// <summary>
-        /// Largest fractional change in surface brightness across one pixel that a single sample is
-        /// allowed to represent. Below it the profile is flat enough that the midpoint value IS the
-        /// average to second order; above it the pixel is subdivided until it is.
-        /// </summary>
+        // Largest fractional change in surface brightness across one pixel that a single sample is allowed to
+        // represent. Below it the profile is flat enough that the midpoint value IS the average to second
+        // order; above it the pixel is subdivided until it is.
         private const double MaxVariationPerPixel = 0.02;
 
-        /// <summary>
-        /// Subdivision ceiling per axis, so a nucleus cannot cost unbounded time.
-        ///
-        /// 128 rather than 32 because 32 is where the flux residual stops being negligible on the
-        /// hardest case a real catalogue contains: an n = 4 spheroid whose half-light radius is
-        /// three pixels and whose minor axis is a quarter of that. There the variation across the
-        /// central pixel asks for nearly 300 subdivisions and the cap bound hard, losing 2.6e-3 of
-        /// the total. Only a handful of pixels ever reach the ceiling; the requirement falls as
-        /// 1/R, so raising it costs a bounded number of extra samples per galaxy, not a factor.
-        /// </summary>
+        // Subdivision ceiling per axis, so a nucleus cannot cost unbounded time. 128 rather than 32 because 32
+        // is where the flux residual stops being negligible on the hardest case a real catalogue contains: an n
+        // = 4 spheroid whose half-light radius is three pixels and whose minor axis is a quarter of that. There
+        // the variation across the central pixel asks for nearly 300 subdivisions and the cap bound hard,
+        // losing 2.6e-3 of the total. Only a handful of pixels ever reach the ceiling; the requirement falls as
+        // 1/R, so raising it costs a bounded number of extra samples per galaxy, not a factor.
         private const int MaxSubdivision = 128;
 
         /// <summary>

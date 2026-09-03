@@ -52,41 +52,30 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class ZodiacalLight
     {
-        /// <summary>
-        /// Helioecliptic longitudes tabulated, degrees: the target's ecliptic longitude minus the
-        /// Sun's, so 0 is toward the Sun and 180 is the anti-solar point. Leinert Table 16's own
-        /// row headings, unevenly spaced as published (5 degree steps near the Sun where the
-        /// gradient is steep, 15 degree steps beyond 45).
-        /// </summary>
+        // Helioecliptic longitudes tabulated, degrees: the target's ecliptic longitude minus the Sun's, so 0 is
+        // toward the Sun and 180 is the anti-solar point. Leinert Table 16's own row headings, unevenly spaced
+        // as published (5 degree steps near the Sun where the gradient is steep, 15 degree steps beyond 45).
         private static readonly double[] LongitudeDeg =
         {
             0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
             60.0, 75.0, 90.0, 105.0, 120.0, 135.0, 150.0, 165.0, 180.0,
         };
 
-        /// <summary>
-        /// Ecliptic latitudes tabulated, degrees: Leinert Table 16's own column headings, plus
-        /// the pole. The table is symmetric about the ecliptic, so only one hemisphere is given.
-        ///
-        /// The 90 degree column is not an extrapolation: the table's own caption supplies it,
-        /// "Towards the ecliptic pole, the brightness as given above is 60 +/- 3 S10sun".
-        /// </summary>
+        // Ecliptic latitudes tabulated, degrees: Leinert Table 16's own column headings, plus the pole. The
+        // table is symmetric about the ecliptic, so only one hemisphere is given. The 90 degree column is not
+        // an extrapolation: the table's own caption supplies it, "Towards the ecliptic pole, the brightness as
+        // given above is 60 +/- 3 S10sun".
         private static readonly double[] LatitudeDeg = { 0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 45.0, 60.0, 75.0, 90.0 };
 
-        /// <summary>Leinert Table 16's own pole value, S10sun. Quoted in its caption rather than in the grid.</summary>
+        // Leinert Table 16's own pole value, S10sun. Quoted in its caption rather than in the grid.
         private const double PoleS10 = 60.0;
 
-        /// <summary>
-        /// Leinert et al. (1998) Table 16, in S10sun at 500 nm, indexed [longitude][latitude].
-        ///
-        /// NaN marks the cells the table leaves blank, which are exactly those inside 15 degrees
-        /// of the Sun: the paper states it completes the earlier table "in the solar vicinity, up
-        /// to 15 degrees solar elongation", and cos(elongation) = cos(lambda - lambda_sun) cos(beta)
-        /// puts every blank cell below that limit and every filled one above it. That is a real
-        /// boundary of the measurement, not a gap in the transcription, and it is left as NaN.
-        ///
-        /// Transcribed verbatim; do not smooth it.
-        /// </summary>
+        // Leinert et al. (1998) Table 16, in S10sun at 500 nm, indexed [longitude][latitude]. NaN marks the
+        // cells the table leaves blank, which are exactly those inside 15 degrees of the Sun: the paper states
+        // it completes the earlier table "in the solar vicinity, up to 15 degrees solar elongation", and
+        // cos(elongation) = cos(lambda - lambda_sun) cos(beta) puts every blank cell below that limit and every
+        // filled one above it. That is a real boundary of the measurement, not a gap in the transcription, and
+        // it is left as NaN. Transcribed verbatim; do not smooth it.
         private static readonly double[][] TableS10 =
         {
             //        beta=0      5       10      15      20      25      30      45     60     75    90
@@ -250,16 +239,12 @@ namespace ExoInstruments.Core
             return VMagPerArcsec2(heliocentricLongitudeDeg, eclipticLatitudeDeg, out _);
         }
 
-        /// <summary>
-        /// Inside 15 degrees elongation, where the table stops: the brightest MEASURED value at
-        /// this latitude, held.
-        ///
-        /// A clamp and not an extrapolation, deliberately. The zodiacal light does keep rising
-        /// toward the Sun, so this understates it, and that is the safe direction to be wrong in
-        /// a region no instrument in the roster may point at: the smallest solar avoidance angle
-        /// here is 62.5 degrees. Extrapolating a steep power law past the end of the data to
-        /// serve a pointing that cannot happen would be inventing a number for its own sake.
-        /// </summary>
+        // Inside 15 degrees elongation, where the table stops: the brightest MEASURED value at this latitude,
+        // held. A clamp and not an extrapolation, deliberately. The zodiacal light does keep rising toward the
+        // Sun, so this understates it, and that is the safe direction to be wrong in a region no instrument in
+        // the roster may point at: the smallest solar avoidance angle here is 62.5 degrees. Extrapolating a
+        // steep power law past the end of the data to serve a pointing that cannot happen would be inventing a
+        // number for its own sake.
         private static double ClampToNearestMeasured(int j0, int j1, double fj)
         {
             for (int i = 0; i < TableS10.Length; i++)
@@ -271,10 +256,8 @@ namespace ExoInstruments.Core
             return PoleS10;
         }
 
-        /// <summary>
-        /// Helioecliptic longitude folded onto 0-180: the cloud is symmetric about the
-        /// Sun-anti-Sun line, which is why the table only tabulates half of it.
-        /// </summary>
+        // Helioecliptic longitude folded onto 0-180: the cloud is symmetric about the Sun-anti-Sun line, which
+        // is why the table only tabulates half of it.
         private static double FoldLongitude(double deg)
         {
             double d = deg % 360.0;

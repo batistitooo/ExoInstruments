@@ -46,7 +46,8 @@ namespace ExoInstruments.Core
         public static void BlackbodyRgb(double teffK, out double r, out double g, out double b)
             => Colorimetry.BlackbodyDisplayRgb(Math.Max(1.0, teffK), out r, out g, out b);
 
-        /// <summary>The fit this replaced, kept so tools/colour-tests can report the difference rather than assert it from memory.</summary>
+        // The fit this replaced, kept so tools/colour-tests can report the difference rather than assert it
+        // from memory.
         internal static void LegacyBlackbodyRgb(double teffK, out double r, out double g, out double b)
         {
             double t = Math.Min(40000.0, Math.Max(1000.0, teffK)) / 100.0;

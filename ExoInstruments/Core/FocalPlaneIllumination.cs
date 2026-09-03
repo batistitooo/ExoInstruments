@@ -105,7 +105,10 @@ namespace ExoInstruments.Core
             return Math.Abs(xMetres) <= halfSideMetres && Math.Abs(yMetres) <= halfSideMetres;
         }
 
-        /// <summary>Whether a point sits inside a circular image circle of the given diameter in millimetres, the form the amateur tubes on this roster publish theirs in.</summary>
+        /// <summary>
+        /// Whether a point sits inside a circular image circle of the given diameter in millimetres, the form
+        /// the amateur tubes on this roster publish theirs in.
+        /// </summary>
         public static bool InsideImageCircle(double xMetres, double yMetres, double imageCircleMillimetres)
         {
             if (!(imageCircleMillimetres > 0.0) || double.IsNaN(imageCircleMillimetres)) return true;

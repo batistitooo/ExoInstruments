@@ -150,11 +150,9 @@ namespace ExoInstruments.Core
             return string.IsNullOrWhiteSpace(v) ? null : v;
         }
 
-        /// <summary>
-        /// The catalog's error bars are asymmetric (separate min/max columns). Collapsed to the
-        /// larger of the two: a single symmetric sigma is what a comparison against a recovered
-        /// value needs, and taking the larger side keeps it from claiming false precision.
-        /// </summary>
+        // The catalog's error bars are asymmetric (separate min/max columns). Collapsed to the larger of the
+        // two: a single symmetric sigma is what a comparison against a recovered value needs, and taking the
+        // larger side keeps it from claiming false precision.
         private static double? LargerError(string[] row, Dictionary<string, int> colIndex, string minColumn, string maxColumn)
         {
             double? lo = GetDouble(row, colIndex, minColumn);

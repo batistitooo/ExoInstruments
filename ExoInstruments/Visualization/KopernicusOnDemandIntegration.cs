@@ -86,7 +86,7 @@ namespace ExoInstruments.Visualization
             return resident;
         }
 
-        /// <summary>Requests this one body's textures; true when they were already resident.</summary>
+        // Requests this one body's textures; true when they were already resident.
         private static bool LoadFor(CelestialBody body)
         {
             if (body == null || body.scaledBody == null) return true;

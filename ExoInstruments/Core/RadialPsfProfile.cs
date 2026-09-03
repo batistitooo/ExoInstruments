@@ -59,7 +59,7 @@ namespace ExoInstruments.Core
     /// </summary>
     public sealed class RadialPsfProfile
     {
-        /// <summary>Radians per arcsecond.</summary>
+        // Radians per arcsecond.
         private const double ArcsecToRad = Math.PI / (180.0 * 3600.0);
 
         /// <summary>
@@ -70,40 +70,30 @@ namespace ExoInstruments.Core
         /// </summary>
         public const int SamplesPerPixel = 8;
 
-        /// <summary>
-        /// Radius, in pixels, out to which the full two-dimensional orientation-averaged square
-        /// pixel is evaluated instead of its radial reduction.
-        ///
-        /// Six pixels, chosen by measurement rather than taste. The step left at the crossover is
-        /// the residual of the one-dimensional reduction itself, evaluated where it takes over, so
-        /// it cannot be driven to zero by placing the switch anywhere; what moving the switch out
-        /// does is put it where that residual is small. Measured across every plate scale this
-        /// display produces (0.1 to 4 lambda/D per pixel): 1.9e-3 of the peak intensity at three
-        /// pixels, 9.5e-4 at six, at which point it no longer exceeds the model's own residual
-        /// against a true square pixel and so adds nothing to the error budget. Moving it further
-        /// buys a fraction of one part in a thousand of an intensity the display renders on a
-        /// nine-decade log stretch, for a cost that grows with the field of view.
-        ///
-        /// Six pixels is 48 table entries whatever the plate scale, against the several thousand a
-        /// full table holds, so the cost of the two-dimensional form is bounded.
-        /// </summary>
+        // Radius, in pixels, out to which the full two-dimensional orientation-averaged square pixel is
+        // evaluated instead of its radial reduction. Six pixels, chosen by measurement rather than taste. The
+        // step left at the crossover is the residual of the one-dimensional reduction itself, evaluated where
+        // it takes over, so it cannot be driven to zero by placing the switch anywhere; what moving the switch
+        // out does is put it where that residual is small. Measured across every plate scale this display
+        // produces (0.1 to 4 lambda/D per pixel): 1.9e-3 of the peak intensity at three pixels, 9.5e-4 at six,
+        // at which point it no longer exceeds the model's own residual against a true square pixel and so adds
+        // nothing to the error budget. Moving it further buys a fraction of one part in a thousand of an
+        // intensity the display renders on a nine-decade log stretch, for a cost that grows with the field of
+        // view. Six pixels is 48 table entries whatever the plate scale, against the several thousand a full
+        // table holds, so the cost of the two-dimensional form is bounded.
         private const double TwoDimensionalRadiusPx = 6.0;
 
-        /// <summary>
-        /// Orientations sampled when averaging a square pixel about the source. A square has
-        /// four-fold symmetry, so orientations spanning 0 to 45 degrees cover every distinct case.
-        /// </summary>
+        // Orientations sampled when averaging a square pixel about the source. A square has four-fold symmetry,
+        // so orientations spanning 0 to 45 degrees cover every distinct case.
         private const int OrientationSamples = 8;
 
-        /// <summary>Minimum midpoint nodes per axis inside the two-dimensional region; see SquarePixelAverage.</summary>
+        // Minimum midpoint nodes per axis inside the two-dimensional region; see SquarePixelAverage.
         private const int MinTwoDimensionalNodes = 32;
 
-        /// <summary>
-        /// Quadrature nodes per ring period (lambda/D) when averaging over a pixel. Simpson's rule
-        /// on a smooth oscillation at 8 nodes per period is already converged well past what an
-        /// 8-bit display can show; the harness verifies the averaged profile against the closed-form
-        /// encircled energy rather than trusting this figure.
-        /// </summary>
+        // Quadrature nodes per ring period (lambda/D) when averaging over a pixel. Simpson's rule on a smooth
+        // oscillation at 8 nodes per period is already converged well past what an 8-bit display can show; the
+        // harness verifies the averaged profile against the closed-form encircled energy rather than trusting
+        // this figure.
         private const int QuadratureNodesPerRingPeriod = 8;
 
         private readonly double[] _lut;
@@ -238,14 +228,11 @@ namespace ExoInstruments.Core
             return area > 0.0 ? weighted / area : 0.0;
         }
 
-        /// <summary>
-        /// The full average of the intensity over a square pixel of side p centred at angular
-        /// offset theta, averaged over the pixel's orientation about the source. Midpoint rule in
-        /// both pixel axes (the integrand has no endpoint structure to favour Simpson, and the
-        /// midpoint rule keeps the samples strictly inside the pixel, which is where the light
-        /// they represent falls) and a uniform sweep over orientation across the square's 45-degree
-        /// symmetry sector.
-        /// </summary>
+        // The full average of the intensity over a square pixel of side p centred at angular offset theta,
+        // averaged over the pixel's orientation about the source. Midpoint rule in both pixel axes (the
+        // integrand has no endpoint structure to favour Simpson, and the midpoint rule keeps the samples
+        // strictly inside the pixel, which is where the light they represent falls) and a uniform sweep over
+        // orientation across the square's 45-degree symmetry sector.
         private static double SquarePixelAverage(
             double thetaRad, double pixelScaleRad, double ringPeriodRad,
             double apertureMeters, double obstructionRatio, double wavelengthMeters)
@@ -283,7 +270,7 @@ namespace ExoInstruments.Core
             return sum / ((double)n * n * OrientationSamples);
         }
 
-        /// <summary>Quadrature nodes across one pixel, set by how many ring periods it straddles. Even, for Simpson.</summary>
+        // Quadrature nodes across one pixel, set by how many ring periods it straddles. Even, for Simpson.
         private static int NodeCount(double pixelScaleRad, double ringPeriodRad)
         {
             int steps = (int)Math.Ceiling(QuadratureNodesPerRingPeriod * pixelScaleRad / ringPeriodRad);

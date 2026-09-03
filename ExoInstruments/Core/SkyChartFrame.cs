@@ -23,7 +23,7 @@ namespace ExoInstruments.Core
         private const double DegToRad = Math.PI / 180.0;
         private const double RadToDeg = 180.0 / Math.PI;
         private const double Sqrt2 = 1.4142135623730951;
-        /// <summary>Right ascension of the central meridian: RA 0h sits on the rims.</summary>
+        // Right ascension of the central meridian: RA 0h sits on the rims.
         private const double CentralRaDeg = 180.0;
         private const double MarginPx = 4.0;
 

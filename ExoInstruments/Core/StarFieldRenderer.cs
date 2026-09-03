@@ -82,17 +82,13 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// Cap on how finely a trail is sampled. A source trailed across the whole sensor is
-        /// already a streak; sampling it more finely than this changes nothing visible and only
-        /// costs time on frames with thousands of stars.
-        /// </summary>
+        // Cap on how finely a trail is sampled. A source trailed across the whole sensor is already a streak;
+        // sampling it more finely than this changes nothing visible and only costs time on frames with
+        // thousands of stars.
         private const int MaxTrailSamples = 512;
 
-        /// <summary>
-        /// Bilinear deposit at a continuous position. Pixel i spans [i, i+1) and is centred at
-        /// i+0.5, so the weights are taken about the centres.
-        /// </summary>
+        // Bilinear deposit at a continuous position. Pixel i spans [i, i+1) and is centred at i+0.5, so the
+        // weights are taken about the centres.
         private static void Splat(float[] plane, int width, int height, double px, double py, double amount)
         {
             double fx = px - 0.5, fy = py - 0.5;
@@ -183,7 +179,8 @@ namespace ExoInstruments.Core
             return drawn;
         }
 
-        /// <summary>How far outside the sensor a source is still deposited, so its PSF wings can spill inward. Matches OpticalPsf's own maximum kernel radius.</summary>
+        // How far outside the sensor a source is still deposited, so its PSF wings can spill inward. Matches
+        // OpticalPsf's own maximum kernel radius.
         private const int OffSensorMarginPx = 48;
     }
 }

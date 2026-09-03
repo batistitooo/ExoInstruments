@@ -22,25 +22,22 @@ namespace ExoInstruments
     /// </summary>
     public partial class ExoInstrumentsGUI
     {
-        /// <summary>
-        /// The live panel, so the static unlock predicate can ask it whether the player owns a
-        /// telescope. Set in Awake and cleared in OnDestroy; null outside the space centre scene,
-        /// which every caller handles.
-        /// </summary>
+        // The live panel, so the static unlock predicate can ask it whether the player owns a telescope. Set in
+        // Awake and cleared in OnDestroy; null outside the space centre scene, which every caller handles.
         internal static ExoInstrumentsGUI Instance { get; private set; }
 
         internal void BindInstance() => Instance = this;
         internal void UnbindInstance() { if (Instance == this) Instance = null; }
 
-        /// <summary>Vessel id of the telescope currently selected, so the choice survives the list being rebuilt.</summary>
+        // Vessel id of the telescope currently selected, so the choice survives the list being rebuilt.
         private Guid selectedTelescopeId = Guid.Empty;
 
-        /// <summary>Rebuilt on a timer rather than per frame: it walks every vessel in the save.</summary>
+        // Rebuilt on a timer rather than per frame: it walks every vessel in the save.
         private List<SpaceTelescopeLink> cachedTelescopes;
         private float telescopeScanTime = -999f;
         private const float TelescopeScanIntervalSeconds = 2.0f;
 
-        /// <summary>Every orbital telescope in the save, rescanned at most every couple of seconds.</summary>
+        // Every orbital telescope in the save, rescanned at most every couple of seconds.
         private List<SpaceTelescopeLink> AvailableTelescopes
         {
             get
@@ -59,7 +56,7 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>The telescope the player has selected, or null.</summary>
+        // The telescope the player has selected, or null.
         private SpaceTelescopeLink SelectedTelescope
         {
             get
@@ -72,22 +69,16 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// True when the player owns at least one telescope in orbit. This, and not a Funds
-        /// price, is what unlocks the orbital instrument row (see Observatories.OrbitalObservatory).
-        /// </summary>
+        // True when the player owns at least one telescope in orbit. This, and not a Funds price, is what
+        // unlocks the orbital instrument row (see Observatories.OrbitalObservatory).
         private bool HasAnyOrbitalTelescope => AvailableTelescopes.Count > 0;
 
-        /// <summary>
-        /// Whether an orbital instrument may be commanded from where the player currently is.
-        ///
-        /// THE TWO CASES ARE GENUINELY DIFFERENT and this is the requirement that made the
-        /// telemetry model worth having. Flying the spacecraft, the player is there: the exposure
-        /// needs power and a clear aperture and nothing else. Sitting in the observatory at the
-        /// space centre, every command and every returned frame has to travel over a radio link,
-        /// so a telescope with no antenna, or one whose antenna currently has no path home, can
-        /// be looked at in the vessel list and not used.
-        /// </summary>
+        // Whether an orbital instrument may be commanded from where the player currently is. THE TWO CASES ARE
+        // GENUINELY DIFFERENT and this is the requirement that made the telemetry model worth having. Flying
+        // the spacecraft, the player is there: the exposure needs power and a clear aperture and nothing else.
+        // Sitting in the observatory at the space centre, every command and every returned frame has to travel
+        // over a radio link, so a telescope with no antenna, or one whose antenna currently has no path home,
+        // can be looked at in the vessel list and not used.
         private bool CanCommand(SpaceTelescopeLink link, out string reason)
         {
             reason = null;
@@ -112,10 +103,8 @@ namespace ExoInstruments
             return true;
         }
 
-        /// <summary>
-        /// The spacecraft picker, drawn under the observatory selector whenever the selected
-        /// instrument is an orbital one.
-        /// </summary>
+        // The spacecraft picker, drawn under the observatory selector whenever the selected instrument is an
+        // orbital one.
         private void DrawSpacecraftSelector()
         {
             List<SpaceTelescopeLink> all = AvailableTelescopes;
@@ -164,10 +153,8 @@ namespace ExoInstruments
             DrawOrbitalStatusPanel(SelectedTelescope);
         }
 
-        /// <summary>
-        /// Points the imaging pipeline at the chosen spacecraft. Idempotent, so it is safe to
-        /// call from the draw loop.
-        /// </summary>
+        // Points the imaging pipeline at the chosen spacecraft. Idempotent, so it is safe to call from the draw
+        // loop.
         private void ApplySelectedTelescope(SpaceTelescopeLink link)
         {
             SpaceTelescopeLink current = ObservingPlatform.ActiveSpaceTelescope;
@@ -222,10 +209,8 @@ namespace ExoInstruments
                 ApplySpaceTelescopePointing();
         }
 
-        /// <summary>
-        /// What the sky and the spacecraft are doing right now, for the selected telescope: the
-        /// orbital analogue of the ground panel's "night, target at 42 degrees, airmass 1.5".
-        /// </summary>
+        // What the sky and the spacecraft are doing right now, for the selected telescope: the orbital analogue
+        // of the ground panel's "night, target at 42 degrees, airmass 1.5".
         private void DrawOrbitalStatusPanel(SpaceTelescopeLink link)
         {
             if (link == null || link.Instrument == null) return;
@@ -340,11 +325,9 @@ namespace ExoInstruments
             }
         }
 
-        /// <summary>
-        /// The camera on the beam, and the button that flips WFC3's Channel Select Mechanism to
-        /// the other one. Everything downstream reacts through the same path a spacecraft change
-        /// takes: registry rescan, SetActiveTelescope, filter and zoom reclamp, stack discard.
-        /// </summary>
+        // The camera on the beam, and the button that flips WFC3's Channel Select Mechanism to the other one.
+        // Everything downstream reacts through the same path a spacecraft change takes: registry rescan,
+        // SetActiveTelescope, filter and zoom reclamp, stack discard.
         private void DrawChannelSelector(SpaceTelescopeLink link)
         {
             if (link == null || link.Instrument == null) return;
@@ -375,11 +358,9 @@ namespace ExoInstruments
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>
-        /// Where the telescope is looking, where it was told to look, and how long until the two
-        /// agree. Both coordinates rather than just the error, because "off by 43 degrees" says
-        /// nothing about which way the spacecraft is facing.
-        /// </summary>
+        // Where the telescope is looking, where it was told to look, and how long until the two agree. Both
+        // coordinates rather than just the error, because "off by 43 degrees" says nothing about which way the
+        // spacecraft is facing.
         private void DrawPointingReadout(SpaceTelescopeLink link)
         {
             PointingReadout r = GroundStation.Readout(link);
@@ -437,10 +418,8 @@ namespace ExoInstruments
             if (r.Phase != GroundPointingPhase.OnTarget) DrawProgressBar(r.SlewProgress);
         }
 
-        /// <summary>
-        /// The battery, what the pending exposure would cost it, and how long it lasts. The panel
-        /// half that turns "the capture button is greyed out" into a number the player can act on.
-        /// </summary>
+        // The battery, what the pending exposure would cost it, and how long it lasts. The panel half that
+        // turns "the capture button is greyed out" into a number the player can act on.
         private void DrawPowerReadout(SpaceTelescopeLink link)
         {
             SpacePlatformSpec platform = link.Instrument.SpacePlatform;
@@ -556,7 +535,8 @@ namespace ExoInstruments
             GUI.color = previous;
         }
 
-        /// <summary>A direction's place on the chart, in IMGUI screen coordinates, or false when it falls outside the drawn rect.</summary>
+        // A direction's place on the chart, in IMGUI screen coordinates, or false when it falls outside the
+        // drawn rect.
         private static bool TryChartPoint(ObservingPlatform.EquatorialFrameSnapshot frame, SkyChartView view,
                                           Rect chartRect, Vector3d worldDirection, out Vector2 point)
         {
@@ -567,7 +547,8 @@ namespace ExoInstruments
             return TryChartPointEquatorial(view, chartRect, raDeg, decDeg, out point);
         }
 
-        /// <summary>The same, for a position already in equatorial coordinates: the chart's own projection with nothing in front of it.</summary>
+        // The same, for a position already in equatorial coordinates: the chart's own projection with nothing
+        // in front of it.
         private static bool TryChartPointEquatorial(SkyChartView view, Rect chartRect,
                                                     double raDeg, double decDeg, out Vector2 point)
         {
@@ -598,10 +579,8 @@ namespace ExoInstruments
             GUI.DrawTexture(new Rect(c.x + half - T, c.y - half, T, half * 2f), Texture2D.whiteTexture);
         }
 
-        /// <summary>
-        /// A point along the great circle joining two directions: the same interpolation
-        /// GroundStation slews along, so the arc is the path the boresight really takes.
-        /// </summary>
+        // A point along the great circle joining two directions: the same interpolation GroundStation slews
+        // along, so the arc is the path the boresight really takes.
         private static Vector3d GreatCircleSample(Vector3d from, Vector3d to, double t)
         {
             Vector3d a = from.normalized, b = to.normalized;
@@ -614,7 +593,7 @@ namespace ExoInstruments
             return v.sqrMagnitude > 1e-12 ? v.normalized : b;
         }
 
-        /// <summary>A plain filled bar. IMGUI has no progress widget and the stacking panel draws its own the same way.</summary>
+        // A plain filled bar. IMGUI has no progress widget and the stacking panel draws its own the same way.
         private static void DrawProgressBar(double fraction)
         {
             Rect r = GUILayoutUtility.GetRect(220f, 10f, GUILayout.Width(220), GUILayout.Height(10));
@@ -626,7 +605,7 @@ namespace ExoInstruments
             GUI.color = prev;
         }
 
-        /// <summary>Sexagesimal right ascension and degrees of declination, the way a finding chart states a position.</summary>
+        // Sexagesimal right ascension and degrees of declination, the way a finding chart states a position.
         private static string FormatRaDec(double raDeg, double decDeg)
         {
             double raHours = ((raDeg % 360.0) + 360.0) % 360.0 / 15.0;
@@ -645,7 +624,7 @@ namespace ExoInstruments
             return string.Format("{0:00}h{1:00}m{2:00.0}s {3}{4:00}d{5:00}'{6:00}\"", h, m, s, sign, d, am, asec);
         }
 
-        /// <summary>An angle in whichever unit keeps it readable: degrees down to arcminutes down to arcseconds.</summary>
+        // An angle in whichever unit keeps it readable: degrees down to arcminutes down to arcseconds.
         private static string FormatAngle(double deg)
         {
             if (double.IsNaN(deg)) return "-";
@@ -671,13 +650,11 @@ namespace ExoInstruments
         private Guid visibilityChangeVesselId;
         private bool visibilityChangeWasObservable;
 
-        /// <summary>
-        /// Seconds until the target's orbital visibility flips, found on the exact geometry:
-        /// the observer propagated along its own Keplerian orbit (getRelativePositionAtUT, the
-        /// same propagation the game itself uses between SOI changes), the host, Sun and moons
-        /// propagated with GetBodyPositionAtUt, the same occultation/limb/moon predicate the
-        /// live gate applies, sampled over one orbit and bisected to the second.
-        /// </summary>
+        // Seconds until the target's orbital visibility flips, found on the exact geometry: the observer
+        // propagated along its own Keplerian orbit (getRelativePositionAtUT, the same propagation the game
+        // itself uses between SOI changes), the host, Sun and moons propagated with GetBodyPositionAtUt, the
+        // same occultation/limb/moon predicate the live gate applies, sampled over one orbit and bisected to
+        // the second.
         private bool TryComputeVisibilityChangeSeconds(SpaceTelescopeLink link, SkyTarget target,
                                                        bool currentlyObservable, out double seconds)
         {

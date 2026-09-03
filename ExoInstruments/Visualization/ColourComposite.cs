@@ -64,7 +64,8 @@ namespace ExoInstruments.Visualization
     /// </summary>
     public static class ColourComposite
     {
-        /// <summary>Cached per-instrument fit: it costs a few thousand bandpass integrals and depends only on the filter set.</summary>
+        // Cached per-instrument fit: it costs a few thousand bandpass integrals and depends only on the filter
+        // set.
         private static ColourCalibration cachedCalibration;
         private static VisualTelescopeSpec cachedSpec;
 
@@ -248,10 +249,8 @@ namespace ExoInstruments.Visualization
             return result;
         }
 
-        /// <summary>
-        /// A palette: each display channel is the sum of one or more narrowband frames, each stretched
-        /// on its own limits. No colorimetry, because there is none to do; see the enum.
-        /// </summary>
+        // A palette: each display channel is the sum of one or more narrowband frames, each stretched on its
+        // own limits. No colorimetry, because there is none to do; see the enum.
         private static UnityEngine.Color[] ComposePalette(
             int width, int height, IDictionary<CameraFilter, float[]> channels, out string report,
             CameraFilter[] toRed, CameraFilter[] toGreen, CameraFilter[] toBlue, string description)
@@ -282,7 +281,8 @@ namespace ExoInstruments.Visualization
             return result;
         }
 
-        /// <summary>Sums the named filters and stretches the result on its own zscale limits, or null when none is present.</summary>
+        // Sums the named filters and stretches the result on its own zscale limits, or null when none is
+        // present.
         private static float[] Combine(IDictionary<CameraFilter, float[]> channels, CameraFilter[] filters,
                                        int width, int height, List<string> present, List<string> missing)
         {
@@ -324,11 +324,9 @@ namespace ExoInstruments.Visualization
         private static float[] Get(IDictionary<CameraFilter, float[]> channels, CameraFilter f)
             => channels.TryGetValue(f, out float[] frame) && frame != null ? frame : null;
 
-        /// <summary>
-        /// Normalised asinh stretch, the standard astronomical curve (Lupton et al. 2004): linear at
-        /// the noise, logarithmic above it, so faint structure lifts without the bright end
-        /// saturating. Applied to LUMINANCE only in the true-colour path.
-        /// </summary>
+        // Normalised asinh stretch, the standard astronomical curve (Lupton et al. 2004): linear at the noise,
+        // logarithmic above it, so faint structure lifts without the bright end saturating. Applied to
+        // LUMINANCE only in the true-colour path.
         private static double AsinhStretch(double v)
         {
             if (!(v > 0.0)) return 0.0;
@@ -339,7 +337,7 @@ namespace ExoInstruments.Visualization
             return den > 0.0 ? num / den : v;
         }
 
-        /// <summary>Ratio of medians, which puts two frames on one footing without either one's outliers deciding it.</summary>
+        // Ratio of medians, which puts two frames on one footing without either one's outliers deciding it.
         private static double MedianRatio(float[] a, float[] b)
         {
             double ma = Median(a), mb = Median(b);

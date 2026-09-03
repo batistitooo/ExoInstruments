@@ -190,19 +190,13 @@ namespace ExoInstruments.Core
             return points;
         }
 
-        /// <summary>
-        /// Sum of the frame inside a circular aperture, by exact pixel-centre membership.
-        ///
-        /// Centre membership rather than partial-pixel area, matching what aperture photometry
-        /// packages do by default and what VIP's own contrast measurement does, so that the two
-        /// can be compared without the comparison measuring a difference of convention.
-        ///
-        /// Returns false when the aperture would reach outside the frame, which the caller treats
-        /// as the end of the measurable range rather than padding with zeros: a zero-padded
-        /// aperture reads as an anomalously faint resolution element and biases the annulus's
-        /// variance downward, which would make the contrast curve improve at exactly the radius
-        /// where the data runs out.
-        /// </summary>
+        // Sum of the frame inside a circular aperture, by exact pixel-centre membership. Centre membership
+        // rather than partial-pixel area, matching what aperture photometry packages do by default and what
+        // VIP's own contrast measurement does, so that the two can be compared without the comparison measuring
+        // a difference of convention. Returns false when the aperture would reach outside the frame, which the
+        // caller treats as the end of the measurable range rather than padding with zeros: a zero-padded
+        // aperture reads as an anomalously faint resolution element and biases the annulus's variance downward,
+        // which would make the contrast curve improve at exactly the radius where the data runs out.
         private static bool TryApertureSum(
             float[] frame, int width, int height, double cx, double cy, double radiusPx, out double sum)
         {

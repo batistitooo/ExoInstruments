@@ -83,8 +83,8 @@ namespace ExoInstruments.Flight
         /// is not necessarily symmetric in time: closing can take a different path from opening,
         /// and a model that supplies two clips is telling you that. A model with only one clip
         /// wants the component's default clip played forwards and backwards instead, and gets it
-        /// either by leaving these names empty or simply by not carrying a clip under either name
-        /// — the lookup falls back on its own. The shipped model is a one-clip model.
+        /// either by leaving these names empty or simply by not carrying a clip under either name;
+        /// the lookup falls back on its own. The shipped model is a one-clip model.
         ///
         /// A part with no animation at all counts as permanently open. That is a telescope
         /// without a door, not a door stuck shut, and it is the right reading for a bare optical
@@ -201,37 +201,30 @@ namespace ExoInstruments.Flight
         [KSPField(guiActive = true, guiName = "Telescope", guiActiveEditor = false)]
         public string statusLine = "";
 
-        /// <summary>
-        /// Rays cast across the pupil per obstruction check. A hundred samples resolves an
-        /// obstruction covering one per cent of the aperture, which is the tolerance
-        /// ApertureObstruction works to, and costs a hundred raycasts a second at the once-a-second
-        /// cadence below. Raising it buys resolution the tolerance does not use.
-        /// </summary>
+        // Rays cast across the pupil per obstruction check. A hundred samples resolves an obstruction covering
+        // one per cent of the aperture, which is the tolerance ApertureObstruction works to, and costs a
+        // hundred raycasts a second at the once-a-second cadence below. Raising it buys resolution the
+        // tolerance does not use.
         private const int ApertureSampleCount = 100;
 
-        /// <summary>
-        /// How far the occlusion rays reach, metres. Long enough to clear any vessel a player
-        /// will build and short enough that it never reaches another vessel, a station or the
-        /// ground; an obstruction two hundred metres away is not on this spacecraft.
-        /// </summary>
+        // How far the occlusion rays reach, metres. Long enough to clear any vessel a player will build and
+        // short enough that it never reaches another vessel, a station or the ground; an obstruction two
+        // hundred metres away is not on this spacecraft.
         private const float ApertureRayLengthMeters = 200f;
 
-        /// <summary>Obstruction and control checks run at 1 Hz rather than per frame: nothing they measure changes faster than that, and both walk the whole vessel.</summary>
+        // Obstruction and control checks run at 1 Hz rather than per frame: nothing they measure changes faster
+        // than that, and both walk the whole vessel.
         private const float StateRefreshIntervalSeconds = 1.0f;
 
         private Transform boresight;
         private Animation doorAnimation;
         private float lastStateRefresh = -999f;
 
-        /// <summary>
-        /// The door's Animation component: on the named transform when the config gives one, and
-        /// otherwise anywhere in the model.
-        ///
-        /// The search falls back to the whole model rather than giving up, because a part config
-        /// that names no transform is not necessarily a part with no door; it may simply be a
-        /// model with one animation and nothing to disambiguate. Returning null means the model
-        /// genuinely has no animation, which the door logic reads as "no door".
-        /// </summary>
+        // The door's Animation component: on the named transform when the config gives one, and otherwise
+        // anywhere in the model. The search falls back to the whole model rather than giving up, because a part
+        // config that names no transform is not necessarily a part with no door; it may simply be a model with
+        // one animation and nothing to disambiguate. Returning null means the model genuinely has no animation,
+        // which the door logic reads as "no door".
         private Animation FindDoorAnimation()
         {
             if (!string.IsNullOrEmpty(animationTransformName))
@@ -319,18 +312,13 @@ namespace ExoInstruments.Flight
             SpaceTelescopeRegistry.Unregister(this);
         }
 
-        /// <summary>
-        /// Builds the boresight as an empty child of the part's model, when the model does not
-        /// supply one.
-        ///
-        /// A part config cannot declare a transform, and a composed part built out of stock
-        /// models has whatever transforms those models happened to ship with, none of them named
-        /// for an optical axis. Rather than make the module depend on a bespoke model, it makes
-        /// the transform it needs: at apertureOffsetMeters along the part's +Y, which is the
-        /// stack axis, oriented so its +Z looks along that axis. A model that DOES carry a
-        /// boresight transform overrides this entirely, and that is the path a purpose-built
-        /// telescope model should take, since only the model knows where its own pupil is.
-        /// </summary>
+        // Builds the boresight as an empty child of the part's model, when the model does not supply one. A
+        // part config cannot declare a transform, and a composed part built out of stock models has whatever
+        // transforms those models happened to ship with, none of them named for an optical axis. Rather than
+        // make the module depend on a bespoke model, it makes the transform it needs: at apertureOffsetMeters
+        // along the part's +Y, which is the stack axis, oriented so its +Z looks along that axis. A model that
+        // DOES carry a boresight transform overrides this entirely, and that is the path a purpose-built
+        // telescope model should take, since only the model knows where its own pupil is.
         private Transform CreateBoresightTransform()
         {
             Transform parent = part.FindModelTransform("model") ?? part.transform;
@@ -405,16 +393,11 @@ namespace ExoInstruments.Flight
 
         // ------------------------------------------------------------------ aperture door
 
-        /// <summary>
-        /// Whether the door is fully out of the light path.
-        ///
-        /// Open means FULLY open, not "has started opening": a door part way across the pupil is
-        /// an obstruction of unknown shape, which is precisely what this pipeline cannot model
-        /// (see ApertureObstruction). So the state is false for the whole of the transit and
-        /// becomes true when the clip has finished.
-        ///
-        /// A part with no animation counts as permanently open; see animationTransformName.
-        /// </summary>
+        // Whether the door is fully out of the light path. Open means FULLY open, not "has started opening": a
+        // door part way across the pupil is an obstruction of unknown shape, which is precisely what this
+        // pipeline cannot model (see ApertureObstruction). So the state is false for the whole of the transit
+        // and becomes true when the clip has finished. A part with no animation counts as permanently open; see
+        // animationTransformName.
         private void SyncDoorState()
         {
             if (doorAnimation == null) { apertureDoorOpen = true; return; }
@@ -422,28 +405,18 @@ namespace ExoInstruments.Flight
             apertureDoorOpen = doorCommandedOpen;
         }
 
-        /// <summary>
-        /// Snaps the door mesh to the pose doorCommandedOpen says it is already in, playing nothing.
-        ///
-        /// WHY THIS HAS TO EXIST. Nothing else in the module ever writes the door's pose; the clips
-        /// are only ever played in response to a player command. So at OnStart the mesh sits in
-        /// whatever pose it was exported in, which is right exactly once: a freshly placed part
-        /// whose door was authored closed. Every other entry into a scene got it wrong.
-        ///
-        ///   a vessel loaded from a save with the door open   came back visually shut, and the next
-        ///                                                    "Close" would play the shut animation
-        ///                                                    on an already-shut door
-        ///   an Animation component with Play Automatically   ran its clip on load and left the door
-        ///                                                    open while this module still believed
-        ///                                                    it closed, so the first "Open" snapped
-        ///                                                    it shut for one frame before animating
-        ///
-        /// Both are the same omission and this fixes both. It also makes the module independent of
-        /// how the model was authored: whatever pose the mesh arrives in, the saved state wins.
-        ///
-        /// Sample() rather than letting the clip run, because this is a correction of the model's
-        /// pose and not a door movement; the player must never see it happen.
-        /// </summary>
+        // Snaps the door mesh to the pose doorCommandedOpen says it is already in, playing nothing. WHY THIS
+        // HAS TO EXIST. Nothing else in the module ever writes the door's pose; the clips are only ever played
+        // in response to a player command. So at OnStart the mesh sits in whatever pose it was exported in,
+        // which is right exactly once: a freshly placed part whose door was authored closed. Every other entry
+        // into a scene got it wrong. a vessel loaded from a save with the door open came back visually shut,
+        // and the next "Close" would play the shut animation on an already-shut door an Animation component
+        // with Play Automatically ran its clip on load and left the door open while this module still believed
+        // it closed, so the first "Open" snapped it shut for one frame before animating Both are the same
+        // omission and this fixes both. It also makes the module independent of how the model was authored:
+        // whatever pose the mesh arrives in, the saved state wins. Sample() rather than letting the clip run,
+        // because this is a correction of the model's pose and not a door movement; the player must never see
+        // it happen.
         private void ApplyDoorPoseImmediately()
         {
             if (doorAnimation == null) return;
@@ -508,14 +481,10 @@ namespace ExoInstruments.Flight
             if (doorCommandedOpen) CloseApertureDoor(); else OpenApertureDoor();
         }
 
-        /// <summary>
-        /// Plays one of the door's clips.
-        ///
-        /// When the model supplies a named clip for this direction it is played forwards, which
-        /// is what a two-clip model means. When it does not, the component's default clip is
-        /// played forwards to open and backwards to close, which is what a one-clip model means.
-        /// Both cases are the model telling the module how it was authored.
-        /// </summary>
+        // Plays one of the door's clips. When the model supplies a named clip for this direction it is played
+        // forwards, which is what a two-clip model means. When it does not, the component's default clip is
+        // played forwards to open and backwards to close, which is what a one-clip model means. Both cases are
+        // the model telling the module how it was authored.
         private void PlayDoorClip(string clipName, bool forward)
         {
             if (doorAnimation == null) return;
@@ -547,14 +516,11 @@ namespace ExoInstruments.Flight
 
         // ------------------------------------------------------------------ obstruction
 
-        /// <summary>
-        /// Casts a ray from every sample point across the open pupil along the boresight, and
-        /// records what fraction is stopped by this vessel's own parts.
-        ///
-        /// Hits on THIS part are ignored: the telescope's own tube and its own door surround the
-        /// pupil by construction, and counting them would report every correctly built telescope
-        /// as blocked. Hits on any other part are real obstructions whoever put them there.
-        /// </summary>
+        // Casts a ray from every sample point across the open pupil along the boresight, and records what
+        // fraction is stopped by this vessel's own parts. Hits on THIS part are ignored: the telescope's own
+        // tube and its own door surround the pupil by construction, and counting them would report every
+        // correctly built telescope as blocked. Hits on any other part are real obstructions whoever put them
+        // there.
         private void RefreshApertureObstruction()
         {
             blockedApertureFraction = 0.0;
@@ -605,24 +571,18 @@ namespace ExoInstruments.Flight
             blockingPartCached = blockingPartTitle ?? "";
         }
 
-        /// <summary>
-        /// Layer 0 only: KSP puts vessel parts on the Default layer, while terrain (15) and
-        /// scaled-space bodies (10) live elsewhere. Casting against those would report the planet
-        /// the telescope is looking past as an obstruction, which is a real constraint but a
-        /// completely different one, handled analytically by OrbitalVisibility rather than by
-        /// raycasting a scaled-space sphere.
-        /// </summary>
+        // Layer 0 only: KSP puts vessel parts on the Default layer, while terrain (15) and scaled-space bodies
+        // (10) live elsewhere. Casting against those would report the planet the telescope is looking past as
+        // an obstruction, which is a real constraint but a completely different one, handled analytically by
+        // OrbitalVisibility rather than by raycasting a scaled-space sphere.
         private static int PartLayerMask => 1 << 0;
 
         // ------------------------------------------------------------------ attitude
 
-        /// <summary>
-        /// Works out how, and whether, this vehicle can hold an attitude, from the hardware on it.
-        ///
-        /// The order is the order of preference a real spacecraft has, and for the same reason:
-        /// momentum-exchange devices point finely and cost only power, thrusters point coarsely
-        /// and cost propellant, so nothing that has wheels uses thrusters to hold still.
-        /// </summary>
+        // Works out how, and whether, this vehicle can hold an attitude, from the hardware on it. The order is
+        // the order of preference a real spacecraft has, and for the same reason: momentum-exchange devices
+        // point finely and cost only power, thrusters point coarsely and cost propellant, so nothing that has
+        // wheels uses thrusters to hold still.
         private void RefreshAttitudeAuthority()
         {
             controlMode = AttitudeControlMode.Uncontrolled;
@@ -676,7 +636,7 @@ namespace ExoInstruments.Flight
             }
         }
 
-        /// <summary>Writes the measured authority into the persistent fields the unloaded path reads.</summary>
+        // Writes the measured authority into the persistent fields the unloaded path reads.
         private void CacheAttitudeAuthority()
         {
             controlModeCached = controlMode.ToString();
@@ -684,17 +644,13 @@ namespace ExoInstruments.Flight
             inertiaCached = vesselInertiaKgM2;
         }
 
-        /// <summary>
-        /// A vessel's moment of inertia about its worst axis, kg m^2.
-        ///
-        /// Taken as the solid-sphere figure 2/5 M R^2 on the vessel's total mass and bounding
-        /// radius. That is an approximation and it is stated as one: a real spacecraft's inertia
-        /// tensor depends on where every part sits, and KSP computes one, but it is not exposed
-        /// on an unloaded vessel and this same number has to be available in both cases. The
-        /// error is bounded on both sides by the two extreme mass distributions, a point mass at
-        /// the centre (0) and a thin shell (2/3 M R^2), and the solid sphere sits between them.
-        /// It enters only the limit-cycle rate, which is itself a coarse regime.
-        /// </summary>
+        // A vessel's moment of inertia about its worst axis, kg m^2. Taken as the solid-sphere figure 2/5 M R^2
+        // on the vessel's total mass and bounding radius. That is an approximation and it is stated as one: a
+        // real spacecraft's inertia tensor depends on where every part sits, and KSP computes one, but it is
+        // not exposed on an unloaded vessel and this same number has to be available in both cases. The error
+        // is bounded on both sides by the two extreme mass distributions, a point mass at the centre (0) and a
+        // thin shell (2/3 M R^2), and the solid sphere sits between them. It enters only the limit-cycle rate,
+        // which is itself a coarse regime.
         private double EstimateInertiaKgM2()
         {
             if (vessel == null) return 0.0;
@@ -727,17 +683,13 @@ namespace ExoInstruments.Flight
 
         private static int ElectricChargeId => PartResourceLibrary.Instance.GetDefinition("ElectricCharge").id;
 
-        /// <summary>
-        /// Commands the vessel's autopilot to put the boresight on the stored target.
-        ///
-        /// The rotation handed to SAS is exact rather than iterative: the shortest rotation
-        /// taking the boresight's current world direction onto the target direction, applied to
-        /// the vessel's current attitude, IS the attitude at which the boresight is on target.
-        /// SAS then flies to it with whatever authority the vessel has, which is precisely the
-        /// behaviour this model wants, since the difference between a vessel that gets there
-        /// smoothly and one that hunts around the target is the difference the imaging pipeline
-        /// is going to measure.
-        /// </summary>
+        // Commands the vessel's autopilot to put the boresight on the stored target. The rotation handed to SAS
+        // is exact rather than iterative: the shortest rotation taking the boresight's current world direction
+        // onto the target direction, applied to the vessel's current attitude, IS the attitude at which the
+        // boresight is on target. SAS then flies to it with whatever authority the vessel has, which is
+        // precisely the behaviour this model wants, since the difference between a vessel that gets there
+        // smoothly and one that hunts around the target is the difference the imaging pipeline is going to
+        // measure.
         private void DrivePointing()
         {
             if (vessel == null || vessel.Autopilot == null || vessel.Autopilot.SAS == null) return;
@@ -813,10 +765,8 @@ namespace ExoInstruments.Flight
         private Quaternion commandedRotation = Quaternion.identity;
         private bool hasCommandedRotation;
 
-        /// <summary>
-        /// True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on
-        /// its control-detection, and this matches it rather than inventing a second one.
-        /// </summary>
+        // True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on its control-
+        // detection, and this matches it rather than inventing a second one.
         private bool PlayerIsSteering()
         {
             if (vessel == null || vessel.ctrlState == null) return false;
@@ -835,16 +785,12 @@ namespace ExoInstruments.Flight
             return Vector3d.Angle(bore, target);
         }
 
-        /// <summary>
-        /// The world direction to hold on this tick.
-        ///
-        /// A BODY IS RE-RESOLVED, A CATALOGUE POSITION IS NOT, and the difference is parallax. A
-        /// star is at infinity: the direction to it does not change as the telescope goes round its
-        /// orbit, so the vector commanded at the moment the player clicked is still the right one
-        /// an orbit later. A planet is not: hold the vector that pointed at Jupiter half an orbit
-        /// ago and Jupiter is no longer in the field. Freezing both would have made solar-system
-        /// photography quietly drift off target while the readout claimed the hold was good.
-        /// </summary>
+        // The world direction to hold on this tick. A BODY IS RE-RESOLVED, A CATALOGUE POSITION IS NOT, and the
+        // difference is parallax. A star is at infinity: the direction to it does not change as the telescope
+        // goes round its orbit, so the vector commanded at the moment the player clicked is still the right one
+        // an orbit later. A planet is not: hold the vector that pointed at Jupiter half an orbit ago and
+        // Jupiter is no longer in the field. Freezing both would have made solar-system photography quietly
+        // drift off target while the readout claimed the hold was good.
         private bool TryResolvePointingDirection(out Vector3d direction)
         {
             direction = Vector3d.zero;

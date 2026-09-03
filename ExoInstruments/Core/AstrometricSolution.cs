@@ -328,7 +328,8 @@ namespace ExoInstruments.Core
             return 2.0 * Math.Asin(Math.Sqrt(h)) / DegToRad * 3600.0;
         }
 
-        /// <summary>Three-by-three symmetric solve by Cramer's rule, which at this size is exact, allocation-free and shorter than a decomposition.</summary>
+        // Three-by-three symmetric solve by Cramer's rule, which at this size is exact, allocation-free and
+        // shorter than a decomposition.
         private static bool Solve3(double m11, double m12, double m13,
                                    double m21, double m22, double m23,
                                    double m31, double m32, double m33,

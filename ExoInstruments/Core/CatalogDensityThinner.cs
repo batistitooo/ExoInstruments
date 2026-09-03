@@ -6,10 +6,10 @@ namespace ExoInstruments.Core
 {
     /// <summary>
     /// Cosmetic declutter pass: caps how many Kepler-field hosts survive in each coarse
-    /// sky cell. The Kepler field (~115 deg²) is dense enough on its own to form an
+    /// sky cell. The Kepler field (~115 deg^2) is dense enough on its own to form an
     /// obvious clump that breaks fog-of-war; other host stars are sparse across the sky
     /// and are never thinned, regardless of how many share a cell.
-    /// Selection within an over-full cell is by a stable hash of CatalogKey — deterministic
+    /// Selection within an over-full cell is by a stable hash of CatalogKey, deterministic
     /// and independent of file order, so a star's presence never changes between sessions.
     /// </summary>
     public static class CatalogDensityThinner

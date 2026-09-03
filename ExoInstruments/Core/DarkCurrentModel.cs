@@ -59,7 +59,10 @@ namespace ExoInstruments.Core
         /// <summary>Varshni beta for silicon, K.</summary>
         public const double VarshniBetaKelvin = 1108.0;
 
-        /// <summary>Boltzmann constant in eV/K, the unit this equation is written in (CODATA 2018 exact value 1.380649e-23 J/K over the exact elementary charge).</summary>
+        /// <summary>
+        /// Boltzmann constant in eV/K, the unit this equation is written in (CODATA 2018 exact value
+        /// 1.380649e-23 J/K over the exact elementary charge).
+        /// </summary>
         public const double BoltzmannEvPerKelvin = 8.617333262e-5;
 
         /// <summary>

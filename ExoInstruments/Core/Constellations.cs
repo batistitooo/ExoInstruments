@@ -129,12 +129,10 @@ namespace ExoInstruments.Core
             indexByAnyName = map;
         }
 
-        /// <summary>
-        /// Lowercase, spaces dropped, and the two names the IAU spells with a diaeresis reduced to
-        /// their plain-letter form, so a player who types "bootes" is understood as readily as one
-        /// who types "Bo&#246;tes". Nothing else is transliterated because nothing else needs it:
-        /// these are the only non-ASCII characters in the list.
-        /// </summary>
+        // Lowercase, spaces dropped, and the two names the IAU spells with a diaeresis reduced to their plain-
+        // letter form, so a player who types "bootes" is understood as readily as one who types "Bo&#246;tes".
+        // Nothing else is transliterated because nothing else needs it: these are the only non-ASCII characters
+        // in the list.
         private static string Canonicalise(string text)
         {
             var sb = new System.Text.StringBuilder(text.Length);

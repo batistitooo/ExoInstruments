@@ -44,39 +44,31 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class OpticalPsf
     {
-        /// <summary>Radians per arcsecond.</summary>
+        // Radians per arcsecond.
         private const double ArcsecToRad = Math.PI / (180.0 * 3600.0);
 
-        /// <summary>
-        /// Hard ceiling on the kernel's half-width in pixels. Airy wings extend formally to
-        /// infinity, so ANY finite implementation truncates somewhere (professional simulation
-        /// codes included); the kernel is renormalised to unit sum afterwards so truncation
-        /// costs no flux, only the very faintest far wings. This is the one approximation in
-        /// this file, and it is a computational bound rather than a physical assumption.
-        ///
-        /// Raised from 48 to 128 because 48 was not a faint place to stop. At the RC20's 0.0688
-        /// arcsec pixels it fell 1.32 seeing-FWHM out, where the Kolmogorov profile is still
-        /// 1.8e-2 of its peak, and the renormalisation that follows conserves the flux but not
-        /// that step; so a bright star showed a square edge at 1.8% of its own core brightness.
-        /// 128 reaches 3.5 FWHM and 4.3e-4 there, 42 times fainter, for about 1.5x the transform
-        /// work (a wider kernel needs a larger tile, but proportionally fewer of them). The
-        /// residuals per instrument are measured in tools/psf-truncation.
-        ///
-        /// A wide, heavy-tailed component cannot be handled by raising this further; see
-        /// FourierConvolution.RadialKernelSpectrum, which carries one across the whole frame.
-        /// </summary>
+        // Hard ceiling on the kernel's half-width in pixels. Airy wings extend formally to infinity, so ANY
+        // finite implementation truncates somewhere (professional simulation codes included); the kernel is
+        // renormalised to unit sum afterwards so truncation costs no flux, only the very faintest far wings.
+        // This is the one approximation in this file, and it is a computational bound rather than a physical
+        // assumption. Raised from 48 to 128 because 48 was not a faint place to stop. At the RC20's 0.0688
+        // arcsec pixels it fell 1.32 seeing-FWHM out, where the Kolmogorov profile is still 1.8e-2 of its peak,
+        // and the renormalisation that follows conserves the flux but not that step; so a bright star showed a
+        // square edge at 1.8% of its own core brightness. 128 reaches 3.5 FWHM and 4.3e-4 there, 42 times
+        // fainter, for about 1.5x the transform work (a wider kernel needs a larger tile, but proportionally
+        // fewer of them). The residuals per instrument are measured in tools/psf-truncation. A wide, heavy-
+        // tailed component cannot be handled by raising this further; see
+        // FourierConvolution.RadialKernelSpectrum, which carries one across the whole frame.
         private const int MaxKernelRadiusPx = 128;
 
-        /// <summary>Kernel half-width is this many times the relevant FWHM before the ceiling above applies, far enough out to carry the first several Airy rings.</summary>
+        // Kernel half-width is this many times the relevant FWHM before the ceiling above applies, far enough
+        // out to carry the first several Airy rings.
         private const double KernelRadiusInFwhm = 3.0;
 
-        /// <summary>
-        /// Fraction of its own peak the atmospheric profile must have fallen to at the kernel's
-        /// edge. 1e-4 is where the step stops being the brightest thing at that radius: the
-        /// Kolmogorov wing itself falls as theta^(-11/3), so one more pixel outward costs only a
-        /// few percent, and a discontinuity of 1e-4 of a star's peak sits under the read noise for
-        /// anything short of a naked-eye star.
-        /// </summary>
+        // Fraction of its own peak the atmospheric profile must have fallen to at the kernel's edge. 1e-4 is
+        // where the step stops being the brightest thing at that radius: the Kolmogorov wing itself falls as
+        // theta^(-11/3), so one more pixel outward costs only a few percent, and a discontinuity of 1e-4 of a
+        // star's peak sits under the read noise for anything short of a naked-eye star.
         private const double AtmosphericTailFraction = 1e-4;
 
         // ---------------------------------------------------------------- Bessel functions
@@ -363,21 +355,17 @@ namespace ExoInstruments.Core
             return sum * h / 3.0;
         }
 
-        /// <summary>
-        /// Simpson points per oscillation of J0 in the atmospheric quadrature. 24 is where the
-        /// wing index converges: 6 (which a fixed 512 steps amounts to at rho = 126) gives -2.18,
-        /// 24 gives -3.70, and quadrupling it again to 96 moves the profile by under 1e-4 anywhere.
-        /// </summary>
+        // Simpson points per oscillation of J0 in the atmospheric quadrature. 24 is where the wing index
+        // converges: 6 (which a fixed 512 steps amounts to at rho = 126) gives -2.18, 24 gives -3.70, and
+        // quadrupling it again to 96 moves the profile by under 1e-4 anywhere.
         private const int SamplesPerOscillation = 24;
 
-        /// <summary>Floor on the step count, so the smooth core is integrated as finely as it always was.</summary>
+        // Floor on the step count, so the smooth core is integrated as finely as it always was.
         private const int MinQuadratureSteps = 512;
 
-        /// <summary>
-        /// Ceiling, reached at about 27 lambda/r0. Beyond that the profile is 1e-5 of its peak and
-        /// far outside any kernel this file builds, so the bound costs nothing real; it exists so
-        /// that a caller asking about an absurd radius cannot make one sample unbounded.
-        /// </summary>
+        // Ceiling, reached at about 27 lambda/r0. Beyond that the profile is 1e-5 of its peak and far outside
+        // any kernel this file builds, so the bound costs nothing real; it exists so that a caller asking about
+        // an absurd radius cannot make one sample unbounded.
         private const int MaxQuadratureSteps = 4096;
 
         // ---------------------------------------------------------------- Kernel assembly
@@ -480,25 +468,18 @@ namespace ExoInstruments.Core
                            atmosphericFwhmArcsec, defocusDiscRadiusPx, vaneCount, vaneWidthMeters,
                            gaussianFwhmArcsec, pads, MaxKernelRadiusPx, out radiusPx);
 
-        /// <summary>
-        /// The kernel builder above, with the support it may spend explicitly bounded.
-        ///
-        /// Every caller that wants a kernel to CONVOLVE WITH passes the full budget and gets the
-        /// method documented above, unchanged. The bound exists for the two solvers below, which
-        /// do not want a kernel at all: they build one only to read the half-power crossing off
-        /// its central row, and then throw 66048 of its 66049 pixels away. A vaned pupil's
-        /// diffraction term costs 144 pupil evaluations per pixel, so at the full budget that is
-        /// nine and a half million evaluations to answer a question about the innermost few.
-        ///
-        /// Bounding it is exact rather than approximate, for two reasons that both have to hold:
-        ///
-        ///   * the measurement is a RATIO, cur/peak along one row, and Normalise scales the whole
-        ///     kernel by one number, so whatever that number is it divides out;
-        ///   * the convolutions that follow the diffraction term reach only their own radius, so
-        ///     a row sample at |x| is complete as soon as the support extends to |x| plus that
-        ///     reach. The solvers size the bound from the width they are solving for and check
-        ///     that the crossing was actually found inside it (see MeasuredGaussianFwhmFor).
-        /// </summary>
+        // The kernel builder above, with the support it may spend explicitly bounded. Every caller that wants a
+        // kernel to CONVOLVE WITH passes the full budget and gets the method documented above, unchanged. The
+        // bound exists for the two solvers below, which do not want a kernel at all: they build one only to
+        // read the half-power crossing off its central row, and then throw 66048 of its 66049 pixels away. A
+        // vaned pupil's diffraction term costs 144 pupil evaluations per pixel, so at the full budget that is
+        // nine and a half million evaluations to answer a question about the innermost few. Bounding it is
+        // exact rather than approximate, for two reasons that both have to hold: * the measurement is a RATIO,
+        // cur/peak along one row, and Normalise scales the whole kernel by one number, so whatever that number
+        // is it divides out; * the convolutions that follow the diffraction term reach only their own radius,
+        // so a row sample at |x| is complete as soon as the support extends to |x| plus that reach. The solvers
+        // size the bound from the width they are solving for and check that the crossing was actually found
+        // inside it (see MeasuredGaussianFwhmFor).
         private static float[] BuildKernel(
             double plateScaleArcsecPerPixel,
             double apertureMeters,
@@ -673,36 +654,27 @@ namespace ExoInstruments.Core
             return Normalise(acc, accR);
         }
 
-        /// <summary>Target sub-samples across the delivered FWHM. Five resolves a profile whose shape is this smooth; more buys nothing measurable against GalSim.</summary>
+        // Target sub-samples across the delivered FWHM. Five resolves a profile whose shape is this smooth;
+        // more buys nothing measurable against GalSim.
         private const int PixelIntegrationSamplesPerFwhm = 15;
 
-        /// <summary>
-        /// Least support, in OUTPUT pixels, the radial diffraction term is given regardless of how
-        /// small its Airy FWHM is. See the comment at its use: the Airy envelope's theta^-3 wings
-        /// leave a deficit that falls only as 1/R, so a support of a couple of pixels moves several
-        /// percent of the light into the core when the kernel is renormalised.
-        /// </summary>
+        // Least support, in OUTPUT pixels, the radial diffraction term is given regardless of how small its
+        // Airy FWHM is. See the comment at its use: the Airy envelope's theta^-3 wings leave a deficit that
+        // falls only as 1/R, so a support of a couple of pixels moves several percent of the light into the
+        // core when the kernel is renormalised.
         private const int MinDiffractionRadiusPx = 12;
 
-        /// <summary>
-        /// Ceiling on the supersampling factor.
-        ///
-        /// A PSF far narrower than one pixel does not need resolving: point-sampled, it is one
-        /// bright pixel and empty neighbours, which after normalisation is the delta function it
-        /// physically is, and the delta is exactly right. The regime that needs the work is the
-        /// one where the PSF is COMPARABLE to a pixel, and 9 covers all of it.
-        /// </summary>
+        // Ceiling on the supersampling factor. A PSF far narrower than one pixel does not need resolving:
+        // point-sampled, it is one bright pixel and empty neighbours, which after normalisation is the delta
+        // function it physically is, and the delta is exactly right. The regime that needs the work is the one
+        // where the PSF is COMPARABLE to a pixel, and 9 covers all of it.
         private const int MaxPixelIntegrationSuper = 21;
 
-        /// <summary>
-        /// Least supersampling on the radial path, whatever the sampling says.
-        ///
-        /// Pixel integration is not only for undersampled instruments. Measured against GalSim on
-        /// the atmospheric term alone, the mean over a pixel differs from the value at its centre
-        /// by 0.43% on the RC20 at 9.1 pixels per FWHM and 1.10% on FORS2 at 5.4. That is an
-        /// aperture correction, so it is worth the handful of table lookups it costs here.
-        /// Nine sub-samples per pixel puts the residual below 0.1%.
-        /// </summary>
+        // Least supersampling on the radial path, whatever the sampling says. Pixel integration is not only for
+        // undersampled instruments. Measured against GalSim on the atmospheric term alone, the mean over a
+        // pixel differs from the value at its centre by 0.43% on the RC20 at 9.1 pixels per FWHM and 1.10% on
+        // FORS2 at 5.4. That is an aperture correction, so it is worth the handful of table lookups it costs
+        // here. Nine sub-samples per pixel puts the residual below 0.1%.
         private const int MinRadialSupersampling = 3;
 
         private static int ChooseSupersampling(
@@ -762,14 +734,10 @@ namespace ExoInstruments.Core
             return super % 2 == 1 ? super : super + 1;   // odd: keeps a sample on the centre
         }
 
-        /// <summary>
-        /// Sums each SUPER x SUPER block of sub-pixels into one detector pixel, which is the
-        /// integral of the PSF over that pixel's area.
-        ///
-        /// The fine grid is laid out so that sub-pixel (super*i + j) belongs to output pixel i for
-        /// j in [-(super-1)/2, +(super-1)/2], which is why super is odd: the block around the
-        /// centre is symmetric and its middle sample sits exactly on the optical axis.
-        /// </summary>
+        // Sums each SUPER x SUPER block of sub-pixels into one detector pixel, which is the integral of the PSF
+        // over that pixel's area. The fine grid is laid out so that sub-pixel (super*i + j) belongs to output
+        // pixel i for j in [-(super-1)/2, +(super-1)/2], which is why super is odd: the block around the centre
+        // is symmetric and its middle sample sits exactly on the optical axis.
         private static double[] BinToPixels(double[] fine, int fineRadius, int super, out int radius)
         {
             int half = (super - 1) / 2;
@@ -1172,16 +1140,12 @@ namespace ExoInstruments.Core
             return MeasureKernelFwhmArcsec(k, r, plateScale);
         }
 
-        /// <summary>
-        /// Support a FWHM measurement needs, in pixels, for a profile of about this width.
-        ///
-        /// The half-power point of a profile of full width W sits at W/2 from the centre, and the
-        /// Gaussian convolved in afterwards reaches its own three sigma-equivalent radius, so
-        /// three widths plus that reach plus a margin is past the crossing with room to spare.
-        /// Eight pixels minimum, because at coarse binning the crossing lands on the first or
-        /// second sample and the interpolation there needs neighbours; capped at the kernel
-        /// budget, above which the bound saves nothing and the caller takes the normal path.
-        /// </summary>
+        // Support a FWHM measurement needs, in pixels, for a profile of about this width. The half-power point
+        // of a profile of full width W sits at W/2 from the centre, and the Gaussian convolved in afterwards
+        // reaches its own three sigma-equivalent radius, so three widths plus that reach plus a margin is past
+        // the crossing with room to spare. Eight pixels minimum, because at coarse binning the crossing lands
+        // on the first or second sample and the interpolation there needs neighbours; capped at the kernel
+        // budget, above which the bound saves nothing and the caller takes the normal path.
         private static int SolveRadiusFor(double widthArcsec, double plateScaleArcsecPerPixel)
         {
             if (!(widthArcsec > 0.0) || !(plateScaleArcsecPerPixel > 0.0)) return 8;
@@ -1189,17 +1153,12 @@ namespace ExoInstruments.Core
             return Math.Max(8, Math.Min(MaxKernelRadiusPx, r));
         }
 
-        /// <summary>
-        /// A circular Gaussian of the given FWHM, integrated over each pixel rather than sampled
-        /// at its centre.
-        ///
-        /// Integration matters here in a way it does not for the wide profiles: the Gaussians
-        /// this carries can be NARROWER than one pixel (HST's pointing jitter is 0.008 arcsec
-        /// against a 0.04 arcsec pixel), and a sub-pixel profile sampled at pixel centres is
-        /// simply wrong, in the specific way of putting all the flux in one pixel and none in
-        /// its neighbours. A 2D Gaussian is separable and each factor integrates to a difference
-        /// of error functions, so the exact pixel integral costs no more than the sample would.
-        /// </summary>
+        // A circular Gaussian of the given FWHM, integrated over each pixel rather than sampled at its centre.
+        // Integration matters here in a way it does not for the wide profiles: the Gaussians this carries can
+        // be NARROWER than one pixel (HST's pointing jitter is 0.008 arcsec against a 0.04 arcsec pixel), and a
+        // sub-pixel profile sampled at pixel centres is simply wrong, in the specific way of putting all the
+        // flux in one pixel and none in its neighbours. A 2D Gaussian is separable and each factor integrates
+        // to a difference of error functions, so the exact pixel integral costs no more than the sample would.
         private static double[] SampleGaussian(int radius, double plateScaleArcsecPerPixel, double fwhmArcsec)
         {
             int size = 2 * radius + 1;
@@ -1229,13 +1188,10 @@ namespace ExoInstruments.Core
             return k;
         }
 
-        /// <summary>
-        /// The error function, to about 1.2e-7 absolute: Abramowitz &amp; Stegun (1964), "Handbook
-        /// of Mathematical Functions", Eq. 7.1.26. The .NET Framework this mod targets has no
-        /// Math.Erf, and the pixel integral above needs one; A&amp;S 7.1.26 is the standard rational
-        /// approximation for exactly this situation and its stated error bound is four orders
-        /// below the kernel's own truncation.
-        /// </summary>
+        // The error function, to about 1.2e-7 absolute: Abramowitz & Stegun (1964), "Handbook of Mathematical
+        // Functions", Eq. 7.1.26. The .NET Framework this mod targets has no Math.Erf, and the pixel integral
+        // above needs one; A&S 7.1.26 is the standard rational approximation for exactly this situation and its
+        // stated error bound is four orders below the kernel's own truncation.
         private static double Erf(double x)
         {
             const double a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
@@ -1248,7 +1204,8 @@ namespace ExoInstruments.Core
             return sign * y;
         }
 
-        /// <summary>Uniformly illuminated defocus blur disc, antialiased at its rim by the fraction of each pixel that falls inside.</summary>
+        // Uniformly illuminated defocus blur disc, antialiased at its rim by the fraction of each pixel that
+        // falls inside.
         private static double[] SampleDisc(int radius, double discRadiusPx)
         {
             int size = 2 * radius + 1;
@@ -1265,71 +1222,50 @@ namespace ExoInstruments.Core
             return k;
         }
 
-        /// <summary>
-        /// Samples a pupil's full two-dimensional pattern onto the kernel grid, pixel-averaged the
-        /// way PupilDiffraction defines it. No radial lookup table is possible here: with a spider
-        /// the pattern depends on azimuth as well as radius, which is the entire point.
-        /// </summary>
-        /// <summary>
-        /// Radius, in kernel pixels, of the handful of pixels that hold most of the light and are
-        /// therefore sampled at BrightCoreNodeCap instead of the grid's own cap. 4 px is 81
-        /// pixels of 66049, so the cap there is nearly free; see SampleTwoDimensional.
-        /// </summary>
+        // Samples a pupil's full two-dimensional pattern onto the kernel grid, pixel-averaged the way
+        // PupilDiffraction defines it. No radial lookup table is possible here: with a spider the pattern
+        // depends on azimuth as well as radius, which is the entire point. Radius, in kernel pixels, of the
+        // handful of pixels that hold most of the light and are therefore sampled at BrightCoreNodeCap instead
+        // of the grid's own cap. 4 px is 81 pixels of 66049, so the cap there is nearly free; see
+        // SampleTwoDimensional.
         private const int BrightCoreRadiusPx = 4;
 
-        /// <summary>
-        /// How those pixels are integrated: sixteen nodes per ring period instead of the four
-        /// the rest of the grid uses, and a ceiling of 48 instead of 12.
-        ///
-        /// Both ends of the roster need one of the two. FORS2 binned 4x4 has a pixel eighteen
-        /// ring periods wide, so the ceiling is what binds and twelve nodes left the peak pixel
-        /// wrong by 8 per cent of itself; SPHERE has a pixel half a period wide, where nothing
-        /// binds and four nodes per period is simply a coarse midpoint rule, worth 1.6 per cent.
-        /// Measured in tools/psf-cost, which is where the two figures come from.
-        /// </summary>
+        // How those pixels are integrated: sixteen nodes per ring period instead of the four the rest of the
+        // grid uses, and a ceiling of 48 instead of 12. Both ends of the roster need one of the two. FORS2
+        // binned 4x4 has a pixel eighteen ring periods wide, so the ceiling is what binds and twelve nodes left
+        // the peak pixel wrong by 8 per cent of itself; SPHERE has a pixel half a period wide, where nothing
+        // binds and four nodes per period is simply a coarse midpoint rule, worth 1.6 per cent. Measured in
+        // tools/psf-cost, which is where the two figures come from.
         private const int BrightCoreNodesPerRingPeriod = 16;
         private const int BrightCoreNodeCap = 48;
 
-        /// <summary>
-        /// Samples the pupil's two-dimensional far field onto the kernel grid.
-        ///
-        /// This is the most expensive thing in a capture on a vaned pupil, so it spends its
-        /// evaluations where they buy something and says here why the other two savings are free.
-        ///
-        /// THE SYMMETRY FOLD IS EXACT, NOT AN APPROXIMATION. A telescope pupil is a real
-        /// transmission function, so its far-field amplitude obeys A(-u) = conj(A(u)) and the
-        /// intensity |A|^2 is therefore an even function of angle, whatever the pupil contains -
-        /// vanes, pads, anything. The midpoint nodes of a pixel at (-dx,-dy) are the negatives of
-        /// those at (dx,dy), so the pixel AVERAGE inherits the same symmetry term by term. Half
-        /// the grid is computed and mirrored, which is exact and also leaves the kernel exactly
-        /// even rather than even to within the order two floating-point sums happened to run in.
-        ///
-        /// A pupil that is itself symmetric about the grid axes gives more, and PupilDiffraction
-        /// works out from its own geometry how much: four vanes at 0 and 90 degrees and no pads,
-        /// which is every ground instrument on the roster, leaves one OCTANT determining the
-        /// pattern, so seven eighths of the sampling is a copy. Hubble's three mirror pads sit at
-        /// 120 degrees and break every reflection, so it keeps the central symmetry alone. The
-        /// fold is never assumed: an unsymmetric pupil folded anyway would mirror its spikes into
-        /// quadrants they do not belong in, and that would look like structure rather than a bug.
-        ///
-        /// THE BRIGHT CORE IS INTEGRATED BETTER THAN THE GRID'S OWN RULE, which costs almost
-        /// nothing and is the reason this kernel is more accurate than the one it replaced rather
-        /// than merely cheaper. See BrightCoreNodesPerRingPeriod.
-        ///
-        /// A THIRD SAVING WAS MEASURED AND REJECTED, and is recorded because the number is
-        /// tempting and someone will think of it again. Halving the node count beyond 16 px is
-        /// worth 5.6x on Hubble's kernel (2268 ms to 405 ms at 4x4) and leaves max|d| against a
-        /// converged reference where it was, 9.3e-5 of the peak against 9.6e-5, because the far
-        /// wings carry almost none of the weight. What it costs is the DIFFRACTION SPIKES: their
-        /// relative error goes from 0.4 to 1.8 per cent on WFC3/UVIS and from 0.2 to 4.9 on
-        /// WFC3/IR. The argument for accepting that - the twelve-sub-band sum has already
-        /// averaged the far rings away, so a finer average per band resolves structure that
-        /// cancels - is sound as far as it goes, but it is an empirical bound rather than a
-        /// derived one, and the spikes are the whole reason this support was widened to 257x257
-        /// in the first place. So the wings keep their full node count. tools/psf-cost measures
-        /// both, and the taper is three lines away if the time is ever worth more than the
-        /// spikes' fourth significant figure.
-        /// </summary>
+        // Samples the pupil's two-dimensional far field onto the kernel grid. This is the most expensive thing
+        // in a capture on a vaned pupil, so it spends its evaluations where they buy something and says here
+        // why the other two savings are free. THE SYMMETRY FOLD IS EXACT, NOT AN APPROXIMATION. A telescope
+        // pupil is a real transmission function, so its far-field amplitude obeys A(-u) = conj(A(u)) and the
+        // intensity |A|^2 is therefore an even function of angle, whatever the pupil contains - vanes, pads,
+        // anything. The midpoint nodes of a pixel at (-dx,-dy) are the negatives of those at (dx,dy), so the
+        // pixel AVERAGE inherits the same symmetry term by term. Half the grid is computed and mirrored, which
+        // is exact and also leaves the kernel exactly even rather than even to within the order two floating-
+        // point sums happened to run in. A pupil that is itself symmetric about the grid axes gives more, and
+        // PupilDiffraction works out from its own geometry how much: four vanes at 0 and 90 degrees and no
+        // pads, which is every ground instrument on the roster, leaves one OCTANT determining the pattern, so
+        // seven eighths of the sampling is a copy. Hubble's three mirror pads sit at 120 degrees and break
+        // every reflection, so it keeps the central symmetry alone. The fold is never assumed: an unsymmetric
+        // pupil folded anyway would mirror its spikes into quadrants they do not belong in, and that would look
+        // like structure rather than a bug. THE BRIGHT CORE IS INTEGRATED BETTER THAN THE GRID'S OWN RULE,
+        // which costs almost nothing and is the reason this kernel is more accurate than the one it replaced
+        // rather than merely cheaper. See BrightCoreNodesPerRingPeriod. A THIRD SAVING WAS MEASURED AND
+        // REJECTED, and is recorded because the number is tempting and someone will think of it again. Halving
+        // the node count beyond 16 px is worth 5.6x on Hubble's kernel (2268 ms to 405 ms at 4x4) and leaves
+        // max|d| against a converged reference where it was, 9.3e-5 of the peak against 9.6e-5, because the far
+        // wings carry almost none of the weight. What it costs is the DIFFRACTION SPIKES: their relative error
+        // goes from 0.4 to 1.8 per cent on WFC3/UVIS and from 0.2 to 4.9 on WFC3/IR. The argument for accepting
+        // that - the twelve-sub-band sum has already averaged the far rings away, so a finer average per band
+        // resolves structure that cancels - is sound as far as it goes, but it is an empirical bound rather
+        // than a derived one, and the spikes are the whole reason this support was widened to 257x257 in the
+        // first place. So the wings keep their full node count. tools/psf-cost measures both, and the taper is
+        // three lines away if the time is ever worth more than the spikes' fourth significant figure.
         private static double[] SampleTwoDimensional(int radius, double plateScaleArcsecPerPixel, PupilDiffraction pupil)
         {
             int size = 2 * radius + 1;
@@ -1388,20 +1324,17 @@ namespace ExoInstruments.Core
             return Math.Max(1, Math.Min(MaxKernelRadiusPx, r));
         }
 
-        /// <summary>Radial lookup samples per pixel. At 4/px the spacing is a quarter pixel, far finer than any structure these smooth profiles contain.</summary>
+        // Radial lookup samples per pixel. At 4/px the spacing is a quarter pixel, far finer than any structure
+        // these smooth profiles contain.
         private const int RadialLutSamplesPerPixel = 4;
 
-        /// <summary>
-        /// Samples a radially symmetric profile onto a square kernel grid.
-        ///
-        /// The profile is evaluated on a fine 1D radial lookup table and interpolated onto the
-        /// grid, rather than evaluated once per pixel. This is not a shortcut for its own sake:
-        /// the atmospheric profile costs a 512-step quadrature with a Bessel evaluation per step,
-        /// so a halo kernel of radius 256 would otherwise mean 263,169 quadratures, of order
-        /// 10^8 special-function evaluations for a single capture. Both profiles here depend on
-        /// radius alone and are smooth on the scale of a quarter pixel, so tabulating and
-        /// interpolating is ~180x cheaper for a difference far below the kernel's own truncation.
-        /// </summary>
+        // Samples a radially symmetric profile onto a square kernel grid. The profile is evaluated on a fine 1D
+        // radial lookup table and interpolated onto the grid, rather than evaluated once per pixel. This is not
+        // a shortcut for its own sake: the atmospheric profile costs a 512-step quadrature with a Bessel
+        // evaluation per step, so a halo kernel of radius 256 would otherwise mean 263,169 quadratures, of
+        // order 10^8 special-function evaluations for a single capture. Both profiles here depend on radius
+        // alone and are smooth on the scale of a quarter pixel, so tabulating and interpolating is ~180x
+        // cheaper for a difference far below the kernel's own truncation.
         private static double[] SampleRadial(int radius, double plateScaleArcsecPerPixel, Func<double, double> intensityAtThetaRad)
         {
             int size = 2 * radius + 1;
@@ -1431,30 +1364,21 @@ namespace ExoInstruments.Core
             return k;
         }
 
-        /// <summary>
-        /// Above this many multiply-adds, the direct sum below gives way to the transform.
-        ///
-        /// The direct sum is O(ra^2 * rb^2) and stayed affordable only while the diffraction term
-        /// was a handful of taps. Once it takes the whole 128 px budget on a vaned pupil, a ground
-        /// instrument's kernel is 257x257 against a 183x183 atmospheric profile: 2.2 billion
-        /// multiply-adds per sub-band and twelve sub-bands per capture, which measured 8.9 s of a
-        /// 9.5 s reduction on the RC20. The transform does the same convolution in about seven
-        /// million operations.
-        ///
-        /// 16 million is where the two are worth about the same on this machine, and it is set an
-        /// order below where the transform actually wins so that everything small keeps the direct
-        /// sum: that path is exact, and the compact kernels (the RedCat's whole PSF spans two
-        /// pixels) are where a bit-for-bit answer is cheap enough to simply keep having.
-        /// </summary>
+        // Above this many multiply-adds, the direct sum below gives way to the transform. The direct sum is
+        // O(ra^2 * rb^2) and stayed affordable only while the diffraction term was a handful of taps. Once it
+        // takes the whole 128 px budget on a vaned pupil, a ground instrument's kernel is 257x257 against a
+        // 183x183 atmospheric profile: 2.2 billion multiply-adds per sub-band and twelve sub-bands per capture,
+        // which measured 8.9 s of a 9.5 s reduction on the RC20. The transform does the same convolution in
+        // about seven million operations. 16 million is where the two are worth about the same on this machine,
+        // and it is set an order below where the transform actually wins so that everything small keeps the
+        // direct sum: that path is exact, and the compact kernels (the RedCat's whole PSF spans two pixels) are
+        // where a bit-for-bit answer is cheap enough to simply keep having.
         private const long DirectConvolutionBudget = 16L * 1024 * 1024;
 
-        /// <summary>
-        /// Convolution of two square kernels, evaluated only over the output radius that will
-        /// actually be kept. Direct while that is cheap; through FourierConvolution when it is
-        /// not, which agrees with the direct sum to the last few bits of double precision
-        /// (tools/psf-cost --convolve measures it) and is the only practical route at the sizes a
-        /// vaned pupil now produces.
-        /// </summary>
+        // Convolution of two square kernels, evaluated only over the output radius that will actually be kept.
+        // Direct while that is cheap; through FourierConvolution when it is not, which agrees with the direct
+        // sum to the last few bits of double precision (tools/psf-cost --convolve measures it) and is the only
+        // practical route at the sizes a vaned pupil now produces.
         private static double[] Convolve(double[] a, int ra, double[] b, int rb, int rOut)
         {
             long work = (2L * ra + 1) * (2L * ra + 1) * (2L * rb + 1) * (2L * rb + 1);
@@ -1497,28 +1421,20 @@ namespace ExoInstruments.Core
             return outK;
         }
 
-        /// <summary>
-        /// Clips a kernel to a CIRCULAR support, when that costs nothing real, and scales it to
-        /// unit sum.
-        ///
-        /// Circular because the array is square and a real PSF is not. Sampled into its corners, a
-        /// square kernel of half-width R carries the profile out to R at the mid-edges and to
-        /// R*sqrt(2) at the corners, so where it ends depends on azimuth, and where a kernel ends
-        /// is where the surface brightness steps to zero. That step is what draws a square around a
-        /// bright star. Clipping to the inscribed circle makes the step isotropic, which is the
-        /// shape the physics has.
-        ///
-        /// BUT ONLY WHEN THE RING IT DISCARDS IS EMPTY. On a wide seeing kernel the annulus between
-        /// the inscribed circle and the corners holds ~1e-4 of the energy and the clip is free. On a
-        /// compact kernel (the RedCat's whole PSF spans two pixels), that annulus holds several
-        /// percent of REAL profile, and clipping it re-concentrated the energy enough to shift the
-        /// encircled-energy curve 17% against GalSim. So the decision is measured, not assumed: the
-        /// clip applies only when the annulus carries less than CircularClipBudget of the total,
-        /// which reproduces the isotropic edge exactly where it was needed and the full square
-        /// exactly where GalSim-validated physics lives.
-        ///
-        /// Unit sum either way, so convolution conserves total flux despite the finite support.
-        /// </summary>
+        // Clips a kernel to a CIRCULAR support, when that costs nothing real, and scales it to unit sum.
+        // Circular because the array is square and a real PSF is not. Sampled into its corners, a square kernel
+        // of half-width R carries the profile out to R at the mid-edges and to R*sqrt(2) at the corners, so
+        // where it ends depends on azimuth, and where a kernel ends is where the surface brightness steps to
+        // zero. That step is what draws a square around a bright star. Clipping to the inscribed circle makes
+        // the step isotropic, which is the shape the physics has. BUT ONLY WHEN THE RING IT DISCARDS IS EMPTY.
+        // On a wide seeing kernel the annulus between the inscribed circle and the corners holds ~1e-4 of the
+        // energy and the clip is free. On a compact kernel (the RedCat's whole PSF spans two pixels), that
+        // annulus holds several percent of REAL profile, and clipping it re-concentrated the energy enough to
+        // shift the encircled-energy curve 17% against GalSim. So the decision is measured, not assumed: the
+        // clip applies only when the annulus carries less than CircularClipBudget of the total, which
+        // reproduces the isotropic edge exactly where it was needed and the full square exactly where GalSim-
+        // validated physics lives. Unit sum either way, so convolution conserves total flux despite the finite
+        // support.
         private static float[] Normalise(double[] kernel, int radius)
         {
             int size = 2 * radius + 1;
@@ -1553,12 +1469,10 @@ namespace ExoInstruments.Core
             return result;
         }
 
-        /// <summary>
-        /// Largest fraction of a kernel's energy the circular clip may discard. 1e-3 sits an order
-        /// of magnitude above the 1e-4 the wide seeing kernels actually carry in their corners;
-        /// so they keep their isotropic edge, and two orders below the several percent a compact
-        /// kernel carries there, so nothing measurable is ever thrown away.
-        /// </summary>
+        // Largest fraction of a kernel's energy the circular clip may discard. 1e-3 sits an order of magnitude
+        // above the 1e-4 the wide seeing kernels actually carry in their corners; so they keep their isotropic
+        // edge, and two orders below the several percent a compact kernel carries there, so nothing measurable
+        // is ever thrown away.
         private const double CircularClipBudget = 1e-3;
     }
 }

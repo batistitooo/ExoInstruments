@@ -125,11 +125,9 @@ namespace ExoInstruments.Visualization
             return true;
         }
 
-        /// <summary>
-        /// The host body's natural satellites, as the avoidance check needs them. Only bodies
-        /// that are actually up there: a moon on the far side of its primary is behind the
-        /// planet and cannot constrain a pointing the planet is already blocking.
-        /// </summary>
+        // The host body's natural satellites, as the avoidance check needs them. Only bodies that are actually
+        // up there: a moon on the far side of its primary is behind the planet and cannot constrain a pointing
+        // the planet is already blocking.
         private static SpaceMoonContext[] BuildMoons(CelestialBody host, Vector3d observer)
         {
             if (host == null || host.orbitingBodies == null || host.orbitingBodies.Count == 0)
@@ -206,7 +204,10 @@ namespace ExoInstruments.Visualization
             return true;
         }
 
-        /// <summary>A world vector as a Core SkyVector, normalised. Core carries no Unity types, which is what keeps the physics testable outside the game.</summary>
+        /// <summary>
+        /// A world vector as a Core SkyVector, normalised. Core carries no Unity types, which is what keeps the
+        /// physics testable outside the game.
+        /// </summary>
         public static SkyVector ToSky(Vector3d v) => SkyVector.Normalized(v.x, v.y, v.z);
 
         /// <summary>A world vector as a Core SkyVector, keeping its magnitude: for positions rather than directions.</summary>

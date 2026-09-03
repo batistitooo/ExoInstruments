@@ -3,7 +3,7 @@
 §12 item 19 (now item 23) used to declare this effect not implemented on two grounds. Both were false.
 
 It said the effect "needs per-sensor electrostatic-vertex calibration tables with no generic
-published values" — but **Downing, Baade, Sinclaire, Deiries & Christen (2006, SPIE Orlando)**
+published values", but **Downing, Baade, Sinclaire, Deiries & Christen (2006, SPIE Orlando)**
 measured it by spatial autocorrelation on ESO's own detectors and reported the numbers in prose.
 And it said "none of these instruments do stellar photometry", which stopped being true when the
 pipeline gained measured aperture photometry.

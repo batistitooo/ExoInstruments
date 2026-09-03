@@ -6,7 +6,7 @@ namespace ExoInstruments.Core
     /// Observing-quality forecast grid for a (target, instrument) pair: one row per body
     /// rotation, one column per time slot. Quality is 0 when unobservable, else:
     /// transit: (sigma_ideal / sigma_actual)^2; imaging: airmass efficiency; RV: 1.
-    /// No weather (stock KSP has none). Deterministic in UT — the forecast is exactly
+    /// No weather (stock KSP has none). Deterministic in UT; the forecast is exactly
     /// what the corresponding session would observe.
     /// </summary>
     public static class ObservingForecast
@@ -18,7 +18,10 @@ namespace ExoInstruments.Core
             public int Columns;              // slots per night/row
             public int Rows;                 // nights covered
 
-            /// <summary>Row-major quality grid, normalized so the best upcoming cell = 1.0. Relative by design: a scintillation-dominated pairing's raw values (~0.01) would render as a flat, useless map.</summary>
+            /// <summary>
+            /// Row-major quality grid, normalized so the best upcoming cell = 1.0. Relative by design: a
+            /// scintillation-dominated pairing's raw values (~0.01) would render as a flat, useless map.
+            /// </summary>
             public double[] Quality01;
 
             public double BestUt;            // center of the single best cell; NaN when nothing is observable
@@ -29,7 +32,10 @@ namespace ExoInstruments.Core
             public double CellUt(int row, int col) => StartUt + (row * (double)Columns + col + 0.5) * CellSeconds;
         }
 
-        /// <summary>Computes the forecast grid starting at startUt. Rows span one body rotation so night structure lines up vertically — standard observing-calendar layout. Safe to call off the main thread.</summary>
+        /// <summary>
+        /// Computes the forecast grid starting at startUt. Rows span one body rotation so night structure lines
+        /// up vertically, the standard observing-calendar layout. Safe to call off the main thread.
+        /// </summary>
         public static ForecastResult Compute(
             StarTarget target, InstrumentSpec instrument, ImagingObserverContext observer,
             double startUt, int nights, int columnsPerNight)

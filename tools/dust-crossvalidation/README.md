@@ -1,6 +1,6 @@
 # dust-crossvalidation
 
-The extinction **law** — the first layer of the dust pipeline, and the one everything else multiplies
+The extinction **law**, the first layer of the dust pipeline, and the one everything else multiplies
 by. Cross-validated against `dust_extinction` 1.5, the astropy-affiliated reference implementation.
 
 An extinction curve splits into an **amount** and a **shape**:
@@ -16,8 +16,8 @@ property of the grains, parameterised by `R_V = A(V)/E(B-V)`. This directory est
 
 | | |
 |---|---|
-| **CCM89** — Cardelli, Clayton & Mathis (1989), *ApJ* **345**, 245 | closed-form polynomials in `x = 1/lambda`. Exactly implementable, nothing to interpolate. Kept as the **control**. |
-| **F99** — Fitzpatrick (1999), *PASP* **111**, 63 | better in the optical, where every instrument in the roster works. Not closed-form: a cubic spline through published anchor points, so it is carried as a generated table. **The default.** |
+| **CCM89**, Cardelli, Clayton & Mathis (1989), *ApJ* **345**, 245 | closed-form polynomials in `x = 1/lambda`. Exactly implementable, nothing to interpolate. Kept as the **control**. |
+| **F99**, Fitzpatrick (1999), *PASP* **111**, 63 | better in the optical, where every instrument in the roster works. Not closed-form: a cubic spline through published anchor points, so it is carried as a generated table. **The default.** |
 
 Reimplementing F99's spline construction and matching its knot placement would be a way to introduce
 an error that looks like physics. Sampling the reference implementation on a grid finer than any
@@ -59,8 +59,8 @@ the error.
 `A(lambda)` scales with `E(B-V)` to machine precision, which is what makes the map's amount and the
 law's shape separable at all, and the curve never rises toward the red.
 
-**The two laws are two laws.** Over 333–909 nm at `R_V = 3.1` they differ by up to 0.062 in
-`A(lambda)/A(V)`, which is **0.19 mag at `E(B-V) = 1`** — the literature-sized residual between
+**The two laws are two laws.** Over 333-909 nm at `R_V = 3.1` they differ by up to 0.062 in
+`A(lambda)/A(V)`, which is **0.19 mag at `E(B-V) = 1`**, the literature-sized residual between
 CCM89's optical polynomial and F99's spline, and the reason F99 is the default. A harness where they
 agreed exactly would be one where only one of them was being evaluated.
 
@@ -71,15 +71,15 @@ agreed exactly would be one where only one of them was being evaluated.
 spline knots sit at 6000, 5470, 4670 and 4110 Å, and V is not one of them.
 
 It is not a problem either, because `A(V) = R_V E(B-V)` is a relation between **band-integrated**
-extinctions. `A(V)` is what a source loses through the Johnson V passband — an integral of the
-reddened spectrum against the filter — not the value of the curve at one wavelength. Monochromatic
+extinctions. `A(V)` is what a source loses through the Johnson V passband, an integral of the
+reddened spectrum against the filter, not the value of the curve at one wavelength. Monochromatic
 `k(V) = 1` is a property of how a law chooses to anchor itself; CCM89 anchors at a wavelength and
 satisfies it by construction, F99 anchors through a spline and does not.
 
 The band-integrated closure is the meaningful one and it is **not testable here**, because it needs
 the Johnson B and V passbands integrated against a source spectrum. That is exactly what
 `SystemResponse` is for, and it is where this check belongs once the reddening is wired into the
-bandpass — the same argument this codebase already made for atmospheric extinction, which had to
+bandpass, the same argument this codebase already made for atmospheric extinction, which had to
 move inside the integral for the same reason.
 
 ## What this does NOT establish

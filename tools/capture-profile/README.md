@@ -1,10 +1,10 @@
-# capture-profile — where a capture's seconds go
+# capture-profile, where a capture's seconds go
 
 Baptiste's report, 2026-07-31: a galaxy photograph on the RC20 at **4×4 binning** took thirty
 seconds or more, and 1×1 was not worth attempting.
 
 At 4×4 the RC20's frame is 1036×705 = 0.73 Mpx. Thirty seconds is therefore not "a big frame",
-and reading the code was not going to say which stage owned the time — it had already suggested
+and reading the code was not going to say which stage owned the time; it had already suggested
 the wrong one. This harness times the shipped stages at the shipped parameters, on the real
 installed data files, so the answer is measured.
 
@@ -15,7 +15,7 @@ or the seed recorded in the FITS header stops reproducing the exposure.
 ## What it times
 
 The scene is an M51 portrait from the Observatoire de Haute-Provence, an hour east of the
-meridian, through the RC20's Barlow and its L filter — the case that was slow.
+meridian, through the RC20's Barlow and its L filter, the case that was slow.
 
 Everything is the shipped Core except the two frame-sized loops that live in the Unity layer
 (`SolarSystemCameraTexture.DepositEmissionField` and its detector chain), which cannot be compiled
@@ -35,8 +35,8 @@ Single-threaded, .NET 10, idle machine, best of five:
 | **total, ms** | **2012** | **284** | **4166** | **954** |
 
 The finding that mattered: **the diffuse-emission fill was 87 % of a 4×4 capture**, and its cost
-does not fall with binning at all. It takes one sample per NATIVE pixel — 11.7 million on this
-sensor whatever the observer chose — because the average over the native sub-pixels is the
+does not fall with binning at all. It takes one sample per NATIVE pixel, 11.7 million on this
+sensor whatever the observer chose, because the average over the native sub-pixels is the
 integral the sensor performs. Inside each sample, `Float16.ToDouble` was calling `Math.Pow` to
 raise two to an integer power, sixteen times per sample through the interpolation stencil, i.e.
 187 million transcendental calls per exposure for an answer that is one of thirty-two constants.
@@ -70,13 +70,13 @@ happened to be holding; the mean of a contended benchmark measures the contentio
 ## A correction, 2026-08-07
 
 **This harness was timing a kernel the mod does not build.** It passed `vaneCount = 0` to
-`BuildChromaticKernel`, which takes `OpticalPsf`'s radial path — and the shipped RC20 has not taken
+`BuildChromaticKernel`, which takes `OpticalPsf`'s radial path, and the shipped RC20 has not taken
 that path since the visual roster's PSF learned about spiders. The stage this harness exists to
 time was the one stage it got wrong, and the difference is not small: with the RC20's real four
 1.5 mm vanes the diffraction term is sampled in two dimensions over the whole 257x257 support and
 then convolved with the atmospheric profile, which was **8855 ms of a 9502 ms reduction**.
 
-Fixed here, and the cost fixed in `Core` — see `tools/psf-cost`, which exists because of it. This
+Fixed here, and the cost fixed in `Core`, see `tools/psf-cost`, which exists because of it. This
 harness's own numbers, once it is asking for the right kernel:
 
 | RC20, M51 from OHP | before | after |

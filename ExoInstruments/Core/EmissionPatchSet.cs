@@ -85,32 +85,25 @@ namespace ExoInstruments.Core
                 return -1;
             }
 
-            /// <summary>H-alpha when plane is negative, otherwise the extra plane of that index.</summary>
+            // H-alpha when plane is negative, otherwise the extra plane of that index.
             internal bool TryPlane(int plane, long pixel, ref int cursor, out double rayleighs)
                 => plane < 0 ? TryValue(pixel, ref cursor, out rayleighs)
                              : TryPlaneValue(plane, pixel, ref cursor, out rayleighs);
 
-            /// <summary>
-            /// COVERAGE, and the value separately. True means this patch holds the cell; the value
-            /// is then NaN if that cell carries no measurement.
-            ///
-            /// The two used to be one answer -- false for a pixel outside the patch AND for a
-            /// masked cell inside it -- and the caller could only treat both as "the base map's
-            /// job". That is what put a hard-edged box on every bright star in every SHASSA patch:
-            /// the packer masks the continuum-subtraction crater around a star as NaN, the lookup
-            /// reported that exactly like the patch's outer rim, and the sample switched to the
-            /// composite mid-frame. Where the two surveys agree the switch is invisible (measured
-            /// at iota Ori: +0.0 ADU across 36% of a 10 arcmin box). Where they disagree it is the
-            /// artefact: around M42's Trapezium the composite reads 4324 to 4380 R against the
-            /// patch's 45 to 900 R in the saturated bowl, so a 3.7 x 1.2 arcmin strip -- the two
-            /// NaN cells there, dilated by the interpolation stencil -- came out +33 ADU brighter
-            /// than the sky around it, with an edge sharp to the pixel.
-            ///
-            /// Coverage is a question about the patch's GEOMETRY and has one right answer; whether
-            /// a covered cell was measured is a question about its VALUE, and only the caller
-            /// knows what to do about it. See TryRayleighsAtGalactic, which now masks and
-            /// reweights, as its own comment has always said it did.
-            /// </summary>
+            // COVERAGE, and the value separately. True means this patch holds the cell; the value is then NaN
+            // if that cell carries no measurement. The two used to be one answer -- false for a pixel outside
+            // the patch AND for a masked cell inside it -- and the caller could only treat both as "the base
+            // map's job". That is what put a hard-edged box on every bright star in every SHASSA patch: the
+            // packer masks the continuum-subtraction crater around a star as NaN, the lookup reported that
+            // exactly like the patch's outer rim, and the sample switched to the composite mid-frame. Where the
+            // two surveys agree the switch is invisible (measured at iota Ori: +0.0 ADU across 36% of a 10
+            // arcmin box). Where they disagree it is the artefact: around M42's Trapezium the composite reads
+            // 4324 to 4380 R against the patch's 45 to 900 R in the saturated bowl, so a 3.7 x 1.2 arcmin strip
+            // -- the two NaN cells there, dilated by the interpolation stencil -- came out +33 ADU brighter
+            // than the sky around it, with an edge sharp to the pixel. Coverage is a question about the patch's
+            // GEOMETRY and has one right answer; whether a covered cell was measured is a question about its
+            // VALUE, and only the caller knows what to do about it. See TryRayleighsAtGalactic, which now masks
+            // and reweights, as its own comment has always said it did.
             internal bool TryValue(long pixel, ref int cursor, out double rayleighs)
             {
                 rayleighs = double.NaN;
@@ -140,7 +133,7 @@ namespace ExoInstruments.Core
                 return true;                            // covered; NaN says unmeasured, not absent
             }
 
-            /// <summary>The same lookup on one of the extra planes. Shares the run geometry, so only the array differs.</summary>
+            // The same lookup on one of the extra planes. Shares the run geometry, so only the array differs.
             internal bool TryPlaneValue(int plane, long pixel, ref int cursor, out double rayleighs)
             {
                 rayleighs = double.NaN;
@@ -519,7 +512,8 @@ namespace ExoInstruments.Core
             for (int i = 0; i < rejectedPerPatch.Length; i++) RejectedCells += rejectedPerPatch[i];
         }
 
-        /// <summary>Flattened neighbourhood lists: neighbours[start[i]..start[i+1]) are the cells within RejectionRadiusCells of cell i, itself included.</summary>
+        // Flattened neighbourhood lists: neighbours[start[i]..start[i+1]) are the cells within
+        // RejectionRadiusCells of cell i, itself included.
         private int[] BuildNeighbourhoods(Patch patch, int[] index, int first, long span,
                                           double step, int[] start)
         {
@@ -621,18 +615,19 @@ namespace ExoInstruments.Core
             return groups;
         }
 
-        /// <summary>Radius of the neighbourhood a cell is judged against, in cells. Four is 3.4 arcmin at nside 4096, above the scale of a stellar residual and below anything diffuse.</summary>
+        // Radius of the neighbourhood a cell is judged against, in cells. Four is 3.4 arcmin at nside 4096,
+        // above the scale of a stellar residual and below anything diffuse.
         private const int RejectionRadiusCells = 4;
 
 
-        /// <summary>Clipping threshold in robust sigma.</summary>
+        // Clipping threshold in robust sigma.
         private const double RejectionSigma = 3.0;
-        /// <summary>Rounds. Five is where the Horsehead patch stopped changing.</summary>
+        // Rounds. Five is where the Horsehead patch stopped changing.
         private const int RejectionRounds = 6;
-        /// <summary>Floor on the spread, as a fraction of the local median, so a flat region cannot clip its own noise.</summary>
+        // Floor on the spread, as a fraction of the local median, so a flat region cannot clip its own noise.
         private const double FloorFraction = 0.05;
 
-        /// <summary>Gathers the values in a disc of RejectionRadiusCells around a direction. Returns how many were found.</summary>
+        // Gathers the values in a disc of RejectionRadiusCells around a direction. Returns how many were found.
         private int Gather(Patch patch, int[] index, int first, long span,
                            double lDeg, double bDeg, double step, double[] window)
         {
@@ -666,11 +661,11 @@ namespace ExoInstruments.Core
                                   : 0.5 * (buffer[count / 2 - 1] + buffer[count / 2]);
         }
 
-        /// <summary>MAD scaled to a Gaussian sigma by the usual 1.4826.</summary>
+        // MAD scaled to a Gaussian sigma by the usual 1.4826.
         private static double MedianAbsoluteDeviation(double[] buffer, int count, double median)
             => MedianAbsoluteDeviation(buffer, count, median, new double[count]);
 
-        /// <summary>The same with a caller-supplied scratch buffer, so a hot loop allocates nothing.</summary>
+        // The same with a caller-supplied scratch buffer, so a hot loop allocates nothing.
         private static double MedianAbsoluteDeviation(double[] buffer, int count, double median, double[] deviations)
         {
             for (int i = 0; i < count; i++) deviations[i] = Math.Abs(buffer[i] - median);
@@ -836,34 +831,24 @@ namespace ExoInstruments.Core
             for (int i = 0; i < calibratedPerPatch.Length; i++) CalibratedCells += calibratedPerPatch[i];
         }
 
-        /// <summary>
-        /// The scale above which the composite may correct a patch, and it is the beam of the
-        /// composite's COARSEST constituent rather than of the composite as published. Finkbeiner
-        /// (2003) is WHAM at a 1 degree beam, filled in with VTSS at 1.6' and SHASSA at 0.8' where
-        /// those reach; over the northern nebulae the backbone is WHAM, and empirically the map
-        /// carries no structure below about 10' there. Correcting a patch at a finer scale than the
-        /// reference resolves does not calibrate it, it erases its contrast.
-        ///
-        /// Measured across the beam, on the Veil, as the ratio of the gain applied to sky under 5 R
-        /// against that applied over 60 R, which is 1.00 for an honest calibration and rises as the
-        /// correction flattens the patch onto the reference:
-        ///
-        ///     beam     6'    10'    15'    20'    30'    45'    60'    90'
-        ///     ratio   5.1    3.8    2.8    2.4    1.9    1.4    1.2    1.1
-        ///     residual 1.9%  2.1%   2.4%   2.8%   2.6%   2.4%   2.6%   2.3%
-        ///
-        /// The residual against the composite at its own beam is flat across that whole range, so
-        /// the fine correction buys no accuracy and costs the contrast the patch exists to supply.
-        /// One degree is where the flattening stops and is what WHAM measures.
-        /// </summary>
+        // The scale above which the composite may correct a patch, and it is the beam of the composite's
+        // COARSEST constituent rather than of the composite as published. Finkbeiner (2003) is WHAM at a 1
+        // degree beam, filled in with VTSS at 1.6' and SHASSA at 0.8' where those reach; over the northern
+        // nebulae the backbone is WHAM, and empirically the map carries no structure below about 10' there.
+        // Correcting a patch at a finer scale than the reference resolves does not calibrate it, it erases its
+        // contrast. Measured across the beam, on the Veil, as the ratio of the gain applied to sky under 5 R
+        // against that applied over 60 R, which is 1.00 for an honest calibration and rises as the correction
+        // flattens the patch onto the reference: beam 6' 10' 15' 20' 30' 45' 60' 90' ratio 5.1 3.8 2.8 2.4 1.9
+        // 1.4 1.2 1.1 residual 1.9% 2.1% 2.4% 2.8% 2.6% 2.4% 2.6% 2.3% The residual against the composite at
+        // its own beam is flat across that whole range, so the fine correction buys no accuracy and costs the
+        // contrast the patch exists to supply. One degree is where the flattening stops and is what WHAM
+        // measures.
         private const double CompositeBeamArcmin = 60.0;
 
-        /// <summary>
-        /// A per-cell field averaged over the composite's beam. Cell values sampled finer than the
-        /// beam carry sampling noise rather than resolved structure, and a correction derived from
-        /// them has to be band-limited to the beam before it is trusted or it injects that noise.
-        /// Inverse-variance-free Gaussian weights over the cells within one beam.
-        /// </summary>
+        // A per-cell field averaged over the composite's beam. Cell values sampled finer than the beam carry
+        // sampling noise rather than resolved structure, and a correction derived from them has to be band-
+        // limited to the beam before it is trusted or it injects that noise. Inverse-variance-free Gaussian
+        // weights over the cells within one beam.
         private static Dictionary<long, double> SmoothOverBeam(Dictionary<long, double> field,
                                                                int nside, double beamArcmin)
         {
@@ -897,12 +882,9 @@ namespace ExoInstruments.Core
             return outp;
         }
 
-        /// <summary>
-        /// A per-cell field read at an arbitrary direction, bilinearly over the cells that carry a
-        /// value and renormalised over them. Applying the containing cell's value instead is what
-        /// makes a correction piecewise constant, and a step at every cell edge is visible whenever
-        /// the frame resolves the cell.
-        /// </summary>
+        // A per-cell field read at an arbitrary direction, bilinearly over the cells that carry a value and
+        // renormalised over them. Applying the containing cell's value instead is what makes a correction
+        // piecewise constant, and a step at every cell edge is visible whenever the frame resolves the cell.
         private static double InterpolateCellField(Dictionary<long, double> field, int nside,
                                                    double lDeg, double bDeg,
                                                    long[] pixelScratch, double[] weightScratch)

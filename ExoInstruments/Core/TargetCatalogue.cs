@@ -317,7 +317,7 @@ namespace ExoInstruments.Core
             return tidied;
         }
 
-        /// <summary>The first catalogue designation, which the table already orders Messier, then NGC, then IC.</summary>
+        // The first catalogue designation, which the table already orders Messier, then NGC, then IC.
         private static string BestDesignation(string[] identifiers)
         {
             foreach (string raw in identifiers)
@@ -326,25 +326,17 @@ namespace ExoInstruments.Core
             return null;
         }
 
-        /// <summary>
-        /// Which of an object's common names to put on the label.
-        ///
-        /// SIMBAD records every name an object has ever been published under and expresses no
-        /// preference among them, so this is a presentation choice and is written as one: no name
-        /// is discarded, every one of them stays searchable, and only the label is decided. Three
-        /// forms are set aside because they name something OTHER than the object an observer means:
-        ///
-        ///   * all-uppercase legacy transliterations ("CRAB NEB", "SMOKING GUN");
-        ///   * designations carrying an asterisk, which in SIMBAD denote the central object rather
-        ///     than the nebula or galaxy around it ("M 87*" is the black hole);
-        ///   * radio-source designations, a constellation followed by a single letter ("Vir A"),
-        ///     and names that begin with a three-letter constellation abbreviation ("Ori Nebula"),
-        ///     both of which are the abbreviated forms rather than the spoken ones.
-        ///
-        /// Among what is left, the shortest: "Crab" over "Crab Nebula", "Whirlpool" over "Whirlpool
-        /// Galaxy". If every candidate is set aside, the rule yields rather than inventing, and the
-        /// first name is used as it stands.
-        /// </summary>
+        // Which of an object's common names to put on the label. SIMBAD records every name an object has ever
+        // been published under and expresses no preference among them, so this is a presentation choice and is
+        // written as one: no name is discarded, every one of them stays searchable, and only the label is
+        // decided. Three forms are set aside because they name something OTHER than the object an observer
+        // means: * all-uppercase legacy transliterations ("CRAB NEB", "SMOKING GUN"); * designations carrying
+        // an asterisk, which in SIMBAD denote the central object rather than the nebula or galaxy around it ("M
+        // 87*" is the black hole); * radio-source designations, a constellation followed by a single letter
+        // ("Vir A"), and names that begin with a three-letter constellation abbreviation ("Ori Nebula"), both
+        // of which are the abbreviated forms rather than the spoken ones. Among what is left, the shortest:
+        // "Crab" over "Crab Nebula", "Whirlpool" over "Whirlpool Galaxy". If every candidate is set aside, the
+        // rule yields rather than inventing, and the first name is used as it stands.
         private static string BestCommonName(string[] identifiers)
         {
             string first = null, best = null;
@@ -419,7 +411,7 @@ namespace ExoInstruments.Core
             if (!aliases.Contains(tidied)) aliases.Add(tidied);
         }
 
-        /// <summary>Catalogue alternate-name fields are comma-separated lists written as one string.</summary>
+        // Catalogue alternate-name fields are comma-separated lists written as one string.
         private static void AddAliasList(List<string> aliases, string commaSeparated)
         {
             if (string.IsNullOrWhiteSpace(commaSeparated)) return;

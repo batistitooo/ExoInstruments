@@ -6,7 +6,7 @@ face value.
 ## The error
 
 A catalogue colour is an observed colour. `pack_gaia_catalog.py` reads Gaia's measured `G` and
-`BP−RP`, and `GaiaPhotometry` converts them with Gaia's own published relations — **nothing is
+`BP−RP`, and `GaiaPhotometry` converts them with Gaia's own published relations, **nothing is
 dereddened anywhere**. So a hot star behind two magnitudes of dust and an intrinsically cool star
 arrive at the photometry indistinguishable, and `StellarPhotometry.CollectedElectrons` modelled both
 as the cool one: it fed the observed `B−V` to Ballesteros' relation and integrated a Planck curve at
@@ -28,7 +28,7 @@ so the comparison is between two real temperatures rather than against a fallbac
 | FORS2 | 7700 Å unfiltered | **56.5 mmag** | **807 mmag** |
 
 An 8000 K star at `E(B−V) = 1`: **−29 mmag on the RC20, −295 mmag on FORS2**. The wider band suffers
-ten times more, which is the check that these are physics and not noise — a *shape* error needs
+ten times more, which is the check that these are physics and not noise, a *shape* error needs
 band to act on, and FORS2's unfiltered position is three times wider.
 
 Beyond `E(B−V) ≈ 2` the observed colour leaves Ballesteros' range entirely, the old path falls back
@@ -45,8 +45,8 @@ extinction factor is written normalised at V too:
 10^(-0.4 R_V E(B-V) [k(lambda) - k(V)])
 ```
 
-which is exactly 1 at V by construction. Nothing is attenuated — the observed magnitude already
-contains the dimming — and this only stops the reddening from being mistaken for a cool photosphere.
+which is exactly 1 at V by construction. Nothing is attenuated, the observed magnitude already
+contains the dimming, and this only stops the reddening from being mistaken for a cool photosphere.
 
 | check | result |
 |---|---|
@@ -58,15 +58,15 @@ The second row is the one that matters for safety: **with no reddening estimate 
 bit-identical to what the pipeline produced before**, so a catalogue carrying no reddening column
 behaves exactly as it always did.
 
-At `E(B−V) = 2`, 400 nm keeps 0.073 of its V-relative flux and 800 nm keeps 10.5 — suppressed in the
+At `E(B−V) = 2`, 400 nm keeps 0.073 of its V-relative flux and 800 nm keeps 10.5, suppressed in the
 blue, enhanced in the red, both relative to V. That is reddening, and its direction is checked
 rather than assumed.
 
 ## The per-frame cache
 
 `SystemResponse.EffectiveWidthAngstromForReddenedStar` runs a quadrature per call, because putting a
-reddening axis on the colour table would multiply its build cost by the number of nodes on that axis
-— 48 ms per capture on the main thread against under a millisecond today. `ReddenedResponseCache`
+reddening axis on the colour table would multiply its build cost by the number of nodes on that axis,
+48 ms per capture on the main thread against under a millisecond today. `ReddenedResponseCache`
 shares the quadratures across a frame instead: one sight line, so its stars sit behind much the same
 dust.
 
@@ -75,7 +75,7 @@ temperature to its bin costs 3.3 % in effective width; rounding the reddening co
 as large as or larger than the error the whole path exists to remove. Interpolating both leaves
 **7.1×10⁻⁵**.
 
-A realistic field — 400 stars over 3000–30000 K at `E(B−V) = 0.50 ± 0.03` — needs **11 reddening
+A realistic field, 400 stars over 3000-30000 K at `E(B−V) = 0.50 ± 0.03`, needs **11 reddening
 tables and 5885 quadratures**, after which every further star is two interpolations.
 
 ## What this does NOT establish

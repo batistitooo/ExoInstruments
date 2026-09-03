@@ -10,8 +10,8 @@ This project uses a proprietary license. It is not a Creative Commons license: r
 
 **Bundled assets.** The orbital telescope's model, `ExoInstruments/Parts/OrbitalObservatory/model.mu`,
 is this project's own: modelled in Fusion, exported through PartTools, and covered by the terms above
-like everything else. It replaced a placeholder — Tarsier Space Technology's Deep Space Telescope,
-Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licence text beside it —
+like everything else. It replaced a placeholder, Tarsier Space Technology's Deep Space Telescope,
+Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licence text beside it,
 and neither that model, its texture, nor its licence file is part of this mod any more. None of
 Tarsier's source code was ever used.
 
@@ -93,7 +93,7 @@ find rather than failing.
   - **VLT FORS2**: the real Very Large Telescope, Unit Telescope 1 "Antu", 8.2m, carrying FORS2's real imager: a mosaic of two MIT/Lincoln-Lab CCID20 CCDs at their own real published plate scale, full well, gain, and read noise; always autoguided, since a real 8.2m research telescope has no unguided operating mode.
   - **VLT SPHERE**: the same VLT, Unit Telescope 3 "Melipal", carrying the real SPHERE/ZIMPOL extreme-adaptive-optics imaging polarimeter. Where FORS2 is limited by ordinary atmospheric seeing no matter the mirror size, SPHERE's SAXO adaptive-optics system corrects that turbulence in real time, reaching a real, published resolution around 25 milliarcseconds, tens of times finer. The tradeoff is real too: ZIMPOL's actual field of view is barely 3.6 arcseconds wide, and it has no blue filter at all.
 
-- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied — instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from a **Gaia DR3** catalogue you build yourself (see below; nothing ships, and without one the sky is simply empty), placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails — along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
+- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied, instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from a **Gaia DR3** catalogue you build yourself (see below; nothing ships, and without one the sky is simply empty), placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails, along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
 
   *Note: the exoplanet detection pipeline is untouched. It keeps searching the small Bright Star Catalogue on purpose, so finding a transit stays a tractable hunt; the rendered star catalogue exists only to fill in what a camera sees.*
 
@@ -125,11 +125,11 @@ find rather than failing.
 
 - **Career-mode discovery loop ("fog of war").** A star's identity and catalog status stay hidden until actually observed. A large real background-star catalog is blended in as camouflage, so anything discovered is a genuinely real system.
 
-- **A target search engine, not a name filter.** The right-hand half of the target-selection view is a search box over *everything the telescope can point at* — the planets and moons of whatever planet pack is installed, the whole star catalogue, the nebulae, every galaxy in the installed catalogue, and every Messier and named NGC/IC object — about sixteen thousand targets in a stock install with the optional catalogues. Type a name in any form it is written in and the list narrows as you type: `M31`, `NGC 224`, `NGC0224` and `Andromeda` all find one entry, `Vega` finds the Bright Star Catalogue's `alf Lyr`, and `M13` finds a globular cluster that no catalogue in this mod carries at all. Matching is on canonical **designations**, not substrings, so `NGC 24` returns NGC 24 and not the two hundred designations it is a substring of. Filter by what a thing is (`type:galaxy`, `type:nebula`, `type:cluster`, or the one-click buttons), by where it is (`in:Ori`, `in:Orion`, `in:Orionis` — the real IAU boundary, see below), by how bright (`mag:<9`) and by whether it is up right now (`alt:>30`). Every result carries its type, magnitude, apparent size, constellation, coordinates, current altitude, **and which catalogue it came from** — two rows in one list can be measured to entirely different standards, and you are entitled to know which is which before spending a night on one. Clicking a result points the telescope; the sky chart on the left simultaneously lights up every match and steps everything else back, so the list and the chart are two views of one search.
+- **A target search engine, not a name filter.** The right-hand half of the target-selection view is a search box over *everything the telescope can point at*, the planets and moons of whatever planet pack is installed, the whole star catalogue, the nebulae, every galaxy in the installed catalogue, and every Messier and named NGC/IC object, about sixteen thousand targets in a stock install with the optional catalogues. Type a name in any form it is written in and the list narrows as you type: `M31`, `NGC 224`, `NGC0224` and `Andromeda` all find one entry, `Vega` finds the Bright Star Catalogue's `alf Lyr`, and `M13` finds a globular cluster that no catalogue in this mod carries at all. Matching is on canonical **designations**, not substrings, so `NGC 24` returns NGC 24 and not the two hundred designations it is a substring of. Filter by what a thing is (`type:galaxy`, `type:nebula`, `type:cluster`, or the one-click buttons), by where it is (`in:Ori`, `in:Orion`, `in:Orionis`, the real IAU boundary, see below), by how bright (`mag:<9`) and by whether it is up right now (`alt:>30`). Every result carries its type, magnitude, apparent size, constellation, coordinates, current altitude, **and which catalogue it came from**, two rows in one list can be measured to entirely different standards, and you are entitled to know which is which before spending a night on one. Clicking a result points the telescope; the sky chart on the left simultaneously lights up every match and steps everything else back, so the list and the chart are two views of one search.
 
 <p align="center"><img src="images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
 
-- **The IAU constellations, done properly.** Every fixed target knows which of the 88 constellations it lies in, and the search can filter on it. This is not a lookup table of approximate regions: Delporte's boundaries (adopted by the IAU in 1928, published 1930, unchanged since) are lines of constant right ascension and declination **in the mean equinox of B1875 and in no other frame**, so a J2000 catalogue position is carried there through the real chain — Murray (1989)'s FK5-to-FK4 rotation including its rotating-system term, then Newcomb's precession — before Roman (1987)'s ordered scan of the boundary arcs. `tools/constellation-tests` reproduces astropy's own FK4 transform to **3 nanoarcseconds**, reproduces all eight worked examples published with the boundary catalogue, and shows that the 0.04% of a quarter-million-point grid where it disagrees with astropy's `get_constellation` are all closer to a boundary than astropy's own two routes to "B1875" are to each other.
+- **The IAU constellations, done properly.** Every fixed target knows which of the 88 constellations it lies in, and the search can filter on it. This is not a lookup table of approximate regions: Delporte's boundaries (adopted by the IAU in 1928, published 1930, unchanged since) are lines of constant right ascension and declination **in the mean equinox of B1875 and in no other frame**, so a J2000 catalogue position is carried there through the real chain, Murray (1989)'s FK5-to-FK4 rotation including its rotating-system term, then Newcomb's precession, before Roman (1987)'s ordered scan of the boundary arcs. `tools/constellation-tests` reproduces astropy's own FK4 transform to **3 nanoarcseconds**, reproduces all eight worked examples published with the boundary catalogue, and shows that the 0.04% of a quarter-million-point grid where it disagrees with astropy's `get_constellation` are all closer to a boundary than astropy's own two routes to "B1875" are to each other.
 
 - **Names from the bodies that assign them.** Cross-identifications (M31 = NGC 224 = the Andromeda Galaxy) come from **SIMBAD**, which maintains them from the literature; star proper names come from the **IAU Catalog of Star Names**, the list the IAU Working Group on Star Names actually approves, rather than from the folklore that half the "traditional" star names in circulation are. Both are pulled by generators under `tools/`, not typed from memory.
 
@@ -151,12 +151,12 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 | **SOPHIE** | 1.93 m spectrograph (Observatoire de Haute-Provence) | Radial Velocity | Moderate (~2.0 m/s) | Entry point into spectroscopic RV detection |
 | **HARPS** | 3.6 m ESO telescope (La Silla) | Radial Velocity | Low (~1.0 m/s) | Long-baseline RV workhorse; the field's historical benchmark |
 | **ESPRESSO** | VLT-fed ultra-stable spectrograph | Radial Velocity | Ultra-Low (~0.15 m/s) | The RV path's capstone; sub-10 cm/s, resolving Earth-mass reflex signals |
-| **ELT** | 39.3 m Extremely Large Telescope (Cerro Armazones) | Direct Imaging | *Not offered: under construction* | The direct-imaging path is listed but not selectable; its physics is not yet at the standard of the rest of the pipeline (TECHNICAL_REFERENCE section 12.3) |
+| **ELT** | 39.3 m Extremely Large Telescope (Cerro Armazones) | Direct Imaging | *Not offered: under construction* | The direct-imaging path is listed but not selectable; its physics is not yet at the standard of the rest of the pipeline |
 | **RC20** | PlaneWave 20" astrograph | Solar-System Photography | N/A; not an exoplanet detector | A real backyard-class scope: point-and-shoot photos of planets and moons in the Kerbol system |
 | **CDK1000** | PlaneWave CDK1000, 1.0 m Corrected Dall-Kirkham (Palomar-class) | Solar-System Photography | N/A; not an exoplanet detector | Research-grade step up from the RC20: nearly four times the light-collecting area |
 | **VLT FORS2** | Real VLT Unit Telescope 1, 8.2 m, real FORS2 imager | Solar-System Photography | N/A; not an exoplanet detector | The actual Very Large Telescope, pointed at the neighborhood instead of a distant galaxy |
 | **VLT SPHERE** | Real VLT Unit Telescope 3, 8.2 m, real SPHERE/ZIMPOL adaptive optics | Solar-System Photography | N/A; not an exoplanet detector | Same VLT, extreme adaptive optics: real ~25 mas resolution instead of ordinary seeing |
-| **Orbital Observatory** | HST's 2.4 m OTA with WFC3/UVIS — *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The near-ultraviolet the atmosphere blocks outright, an identical PSF in every frame, and a sky with no airglow in it |
+| **Orbital Observatory** | HST's 2.4 m OTA with WFC3/UVIS, *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The near-ultraviolet the atmosphere blocks outright, an identical PSF in every frame, and a sky with no airglow in it |
 
 ## Building a space telescope
 
@@ -184,7 +184,7 @@ building a spacecraft that can actually hold a target still.
 3. **Attitude control it can hold a target with.** This is the one that actually shows up in the
    photograph. Reaction wheels hold the boresight at a *point*, and what is left is HST's published
    0.008″ jitter, a fifth of a pixel. Thrusters cannot: an on-off thruster has no small setting, so
-   the vehicle drifts across a deadband and gets pulsed back, forever — the standard limit cycle,
+   the vehicle drifts across a deadband and gets pulsed back, forever, the standard limit cycle,
    and at this plate scale it is **hundreds of pixels** of smear. A telescope pointed on RCS alone
    does not take a slightly worse photograph, it takes a streak. The part ships with wheels for
    exactly this reason; add more if the spacecraft is heavy.
@@ -192,7 +192,7 @@ building a spacecraft that can actually hold a target still.
 
 **Where you operate it from.** Flying the spacecraft, you are there: power and a clear aperture are
 enough. From the observatory at the space centre, every command and every returned frame goes over
-a radio, so it also needs **an antenna with a working link**. Without one it still works — you just
+a radio, so it also needs **an antenna with a working link**. Without one it still works; you just
 have to go and fly it. The frame is 32 MB of real data, which is 9 minutes on a Communotron 16 and
 2 on a relay dish, so the antenna you picked is a real decision.
 
@@ -215,58 +215,58 @@ target near your orbital pole falls in the **continuous viewing zone** and is ne
 
 ## Solar-System Observing Guide
 
-The right instrument for a target isn't the biggest one — it's whichever one actually *frames* the body without either overflowing the field (empty magnification) or shrinking it to a handful of pixels. The tables below are computed straight from each instrument's real aperture, focal length, and sensor (§7.00/§7.11 of the [technical reference](./TECHNICAL_REFERENCE.md)), not eyeballed.
+The right instrument for a target isn't the biggest one; it's whichever one actually *frames* the body without either overflowing the field (empty magnification) or shrinking it to a handful of pixels. The tables below are computed straight from each instrument's real aperture, focal length, and sensor, not eyeballed.
 
-**Reading the tables:** "px @ tight zoom" is the target's diameter in pixels once fully zoomed in (real Barlow/HR-collimator factor where the instrument has one); "% of frame" is that diameter against the sensor's own long axis at that zoom. A target well over 100% has genuinely overflowed the field — you're looking at a crop, not the whole disk.
+**Reading the tables:** "px @ tight zoom" is the target's diameter in pixels once fully zoomed in (real Barlow/HR-collimator factor where the instrument has one); "% of frame" is that diameter against the sensor's own long axis at that zoom. A target well over 100% has genuinely overflowed the field; you're looking at a crop, not the whole disk.
 
 ### Stock Kerbol system (from Kerbin)
 
 | Target | Apparent size | Best instrument | Zoom | Notes |
 |---|---|---|---|---|
-| **Mün** | ~6875″ (1.9°) | *(none)* | — | Too close for any instrument here — it overflows every field by 20×+. This is a naked-eye/map-view target, not a telescope one. |
+| **Mün** | ~6875″ (1.9°) | *(none)* | - | Too close for any instrument here; it overflows every field by 20×+. This is a naked-eye/map-view target, not a telescope one. |
 | **Minmus** | ~527″ (8.8′) | RC20 / CDK1000 | **Wide** (no Barlow) | Also overflows at tight zoom; frames nicely (~46% of the wide field) with the Barlow backed out. |
-| Eve | 76.7″ | CDK1000 | Tight | 46% of frame, 1926 px across. Genuinely bright (thick, reflective cloud deck) — watch the live saturation readout and dial in an ND filter if it clips. |
-| Jool | 44.9″ | CDK1000 | Tight | 27% of frame, 1127 px — best balance of framing and light. FORS2 gives more light-collecting area but a wider tight-zoom field, so it frames Jool smaller (17%). |
-| Duna | 18.5″ | CDK1000 | Tight | 11% of frame, 466 px — enough to show real surface contrast. |
-| Moho | 12.4″ | CDK1000 | Tight | 8% of frame, 311 px — small and dim; needs a real exposure, not a snapshot. |
-| Ike | 7.5″ | CDK1000 | Tight | 5% of frame — modest on every ground scope; overflows SPHERE's 3.7″ field instead of fitting it. |
-| **Dres** | 2.1″ | **VLT SPHERE** | Tight (fixed) | 57% of frame, 1161 px. The dwarf-planet-class bodies (Dres, Eeloo, Gilly) are exactly SPHERE's niche — see the diffraction/AO math in §7.11. |
+| Eve | 76.7″ | CDK1000 | Tight | 46% of frame, 1926 px across. Genuinely bright (thick, reflective cloud deck); watch the live saturation readout and dial in an ND filter if it clips. |
+| Jool | 44.9″ | CDK1000 | Tight | 27% of frame, 1127 px, best balance of framing and light. FORS2 gives more light-collecting area but a wider tight-zoom field, so it frames Jool smaller (17%). |
+| Duna | 18.5″ | CDK1000 | Tight | 11% of frame, 466 px, enough to show real surface contrast. |
+| Moho | 12.4″ | CDK1000 | Tight | 8% of frame, 311 px, small and dim; needs a real exposure, not a snapshot. |
+| Ike | 7.5″ | CDK1000 | Tight | 5% of frame, modest on every ground scope; overflows SPHERE's 3.7″ field instead of fitting it. |
+| **Dres** | 2.1″ | **VLT SPHERE** | Tight (fixed) | 57% of frame, 1161 px. The dwarf-planet-class bodies (Dres, Eeloo, Gilly) are exactly SPHERE's niche. |
 | **Eeloo** | 1.6″ | **VLT SPHERE** | Tight (fixed) | 44% of frame, 906 px. |
-| **Gilly** | 1.4″ | **VLT SPHERE** | Tight (fixed) | 39% of frame, 797 px — Eve's tiny moon is unresolvable anywhere else. |
+| **Gilly** | 1.4″ | **VLT SPHERE** | Tight (fixed) | 39% of frame, 797 px; Eve's tiny moon is unresolvable anywhere else. |
 | **Vall** | 2.2″ | **VLT SPHERE** | Tight (fixed) | 61% of frame, 1247 px. |
-| **Laythe** | 3.7″ | **VLT SPHERE** | Tight (fixed) | ~101% of frame — fills it almost exactly. |
-| **Tylo** | 4.5″ | **VLT SPHERE** | Tight (fixed) | 122% — a slight crop, still the best option by far. |
-| Bop | 0.5″ | VLT SPHERE | Tight (fixed) | Only 13% of frame, but that's still 271 px — SPHERE's fine plate scale (1.8 mas/px) resolves it where every other instrument gives single-digit pixels. |
+| **Laythe** | 3.7″ | **VLT SPHERE** | Tight (fixed) | ~101% of frame, fills it almost exactly. |
+| **Tylo** | 4.5″ | **VLT SPHERE** | Tight (fixed) | 122%, a slight crop, still the best option by far. |
+| Bop | 0.5″ | VLT SPHERE | Tight (fixed) | Only 13% of frame, but that's still 271 px; SPHERE's fine plate scale (1.8 mas/px) resolves it where every other instrument gives single-digit pixels. |
 | Pol | 0.3″ | VLT SPHERE | Tight (fixed) | The hardest real target in the roster: 183 px, 9% of frame. |
 
-The pattern above isn't a coincidence: SPHERE dominates every small/icy/rocky body (Jool's moons, the dwarf planets) exactly the way the real VLT/SPHERE dominates that same class of target in actual observing programs — the mod converges on the real instrument's real niche because the optics feeding it are real, not because anyone tuned it to do so.
+The pattern above isn't a coincidence: SPHERE dominates every small/icy/rocky body (Jool's moons, the dwarf planets) exactly the way the real VLT/SPHERE dominates that same class of target in actual observing programs, the mod converges on the real instrument's real niche because the optics feeding it are real, not because anyone tuned it to do so.
 
 ### Real Solar System (RSS, from Earth)
 
-Distances and magnitudes at *best* elongation/opposition — actual framing on any given night will be worse than the table shows; check the in-game `disk X" = Y px` diagnostic line for the real value at the time.
+Distances and magnitudes at *best* elongation/opposition, actual framing on any given night will be worse than the table shows; check the in-game `disk X" = Y px` diagnostic line for the real value at the time.
 
 | Target | Best diameter | Best instrument | ND filter needed (FORS2, min exposure) | Notes |
 |---|---|---|---|---|
-| Moon | 1800″ | RC20 / CDK1000 | ND100000 | Overflows every field at tight zoom (600%+) — shoot it wide. |
-| Venus | 66″ | RC20 / CDK1000 | ND1000 | 23–40% of frame on the amateur scopes. |
+| Moon | 1800″ | RC20 / CDK1000 | ND100000 | Overflows every field at tight zoom (600%+), shoot it wide. |
+| Venus | 66″ | RC20 / CDK1000 | ND1000 | 23-40% of frame on the amateur scopes. |
 | **Saturn (+rings)** | 46″ | **VLT FORS2** | **ND64** | The best VLT FORS2 target by far: same resolved detail as Jupiter, 12× less saturation. |
-| Jupiter | 49.9″ | VLT FORS2 | ND1000 | Good detail (77 resolution elements) but needs the stronger ND — this is what "impossible with ND8" looks like. |
+| Jupiter | 49.9″ | VLT FORS2 | ND1000 | Good detail (77 resolution elements) but needs the stronger ND; this is what "impossible with ND8" looks like. |
 | Mars | 25.1″ | VLT FORS2 | ND1000 | 39 resolution elements at opposition; far fewer near conjunction (3.5″). |
-| Mercury | 13.0″ | VLT FORS2 | ND100000 | Small and close to the Sun — a genuinely hard real target, same as in life. |
+| Mercury | 13.0″ | VLT FORS2 | ND100000 | Small and close to the Sun, a genuinely hard real target, same as in life. |
 | **Neptune** | 2.4″ | **VLT SPHERE** | none | The best SPHERE target: 65% of the 3.7″ field, ~473 s exposure for good SNR. |
 | Ganymede | 1.72″ | VLT SPHERE | none | 47% of frame, ~13 s exposure. |
 | Callisto | 1.58″ | VLT SPHERE | none | 43% of frame, ~30 s exposure. |
-| Io / Europa | 1.05–1.22″ | VLT SPHERE | none | 28–33% of frame, ~9 s exposure. |
+| Io / Europa | 1.05-1.22″ | VLT SPHERE | none | 28-33% of frame, ~9 s exposure. |
 | Titan | 0.90″ | VLT SPHERE | none | 24% of frame, ~96 s (Saturn's haze makes it faint per unit area). |
-| Ceres / Vesta | 0.60–0.70″ | VLT SPHERE | none | 16–19% of frame, 3–15 s. |
-| Pluto | 0.11″ | VLT SPHERE | none | 3% of frame — the hardest real target in the whole mod. |
-| Uranus | 3.8″ | *either* | ND64 (FORS2) | Right at SPHERE's field edge (103%) — FORS2 also works, with a stronger filter. |
+| Ceres / Vesta | 0.60-0.70″ | VLT SPHERE | none | 16-19% of frame, 3-15 s. |
+| Pluto | 0.11″ | VLT SPHERE | none | 3% of frame, the hardest real target in the whole mod. |
+| Uranus | 3.8″ | *either* | ND64 (FORS2) | Right at SPHERE's field edge (103%), FORS2 also works, with a stronger filter. |
 
-**RC20/CDK1000 on real-solar-system targets:** at their real minimum exposure (32 µs), even Jupiter or the Moon barely register through a 0.51–1.0 m amateur aperture at real interplanetary distances — saturation isn't the risk, under-exposure is. Raise exposure and gain rather than reaching for an ND filter, and use the live diagnostic line to dial it in.
+**RC20/CDK1000 on real-solar-system targets:** at their real minimum exposure (32 µs), even Jupiter or the Moon barely register through a 0.51-1.0 m amateur aperture at real interplanetary distances, saturation isn't the risk, under-exposure is. Raise exposure and gain rather than reaching for an ND filter, and use the live diagnostic line to dial it in.
 
 ### Memory cost per capture
 
-A capture is monochrome — one value per pixel — but the pipeline currently stores it duplicated three-fold in `Color` buffers along the way. Numbers below are exact, computed from every frame-sized buffer the pipeline actually allocates:
+A capture is monochrome; one value per pixel, but the pipeline currently stores it duplicated three-fold in `Color` buffers along the way. Numbers below are exact, computed from every frame-sized buffer the pipeline actually allocates:
 
 | Config | Megapixels | Managed heap | GPU textures | **Total** |
 |---|---|---|---|---|
@@ -278,7 +278,7 @@ A capture is monochrome — one value per pixel — but the pipeline currently s
 | SPHERE, 1×1 | 4.19 | 304 MB | 104 MB | 408 MB |
 | SPHERE, 4×4 | 0.26 | 19 MB | 6 MB | 26 MB |
 
-**2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target — more than the seeing/diffraction limit can usually deliver anyway (see §7.11). Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
+**2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target, more than the seeing/diffraction limit can usually deliver anyway. Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
 ## Data files: one command
 
@@ -437,7 +437,7 @@ python3 tools/pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp
 ```
 
 That is a 1° cone on the Orion Nebula. It should report a few hundred stars, a handful without a
-colour index, and roughly half without a reddening estimate — toward Orion the archive has
+colour index, and roughly half without a reddening estimate, toward Orion the archive has
 `ag_gspphot` for 57% of sources brighter than G = 13, and the packer neither invents the rest nor
 drops them.
 
@@ -503,14 +503,14 @@ star by one pixel every few years of in-game time.
 Gaia's photometry is **observed** photometry: `G` and `G_BP − G_RP` already carry whatever dust sits
 in front of the star, and nothing in the conversion above deredden them. That used to leave a hot
 star behind two magnitudes of dust indistinguishable from an intrinsically cool one, and the
-photometry modelled both as the cool one — integrating a Planck curve at a temperature the star does
+photometry modelled both as the cool one, integrating a Planck curve at a temperature the star does
 not have. On FORS2's 7700 Å band that is worth a median 57 mmag and up to 807 mmag; on the RC20's
 2600 Å band, 8 and 166 mmag. Ten times worse on the wider band, because a *shape* error needs band
 to act on.
 
 Version 3 carries a per-star `E(B−V)` so the two separate: deredden the colour for the real
 photosphere, and put the extinction curve into the bandpass integral as a shape. **Nothing is
-attenuated twice** — the integrand is normalised at Johnson V, the extinction factor is written
+attenuated twice**, the integrand is normalised at Johnson V, the extinction factor is written
 normalised at V too and is exactly 1 there, so the observed magnitude still sets the flux and only
 its distribution across the band changes. `tools/reddening-tests` checks that "exactly", not to a
 tolerance.
@@ -522,7 +522,7 @@ rather than filled in from a sight-line average that would be wrong for a foregr
 
 **Version 2 files still load.** They simply have no reddening column, every star reads as "not
 estimated", and the result is bit-identical to before. Rebuilding is worth doing when convenient,
-not urgent — and note that a version 2 run's `<out>.cache` is **not reusable**, because it was
+not urgent, and note that a version 2 run's `<out>.cache` is **not reusable**, because it was
 fetched without the `ag_gspphot` column.
 
 ## Optional: the interstellar dust map
@@ -539,7 +539,7 @@ cp DustMap.dustmap "<KSP>/GameData/ExoInstruments/PluginData/"
 The first run fetches **SFD98** (Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525), about 150 MB,
 once. It is applied with the 0.86 recalibration of Schlafly & Finkbeiner (2011, ApJ 737, 103), which
 is the standard use of SFD98 today. `--map planck` uses Planck's GNILC map instead (5′ rather than
-6.1′, but a 1.6 GB fetch). At nside 1024 — finer than either source map's own beam — the whole sky
+6.1′, but a 1.6 GB fetch). At nside 1024, finer than either source map's own beam, the whole sky
 is 24 MB and loads in one block.
 
 **This is the TOTAL column**, so it describes what lies beyond the whole Galaxy. It is deliberately
@@ -575,13 +575,13 @@ Note `astropy-healpix`, which is **not** `healpy`: this packer imports `astropy_
 installing only `healpy` gets you an `ImportError` several minutes in.
 
 That file is 49 MB, HEALPix nside 1024, and is the **Finkbeiner (2003, ApJS 146, 407)** composite of
-WHAM, VTSS and SHASSA, already published in rayleighs — the unit the photometry converts from, so
+WHAM, VTSS and SHASSA, already published in rayleighs, the unit the photometry converts from, so
 nothing is reinterpreted on the way in. Packed it becomes 24 MB, reproducing the source to 0.0488%,
 which is exactly half-float precision and therefore the whole cost of storing it.
 
 **Take the nside 1024 file, not the nside 512 one the same page offers.** They are the same product:
 degrade the 1024 to 512 and it matches the native 512 file to 0.8% in the median. But the map's beam
-is 6′ FWHM and nside 512 gives **6.87′ pixels, coarser than the beam itself** — undersampled by a
+is 6′ FWHM and nside 512 gives **6.87′ pixels, coarser than the beam itself**, undersampled by a
 factor 2.3 against Nyquist. The two disagree by 7.3% at the 90th percentile and the 512 loses 130 R
 off the brightest peak in the sky. nside 1024's 3.44′ pixels sample a 6′ beam properly. The packer
 keeps whatever nside the input has: going finer would store interpolation rather than data.
@@ -596,37 +596,37 @@ two cannot disagree.
 
 ### What the other lines do
 
-The map measures Hα, but a filter rarely admits Hα alone — a 7 nm filter centred on it also passes
+The map measures Hα, but a filter rarely admits Hα alone, a 7 nm filter centred on it also passes
 [N II] 6548 and 6584, twenty angstroms away. Those, and the [S II] doublet, are **derived from the
 physics that sets them** rather than from a ratio picked to look right.
 
 Hα is a *recombination* line: its emissivity is fixed by how many protons recombine and falls only
-slowly with temperature. [N II] and [S II] are *collisionally excited* — an electron has to be
-knocked about 2 eV up — so they carry `exp(−E/kT)` and rise steeply with it. The ratio between them
+slowly with temperature. [N II] and [S II] are *collisionally excited*, an electron has to be
+knocked about 2 eV up, so they carry `exp(−E/kT)` and rise steeply with it. The ratio between them
 is therefore a **thermometer**, and that is exactly how it is used observationally: Madsen, Reynolds
 & Haffner (2006, ApJ 652, 401) measure the warm ionised medium's temperature by inverting these
-expressions. The emissivity ratios are Haffner, Reynolds & Tufte (1999, ApJ 523, 223) eq. 1–2, with
+expressions. The emissivity ratios are Haffner, Reynolds & Tufte (1999, ApJ 523, 223) eq. 1-2, with
 gas-phase N/H = 7.5 × 10⁻⁵ and S/H = 1.86 × 10⁻⁵.
 
-Nitrogen needs no ionisation correction — charge exchange with hydrogen locks N⁺/N to H⁺/H — which
+Nitrogen needs no ionisation correction, charge exchange with hydrogen locks N⁺/N to H⁺/H, which
 is why [N II]/Hα is the cleaner thermometer. Sulphur has no such lock, so S⁺/S stays explicit; it is
 obtained the way the papers obtain it, from the observed [S II]/[N II], which is nearly independent
 of temperature because the two lines sit within 2% of the same excitation energy.
 
 The one modelled step is the temperature itself, interpolated logarithmically between two measured
 anchors: **6500 K at 1000 R** (a classical H II region, which cools efficiently) and **10 000 K at
-1 R** (faint high-latitude gas). That reproduces the WIM's most robust observed property — bright
-nebulae are Hα-dominated, faint diffuse gas is [N II]-rich — and the frame reports the temperature
+1 R** (faint high-latitude gas). That reproduces the WIM's most robust observed property, bright
+nebulae are Hα-dominated, faint diffuse gas is [N II]-rich, and the frame reports the temperature
 it used, because it is the one number here that is a model rather than a measurement.
 
 `tools/emission-tests` checks the result against the published values at both ends: [N II]/Hα comes
-out **0.26 at 6000 K** (H II regions are measured at 0.15–0.35) and **0.73 at 8000 K** (the WIM at
-0.3–0.9), with [S II]/[N II] flat to 9% across 6000–10 000 K while [N II]/Hα moves 432% — the
+out **0.26 at 6000 K** (H II regions are measured at 0.15-0.35) and **0.73 at 8000 K** (the WIM at
+0.3-0.9), with [S II]/[N II] flat to 9% across 6000-10 000 K while [N II]/Hα moves 432%, the
 signature of a temperature gradient rather than an abundance one.
 
 **[O III] 5007, [O II] 3727 and [O I] 6300 are deliberately not synthesised.** [O III] needs O⁺⁺,
 which needs photons above 35 eV; the diffuse gas is lit by Lyman continuum that leaked out of H II
-regions and is far too soft to make much of it, so [O III] does **not** track Hα — it is strong in
+regions and is far too soft to make much of it, so [O III] does **not** track Hα; it is strong in
 planetary nebulae, supernova remnants and a few hot cores, and weak everywhere between. [O I] traces
 the neutral boundary rather than the ionised gas. Deriving either from an Hα map would be inventing
 a sky, so those filter positions stay empty until a survey of their own is installed.
@@ -654,7 +654,7 @@ photograph is finer than that:
 | IC 1396 as a whole | 170′ | 28.3 | its outline |
 
 Only the last four render as shapes, and none of the detail inside them does. A real astrophotograph
-works at 2 arcseconds — **180 times finer** — which is why the pictures look different. No display
+works at 2 arcseconds, **180 times finer**, which is why the pictures look different. No display
 setting, stretch or stacking recovers information the file does not contain.
 
 Two further consequences worth knowing:
@@ -664,14 +664,14 @@ Two further consequences worth knowing:
   only what is emitted. `Core/DeepSkyCatalog` marks dark nebulae as such and the sky chart says so.
 * Around the very brightest object in the sky the composite carries a visible **artefact**: a ridge
   about 10′ wide and 1.5° long through M42, whereas M42 is a roughly round 85′ × 60′ nebula. It is
-  in the published file — reading it with `healpy` directly reproduces it — and is most likely a
+  in the published file, reading it with `healpy` directly reproduces it, and is most likely a
   saturation bleed in the survey images the composite mosaics.
 
 ### The patch layer
 
 The one thing that helps is finer data, and it exists over part of the sky. **SHASSA** (Gaustad,
 McCullough, Rosing & Van Buren 2001, PASP 113, 1326) images everything south of **+15° declination**
-at **0.8 arcmin** — 7.5× finer, at which the Horsehead spans 10 elements instead of 1.3.
+at **0.8 arcmin**, 7.5× finer, at which the Horsehead spans 10 elements instead of 1.3.
 
 ```
 cd tools
@@ -688,7 +688,7 @@ download the survey's 2.3 GB of fields.
 **Why patches and not a finer all-sky map.** Resolution is only worth storing where there is
 something to resolve. All-sky at 0.86′ is 201 million HEALPix cells and **403 MB**, nearly all of it
 diffuse background that 6′ already describes perfectly. A degree or two around each catalogued object
-is about **5 MB for the whole catalogue** — eighty times smaller for the same result on every target
+is about **5 MB for the whole catalogue**, eighty times smaller for the same result on every target
 anyone actually points at. Outside a patch the all-sky map answers, which is the layered arrangement
 every real survey archive uses. The frame reports which layer it came from and at what sampling.
 
@@ -824,8 +824,8 @@ classical source for exactly these parameters, plus everything measured since.
 tens of thousands of galaxies; fitted half-light radii exist for far fewer. The conversion costs
 nothing in rigour: a total magnitude and an isophotal diameter **over-determine** a two-parameter
 profile, so the half-light radius follows from the two together with no free constant. The profile
-shape comes from the morphological type — de Vaucouleurs (1948) R^(1/4) for spheroids, Freeman
-(1970) exponential for disks, which are Sérsic n = 4 and n = 1 — and where a catalogue carries a
+shape comes from the morphological type, de Vaucouleurs (1948) R^(1/4) for spheroids, Freeman
+(1970) exponential for disks, which are Sérsic n = 4 and n = 1, and where a catalogue carries a
 fitted index the packer stores it and flags it as measured.
 
 Where the two are inconsistent (a galaxy too faint in total to reach 25 mag/arcsec² anywhere at its
@@ -833,7 +833,7 @@ quoted size) there is no solution, and the renderer keeps the **size**, which is
 shows, rather than the isophote, which it does not.
 
 Photometry goes down the same path as a catalogue star, with the Galactic foreground extinction
-applied in full — a galaxy sits behind the whole column, which is the one case the dust map's total
+applied in full, a galaxy sits behind the whole column, which is the one case the dust map's total
 reddening applies to without qualification.
 
 The packer prints five named galaxies as it finishes, so a units error cannot pass silently: M31
@@ -849,7 +849,7 @@ profile against SciPy and astropy: b_n to 4 × 10⁻¹⁵, the surface brightnes
 A Sérsic profile fitted to four catalogued numbers is an ellipse of light, and that is all it can
 ever be. Measured over the 156 galaxies the sky chart plots, on the RC20 at 4×4 in a 300 s sub: M31
 peaks at **10.4σ** above the sky and reaches 3σ only out to a third of its catalogued radius, M51 at
-21.9σ. That is why a spiral reads as nothing — its light is spread perfectly evenly. None of them
+21.9σ. That is why a spiral reads as nothing; its light is spread perfectly evenly. None of them
 has arms, a dust lane or a knot, and **no published relation puts them back**: those are properties
 of the individual galaxy, not of its Hubble type.
 
@@ -960,7 +960,7 @@ Not yet implemented in the current build:
 
 - **Autoguiding as a paid career upgrade** for the RC20, rather than a free toggle.
 - **Further real astrograph features** surveyed but not built: plate-solving, flat-frame calibration, meridian flip, dithering.
-- **A faint population without the download.** Building a Gaia catalogue solves depth for anyone willing to spend the disk and the RAM, but a player who installs nothing still gets an empty sky. Generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) would give a plausible field at zero download — the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
+- **A faint population without the download.** Building a Gaia catalogue solves depth for anyone willing to spend the disk and the RAM, but a player who installs nothing still gets an empty sky. Generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) would give a plausible field at zero download, the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
 - **Naming rights & a discovery archive.** Player-named planets on confirmation, plus an auto-generated logbook entry (light curve, date, instrument) per detection.
 - **Weather in the generic instrument forecast.** EVE cloud cover is already hooked into the RC20's solar-system forecast; extending it to the exoplanet-instrument heatmap (SPECULOOS, ELT, and the other ground-based facilities) is still open.
 - **Two additional KSC observatory buildings**, each a different real telescope type, planned as further additions alongside the current one.

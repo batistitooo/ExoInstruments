@@ -4,7 +4,7 @@ Stars of known magnitude go in, a frame comes out, and **photutils** has to get 
 
 Every other harness under `tools/` checks one mechanism against a reference. This one checks that the
 mechanisms **compose**. A zero point that disagrees with the electron counts, a PSF that quietly
-loses flux, a gain applied twice, an aperture correction taken from the wrong profile — none of
+loses flux, a gain applied twice, an aperture correction taken from the wrong profile, none of
 those is visible to a test that looks at one stage alone, and all of them show up here.
 
 It also settles a disagreement the codebase names about itself. `Core/CcdEquation.cs` says outright
@@ -27,7 +27,7 @@ localised artefact whose job is to damage pixels; photometry of a clean field is
 chain, and the artefacts have their own checks in `TESTING.md`.
 
 `Core/NoiseSampler.cs` is new. The Poisson and Gaussian deviates used to be private statics inside
-`SolarSystemCameraTexture`, which is Unity-dependent — so the two most consequential numerical
+`SolarSystemCameraTexture`, which is Unity-dependent, so the two most consequential numerical
 routines in the pipeline were the only ones no harness could reach. Moving them to `Core` changes no
 behaviour (the call sites delegate) and makes them testable.
 
@@ -37,10 +37,10 @@ Configuration: RC20 + ASI294MM Pro, 60 s, 0.2754″/px, seeing 2.45″, sky 21.7
 
 **1. The noise deviates are the distributions they claim to be.** `NoiseSampler.Poisson` against
 SciPy's exact pmf by binned chi-square, at λ = 0.05, 0.5, 2, **9.9, 10.0, 10.1**, 50, 1000 and
-150 000 — the three middle values bracket `PtrsThreshold`, where the sampler switches from Knuth's
+150 000, the three middle values bracket `PtrsThreshold`, where the sampler switches from Knuth's
 product method to Hörmann's PTRS, and where a bug would hide without ever throwing. Sample mean
 within 0.7 % and variance within 0.8 % of λ everywhere; every chi-square p-value in [0.23, 0.90].
-The Gaussian passes Kolmogorov–Smirnov at p = 0.43 with σ recovered to 0.11 %.
+The Gaussian passes Kolmogorov-Smirnov at p = 0.43 with σ recovered to 0.11 %.
 
 **2. The magnitudes come back.**
 
@@ -51,7 +51,7 @@ The Gaussian passes Kolmogorov–Smirnov at p = 0.43 with σ recovered to 0.11 %
 | recovered-vs-injected slope | 1.00067 |
 | PSF flux conservation in the total-flux aperture | 0.99867 |
 
-The colour term is not fitted out — it is predicted. `MAGZERO` is quoted for a **flat** source
+The colour term is not fitted out; it is predicted. `MAGZERO` is quoted for a **flat** source
 spectrum, the injected stars are solar, and the two effective widths (1805.2 Å flat, 1721.9 Å solar)
 give an offset of exactly **+0.0513 mag**. Removing that predicted value leaves 1.4 mmag.
 
@@ -78,7 +78,7 @@ imaging half renders from is the same one the transit half predicts with. The si
 aperture correction:
 
 > **`CcdEquation.GaussianEnclosedEnergy` returns 0.7225 at its 0.68-FWHM aperture. The real
-> Airy-convolved-Kolmogorov kernel puts 0.6000 there — the Gaussian is 20.4 % optimistic.**
+> Airy-convolved-Kolmogorov kernel puts 0.6000 there, the Gaussian is 20.4 % optimistic.**
 
 `CcdEquation.cs` flags this itself as the file's only assumption and says the exact number "is
 computable from what this codebase already has". It is: this is the number, and it is worth more than
@@ -99,8 +99,8 @@ The background is the annulus **mean**, not its median. Merline & Howell's `(1 +
 is derived for a sky level obtained by *averaging* n_B pixels; the median of the same pixels has π/2
 times the variance. Measuring with a median and comparing against the equation attributes a 57 %
 inflation of the background term to the pipeline when it belongs to the estimator. It matters
-doubly here because the annulus values are coarsely quantised — the sky is 8.7 ADU per pixel at
-K = 4.03 e⁻/ADU — and the median of a coarsely quantised sample is itself nearly quantised, while
+doubly here because the annulus values are coarsely quantised, the sky is 8.7 ADU per pixel at
+K = 4.03 e⁻/ADU, and the median of a coarsely quantised sample is itself nearly quantised, while
 the mean of 575 of them is not. Using the median moved the V = 18 point from 1.10 to 1.39.
 
 ## What this does NOT establish
@@ -112,7 +112,7 @@ the mean of 575 of them is not. Using the median moved the V = 18 point from 1.1
   for a reason this harness cannot measure.
 - **A clean field.** No cosmic rays, defects, blooming or charge-transfer smear.
 - **Nothing about the sky model's absolute level, nor the zero point's absolute scale.** The zero
-  point is checked for *self-consistency* — the frame agrees with the header that describes it. Whether
+  point is checked for *self-consistency*, the frame agrees with the header that describes it. Whether
   948 photons/cm²/s/Å at 5556 Å is the right anchor is a separate question, and `synphot` against the
   CALSPEC Vega spectrum is the tool for it.
 

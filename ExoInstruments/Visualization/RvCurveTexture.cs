@@ -14,7 +14,7 @@ namespace ExoInstruments.Visualization
 
     /// <summary>
     /// Renders RvSample data into Texture2D scatter plots for IMGUI display,
-    /// mirroring LightCurveTexture. Unity-dependent by design — kept separate
+    /// mirroring LightCurveTexture. Unity-dependent by design, kept separate
     /// from Core so Core stays engine-agnostic and testable.
     /// </summary>
     public static class RvCurveTexture
@@ -24,22 +24,22 @@ namespace ExoInstruments.Visualization
         private static readonly Color ErrorBarColor = new Color(1f, 0.65f, 0.3f, 0.45f);
         private static readonly Color BaselineColor = new Color(0.5f, 0.9f, 0.5f, 0.6f);
 
-        /// <summary>Phase bins for the folded view, same rationale as LightCurveTexture's: RV baselines that cover many cadence epochs pile up hundreds of raw error bars per plot otherwise.</summary>
+        // Phase bins for the folded view, same rationale as LightCurveTexture's: RV baselines that cover many
+        // cadence epochs pile up hundreds of raw error bars per plot otherwise.
         private const int MaxPhaseFoldBinCount = 100;
 
-        /// <summary>Floor on bin count so short-baseline RV sessions (a few dozen points, typical given hours-long cadences) still get *some* folding rather than one bin per point.</summary>
+        // Floor on bin count so short-baseline RV sessions (a few dozen points, typical given hours-long
+        // cadences) still get *some* folding rather than one bin per point.
         private const int MinPhaseFoldBinCount = 8;
 
-        /// <summary>Bins under this count are dropped rather than drawn, matches LightCurveTexture's MinBinSampleCount cutoff.</summary>
+        // Bins under this count are dropped rather than drawn, matches LightCurveTexture's MinBinSampleCount
+        // cutoff.
         private const int MinBinSampleCount = 3;
 
-        /// <summary>
-        /// Fixed 100 bins assumes hundreds-to-thousands of points, true for transit's
-        /// 30s-600s cadences but not for RV's 6-8h cadences; a real session might only
-        /// have a few dozen samples, which spread ~0.3/bin at a fixed 100 and get filtered
-        /// out almost entirely by MinBinSampleCount, leaving the plot blank. Scale bin
-        /// count down so the average bin actually clears the threshold.
-        /// </summary>
+        // Fixed 100 bins assumes hundreds-to-thousands of points, true for transit's 30s-600s cadences but not
+        // for RV's 6-8h cadences; a real session might only have a few dozen samples, which spread ~0.3/bin at
+        // a fixed 100 and get filtered out almost entirely by MinBinSampleCount, leaving the plot blank. Scale
+        // bin count down so the average bin actually clears the threshold.
         private static int ComputeAdaptiveBinCount(int sampleCount)
         {
             int bins = sampleCount / MinBinSampleCount;
@@ -176,12 +176,9 @@ namespace ExoInstruments.Visualization
             public int Count;
         }
 
-        /// <summary>
-        /// Bins raw samples by orbital phase and reduces each bin to a mean velocity plus
-        /// the standard error of that mean: sigma_bin = sqrt(sum(sigma_i^2)) / n, formal
-        /// propagation of each sample's own instrument precision rather than empirical
-        /// scatter, mirrors LightCurveTexture.BinByPhase.
-        /// </summary>
+        // Bins raw samples by orbital phase and reduces each bin to a mean velocity plus the standard error of
+        // that mean: sigma_bin = sqrt(sum(sigma_i^2)) / n, formal propagation of each sample's own instrument
+        // precision rather than empirical scatter, mirrors LightCurveTexture.BinByPhase.
         private static PhaseBin[] BinByPhase(List<RvSample> samples, double periodSeconds, int binCount)
         {
             var sumVelocity = new double[binCount];
@@ -273,7 +270,7 @@ namespace ExoInstruments.Visualization
             }
         }
 
-        /// <summary>Vertical whisker from (v - sigma) to (v + sigma), with short horizontal caps at each end.</summary>
+        // Vertical whisker from (v - sigma) to (v + sigma), with short horizontal caps at each end.
         private static void DrawErrorBar(Color[] pixels, int width, int height, int x, double v, double sigma, double minV, double maxV)
         {
             if (sigma <= 0) return;

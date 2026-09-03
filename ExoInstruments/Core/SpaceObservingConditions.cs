@@ -187,16 +187,12 @@ namespace ExoInstruments.Core
             s.SkyVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(flux);
         }
 
-        /// <summary>
-        /// How much of the orbit this target is available for, and therefore the longest single
-        /// exposure that can run without the planet cutting it off.
-        ///
-        /// The blocking half-angle is the body's own angular radius PLUS the limb avoidance
-        /// angle, because an exposure ends when the pointing enters the avoidance zone, not when
-        /// the target finally disappears behind the disk. That distinction is not academic: for
-        /// HST it is the difference between the 36 minutes of geometric occultation and the
-        /// roughly 44 minutes STScI actually quotes.
-        /// </summary>
+        // How much of the orbit this target is available for, and therefore the longest single exposure that
+        // can run without the planet cutting it off. The blocking half-angle is the body's own angular radius
+        // PLUS the limb avoidance angle, because an exposure ends when the pointing enters the avoidance zone,
+        // not when the target finally disappears behind the disk. That distinction is not academic: for HST it
+        // is the difference between the 36 minutes of geometric occultation and the roughly 44 minutes STScI
+        // actually quotes.
         private static void ComputeVisibilityWindow(ref SpaceConditionsSnapshot s, SkyVector lineOfSight,
                                                     in SpaceObserverContext ctx, SpacePlatformSpec platform)
         {
