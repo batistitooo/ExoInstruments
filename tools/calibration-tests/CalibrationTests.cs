@@ -181,8 +181,31 @@ static class CalibrationTests
     static void SectionIlluminationGeometry()
     {
         Header("3. Illumination geometry");
-        Console.WriteLine("  instrument  f (m)    corner (deg)  cos^4 loss   illuminated");
-        var rows = new List<string> { "instrument,focal_length_m,corner_deg,cos4_loss_percent,illuminated_fraction" };
+        Console.WriteLine("  instrument  f (m)    corner (deg)  cos^4 loss   illuminated   zoomed in");
+        var rows = new List<string> { "instrument,focal_length_m,corner_deg,cos4_loss_percent,illuminated_fraction,illuminated_fraction_zoomed" };
+
+        // Fraction of the detector's pixels that receive any light at all, at a stated focal length.
+        // Sampled on a coarse grid rather than at full resolution: the stop is a straight edge, so a
+        // 512x512 sample locates it to a fifth of a percent of the frame and the full array would
+        // only cost time.
+        double IlluminatedFraction(VisualTelescopeSpec s, double focal)
+        {
+            const int Sample = 512;
+            int sw = s.NativeSensorWidthPx, sh = s.NativeSensorHeightPx;
+            double spitch = s.NativePixelSizeMeters;
+            int inside = 0;
+            for (int y = 0; y < Sample; y++)
+            {
+                double dy = ((y + 0.5) / Sample - 0.5) * sh * spitch;
+                for (int x = 0; x < Sample; x++)
+                {
+                    double dx = ((x + 0.5) / Sample - 0.5) * sw * spitch;
+                    if (FocalPlaneIllumination.Factor(dx, dy, focal, s.FieldStopSquareArcmin, s.ImageCircleMillimetres) > 0.0)
+                        inside++;
+                }
+            }
+            return inside / (double)(Sample * Sample);
+        }
 
         foreach (var (name, spec) in Ground)
         {
@@ -194,27 +217,17 @@ static class CalibrationTests
             double cornerDeg = Math.Atan(halfDiagonal / f) * 180.0 / Math.PI;
             double cornerLoss = 1.0 - FocalPlaneIllumination.CosineFourth(halfDiagonal, f);
 
-            // Fraction of the detector's pixels that receive any light at all. Sampled on a coarse
-            // grid rather than at full resolution: the stop is a straight edge, so a 512x512 sample
-            // locates it to a fifth of a percent of the frame and the full array would only cost
-            // time.
-            const int Sample = 512;
-            int inside = 0;
-            for (int y = 0; y < Sample; y++)
-            {
-                double dy = ((y + 0.5) / Sample - 0.5) * h * pitch;
-                for (int x = 0; x < Sample; x++)
-                {
-                    double dx = ((x + 0.5) / Sample - 0.5) * w * pitch;
-                    if (FocalPlaneIllumination.Factor(dx, dy, f, spec.FieldStopSquareArcmin, spec.ImageCircleMillimetres) > 0.0)
-                        inside++;
-                }
-            }
-            double illuminated = inside / (double)(Sample * Sample);
+            double illuminated = IlluminatedFraction(spec, f);
+            // The same instrument with its accessory fully in. A Barlow or a collimator swap lengthens
+            // the focal length and leaves the detector alone, so a stop fixed in ANGLE grows in
+            // millimetres and lets go of the array. This column is what distinguishes a stop that
+            // moves with the optics from one painted onto the silicon, and the wide-end column alone
+            // cannot: they are equal for every instrument that has no stop.
+            double illuminatedZoomed = IlluminatedFraction(spec, f * Math.Max(1.0, spec.BarlowFactor));
 
-            Console.WriteLine($"  {name,-10}  {f,7:F3}  {cornerDeg,11:F4}  {cornerLoss * 100.0,9:F4}%  {illuminated * 100.0,9:F2}%");
-            rows.Add(string.Format(CultureInfo.InvariantCulture, "{0},{1:G6},{2:G6},{3:G6},{4:G6}",
-                                   name, f, cornerDeg, cornerLoss * 100.0, illuminated));
+            Console.WriteLine($"  {name,-10}  {f,7:F3}  {cornerDeg,11:F4}  {cornerLoss * 100.0,9:F4}%  {illuminated * 100.0,9:F2}%  {illuminatedZoomed * 100.0,9:F2}%");
+            rows.Add(string.Format(CultureInfo.InvariantCulture, "{0},{1:G6},{2:G6},{3:G6},{4:G6},{5:G6}",
+                                   name, f, cornerDeg, cornerLoss * 100.0, illuminated, illuminatedZoomed));
 
             Check($"{name} illumination is unity on axis",
                   FocalPlaneIllumination.Factor(0, 0, f, spec.FieldStopSquareArcmin, spec.ImageCircleMillimetres), 1.0, 1e-12);
@@ -229,6 +242,25 @@ static class CalibrationTests
               fors2.FieldStopSquareArcmin, fors2.ImageCircleMillimetres) > 0.0);
         Check("FORS2 stop edge is outside", FocalPlaneIllumination.Factor(halfSide * 1.001, 0, fors2.FocalLengthMeters,
               fors2.FieldStopSquareArcmin, fors2.ImageCircleMillimetres) == 0.0);
+
+        // AND THE SAME STOP AT THE OTHER COLLIMATOR, which is the check that pins the geometry to the
+        // optics rather than to the array. The two checks above pass whether or not the illumination
+        // follows the zoom, because both evaluate at the bare focal length; this one does not.
+        //
+        // ESO publishes FORS2's standard-resolution field as the stop's own 6.8 x 6.8 arcmin and its
+        // high-resolution field as 4.25 x 4.25 arcmin. The second figure is the DETECTOR, not a stop:
+        // in HR the collimator's 616mm against the SR 1233mm doubles the effective focal length, the
+        // stop's image grows from a 24.29mm half-side to 48.57mm against a 30.72mm half-detector, and
+        // the whole chip sits inside it. So the correct answer at full zoom is a fully illuminated
+        // frame, and a model that still darkens the border there is painting the stop on the silicon.
+        double hrFocal = fors2.FocalLengthMeters * fors2.BarlowFactor;
+        double hw = 0.5 * fors2.NativeSensorWidthPx * fors2.NativePixelSizeMeters;
+        double hh = 0.5 * fors2.NativeSensorHeightPx * fors2.NativePixelSizeMeters;
+        Check("FORS2 corner is dark in the SR collimator", FocalPlaneIllumination.Factor(hw, hh, fors2.FocalLengthMeters,
+              fors2.FieldStopSquareArcmin, fors2.ImageCircleMillimetres) == 0.0);
+        Check("FORS2 corner is lit in the HR collimator", FocalPlaneIllumination.Factor(hw, hh, hrFocal,
+              fors2.FieldStopSquareArcmin, fors2.ImageCircleMillimetres) > 0.0);
+        Check("FORS2 is fully illuminated in the HR collimator", IlluminatedFraction(fors2, hrFocal), 1.0, 1e-12);
 
         File.WriteAllLines(Path.Combine(outDir, "illumination.csv"), rows);
         Console.WriteLine($"  -> {Path.Combine(outDir, "illumination.csv")}");

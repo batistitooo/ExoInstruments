@@ -31,10 +31,21 @@ git-ignored; the small CSVs are not, so the tables below can be diffed between r
 
 Two results are worth reading even when everything passes.
 
-**FORS2 is 62% illuminated.** The MIT mosaic spans 8.5 arcminutes and the MOS unit stops the field
-at 6.8, so more than a third of the detector never sees the sky. It is the only instrument on the
-roster whose detector is larger than its illuminated field, and the only one where the flat is
+**FORS2 is 62% illuminated, and only in one of its two collimators.** The MIT mosaic spans 8.60
+arcminutes at the standard-resolution collimator's own 0.126 arcsec/px, and the MOS unit stops the
+field at 6.8, so more than a third of the detector never sees the sky. It is the only instrument on
+the roster whose detector is larger than its illuminated field, and the only one where the flat is
 dominated by the optics rather than by the silicon.
+
+The `illuminated_fraction_zoomed` column is why the table now carries two of them. The stop is fixed
+in ANGLE, at UT1's Cassegrain focus ahead of the collimator, so the size of its image at the detector
+follows the effective focal length. Swapping to the high-resolution collimator doubles that focal
+length, grows the stop's half-side from 24.29 mm to 48.57 mm against a 30.72 mm half-detector, and
+the whole chip ends up inside it: 100% illuminated, which is exactly why ESO publishes the SR field
+as the stop's own 6.8 x 6.8 arcmin and the HR field as 4.25 x 4.25, which is the detector's. A model
+that darkened the border at both focal lengths would be painting the stop onto the silicon, and a
+one-column version of this table cannot tell the two apart, because the columns agree for every
+instrument that has no stop at all.
 
 **The ASI294MM Pro is quantisation-limited in a bias frame.** Section 5 recovers 0.413 ADU of
 read-out noise where the catalogue's 1.2 e- is only 0.298 ADU, because the converter's own
