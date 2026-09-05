@@ -35,6 +35,7 @@ static class FringeTests
         SectionThicknessCrossCheck();
         SectionMonochromatic();
         SectionBroadband();
+        SectionMapAcrossCores();
 
         Console.WriteLine();
         Console.WriteLine(new string('=', 78));
@@ -227,6 +228,176 @@ static class FringeTests
             if (smooth[i] >= smooth[i - 1]) smoothMonotonic = false;
         }
         Check("neither sky washes out monotonically", !realMonotonic && !smoothMonotonic);
+    }
+
+    /// <summary>
+    /// The map itself, and the two claims made for it that are not claims about optics.
+    ///
+    /// Core.FringeMap.Build is the loop EnsureFringeMap used to run with the spectral integral
+    /// inside it, once per pixel. Moving it into Core was argued for on the grounds that a
+    /// frame-sized loop in the Unity layer is a loop no harness can compile, so this is the harness
+    /// compiling it. Until this section existed nothing under tools/ referenced the file at all, and
+    /// the equivalence figures for the move lived only in a commit message, which is not a thing
+    /// that re-runs.
+    ///
+    /// Neither claim below is about fringing. One is that the map does not depend on how the work
+    /// was divided across cores, which is what ParallelWork's policy demands of every parallel stage
+    /// and the reason that policy is written down rather than assumed. The other is that hoisting
+    /// the refractive index out of the loop did not move the optical path, which is the step that
+    /// made the loop cheap and the one place the refactor could have changed a frame.
+    /// </summary>
+    static void SectionMapAcrossCores()
+    {
+        Header("4. The map, and what dividing it across cores may not change");
+
+        var spec = VisualTelescopeCatalog.Fors2Vlt;
+        double thickness = spec.DetectorSiliconThicknessMicrons;
+        double variation = spec.DetectorThicknessVariationFraction;
+
+        // The frame builder's own conversion: the modulation field carries unit variance, and four
+        // sigma of a unit-variance field spans the published peak-to-peak, so this is the thickness
+        // sigma EnsureFringeMap passes.
+        double thicknessSigma = thickness * variation / 4.0;
+
+        // I_BESS over the real night sky, one of section 3's own bands. It has to be wide enough to
+        // matter: ParallelWork.Worthwhile gates on pixels times samples, so a narrow band on a small
+        // frame would take the serial branch twice over and the comparison below would pass whatever
+        // the code did.
+        Func<double, double> sky = l => Airglow.LineDensityAtZenith(l) + Airglow.ContinuumDensityAtZenith(l);
+        const double Lo = 699.0, Hi = 837.0, Centre = 768.0;
+        var passband = Fringing.Passband.Sample(
+            sky, l => (l >= Lo && l <= Hi) ? 1.0 : 0.0,
+            Math.Max(AirglowTable.MinWavelengthNm, Lo), Math.Min(AirglowTable.MaxWavelengthNm, Hi),
+            AirglowTable.StepNm);
+
+        // 200 x 200 and not a token array. Build divides the frame into 4096-pixel blocks, so a
+        // frame of one block or less is ONE block, which Parallel.For hands to a single worker: the
+        // comparison below would then be serial against serial and would prove nothing.
+        const int W = 200, H = 200;
+        int n = W * H;
+        int blocks = (n + 4095) / 4096;
+        long operations = (long)n * passband.FringingSampleCount;
+        float[] modulation = ThicknessModulation(n);
+
+        Console.WriteLine($"   {W}x{H} = {n} pixels in {blocks} blocks of 4096");
+        Console.WriteLine($"   {Lo:F0}-{Hi:F0} nm, {passband.FringingSampleCount} samples past the 774 nm onset");
+        Console.WriteLine($"   {operations:N0} elementary operations against ParallelWork's 200,000 threshold");
+        Check("the frame divides into more than one block", blocks > 1);
+
+        // ---- the map may not depend on the worker count -----------------------------------------
+
+        ParallelWork.UseWorkers(1);
+        Check("at one worker the serial branch is the one taken", !ParallelWork.Worthwhile(operations));
+        ushort[] serial = FringeMap.Build(passband, modulation, thickness, thicknessSigma, Centre);
+
+        var counts = new List<int> { 2, 3 };
+        int cores = Math.Max(2, Environment.ProcessorCount - 1);
+        if (!counts.Contains(cores)) counts.Add(cores);
+
+        Console.WriteLine();
+        Console.WriteLine("   workers   differing half words");
+        // Not written to a CSV beside the other two: the worker counts come from
+        // Environment.ProcessorCount, so the file would differ from machine to machine while saying
+        // nothing the console line does not. The other CSVs here are physics and are the same
+        // everywhere.
+        foreach (int workers in counts)
+        {
+            ParallelWork.UseWorkers(workers);
+            Check($"at {workers} workers the parallel branch is the one taken", ParallelWork.Worthwhile(operations));
+
+            ushort[] parallel = FringeMap.Build(passband, modulation, thickness, thicknessSigma, Centre);
+            int differing = 0;
+            for (int i = 0; i < n; i++) if (parallel[i] != serial[i]) differing++;
+
+            Console.WriteLine($"   {workers,7}   {differing,10} out of {n}");
+
+            Check($"the map is bit for bit unchanged at {workers} workers", differing == 0);
+        }
+        ParallelWork.UseWorkers(Math.Max(1, Environment.ProcessorCount - 1));
+
+        // ---- what the map stores, and the hoist that made it cheap ------------------------------
+
+        // SiliconRefractiveIndex is now evaluated ONCE at the filter's centre instead of once per
+        // pixel, which is legitimate only if the path it produces is the same double the per-pixel
+        // form produced.
+        //
+        // TWO CHECKS, AND ONLY THE SECOND ONE HAS TEETH. The first compares the two spellings of
+        // the path against each other, which is an algebraic statement about association order and
+        // is the premise the hoist rests on; it is computed here, so nothing inside FringeMap can
+        // make it fail. The second compares the SHIPPED map against Fringing.OpticalPathNm, the
+        // per-pixel form the loop replaced and which is still shipped unchanged, so it is the one
+        // that fails if the hoist inside Build ever stops agreeing with it. Verified by perturbing
+        // the index in a scratch copy of Core: the first check stayed green and the second went red.
+        //
+        // Equality rather than tolerance throughout, because a path that moved by one ulp would move
+        // the frame a recorded seed reproduces, which is the property this pipeline exists to have.
+        double indexAtCentre = Fringing.SiliconRefractiveIndex(Centre);
+        int pathDiffs = 0, storedDiffs = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double localThickness = thickness + (modulation[i] - 1.0) * thicknessSigma;
+            double hoisted = 2.0 * localThickness * 1000.0 * indexAtCentre;
+            double perPixel = Fringing.OpticalPathNm(localThickness, Centre);
+            if (hoisted != perPixel) pathDiffs++;
+
+            // And the map holds (1 + x) - 1 snapped to half precision, not x. Adding one snaps x
+            // onto the 2^-53 grid before the subtraction takes it off again, and the map has always
+            // stored the snapped value; storing the unsnapped x would be slightly more accurate and
+            // therefore wrong, because it would make this line a tolerance.
+            if (serial[i] != Float16.FromDouble(passband.ModulationAt(perPixel) - 1.0)) storedDiffs++;
+        }
+        Console.WriteLine();
+        Console.WriteLine($"   the hoisted and per-pixel paths differ on {pathDiffs} of {n} pixels");
+        Console.WriteLine($"   the shipped map differs from the per-pixel form on {storedDiffs} of {n}");
+        Check("the two spellings of the optical path agree bit for bit", pathDiffs == 0);
+        Check("the shipped map matches the per-pixel form it replaced, exactly", storedDiffs == 0);
+
+        // ---- what it refuses, and what it returns when there is nothing to do --------------------
+
+        // Below the onset there is no second surface to interfere with and Walsh's own 774 nm flat
+        // showed no fringes, so CanFringe is false. The map must then be exact ZEROS and not ones:
+        // it stores the excess over unity, and FringeAt adds the one back.
+        var noFringe = Fringing.Passband.Sample(
+            sky, l => (l >= 500.0 && l <= 600.0) ? 1.0 : 0.0,
+            Math.Max(AirglowTable.MinWavelengthNm, 500.0), Math.Min(AirglowTable.MaxWavelengthNm, 600.0),
+            AirglowTable.StepNm);
+        ushort[] unfringed = FringeMap.Build(noFringe, modulation, thickness, thicknessSigma, 550.0);
+        bool allZero = unfringed.Length == n;
+        for (int i = 0; allZero && i < n; i++) allZero = unfringed[i] == 0;
+        Check("a passband below the onset cannot fringe", !noFringe.CanFringe);
+        Check("and gives a map of exact zeros, not of ones", allZero);
+
+        Check("an empty frame gives an empty map",
+              FringeMap.Build(passband, new float[0], thickness, thicknessSigma, Centre).Length == 0);
+        Check("a null passband is refused rather than dereferenced",
+              Throws<ArgumentNullException>(() => FringeMap.Build(null, modulation, thickness, thicknessSigma, Centre)));
+        Check("a null thickness field is refused rather than dereferenced",
+              Throws<ArgumentNullException>(() => FringeMap.Build(passband, null, thickness, thicknessSigma, Centre)));
+    }
+
+    /// <summary>
+    /// A deterministic stand-in for the thickness field the frame builder draws from
+    /// Core.SpeckleField: unit mean, unit variance, one value per pixel.
+    ///
+    /// FringeMap.Build is a pure function of its arguments and has no opinion about where the field
+    /// came from, so nothing above depends on this being the real speckle draw. What the worker
+    /// comparison needs is that it is the SAME field at every worker count, which a fixed seed
+    /// gives, and that it is not constant, which would make a per-pixel loop trivially agree with
+    /// itself however it was divided.
+    /// </summary>
+    static float[] ThicknessModulation(int n)
+    {
+        var rng = new Pcg32(0x46524E47UL, Pcg32.StreamPhotoResponse);
+        var field = new float[n];
+        for (int i = 0; i < n; i++) field[i] = (float)(1.0 + NoiseSampler.Gaussian(rng, 1.0));
+        return field;
+    }
+
+    static bool Throws<T>(Action act) where T : Exception
+    {
+        try { act(); return false; }
+        catch (T) { return true; }
+        catch { return false; }
     }
 
     static void Header(string t) { Console.WriteLine(); Console.WriteLine(t); Console.WriteLine(new string('-', t.Length)); }

@@ -12,6 +12,7 @@
     <Compile Include="FringeTests.cs" />
     <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/Fringing.cs" />
+    <Compile Include="$(Core)/FringeMap.cs" />
     <Compile Include="$(Core)/Airglow.cs" />
     <Compile Include="$(Core)/AirglowTable.cs" />
     <Compile Include="$(Core)/Coronagraph.cs" />
