@@ -271,8 +271,16 @@ namespace ExoInstruments.Visualization
         /// <summary>Real (binned) pixel pitch in microns, for FITS XPIXSZ/YPIXSZ header keywords.</summary>
         public static double PixelSizeMicrons => NativePixelSizeMeters * BinningFactor * 1e6;
 
-        /// <summary>Real focal length in mm, for the FITS FOCALLEN header keyword.</summary>
-        public static double FocalLengthMm => RealFocalLengthMeters * 1000.0;
+        /// <summary>
+        /// Focal length in mm for the FITS FOCALLEN keyword, at THIS FRAME's zoom.
+        ///
+        /// The magnification goes here and not into XPIXSZ, because the silicon does not move: that is the
+        /// convention SharpCap and NINA write for a Barlowed rig, and neither carries a separate accessory
+        /// keyword. It is also what makes the header self-consistent, since 206.265 * XPIXSZ / FOCALLEN then
+        /// reproduces the SECPIX the WCS measures off the projection, which FitsWcs names as its own sanity
+        /// check.
+        /// </summary>
+        public double FocalLengthMm => EffectiveFocalLengthMeters * 1000.0;
 
         /// <summary>
         /// Real full well AT THE CURRENT BINNING, in electrons, for FITS header info and the
@@ -394,12 +402,16 @@ namespace ExoInstruments.Visualization
             => SelectedCoronagraphMask.HasValue ? Coronagraph.Throughput(Spec.CoronagraphLyotStop) : 1.0;
 
         /// <summary>
-        /// Real plate scale at the current binning: arcsec per (binned) pixel, from the telescope's real focal
-        /// length and the sensor's real pixel pitch. Public because it's the single number that decides whether
-        /// a target is resolvable at all; real acquisition software (SharpCap, NINA, ESO's own ETCs) all put it
-        /// front and center for exactly that reason.
+        /// NATIVE (accessory-out) plate scale at the current binning: arcsec per (binned) pixel, from the
+        /// telescope's bare focal length and the sensor's real pixel pitch. This is the WIDE END of the zoom
+        /// range and nothing else. It is what MaxFovDeg is defined from, and what the catalogue's own plate
+        /// scale comments quote.
+        ///
+        /// Every per-frame consumer wants EffectivePlateScaleArcsecPerPixel below instead. This one cannot be
+        /// made zoom aware in place: MaxFovDeg is built from it and MinFovDeg from MaxFovDeg, so the clamps in
+        /// RenderScene and BuildProjection would become a self-referential fixed point.
         /// </summary>
-        public static float PlateScaleArcsecPerPixel
+        public static float NativePlateScaleArcsecPerPixel
         {
             get
             {
@@ -410,7 +422,7 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>Native (no-accessory) field of view across the sensor's long axis, the "wide" end of the zoom range.</summary>
-        public static float MaxFovDeg => (TextureWidth * PlateScaleArcsecPerPixel) / 3600f;
+        public static float MaxFovDeg => (TextureWidth * NativePlateScaleArcsecPerPixel) / 3600f;
 
         /// <summary>Field of view with a real Barlow, the "high power" end of the zoom range.</summary>
         public static float MinFovDeg => MaxFovDeg / BarlowFactor;
@@ -424,6 +436,50 @@ namespace ExoInstruments.Visualization
         /// tested is a property of the optics, not a float coincidence.
         /// </summary>
         public static bool HasZoomRange => BarlowFactor > 1f;
+
+        /// <summary>
+        /// How much longer the imaging train's focal length is at THIS FRAME's zoom than at the wide end:
+        /// 1.0 with the accessory out, BarlowFactor with it fully in.
+        ///
+        /// The ratio is exact rather than fitted. MaxFovDeg is TextureWidth * pitch / f expressed in degrees,
+        /// so MaxFovDeg / FovDeg has the pixel pitch and the pixel count cancel straight out of it and leaves
+        /// f_effective / f_bare, which is the definition of the magnification. It is identically 1.0 at the
+        /// wide end, where FovDeg is initialised (ConformSettingsToSpec), so nothing an unzoomed frame
+        /// computes can move.
+        /// </summary>
+        public float ZoomMagnification
+        {
+            get
+            {
+                float maxFov = MaxFovDeg;
+                float fov = Mathf.Clamp(FovDeg, MinFovDeg, maxFov);
+                // A spec with BarlowFactor left at zero makes MinFovDeg infinite. Refuse to carry that into
+                // the optics rather than dividing by it and putting an infinity into the flat field.
+                if (!(fov > 0f) || !(maxFov > 0f) || float.IsInfinity(fov)) return 1f;
+                return maxFov / fov;
+            }
+        }
+
+        /// <summary>
+        /// The focal length this frame is actually being taken at, in metres.
+        ///
+        /// FORS2's zoom range is its two REAL collimators (1233mm standard resolution against 616mm high
+        /// resolution, ratio 2.001; see the catalogue entry), and the RC20's and CDK1000's is a real Barlow.
+        /// In every case the accessory lengthens the focal length and leaves the pixel pitch alone, which is
+        /// why nothing here scales the detector.
+        /// </summary>
+        public double EffectiveFocalLengthMeters => Spec.FocalLengthMeters * ZoomMagnification;
+
+        /// <summary>
+        /// Arcsec per binned pixel AT THIS FRAME'S ZOOM: the sampling the pixels of this exposure were
+        /// actually taken at, and the number every photometric, PSF and geometric term wants.
+        ///
+        /// Equal to FovDeg * 3600 / TextureWidth, i.e. to the GnomonicProjection's own central scale to within
+        /// the tangent term (5e-7 relative at FORS2's widest field, 2.6e-6 at the RC20's), which is why a
+        /// header written from this and a SECPIX measured off the projection agree to well inside the card's
+        /// own formatting.
+        /// </summary>
+        public float EffectivePlateScaleArcsecPerPixel => NativePlateScaleArcsecPerPixel / ZoomMagnification;
 
         private const string ScaledSpaceCameraName = "Camera ScaledSpace";
 
@@ -843,6 +899,9 @@ namespace ExoInstruments.Visualization
         // instrument at this binning rather than of any exposure, so both are built once and discarded with the
         // resolution-sized buffers.
         private ushort[] flatFieldMap;
+        // NaN so the first build always happens, and an exact comparison thereafter because this is a cache
+        // key rather than a measurement: it is the same expression that built the map.
+        private float flatFieldMapMagnification = float.NaN;
         private ushort[] offsetFpnMap;
         private int[] deadPixelIndices;
 
@@ -2111,7 +2170,7 @@ namespace ExoInstruments.Visualization
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
                 Response = response,
-                PlateScaleArcsec = PlateScaleArcsecPerPixel,
+                PlateScaleArcsec = EffectivePlateScaleArcsecPerPixel,
                 SeeingFwhmArcsec = seeingFwhmArcsec,
                 DefocusDiscRadiusPx = defocusDiscRadiusPx,
                 IsSpaceBased = spaceBased,
@@ -2483,7 +2542,10 @@ namespace ExoInstruments.Visualization
             // leaving a stale number here would register the stack on a position never measured.
             LastTargetPixelX = double.NaN;
             LastTargetPixelY = double.NaN;
-            LastFieldWidthArcsec = projection.WidthPx * PlateScaleArcsecPerPixel;
+            // This frame's scale, not the instrument's native one: the projection whose pixels are being
+            // converted was itself built from the clamped FovDeg a few lines above, so the native scale
+            // asserted two different angles for the same frame width inside one method.
+            LastFieldWidthArcsec = projection.WidthPx * EffectivePlateScaleArcsecPerPixel;
 
             bool projected = false;
             double px = 0.0, py = 0.0;
@@ -2506,7 +2568,7 @@ namespace ExoInstruments.Visualization
 
             LastTargetPixelX = px;
             LastTargetPixelY = py;
-            LastTargetOffsetArcsec = Math.Sqrt(dx * dx + dy * dy) * PlateScaleArcsecPerPixel;
+            LastTargetOffsetArcsec = Math.Sqrt(dx * dx + dy * dy) * EffectivePlateScaleArcsecPerPixel;
             LastTargetInFrame = px >= 0.0 && px <= projection.WidthPx
                              && py >= 0.0 && py <= projection.HeightPx;
         }
@@ -5025,12 +5087,17 @@ namespace ExoInstruments.Visualization
 
         // Pixels the detection aperture covers, from the frame's own delivered PSF width and plate scale
         // through the same CcdEquation helper the photometry uses.
+        //
+        // The scale is read off the FRAME rather than off the instrument because a zoomed frame is sampled
+        // finer than the instrument's native figure, and this method is static so it cannot see the zoom any
+        // other way. On a ground frame, where no pointing budget supplies a delivered FWHM, the scale appears
+        // in both the radius and the divide and cancels, so this is the same number it was.
         private static double SupernovaAperturePixels(FrameComputeInputs inputs)
         {
             double fwhmArcsec = Math.Max(1e-6, inputs.Pointing.EquivalentFwhmArcsec > 0.0
-                ? inputs.Pointing.EquivalentFwhmArcsec : PlateScaleArcsecPerPixel);
+                ? inputs.Pointing.EquivalentFwhmArcsec : inputs.PlateScaleArcsec);
             double radiusArcsec = CcdEquation.OptimalApertureRadiusInFwhm * fwhmArcsec;
-            return Math.Max(1.0, CcdEquation.AperturePixels(radiusArcsec, PlateScaleArcsecPerPixel));
+            return Math.Max(1.0, CcdEquation.AperturePixels(radiusArcsec, inputs.PlateScaleArcsec));
         }
 
         // Sky annulus area, from the equation's own published aperture-to-annulus ratio.
@@ -5872,9 +5939,19 @@ namespace ExoInstruments.Visualization
         // reconstruct a quantity that is never used except as one. Both components are properties of this
         // instrument at this binning rather than of the exposure, which is why the map outlives the frame and
         // is discarded with the buffers when the telescope or the binning changes.
+        // KEYED ON THE ZOOM, because the map is what the light path does and the accessory is part of that
+        // path. The field stop is fixed in angle on the sky, so its image at the detector scales with the
+        // effective focal length; keyed on the array alone, a frame taken through the high-resolution
+        // collimator was divided by the standard-resolution collimator's field stop and lost 38 per cent of a
+        // frame the real instrument fills. The zoom slider invalidates nothing on its own, so without this
+        // key the geometry fix above would never be rebuilt through.
         private void EnsureFlatFieldMap()
         {
-            if (flatFieldMap != null) return;
+            float magnification = ZoomMagnification;
+            if (flatFieldMap != null && flatFieldMapMagnification == magnification) return;
+
+            flatFieldMap = null;
+            flatFieldMapMagnification = magnification;
 
             int width = TextureWidth, height = TextureHeight;
             int n = width * height;
@@ -5907,7 +5984,27 @@ namespace ExoInstruments.Visualization
             // metres from the optical axis, which is what the cosine-fourth law and any field stop
             // are both expressed in.
             double pixelPitchMetres = Spec.NativePixelSizeMeters * Math.Max(1, BinningFactor);
-            double focalLengthMetres = Spec.FocalLengthMeters;
+
+            // THE ILLUMINATION IS EVALUATED AT THIS FRAME'S FOCAL LENGTH, NOT THE CATALOGUE'S.
+            //
+            // FORS2's stop is the MOS unit, which ESO places "in the focal plane of the unit telescope",
+            // i.e. at UT1's Cassegrain focus, ahead of the collimator. Its aperture is therefore fixed at
+            // 6.8 arcmin ON SKY, while the size of its image at the detector is whatever the collimator and
+            // camera currently make of it: half a side is 0.5 * f_effective * tan(6.8'), which is 24.29 mm in
+            // the standard-resolution collimator against a 30.72 mm half-detector, and 48.57 mm in the
+            // high-resolution one, which is off the chip on all four sides. That is exactly why ESO publishes
+            // the SR field as the stop's own 6.8 x 6.8 arcmin and the HR field as 4.25 x 4.25 arcmin, which is
+            // the DETECTOR: in HR the whole chip sits inside the stop and the frame is fully illuminated.
+            //
+            // Evaluated at the bare focal length the SR stop was being painted onto an HR frame, and the
+            // border did not move when the field halved, which no physical stop can do. The cosine-fourth
+            // term below takes the same focal length and must: a longer effective focal length really does
+            // put the corner at a smaller field angle.
+            //
+            // ImageCircleMillimetres is deliberately NOT scaled. InsideImageCircle takes no focal length, so
+            // there is nothing for the magnification to reach, and the only spec carrying both a circle and
+            // an accessory is the CDK1000, whose ASI294 diagonal never comes near its 100 mm circle.
+            double focalLengthMetres = EffectiveFocalLengthMeters;
             double centreX = 0.5 * (width - 1);
             double centreY = 0.5 * (height - 1);
 
@@ -6214,6 +6311,7 @@ namespace ExoInstruments.Visualization
             hotPixelIndices = null;
             deadPixelIndices = null;
             flatFieldMap = null;
+            flatFieldMapMagnification = float.NaN;
             offsetFpnMap = null;
             fringeMap = null;
             // Trapped charge belongs to one piece of silicon at one binning. Changing either means
