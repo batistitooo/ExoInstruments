@@ -5988,21 +5988,19 @@ namespace ExoInstruments.Visualization
                 staticVarianceFraction: 1.0 - 1e-9, realisations: 1.0,
                 staticSeed: Pcg32.MixSeed(SensorSerialSeed, 0x46524E47L), temporalSeed: 1UL);
 
-            var map = new ushort[n];
             // The map's own values have unit mean and unit variance, so scaling their deviation to
             // the published peak-to-peak fraction (four sigma of a unit-variance field spans it)
             // gives a thickness field of the measured amplitude.
             double thicknessSigma = thickness * variation / 4.0;
 
-            for (int i = 0; i < n; i++)
-            {
-                double localThickness = thickness + (thicknessMap[i] - 1.0) * thicknessSigma;
-                double path = Fringing.OpticalPathNm(localThickness, centreNm);
-                double m = Fringing.Modulation(path, sky, response, lo, hi, AirglowTable.StepNm);
-                map[i] = Float16.FromDouble(m - 1.0);
-            }
-
-            fringeMap = map;
+            // The passband is walked ONCE, here, and not once per pixel. It used to be the latter,
+            // which cost ninety seconds of a 4x4 FORS2 capture and twenty-four minutes of a 1x1 one,
+            // inside a stage that emits no timing of its own and so reported nothing at all. See
+            // Fringing.Passband for why the sky spectrum, the response and Walsh's amplitude curve
+            // were never functions of the pixel, and Core.FringeMap for why the loop over them now
+            // lives in Core where a harness compiles the shipped code rather than a copy of it.
+            Fringing.Passband passband = Fringing.Passband.Sample(sky, response, lo, hi, AirglowTable.StepNm);
+            fringeMap = FringeMap.Build(passband, thicknessMap, thickness, thicknessSigma, centreNm);
         }
 
         // Below this the absorption length in silicon is far shorter than any thinned layer and there is no
