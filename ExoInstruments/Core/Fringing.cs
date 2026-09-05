@@ -130,7 +130,7 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// The detector's fringe modulation at one pixel, for a given passband and sky spectrum.
+        /// The passband side of the fringe integral, walked once.
         ///
         /// THE INTEGRAL THAT DECIDES EVERYTHING:
         ///
@@ -146,32 +146,127 @@ namespace ExoInstruments.Core
         /// percent, and that variation is what draws the pattern. It is passed in rather than
         /// modelled here: its map is a property of one piece of silicon and nobody publishes one.
         ///
-        /// skyRadiance and response are sampled on AirglowTable's own 0.1 nm grid, which is fine
-        /// enough to resolve both a 2.9 nm fringe period and the OH lines that drive it. Coarser
-        /// sampling would alias the cosine against the line spectrum and produce a number with the
-        /// right units and no meaning.
+        /// WHY A TYPE AND NOT AN ARGUMENT LIST. S, R and A are not functions of the pixel; only the
+        /// cosine is. Written as one scalar function of six arguments, the whole spectral walk had
+        /// to be repeated for every pixel of the detector -- 1,056,768 times for a 4x4-binned FORS2
+        /// frame and 16,908,288 at 1x1 -- and building one fringe map stopped the capture for
+        /// minutes with no stage timing to say why. Sampling the band once and then asking it for a
+        /// modulation is not an optimisation of a correct thing into a faster thing: it is the
+        /// shape this integral already has. The six-argument scalar entry point is GONE rather than
+        /// deprecated, because a scalar signature over a 6500-point body is precisely the affordance
+        /// that put the walk inside a per-pixel loop, and leaving it would leave the next caller the
+        /// same trap.
+        ///
+        /// WHAT IS STORED. One entry per grid point that can fringe at all: everything above Walsh
+        /// et al.'s 774 nm onset and nothing below it, which for an unfiltered 350-1000 nm band at
+        /// AirglowTable's 0.1 nm sampling is 2260 points of 6500. The denominator carries the weight
+        /// sum over ALL of them, fringing or not, because the normalisation is the whole passband's
+        /// flux and not only the part of it that interferes.
         /// </summary>
-        public static double Modulation(
-            double opticalPathNm, Func<double, double> skyRadiance, Func<double, double> response,
-            double minWavelengthNm, double maxWavelengthNm, double stepNm)
+        public sealed class Passband
         {
-            if (skyRadiance == null || response == null) return 1.0;
-            if (!(opticalPathNm > 0.0) || !(stepNm > 0.0)) return 1.0;
-            if (!(maxWavelengthNm > minWavelengthNm)) return 1.0;
+            private readonly double[] wavelengthNm;   // l_k, exactly as the walk below produced them
+            private readonly double[] coefficient;    // (w_k * 0.5) * A_k, in that association
+            private readonly double weightTotal;      // sum of w_k across the whole band
 
-            double weighted = 0.0, total = 0.0;
-            for (double l = minWavelengthNm; l <= maxWavelengthNm; l += stepNm)
+            private static readonly Passband EmptyBand = new Passband(new double[0], new double[0], 0.0);
+
+            private Passband(double[] wavelengths, double[] coefficients, double total)
             {
-                double w = skyRadiance(l) * response(l);
-                if (!(w > 0.0)) continue;
-                total += w;
-                double amplitude = MonochromaticPeakToPeak(l);
-                if (amplitude > 0.0)
-                    weighted += w * 0.5 * amplitude * Math.Cos(2.0 * Math.PI * opticalPathNm / l);
+                wavelengthNm = wavelengths;
+                coefficient = coefficients;
+                weightTotal = total;
             }
 
-            if (!(total > 0.0)) return 1.0;
-            return 1.0 + weighted / total;
+            /// <summary>A band that fringes nowhere, which is what every guard failure returns.</summary>
+            public static Passband Empty { get { return EmptyBand; } }
+
+            /// <summary>Grid points carrying a fringe amplitude: the length of the per-pixel sum.</summary>
+            public int FringingSampleCount { get { return wavelengthNm.Length; } }
+
+            /// <summary>False for every filter that stops short of 774 nm, which is most of this roster.</summary>
+            public bool CanFringe { get { return wavelengthNm.Length > 0 && weightTotal > 0.0; } }
+
+            /// <summary>
+            /// Samples a passband on AirglowTable's own 0.1 nm grid, which is fine enough to resolve
+            /// both a 2.9 nm fringe period and the OH lines that drive it. Coarser sampling would
+            /// alias the cosine against the line spectrum and produce a number with the right units
+            /// and no meaning. Call this ONCE per capture.
+            ///
+            /// THE INDUCTION VARIABLE IS ACCUMULATED RATHER THAN RECONSTRUCTED, and that is
+            /// load-bearing rather than careless. Rewriting the walk as min + k*step is the obvious
+            /// tidy-up and it moves the physics: the drifting sum reaches Walsh et al.'s onset at
+            /// 774.0000000000964, on the fringing side of it where the exact grid point is not, and
+            /// Airglow's tables are BIN INTEGRALS addressed by a floor over 0.1 nm cells, so a
+            /// sub-nanometre drift of either sign moves a sample into a different OH bin. This is
+            /// the same walk, in the same order, on the same accumulator as the per-pixel form it
+            /// replaces, deliberately, so that the two agree to the bit.
+            /// </summary>
+            public static Passband Sample(
+                Func<double, double> skyRadiance, Func<double, double> response,
+                double minWavelengthNm, double maxWavelengthNm, double stepNm)
+            {
+                if (skyRadiance == null || response == null) return EmptyBand;
+                if (!(stepNm > 0.0)) return EmptyBand;
+                if (!(maxWavelengthNm > minWavelengthNm)) return EmptyBand;
+
+                int capacity = (int)((maxWavelengthNm - minWavelengthNm) / stepNm) + 2;
+                if (capacity < 1) capacity = 1;
+                var lambda = new double[capacity];
+                var coef = new double[capacity];
+                int count = 0;
+                double total = 0.0;
+
+                for (double l = minWavelengthNm; l <= maxWavelengthNm; l += stepNm)
+                {
+                    double w = skyRadiance(l) * response(l);
+                    if (!(w > 0.0)) continue;
+                    total += w;
+                    double amplitude = MonochromaticPeakToPeak(l);
+                    if (amplitude > 0.0)
+                    {
+                        if (count == lambda.Length)
+                        {
+                            Array.Resize(ref lambda, count * 2);
+                            Array.Resize(ref coef, count * 2);
+                        }
+                        lambda[count] = l;
+                        // (w * 0.5) * A, left to right, which is the association the per-pixel form
+                        // evaluated before multiplying by the cosine. Reassociating it would be a
+                        // different double and the equivalence test would stop being an equality.
+                        coef[count] = w * 0.5 * amplitude;
+                        count++;
+                    }
+                }
+
+                if (!(total > 0.0)) return EmptyBand;
+                Array.Resize(ref lambda, count);
+                Array.Resize(ref coef, count);
+                return new Passband(lambda, coef, total);
+            }
+
+            /// <summary>
+            /// F(P) at one pixel's optical path: the sum above, with everything that does not depend
+            /// on the pixel already done.
+            ///
+            /// THE PER-TERM DIVIDE STAYS A DIVIDE. Precomputing 2*pi/l per sample and multiplying is
+            /// the obvious next hoist and it is about 15 per cent faster; it is also not the same
+            /// double, differing on roughly two thirds of the realised paths at the 1e-16 level.
+            /// That is far below anything physical, but it would turn a refactor whose output is
+            /// provably identical into one that merely agrees closely, and the whole point of this
+            /// change is that the frame a recorded seed reproduces did not move.
+            /// </summary>
+            public double ModulationAt(double opticalPathNm)
+            {
+                if (!(opticalPathNm > 0.0)) return 1.0;
+                if (!(weightTotal > 0.0)) return 1.0;
+
+                double weighted = 0.0;
+                for (int k = 0; k < coefficient.Length; k++)
+                    weighted += coefficient[k] * Math.Cos(2.0 * Math.PI * opticalPathNm / wavelengthNm[k]);
+
+                return 1.0 + weighted / weightTotal;
+            }
         }
 
         /// <summary>
@@ -196,12 +291,17 @@ namespace ExoInstruments.Core
             // of lambda / (2n) produces and what the fringe pattern repeats over.
             double pathPeriod = referenceWavelengthNm;
 
+            // Sampled once for all sixty-four phases rather than once per phase. It is the same
+            // band each time round, so this is the reassociation Passband exists for, applied to
+            // the caller that reaches this integral most often after the map builder.
+            Passband band = Passband.Sample(skyRadiance, response, minWavelengthNm, maxWavelengthNm, stepNm);
+
             const int Phases = 64;
             double lo = double.MaxValue, hi = double.MinValue;
             for (int i = 0; i < Phases; i++)
             {
                 double path = basePath + pathPeriod * i / Phases;
-                double m = Modulation(path, skyRadiance, response, minWavelengthNm, maxWavelengthNm, stepNm);
+                double m = band.ModulationAt(path);
                 if (m < lo) lo = m;
                 if (m > hi) hi = m;
             }

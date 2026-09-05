@@ -57,10 +57,24 @@ namespace ExoInstruments.Core
                 return (ushort)(sign | (ushort)m);
             }
 
-            int exponent = (int)Math.Floor(Math.Log(a, 2.0));
+            // THE EXPONENT IS READ OFF THE NUMBER, NOT COMPUTED FROM IT. For a normal double in
+            // [2^e, 2^(e+1)) the IEEE 754 biased exponent field IS e + 1023 by definition, so this
+            // is floor(log2(a)) exactly, with nothing rounded. It is also better conditioned than
+            // what it replaced: Math.Log(a, 2.0) is Log(a)/Log(2), which at an exact power of two
+            // can land a hair under the integer and then needs the frac > 0x3FF carry below to
+            // repair it. Reading the field removes the failure the repair exists for.
+            //
+            // The scale that follows is the same table the Math.Pow in ToDouble was replaced with,
+            // for the same reason and with the same guarantee: every entry is a power of two, which
+            // a double holds exactly, so the multiplication only shifts and nothing is rounded here
+            // that was not rounded before. This decoder's twin runs 187 million times per emission
+            // fill; this direction runs once per pixel of every sensor map, which is five
+            // frame-sized call sites, and it was the last transcendental left on either path.
+            long bits = BitConverter.DoubleToInt64Bits(a);
+            int exponent = (int)((bits >> 52) & 0x7FF) - 1023;
             if (exponent < -14) exponent = -14;
             if (exponent > 15) exponent = 15;
-            double mantissa = a / Math.Pow(2.0, exponent) - 1.0;
+            double mantissa = a * ExponentScale[15 - exponent] - 1.0;
             int frac = (int)Math.Round(mantissa * 1024.0, MidpointRounding.ToEven);
             if (frac > 0x3FF) { frac = 0; exponent++; }
             if (frac < 0) { frac = 0; }

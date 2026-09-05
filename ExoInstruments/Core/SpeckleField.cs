@@ -431,7 +431,20 @@ namespace ExoInstruments.Core
             // preserves its statistics exactly: every pixel sees a full kernel of independent
             // samples. It buys that with a periodicity across the frame, which for a noise field
             // costs nothing anyone can measure and is the standard treatment.
-            for (int y = 0; y < height; y++)
+            // BOTH PASSES ARE SPLIT ACROSS CORES, and both are exact under ParallelWork's rule
+            // rather than close enough: each output element is written by exactly one worker, the
+            // taps inside a pixel are summed in a fixed order that does not depend on the division,
+            // the two passes read and write different arrays, and the white noise above was already
+            // drawn serially from its own Pcg32 stream. Nothing here accumulates across pixels, so
+            // there is no order for the thread count to change. tools/fringe-tests checks that at
+            // one worker and at many, element for element.
+            //
+            // It is worth doing because this smoothing is not a minor term: at the largest sensor
+            // in the roster the four fields it builds are the second-largest cost in the whole
+            // detector stage, behind only the fringe integral it sits next to.
+            double scale = targetSigma / sumSquares;
+
+            Action<int> horizontal = delegate(int y)
             {
                 int row = y * width;
                 for (int x = 0; x < width; x++)
@@ -445,9 +458,9 @@ namespace ExoInstruments.Core
                     }
                     scratch[row + x] = (float)acc;
                 }
-            }
-            double scale = targetSigma / sumSquares;
-            for (int x = 0; x < width; x++)
+            };
+
+            Action<int> vertical = delegate(int x)
             {
                 for (int y = 0; y < height; y++)
                 {
@@ -460,6 +473,17 @@ namespace ExoInstruments.Core
                     }
                     field[y * width + x] = (float)(acc * scale);
                 }
+            };
+
+            if (ParallelWork.Worthwhile((long)n * (2 * radius + 1)))
+            {
+                System.Threading.Tasks.Parallel.For(0, height, ParallelWork.Options, delegate(int y) { horizontal(y); });
+                System.Threading.Tasks.Parallel.For(0, width, ParallelWork.Options, delegate(int x) { vertical(x); });
+            }
+            else
+            {
+                for (int y = 0; y < height; y++) horizontal(y);
+                for (int x = 0; x < width; x++) vertical(x);
             }
         }
 

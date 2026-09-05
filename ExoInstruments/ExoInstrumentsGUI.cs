@@ -2426,7 +2426,7 @@ namespace ExoInstruments
         {
             if (!selectedPhotographyTarget.HasTarget) return;
 
-            float plateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+            float plateScale = solarSystemCamera.EffectivePlateScaleArcsecPerPixel;
             if (plateScale <= 0f) return;
 
             // A star or a nebula has no resolvable disk, so the disk terms below drop out, but
@@ -2605,7 +2605,7 @@ namespace ExoInstruments
                     int fromImages = solarSystemCamera.LastGalaxiesFromImages;
                     int fromProfile = solarSystemCamera.LastGalaxiesDrawn - fromImages;
                     double sampling = solarSystemCamera.LastGalaxyMapSamplingArcsec;
-                    double framePlateScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+                    double framePlateScale = solarSystemCamera.EffectivePlateScaleArcsecPerPixel;
                     string detail = fromImages > 0
                         ? $"   {fromImages} from measured survey imagery"
                           + (double.IsNaN(sampling) ? ""
@@ -2936,7 +2936,7 @@ namespace ExoInstruments
                 ElectronsPerAdu = solarSystemCamera.LastCalibrationElectronsPerAdu,
                 SaturationAdu = solarSystemCamera.LastCalibrationSaturationElectrons
                                 / Math.Max(1e-9, solarSystemCamera.LastCalibrationElectronsPerAdu),
-                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                FocalLengthMm = solarSystemCamera.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = true,   // genuinely raw converter counts, which is the whole point
                 FilterName = FilterLabel(solarSystemCamera.Filter),
@@ -3285,7 +3285,7 @@ namespace ExoInstruments
                 AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
                 ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
                 SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
-                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                FocalLengthMm = solarSystemCamera.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = false, // stacked composite, see FitsHeaderInfo.IsCalibratedAdu
                 FilterName = "LRGB",
@@ -3374,7 +3374,7 @@ namespace ExoInstruments
                 AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
                 ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
                 SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
-                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                FocalLengthMm = solarSystemCamera.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = calibrated,
                 FilterName = FilterLabel(filter),
@@ -3627,7 +3627,7 @@ namespace ExoInstruments
                 AdcBits = SolarSystemCameraTexture.ActiveTelescope.AdcBits,
                 ElectronsPerAdu = solarSystemCamera.LastElectronsPerAdu,
                 SaturationAdu = solarSystemCamera.LastSaturationElectrons / System.Math.Max(1e-9, solarSystemCamera.LastElectronsPerAdu),
-                FocalLengthMm = SolarSystemCameraTexture.FocalLengthMm,
+                FocalLengthMm = solarSystemCamera.FocalLengthMm,
                 Gain = solarSystemCamera.Gain,
                 IsCalibratedAdu = true, // single raw frame straight off the converter
                 FilterName = FilterLabel(solarSystemCamera.Filter),
@@ -6210,7 +6210,10 @@ namespace ExoInstruments
         }
 
         /// <summary>What the object is and how much sky it covers, the two things that decide which instrument can frame it.</summary>
-        static string DescribeDeepSky(DeepSkyObject obj)
+        // Not static: the sampling this compares survey imagery against is the CURRENT frame's, which depends
+        // on where the zoom sits, and a target description that quoted the wide end regardless would tell the
+        // player an image is too coarse for an instrument they have already zoomed past it with.
+        string DescribeDeepSky(DeepSkyObject obj)
         {
             string kind;
             switch (obj.Kind)
@@ -6238,7 +6241,7 @@ namespace ExoInstruments
                 GalaxyImage image = images != null ? images.Describe(obj.Id) : null;
                 if (image != null)
                 {
-                    double frameScale = SolarSystemCameraTexture.PlateScaleArcsecPerPixel;
+                    double frameScale = solarSystemCamera.EffectivePlateScaleArcsecPerPixel;
                     note = $", real {image.SurveyId} imagery at {image.SamplingArcsec:F1}\"/px"
                          // F2, not F1, and for a reason: the space instruments are the ones this
                          // branch fires on, and F1 renders WFC3/UVIS's 0.0396"/px as 0.0"/px. A
