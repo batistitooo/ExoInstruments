@@ -10,7 +10,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="FlatTests.cs" />
+    <Compile Include="Stub.cs" />
     <Compile Include="$(Core)/FitsImageReader.cs" />
     <Compile Include="$(Core)/MeasuredFlatField.cs" />
+    <!-- Section F builds EnsureFlatFieldMap's modelled branch from the same Core it uses. -->
+    <Compile Include="$(Core)/SensorNonUniformity.cs" />
+    <Compile Include="$(Core)/FocalPlaneIllumination.cs" />
+    <Compile Include="$(Core)/Pcg32.cs" />
+    <Compile Include="$(Core)/NoiseSampler.cs" />
+    <Compile Include="$(Core)/Float16.cs" />
   </ItemGroup>
 </Project>

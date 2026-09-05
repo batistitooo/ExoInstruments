@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using ExoInstruments.Core;
+using ExoInstruments.Visualization;   // CameraFilter, from Stub.cs
 
 // Headless checks on Core/FitsImageReader.cs and Core/MeasuredFlatField.cs.
 //
@@ -52,6 +53,10 @@ internal static class FlatTests
         Console.WriteLine();
         Console.WriteLine("E. The flat itself");
         FlatBuilding();
+
+        Console.WriteLine();
+        Console.WriteLine("F. One instrument, one binning, two filters");
+        FilterFlats();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : failures + " FAILURE(S)");
@@ -360,6 +365,317 @@ internal static class FlatTests
 
     private static FitsImageReader.Image MakeImage(double[] values, int w, int h)
         => new FitsImageReader.Image { Values = values, Width = w, Height = h, BitPix = -64, BZero = 0, BScale = 1 };
+
+    // ------------------------------------------------------------------ F
+
+    // One instrument, one binning, two filters.
+    //
+    // What this section pins is a CACHE KEY rather than a number. SolarSystemCameraTexture's
+    // EnsureFlatFieldMap held the flat field map keyed on the array being non-null and on nothing
+    // else, while the field it loads is chosen per filter: MeasuredFlatPath puts the filter IN THE
+    // FILE NAME, because the dust motes and accessory vignetting that make a real flat worth having
+    // sit on the filter and move when it is swapped. Changing filter on one instrument at one
+    // binning therefore went on serving the PREVIOUS passband's measured flat, and every frame after
+    // it was divided by a flat belonging to a different light path. Nothing announced it, and nothing
+    // could: a frame divided by the wrong flat looks exactly like a frame divided by the right one.
+    // EnsureFringeMap, a few lines below in the same file, has carried the filter in its key from the
+    // start, and the fix is to give this one the same key in the same shape.
+    //
+    // TWO HALVES, for the reason the rest of this file has two halves. The MAPS are the real shipped
+    // Core - FitsImageReader and MeasuredFlatField for the measured branch, FocalPlaneIllumination
+    // and SensorNonUniformity for the modelled one - so "the two maps differ" is a measurement of the
+    // code that ships rather than of a copy. The four lines of the CACHE are restated in FlatCache
+    // below, because they live in a file that needs Unity and cannot be compiled headlessly; the
+    // README quotes both forms verbatim beside the original so the copy can be checked by eye.
+
+    // The one instrument, held fixed across both filters. The name is the roster's amateur camera,
+    // which carries Luminance and H-alpha in the same wheel and so is a device the fault is actually
+    // reachable on. Its numbers are NOT read from Core.VisualTelescopeCatalog: that file names
+    // SpectralCurve, FilterCurves, SystemBandpass, OpticalPsf and five more, and pulling fifty files
+    // into a FITS-and-flat harness to borrow a pixel pitch would couple this test to most of the mod
+    // for no gain. Nothing below is a claim about the real ASI294MM Pro. What the test needs is only
+    // that the camera, the binning and the array are THE SAME for both filters, so that every
+    // difference between the two maps is the filter's.
+    private const string FCamera = "ZWO ASI294MM Pro";
+    private const int FBinning = 2;
+    private const int FW = 96, FH = 96;
+    private const double FPedestal = 3000.0;
+    private const double FLevel = 25000.0;
+    private const double FAdcMax = 65535.0;
+    private const double FGain = 1.0;              // e-/ADU
+    private const double FPixelPitchMetres = 4.63e-6;
+    private const double FFocalLengthMetres = 0.80;
+    private const double FPrnuFraction = 0.003;    // 0.3 %, an ordinary published figure
+    private const long FSerialSeed = 0x5A17C0DEL;  // one piece of silicon, the same under both filters
+
+    private static void FilterFlats()
+    {
+        // The naming rule is the mechanism, so it is stated rather than assumed: one instrument at
+        // one binning still has one file per filter, and two filters name two different files.
+        string lumPath = Path.Combine(outDir, FlatFileName(FCamera, CameraFilter.Luminance, FBinning));
+        string haPath  = Path.Combine(outDir, FlatFileName(FCamera, CameraFilter.HAlpha,    FBinning));
+        Check("one instrument at one binning still has one flat per filter",
+              lumPath != haPath, Path.GetFileName(lumPath) + "  vs  " + Path.GetFileName(haPath));
+
+        // Two master flats through the same telescope on the same night, differing only in which
+        // filter was in the way: same silicon, same tube, different mote and different filter cell.
+        double sigma = SensorNonUniformity.BinnedPhotoResponseSigma(FPrnuFraction, FBinning);
+        ushort[] prnu = SensorNonUniformity.BuildPhotoResponseMap(Pcg32.MixSeed(FSerialSeed), FW * FH, sigma);
+
+        var lumFrame = SyntheticFlatFrame(prnu, moteXPx: 30.0, moteYPx: 34.0,
+                                          moteRadiusPx: 9.0, moteDepth: 0.12, vignetteScalePx: 90.0);
+        var haFrame  = SyntheticFlatFrame(prnu, moteXPx: 66.0, moteYPx: 58.0,
+                                          moteRadiusPx: 7.0, moteDepth: 0.15, vignetteScalePx: 72.0);
+
+        // BITPIX 16 with BZERO=32768, which is what a real camera writes, so the maps under test come
+        // through the same unsigned path section B exists to defend.
+        WriteFits(lumPath, lumFrame, FW, FH, 16, 32768.0, 1.0, null);
+        WriteFits(haPath,  haFrame,  FW, FH, 16, 32768.0, 1.0, null);
+
+        double[] lumMap = MeasuredResponse(lumPath);
+        double[] haMap  = MeasuredResponse(haPath);
+
+        // THE ASSERTION THE KEY EXISTS FOR. If these two were the same map the cache key would not
+        // matter, so the premise is measured rather than asserted in prose.
+        double rms = 0.0, worst = 0.0;
+        int worstIndex = 0;
+        for (int i = 0; i < lumMap.Length; i++)
+        {
+            double d = haMap[i] - lumMap[i];
+            rms += d * d;
+            if (Math.Abs(d) > Math.Abs(worst)) { worst = d; worstIndex = i; }
+        }
+        rms = Math.Sqrt(rms / lumMap.Length);
+        Check("the two filters' measured flats are different maps", rms > 0.01,
+              "RMS difference " + F(100.0 * rms) + " %, worst pixel " + F(100.0 * worst)
+              + " % at (" + (worstIndex % FW) + "," + (worstIndex / FW) + ")");
+
+        // What it costs to divide by the wrong one, in the unit the observer reads. A frame's counts
+        // carry the response of the path they were taken through, so dividing by a different path's
+        // flat leaves the ratio of the two behind as a photometric error.
+        int lumMote = 34 * FW + 30, haMote = 58 * FW + 66;
+        double errAtHaMote  = -2.5 * Math.Log10(haMap[haMote]  / lumMap[haMote]);
+        double errAtLumMote = -2.5 * Math.Log10(haMap[lumMote] / lumMap[lumMote]);
+        Check("an H-alpha frame divided by the Luminance flat is wrong by a measurable magnitude",
+              Math.Abs(errAtHaMote) > 0.05 && Math.Abs(errAtLumMote) > 0.05,
+              "a star under H-alpha's own mote reads " + F(errAtHaMote) + " mag too faint; one under"
+              + " Luminance's mote reads " + F(-errAtLumMote) + " mag too bright");
+
+        // ---- the cache, in both forms, driven by those maps -------------------------------------
+
+        Func<CameraFilter, double[]> build = f => BuildAsTheFrameBuilderWould(f);
+
+        // A. The filter change itself. One instrument, one binning, Luminance and then H-alpha.
+        var shipped = new FlatCache(keyOnFilter: true);
+        var previous = new FlatCache(keyOnFilter: false);
+
+        shipped.Ensure(CameraFilter.Luminance, build);
+        previous.Ensure(CameraFilter.Luminance, build);
+        double[] shippedAfter = shipped.Ensure(CameraFilter.HAlpha, build);
+        double[] previousAfter = previous.Ensure(CameraFilter.HAlpha, build);
+
+        Check("keyed on the filter, a filter change rebuilds the flat",
+              Same(shippedAfter, haMap) && shipped.Builds == 2,
+              "H-alpha's own flat, after " + shipped.Builds + " builds");
+        Check("keyed on the array alone it did not, which is the regression",
+              Same(previousAfter, lumMap) && previous.Builds == 1,
+              "still Luminance's flat, after " + previous.Builds + " build");
+
+        // B. Measured to none. H-alpha has a flat on disk and OIII does not, so OIII has to fall back
+        // to the modelled map rather than go on dividing by H-alpha's measured one.
+        var toNone = new FlatCache(keyOnFilter: true);
+        var toNonePrev = new FlatCache(keyOnFilter: false);
+        toNone.Ensure(CameraFilter.HAlpha, build);
+        toNonePrev.Ensure(CameraFilter.HAlpha, build);
+        Check("a filter with no flat on disk falls back to the model",
+              Same(toNone.Ensure(CameraFilter.OIII, build), ModelledFlat()), "the modelled map");
+        Check("keyed on the array alone it kept the previous passband's measured flat",
+              Same(toNonePrev.Ensure(CameraFilter.OIII, build), haMap), "H-alpha's flat, under OIII");
+
+        // C. None to measured, the direction that is just as wrong and easier to miss. OIII has no
+        // flat, Luminance does, and changing to Luminance has to pick it up.
+        var toMeasured = new FlatCache(keyOnFilter: true);
+        var toMeasuredPrev = new FlatCache(keyOnFilter: false);
+        toMeasured.Ensure(CameraFilter.OIII, build);
+        toMeasuredPrev.Ensure(CameraFilter.OIII, build);
+        Check("a filter that does have a flat on disk picks it up",
+              Same(toMeasured.Ensure(CameraFilter.Luminance, build), lumMap), "Luminance's flat");
+        Check("keyed on the array alone the observer's own flat was never loaded",
+              Same(toMeasuredPrev.Ensure(CameraFilter.Luminance, build), ModelledFlat()),
+              "still the modelled map");
+
+        // D. The control, and the reason EnsureOffsetFpnMap is left keyed on the array alone. Offset
+        // fixed-pattern noise is the readout chain's per-pixel zero level, which is what a bias frame
+        // measures with the shutter shut: no light means no passband. The call graph says the same
+        // thing - BuildOffsetMap takes the serial seed, the pixel count and a sigma that comes from
+        // the spec and the binning, and the filter reaches none of the three - and this checks it
+        // rather than taking it on trust, because taking exactly this on trust is what produced the
+        // fault above.
+        double offsetSigma = SensorNonUniformity.BinnedOffsetSigmaElectrons(3.5, FBinning);
+        ushort[] offsetUnderLum = SensorNonUniformity.BuildOffsetMap(
+            Pcg32.MixSeed(FSerialSeed), FW * FH, offsetSigma);
+        ushort[] offsetUnderHa = SensorNonUniformity.BuildOffsetMap(
+            Pcg32.MixSeed(FSerialSeed), FW * FH, offsetSigma);
+        bool identical = offsetUnderLum.Length == offsetUnderHa.Length;
+        for (int i = 0; identical && i < offsetUnderLum.Length; i++)
+            identical = offsetUnderLum[i] == offsetUnderHa[i];
+        Check("the offset map is filter-independent, so keying it on the array alone is right",
+              identical, "bit-identical across " + offsetUnderLum.Length + " pixels");
+    }
+
+    // MeasuredFlatPath's rule, restated: the camera, the FILTER and the binning are all in the name,
+    // because a flat belongs to one optical train at one filter at one binning.
+    private static string FlatFileName(string camera, CameraFilter filter, int binning)
+        => "Flat_" + Sanitise(camera) + "_" + Sanitise(filter.ToString()) + "_bin" + binning + ".fits";
+
+    private static string Sanitise(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "unknown";
+        var sb = new StringBuilder(s.Length);
+        foreach (char c in s) sb.Append(char.IsLetterOrDigit(c) ? c : '-');
+        return sb.ToString();
+    }
+
+    // What a master flat through one filter looks like: the sensor's photo-response and the tube's
+    // cosine-fourth falloff, which are the SAME under both filters because one is the silicon and the
+    // other is the optics, and on top of them the two terms that are not - a dust mote and an
+    // undersized filter cell, both of which sit ON THE FILTER and move when it is swapped. Written
+    // clean rather than with shot noise, which is what stacking a master flat is for and which keeps
+    // the difference between the two maps attributable to the filter rather than to the draw.
+    private static double[] SyntheticFlatFrame(ushort[] prnu, double moteXPx, double moteYPx,
+                                               double moteRadiusPx, double moteDepth,
+                                               double vignetteScalePx)
+    {
+        double centreX = 0.5 * (FW - 1), centreY = 0.5 * (FH - 1);
+        double pitch = FPixelPitchMetres * FBinning;
+        var raw = new double[FW * FH];
+
+        for (int y = 0; y < FH; y++)
+        {
+            for (int x = 0; x < FW; x++)
+            {
+                int i = y * FW + x;
+
+                double dx = (x - centreX) * pitch, dy = (y - centreY) * pitch;
+                double illumination = FocalPlaneIllumination.Factor(
+                    dx, dy, FFocalLengthMetres, double.NaN, double.NaN);
+                double response = illumination * SensorNonUniformity.PhotoResponse(prnu, i);
+
+                // A dust mote is an out-of-focus shadow, taken here as a smooth disc rather than as a
+                // real defocused pupil. What the test needs from it is that it is LOCAL and that it
+                // belongs to the filter, not its exact profile.
+                double mx = x - moteXPx, my = y - moteYPx;
+                double mr = Math.Sqrt(mx * mx + my * my);
+                if (mr < moteRadiusPx)
+                {
+                    double t = mr / moteRadiusPx;
+                    response *= 1.0 - moteDepth * (1.0 - t * t);
+                }
+
+                // Accessory vignetting from an undersized filter cell, which is what puts the deep
+                // corners in most real amateur flats and differs from one filter to the next.
+                double vx = x - centreX, vy = y - centreY;
+                double t2 = Math.Min(1.0, Math.Sqrt(vx * vx + vy * vy) / vignetteScalePx);
+                response *= 1.0 - 0.5 * t2 * t2 * t2 * t2;
+
+                raw[i] = FPedestal + FLevel * response;
+            }
+        }
+        return raw;
+    }
+
+    // The measured branch, end to end through the shipped reader and the shipped flat builder, then
+    // packed to half precision as a deviation from unity because that is how the frame builder stores
+    // it. Packing here rather than comparing the full-precision result means the map under test is
+    // the map that would actually be applied.
+    private static double[] MeasuredResponse(string path)
+    {
+        var image = FitsImageReader.Read(path);
+        var flat = MeasuredFlatField.Build(image, FW, FH, FPedestal, FAdcMax, FGain);
+        var map = new double[flat.Response.Length];
+        for (int i = 0; i < map.Length; i++)
+            map[i] = 1.0 + Float16.ToDouble(Float16.FromDouble(flat.Response[i] - 1.0));
+        return map;
+    }
+
+    // EnsureFlatFieldMap's modelled branch, through the same shipped Core it uses. This array spans
+    // 1.26 mm at f = 0.8 m, so the cosine-fourth term is about one part in a million corner to
+    // centre and what survives is essentially the photo-response spread; that is a fact about a
+    // small chip on a long focal length rather than a shortcut, and the branch's job here is only to
+    // be the distinct third map the cache has to be able to fall back to.
+    private static double[] ModelledFlat()
+    {
+        int n = FW * FH;
+        double centreX = 0.5 * (FW - 1), centreY = 0.5 * (FH - 1);
+        double pitch = FPixelPitchMetres * FBinning;
+        double sigma = SensorNonUniformity.BinnedPhotoResponseSigma(FPrnuFraction, FBinning);
+        ushort[] prnu = SensorNonUniformity.BuildPhotoResponseMap(Pcg32.MixSeed(FSerialSeed), n, sigma);
+
+        var map = new double[n];
+        for (int y = 0; y < FH; y++)
+        {
+            for (int x = 0; x < FW; x++)
+            {
+                int i = y * FW + x;
+                double dx = (x - centreX) * pitch, dy = (y - centreY) * pitch;
+                double illumination = FocalPlaneIllumination.Factor(
+                    dx, dy, FFocalLengthMetres, double.NaN, double.NaN);
+                double response = illumination * SensorNonUniformity.PhotoResponse(prnu, i);
+                map[i] = 1.0 + Float16.ToDouble(Float16.FromDouble(response - 1.0));
+            }
+        }
+        return map;
+    }
+
+    // EnsureFlatFieldMap's own structure: the observer's flat REPLACES the model wherever there is
+    // one, and there is one per filter, which is the whole of why the map is filter-specific.
+    private static double[] BuildAsTheFrameBuilderWould(CameraFilter filter)
+    {
+        string path = Path.Combine(outDir, FlatFileName(FCamera, filter, FBinning));
+        if (File.Exists(path)) return MeasuredResponse(path);
+        return ModelledFlat();
+    }
+
+    private static bool Same(double[] a, double[] b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            if (Math.Abs(a[i] - b[i]) > 1e-12) return false;
+        return true;
+    }
+
+    // The cache from SolarSystemCameraTexture.EnsureFlatFieldMap, in both forms.
+    //
+    //   keyOnFilter: true    if (flatFieldMap != null && flatFieldMapFilter == Filter) return;
+    //                        flatFieldMap = null;
+    //                        flatFieldMapFilter = Filter;
+    //
+    //   keyOnFilter: false   if (flatFieldMap != null) return;
+    //
+    // The second is the guard as it stood. Restated here rather than compiled because that file needs
+    // Unity; the maps it is driven with are the shipped Core's, so what is reproduced is the decision
+    // and not the physics it decides over.
+    private sealed class FlatCache
+    {
+        private readonly bool keyOnFilter;
+        private double[] map;
+        private CameraFilter mapFilter = (CameraFilter)(-1);
+
+        public int Builds;
+
+        public FlatCache(bool keyOnFilter) { this.keyOnFilter = keyOnFilter; }
+
+        public double[] Ensure(CameraFilter filter, Func<CameraFilter, double[]> build)
+        {
+            if (map != null && (!keyOnFilter || mapFilter == filter)) return map;
+
+            map = null;
+            mapFilter = filter;
+            map = build(filter);
+            Builds++;
+            return map;
+        }
+    }
 
     // ------------------------------------------------------------------ a minimal writer
 

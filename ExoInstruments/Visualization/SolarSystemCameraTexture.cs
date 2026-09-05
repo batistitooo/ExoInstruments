@@ -839,10 +839,16 @@ namespace ExoInstruments.Visualization
         private int[] hotPixelIndices;
 
         // The sensor's flat field and its readout offsets, as deviations packed to half precision: 2 bytes a
-        // pixel each rather than 4, for the reason Core.SensorNonUniformity gives. Both are properties of this
-        // instrument at this binning rather than of any exposure, so both are built once and discarded with the
-        // resolution-sized buffers.
+        // pixel each rather than 4, for the reason Core.SensorNonUniformity gives. Neither is a property of any
+        // one exposure, so both outlive the frame and are discarded with the resolution-sized buffers.
+        //
+        // THEY ARE NOT KEYED ALIKE, and the difference is physical rather than incidental. The offsets belong
+        // to the readout chain at this binning and to nothing else, because they are what a shutter-closed bias
+        // frame measures and no light reaches them. The flat belongs to this instrument at this binning THROUGH
+        // ONE FILTER, because a flat measures the light path and the filter is part of that path. Each Ensure
+        // method below carries the argument for its own key.
         private ushort[] flatFieldMap;
+        private CameraFilter flatFieldMapFilter = (CameraFilter)(-1);
         private ushort[] offsetFpnMap;
         private int[] deadPixelIndices;
 
@@ -5864,17 +5870,32 @@ namespace ExoInstruments.Visualization
         public double LastSpeckleControlRadiusMas => lastSpeckleControlRadiusMas;
 
         // The sensor's flat field: what fraction of the light that entered the telescope each pixel actually
-        // converts, relative to the array's mean. Built once per instrument and binning, held as the DEVIATION
-        // FROM UNITY so that half precision costs nothing (see Core.SensorNonUniformity for that argument in
-        // full). ONE MAP FOR TWO PHYSICALLY SEPARATE TERMS, and that is not a shortcut: the optics'
+        // converts, relative to the array's mean. Built once per instrument, binning and FILTER, held as the
+        // DEVIATION FROM UNITY so that half precision costs nothing (see Core.SensorNonUniformity for that
+        // argument in full). ONE MAP FOR TWO PHYSICALLY SEPARATE TERMS, and that is not a shortcut: the optics'
         // illumination falloff and the silicon's photo-response spread multiply, and their PRODUCT is precisely
         // and only what a flat frame measures. Keeping them apart in storage would mean holding two maps to
         // reconstruct a quantity that is never used except as one. Both components are properties of this
         // instrument at this binning rather than of the exposure, which is why the map outlives the frame and
         // is discarded with the buffers when the telescope or the binning changes.
+        //
+        // AND OF THE FILTER, which is why this is keyed the way EnsureFringeMap is. The modelled branch below
+        // is genuinely filter-blind, and reading only that branch is how the missing key survived: a
+        // cosine-fourth falloff and a photo-response spread are geometry and silicon, and neither knows the
+        // passband. The MEASURED branch is where that reasoning breaks. MeasuredFlatPath puts the filter in the
+        // FILE NAME, because the dust motes and accessory vignetting that are most of what makes a real flat
+        // worth having sit on the filter itself, so the observer has one file per passband and the two are
+        // different images. The outcome of this method therefore depends on the filter in BOTH directions:
+        // changing to a filter that has a flat on disk has to load it rather than go on serving the model, and
+        // changing to one that has none has to fall back to the model rather than go on serving the previous
+        // passband's measured field. Keyed on the array alone, neither happened, and nothing announced it - a
+        // frame divided by the wrong filter's flat looks exactly like a frame divided by the right one.
         private void EnsureFlatFieldMap()
         {
-            if (flatFieldMap != null) return;
+            if (flatFieldMap != null && flatFieldMapFilter == Filter) return;
+
+            flatFieldMap = null;
+            flatFieldMapFilter = Filter;
 
             int width = TextureWidth, height = TextureHeight;
             int n = width * height;
@@ -6019,8 +6040,17 @@ namespace ExoInstruments.Visualization
             return 1f + (float)Float16.ToDouble(fringeMap[index]);
         }
 
-        // The sensor's per-pixel readout offsets in electrons, built once per instrument and binning for the
-        // same reasons as the flat field above.
+        // The sensor's per-pixel readout offsets in electrons, built once per instrument and binning, and
+        // outliving the frame for the same reason the flat field above does.
+        //
+        // NOT KEYED ON THE FILTER, and unlike the flat field that is correct rather than an oversight. Checked
+        // rather than assumed, because the flat field's key was wrong on exactly this point: the map is
+        // SensorNonUniformity.BuildOffsetMap of the serial seed, the pixel count and a sigma that
+        // BinnedOffsetSigmaElectrons takes from Spec.OffsetFixedPatternElectrons and the binning. The filter
+        // reaches none of those three arguments, and no measured-file path exists here to smuggle it in the way
+        // MeasuredFlatPath does for the flat. The physics agrees with the call graph: offset fixed-pattern
+        // noise is the readout chain's per-pixel zero level, the thing a bias frame measures with the shutter
+        // shut. No light means no passband, so there is nothing for a filter to change.
         private void EnsureOffsetFpnMap()
         {
             if (offsetFpnMap != null) return;
