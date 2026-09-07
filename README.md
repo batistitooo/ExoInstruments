@@ -4,17 +4,6 @@
 
 ---
 
-## License Summary
-
-This project uses a proprietary license. It is not a Creative Commons license: redistribution of copies (even unmodified ones) is not permitted here, only personal use of the original. Full legal terms are in [LICENSE](./LICENSE).
-
-**Bundled assets.** The orbital telescope's model, `ExoInstruments/Parts/OrbitalObservatory/model.mu`,
-is this project's own: modelled in Fusion, exported through PartTools, and covered by the terms above
-like everything else. It replaced a placeholder, Tarsier Space Technology's Deep Space Telescope,
-Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licence text beside it,
-and neither that model, its texture, nor its licence file is part of this mod any more. None of
-Tarsier's source code was ever used.
-
 ## Installation
 
 **Through CKAN**, search for ExoInstruments and install it. That is everything: the mod has no hard
@@ -967,6 +956,17 @@ Not yet implemented in the current build:
 - **Space-based telescope facilities**, modeled after concept missions like ESA's LIFE, with atmospheric/biosignature classification as a further scientific payoff.
 - **Deeper catalog integration** and an **extended instrument roster** (more real-world facilities as further progression rungs).
 - **Economy rebalance**; current career Funds/Science values are still placeholders pending playtesting.
+
+## License Summary
+
+This project uses a proprietary license. It is not a Creative Commons license: redistribution of copies (even unmodified ones) is not permitted here, only personal use of the original. Full legal terms are in [LICENSE](./LICENSE).
+
+**Bundled assets.** The orbital telescope's model, `ExoInstruments/Parts/OrbitalObservatory/model.mu`,
+is this project's own: modelled in Fusion, exported through PartTools, and covered by the terms above
+like everything else. It replaced a placeholder, Tarsier Space Technology's Deep Space Telescope,
+Copyright (c) 2013 tobyb121, carried under that mod's MIT licence with the licence text beside it,
+and neither that model, its texture, nor its licence file is part of this mod any more. None of
+Tarsier's source code was ever used.
 
 ## Acknowledgments & Scientific Inspiration
 
