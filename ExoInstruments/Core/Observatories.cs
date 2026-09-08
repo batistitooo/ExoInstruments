@@ -653,10 +653,39 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0,
         };
 
+        public static readonly InstrumentSpec Wfpc2 = new InstrumentSpec
+        {
+            Name = "Hubble WFPC2",
+            DisplayName = "Hubble Space Telescope (WFPC2/PC1)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "WFPC2 Instrument Handbook, Cycle 17, Tables 2.3, 3.1, 4.1 and 4.2 and "
+                     + "Sects. 1.1.4, 2.5, 4.9 and 5.4. See VisualTelescopeCatalog.HubbleWfpc2Pc1 "
+                     + "for the per-figure sourcing.",
+            Description = "The camera that took Hubble's famous images of the 1990s, on the Planetary Camera "
+                        + "chip it was named for. Finer sampling than ACS/WFC and a tighter internal stop than "
+                        + "the telescope's own, but its converter gives up long before its silicon does: "
+                        + "twelve bits over a 90,000-electron well means a pixel saturates at about 27,000, "
+                        + "and the top two thirds of the well can never be reached. Bright targets clip early "
+                        + "here, and that is the instrument rather than the model.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.HubbleWfpc2Pc1.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.HubbleWfpc2Pc1,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0,
+        };
+
         public static readonly InstrumentSpec[] All =
         {
             Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
-            BriteToronto, AcsWideField, OrbitalObservatory
+            BriteToronto, Wfpc2, AcsWideField, OrbitalObservatory
         };
     }
 }

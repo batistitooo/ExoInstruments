@@ -2910,6 +2910,175 @@ namespace ExoInstruments.Core
             },
         };
 
-        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
+        /// <summary>
+        /// Hubble's Wide Field and Planetary Camera 2, Planetary Camera chip.
+        ///
+        /// The instrument that took the famous images of the 1990s, and the one whose converter
+        /// gives up before its silicon does: a 12-bit ADC over a 90,000 e- well, so a pixel
+        /// saturates digitally at about 27,000 e- and the top two thirds of the well is
+        /// unreachable. It also sits behind its own internal stop, tighter than the telescope's.
+        ///
+        /// WFPC2 Instrument Handbook, Cycle 17, unless another source is named.
+        /// </summary>
+        public static readonly VisualTelescopeSpec HubbleWfpc2Pc1 = new VisualTelescopeSpec
+        {
+            Name = "Hubble Space Telescope (OTA/WFPC2-PC1)",
+            CameraName = "WFPC2/PC1",
+            SiteName = "Low Earth orbit",
+            PartTitle = "the Hubble Space Telescope (WFPC2)",
+
+            // Table 4.1: "PC resolution 0.0455 arcsec/pixel", "Pixel size 15 um". Derived focal
+            // length is f/28.33, against Table 2.1's published F/28.3. That same table says the
+            // field is "35 x 35 arcsec" where 800 x 0.0455 gives 36.40, a 4 per cent disagreement
+            // inside one handbook; the plate scale is the figure everything else follows from.
+            DetectorMinWavelengthNm = 121.6,
+            DetectorMaxWavelengthNm = 1100.0,
+            ApertureMeters = 2.4,
+            FocalLengthMeters = 206265.0 * 15.0e-6 / 0.0455,
+            BarlowFactor = 1.0,
+
+            // Tiny Tim 7.5 wfpc2pc1.pup, listed separately from and below the OTA's own 0.330 and
+            // 0.022: "0.410 = WFPC2 PC Secondary Mirror Radius", "0.058 = WFPC2 PC Spider Width".
+            // This is the PC's internal stop, tighter than the telescope's. Counted once, not
+            // twice: the photometric chain here is built from components (detector DQE, the OTA's
+            // two mirrors, the filter), not from the handbook's published system throughput, which
+            // would already contain this stop's vignetting.
+            //
+            // NOT MODELLED: that file places the stop off centre, at (396, 430). A decentred mask
+            // is not something the pupil model can express, so the obscuration is concentric here.
+            SecondaryObstructionFraction = 0.410,
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.058 * 1.2,
+            PrimaryMirrorPads = new[]
+            {
+                new PupilPad(0.8921,  0.0000, 0.065),
+                new PupilPad(-0.4615, 0.7555, 0.065),
+                new PupilPad(-0.4564, -0.7606, 0.065),
+            },
+            MirrorCount = 2,
+            MirrorReflectivity = 0.854,
+
+            // Table 4.1, verbatim: format 800 x 800, pixel size 15 um.
+            NativeSensorWidthPx = 800,
+            NativeSensorHeightPx = 800,
+            NativePixelSizeMeters = 15.0e-6,
+
+            // Table 4.1: full well ~90,000 e-, dark rate ~0.0045 e-/s at -88 C, read noise 5 e-
+            // RMS. Table 4.2's PC1 column gives the read noise and gain measured together at
+            // ATD-GAIN 7: 5.24 +/- 0.30 e- and 7.12 +/- 0.41 e-/DN, and those are the pair used.
+            FullWellElectrons = 90000.0,
+            ReadNoiseElectrons = 5.24,
+            ElectronsPerAduAtUnityGain = 7.12,
+            DarkCurrentElectronsPerSecond = 0.0045,
+            DetectorTemperatureCelsius = -88.0,
+            CoolerDeltaBelowAmbientC = 0.0,
+            Technology = DetectorTechnology.Ccd,
+
+            // THE PEDESTAL IS LOAD-BEARING HERE, not decoration. Sect. 1.1.4: "a 7 e- DN-1 channel
+            // which saturates at about 27000 e- (4096 DN with a bias of about 300 DN)". With the
+            // pedestal, (4096 - 300) x 7.12 = 27,028 against the published ~27,000. Without it,
+            // 4095 x 7.12 = 29,156, which is 8 per cent too high. The gain-15 channel checks out
+            // the same way: (4096 - 300) x 13.99 = 53,106 against a published ~53,000.
+            AdcBits = 12,
+            BiasLevelAdu = 300.0,
+
+            // TRDS wfpc2_dqepc1_005_syn.fits, 30 samples from 1216 to 11000 A. Peak 0.4343 at
+            // 7000 A, 0.4144 at 6000, 0.1575 at 2537, 0.1487 at 2000, which brackets Table 4.1's
+            // "35% at 6000 A" and "15% at 2500 A". That file's own HISTORY card records the
+            // reservation: "Average CCD curve used for all chips", so this is not PC1's own.
+            QuantumEfficiency = 0.4343,
+
+            // Table 2.3 and Sect. 2.5: exposure times are quantised, and "an exposure time shorter
+            // than the minimum allowed (0.11 seconds) is, instead, rounded up to this minimum
+            // value". The quantisation itself is not modelled here, only its floor and ceiling.
+            MinExposureSeconds = 0.11f,
+            MaxExposureSeconds = 10000.0f,
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // Sect. 4.9 publishes the rate directly, which no other entry on this roster can say:
+            // "an average rate of 1.8 events chip-1 s-1" over a 1.44 cm2 chip, and a signal
+            // distribution with "a well-defined maximum at about 1000 electrons". The 1000 is a
+            // MODE, not the median other instruments carry. Internal check from the same section:
+            // 6.7 pixels per event x 1.8 x 2000 s / 640,000 px = 3.77 per cent of pixels affected
+            // in a 2000 s exposure, against the "3.8%" it states.
+            CosmicRayEventsPerMinutePerCm2 = 75.0,
+            CosmicRayElectronsPerEvent = 1000.0,
+
+            // Sect. 5.4, charge diffusion: "even when a pinhole was centered over a pixel only
+            // about 70% of the light was detected in that pixel", equivalent to "18 mas" RMS
+            // jitter in the PC. The two published forms agree to 2 per cent: 2.3548 x 18 mas is
+            // 42.4 mas, and this kernel's equivalent Gaussian FWHM is 0.912 px, or 41.5 mas.
+            //
+            // The field is named for interpixel capacitance and documented for an HgCdTe array.
+            // On a CCD this position in the chain carries charge diffusion instead. The placement
+            // is right, both act on pixel-scale resolution after binning; the name is not.
+            InterpixelCapacitanceKernel = new double[,]
+            {
+                { 0.0125, 0.050, 0.0125 },
+                { 0.0500, 0.750, 0.0500 },
+                { 0.0125, 0.050, 0.0125 },
+            },
+
+            // NOT PUBLISHED as a value. Sect. 1.1.4 gives a BOUND, "<2% pixel-to-pixel
+            // non-uniformity", and a bound written into a value field is an invented floor.
+            PhotoResponseNonUniformity = double.NaN,
+
+            // Table 3.1, the WFPC2 Simple Filter Set, and the only instrument on this roster whose
+            // widths arrive already as FWHM and whose filter-only peak transmissions are published,
+            // so these are real values rather than the file's 1.0 convention for "not published".
+            // The table's own caption confirms both: the width is "reasonably close to the FWHM",
+            // and the values "do not include the CCD DQE or the transmission of the OTA or WFPC2
+            // optics", which is exactly what a filter field should hold.
+            LuminanceCentralWavelengthNm = 576.7,   // F606W
+            LuminanceBandwidthAngstrom = 1579.0,
+            LuminanceFilterPeakTransmission = 0.967,
+            BlueCentralWavelengthNm = 428.3,        // F439W, the B of the handbook's own UBVRI set
+            BlueBandwidthAngstrom = 464.4,
+            BlueFilterPeakTransmission = 0.682,
+            GreenCentralWavelengthNm = 544.6,       // F547M
+            GreenBandwidthAngstrom = 486.6,
+            GreenFilterPeakTransmission = 0.913,
+            RedCentralWavelengthNm = 671.4,         // F675W, its R
+            RedBandwidthAngstrom = 889.5,
+            RedFilterPeakTransmission = 0.973,
+            HAlphaCentralWavelengthNm = 656.4,      // F656N
+            HAlphaBandwidthAngstrom = 21.5,
+            HAlphaFilterPeakTransmission = 0.778,
+            AvailableFilters = AllFilters,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Hubble Space Telescope",
+                SunAvoidanceAngleDeg = 62.5,
+                BrightLimbAvoidanceAngleDeg = 20.0,
+                DarkLimbAvoidanceAngleDeg = 7.6,
+                MoonAvoidanceAngleDeg = 9.0,
+                PointingJitterArcsecRms = 0.008,
+
+                // CONFIRM THIS ONE AGAINST THE PDF. The WFPC2 IHB Chapter 5 gives the PC's PSF as
+                // 0.088 arcsec, and Sect. 5.1 otherwise says only that the FWHM is "approximately
+                // proportional to wavelength". The figure is the handbook's own text, but it was
+                // read through a search index rather than fetched: the documents.stsci.edu mirror
+                // no longer resolves and the Cycle 17 PDF exceeds the fetch limit. It is written
+                // rather than left null because null in this field means DIFFRACTION LIMITED, and
+                // a 2.4 m at 550 nm gives 0.058 arcsec, which would make this camera a third
+                // sharper than it is.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.088 }),
+
+                HasApertureDoor = true,
+                // A real WFPC2 exposure always reads all four CCDs through the pyramid mirror, so
+                // the downlink volume is four chips even though one is imaged here.
+                DownlinkBitsPerPixel = 12,
+                FullFramePixels = 4L * 800L * 800L,
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfpc2Pc1, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }
