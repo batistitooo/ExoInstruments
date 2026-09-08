@@ -54,10 +54,16 @@ namespace ExoInstruments.Flight
         public double DownlinkBitsPerSecond;
 
         /// <summary>True when the aperture is open, unobstructed, powered and pointable: everything except the sky geometry.</summary>
+        /// <summary>True when this telescope has a door at all; one that has none is never shut.</summary>
+        public bool ApertureUncovered =>
+            Instrument == null || Instrument.SpacePlatform == null
+            || !Instrument.SpacePlatform.HasApertureDoor
+            || ApertureDoorOpen;
+
         public bool Operational =>
             Instrument != null
             && Instrument.SpacePlatform != null
-            && ApertureDoorOpen
+            && ApertureUncovered
             && ApertureObstruction.IsClear(BlockedApertureFraction)
             && ControlMode != AttitudeControlMode.Uncontrolled
             && ElectricCharge > 0.01;
@@ -68,7 +74,7 @@ namespace ExoInstruments.Flight
             get
             {
                 if (Instrument == null || Instrument.SpacePlatform == null) return "instrument not configured";
-                if (!ApertureDoorOpen) return "aperture door closed";
+                if (!ApertureUncovered) return "aperture door closed";
                 if (!ApertureObstruction.IsClear(BlockedApertureFraction))
                     return string.IsNullOrEmpty(BlockingPartTitle)
                         ? string.Format("aperture blocked ({0:P0})", BlockedApertureFraction)

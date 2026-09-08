@@ -2176,7 +2176,11 @@ namespace ExoInstruments.Visualization
             // target's airmass; the adaptive-optics solve is pure arithmetic and happens
             // off-thread.
             double seeingFwhmArcsec = spaceBased ? 0.0 : ComputeGroundSeeingFwhmArcsec(airmass);
-            double defocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
+            // The observer's own defocus, and under it whatever the instrument carries built in.
+            // Taken as a floor rather than added: autofocus finds the best focus this optical
+            // assembly HAS, which for a deliberately defocused survey photometer is not a point.
+            double manualDefocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
+            double defocusDiscRadiusPx = Math.Max(Spec.BuiltInDefocusDiscRadiusPx, manualDefocusDiscRadiusPx);
 
             var inputs = new FrameComputeInputs
             {

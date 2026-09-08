@@ -583,10 +583,49 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument doesn't feed the science-reward economy
         };
 
+        /// <summary>
+        /// BRITE-Toronto, the bottom of the orbital ladder.
+        ///
+        /// Gated exactly like the other orbital rows: not bought, available when the player has
+        /// launched one. Its price is the nanosatellite and the ride, not a Funds unlock.
+        /// </summary>
+        public static readonly InstrumentSpec BriteToronto = new InstrumentSpec
+        {
+            Name = "BRITE-Toronto",
+            DisplayName = "BRITE-Toronto (Nanosatellite)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "Weiss et al. 2014, PASP 126, 573; Pablo et al. 2016, PASP 128, 125001; "
+                     + "Popowicz et al. 2017, A&A 605, A26. See VisualTelescopeCatalog.BriteToronto "
+                     + "for the per-figure sourcing.",
+            Description = "A 3-centimetre lens on a 20-centimetre cube, and the smallest telescope here by "
+                        + "a wide margin. Almost everything about it is a limitation, and all of them are "
+                        + "real: the detector is not cooled, so it carries a dark current three thousand "
+                        + "times a cooled amateur camera's; there is one fixed red filter and no wheel to "
+                        + "change it; there is no focus mechanism, and the stars are deliberately out of "
+                        + "focus across about eight pixels so that flat-field errors average out; and the "
+                        + "converter saturates before the well does, so the top of every pixel is "
+                        + "unreachable. At 26.5 arcseconds per pixel a planet is a point and the Mun is "
+                        + "most of the frame. What it is actually for is what it was built for: watching "
+                        + "bright things get brighter, from above the atmosphere, cheaply.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.BriteToronto.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.BriteToronto,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument does not feed the science economy
+        };
+
         public static readonly InstrumentSpec[] All =
         {
             Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
-            OrbitalObservatory
+            BriteToronto, OrbitalObservatory
         };
     }
 }

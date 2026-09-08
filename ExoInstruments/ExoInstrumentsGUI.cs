@@ -4633,8 +4633,11 @@ namespace ExoInstruments
                 string partTitle = string.IsNullOrEmpty(instrument.VisualTelescope.PartTitle)
                                  ? "the orbital telescope part"
                                  : instrument.VisualTelescope.PartTitle;
+                // Only the telescopes that have a door are told to open one.
+                bool hasDoor = instrument.VisualTelescope.SpacePlatform == null
+                            || instrument.VisualTelescope.SpacePlatform.HasApertureDoor;
                 GUILayout.Label($"Locked: {instrument.DisplayName} - none in orbit. "
-                              + $"Launch {partTitle} and open its aperture door.");
+                              + $"Launch {partTitle}{(hasDoor ? " and open its aperture door" : "")}.");
                 return;
             }
 

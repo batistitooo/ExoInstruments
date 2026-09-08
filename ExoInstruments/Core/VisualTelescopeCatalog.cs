@@ -739,6 +739,21 @@ namespace ExoInstruments.Core
         public float AstigmatismStrengthPxAtCorner;
 
         /// <summary>
+        /// Radius, in native pixels, of a defocus blur disc the instrument carries in its own right,
+        /// before the observer touches anything. Zero for a telescope built to focus.
+        ///
+        /// This exists because deliberate defocus is a real design choice, not a fault: a survey
+        /// photometer spreads a star over many pixels on purpose, so that flat-field and
+        /// intra-pixel response errors average out instead of landing on one pixel. The pipeline
+        /// already draws a defocus disc, but its radius came only from the observer's own focus
+        /// control, which cannot describe an instrument with no focus mechanism at all.
+        ///
+        /// A floor rather than a substitute: the observer's manual defocus can add to it and
+        /// autofocus cannot remove it, which is what a fixed optical assembly does.
+        /// </summary>
+        public double BuiltInDefocusDiscRadiusPx;
+
+        /// <summary>
         /// True when the instrument carries an atmospheric dispersion corrector: a pair of
         /// counter-rotating prisms that cancels the atmosphere's own dispersion before it reaches the
         /// detector.
@@ -2385,6 +2400,207 @@ namespace ExoInstruments.Core
             },
         };
 
-        public static readonly VisualTelescopeSpec[] All = { RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis, HubbleWfc3Ir };
+        /// <summary>
+        /// BRITE-Toronto (BTr), one of the BRITE-Constellation nanosatellites: a 3 cm five-lens
+        /// objective on a 20 cm cube, and the smallest telescope on this roster by a factor of
+        /// seventeen in aperture.
+        ///
+        /// It is here to be the bottom of the ladder, and its defects are the published ones. The
+        /// detector is not cooled, at all. There is no filter wheel, no focus mechanism and no
+        /// aperture door, because the reaction wheels are the only moving parts on the spacecraft.
+        /// The stars are deliberately out of focus. Saturation is reached in the converter before
+        /// the well, so the last 2,660 electrons of every pixel are unreachable.
+        ///
+        /// Sources throughout: Weiss et al. 2014, PASP 126, 573; Pablo et al. 2016, PASP 128,
+        /// 125001 (sections numbered in Roman numerals, as that paper does); Popowicz et al. 2017,
+        /// A&amp;A 605, A26; Zwintz et al. arXiv:2311.18382.
+        /// </summary>
+        public static readonly VisualTelescopeSpec BriteToronto = new VisualTelescopeSpec
+        {
+            Name = "BRITE-Toronto (BTr)",
+            // Pablo Sect. II.2, "the KAI-11002 CCD from Kodak Truesense Imaging"; Weiss Sect. 6.2
+            // names the mono part. Truesense is now ON Semiconductor (Pablo footnote 3). The red
+            // build is named because Pablo Sect. II.1 says the red and blue optical cells differ.
+            CameraName = "BRITE red instrument (KAI-11002M)",
+            SiteName = "Low Earth orbit",
+            PartTitle = "the BRITE-Toronto nanosatellite",
+
+            // Weiss Sect. 6.2: "an aperture of 30 mm and effective focal length of 70 mm".
+            ApertureMeters = 0.030,
+            // Pablo Sect. II.1, "The net focal length is 70 mm". NOT derived from the plate scale
+            // here, against the usual convention: the published "27 arcsec per pixel" (Pablo
+            // Sect. II.2) is rounded, and inverting it would give 68.755 mm. The focal length is
+            // the measured quantity. The consequence is that this entry's field comes out at
+            // 29.53 x 19.68 deg where Popowicz Sect. 2 publishes "30 deg x 20 deg", the 1.8 per
+            // cent being that rounding.
+            FocalLengthMeters = 0.070,
+
+            // Pablo Sect. II.1: "There are five lenses in each configuration made from Schott
+            // glass", a Double Gauss variant. A refractor has no secondary and therefore no
+            // spider, so these zeros are the design rather than missing measurements. The
+            // "spiky, irregular shaped PSFs on the edges of the CCD" (Pablo Sect. III.1) are
+            // aberration, and must NOT be modelled as diffraction from vanes.
+            SecondaryObstructionFraction = 0.0,
+            SpiderVaneCount = 0,
+            SpiderVaneWidthMeters = 0.0,
+            MirrorCount = 0,
+            BarlowFactor = 1.0,
+            // NOT PUBLISHED: no coating, glass or end-to-end throughput figure appears in Weiss,
+            // Pablo or Popowicz, and Weiss Fig. 6 is on a relative axis with no peak value. Five
+            // air-spaced Schott elements plus a multilayer interference filter are therefore
+            // carried as lossless, which overstates this instrument's sensitivity by an
+            // unpublished factor.
+            RelayOpticsTransmission = 1.0,
+
+            // Weiss Fig. 9 images "+/- 12 deg off axis at the edges of the unvignetted field".
+            // Written as the derivation because this focal plane is f*tan(theta), not f*theta
+            // (see FocalPlaneIllumination): the f-theta form would stop at 11.83 deg instead.
+            // This is the first image circle on the roster that actually cuts, clipping the left
+            // and right ends of the sensor and all four corners. The mod's edge is hard where
+            // Weiss says only "nearly unvignetted", which is the approximation here.
+            ImageCircleMillimetres = 2.0 * 0.070 * 1000.0 * 0.21255656167002213,
+
+            // Pablo Table 1: "Active pixels 4008 (H) x 2672 (V)", "Pixel dimensions 9 um x 9 um",
+            // out of 4072 x 2720 total, the rest being dark and buffer regions.
+            NativeSensorWidthPx = 4008,
+            NativeSensorHeightPx = 2672,
+            NativePixelSizeMeters = 9.0e-6,
+
+            // Pablo Sect. II.2: "the saturation level has been set at 60,000 electrons to ensure
+            // anti-blooming protection". That paper's own Table 1 says 90,000 e-, and the two
+            // cannot both be the operating well; Sect. III.2.3 uses 60,000, so it is taken and
+            // the contradiction is recorded rather than smoothed over.
+            FullWellElectrons = 60000.0,
+            // Pablo Sect. III.2.2: "A value of 3.5 e-/ADU was adopted as the inverse gain before
+            // launch for all BRITEs."
+            ElectronsPerAduAtUnityGain = 3.5,
+            // Pablo Table 1. This is the one that bites: 3.5 x 16383 = 57,340 e- is below the
+            // 60,000 e- well, so BTr saturates in the converter, not in the silicon.
+            AdcBits = 14,
+
+            // Popowicz Table 2, BTr row, evaluated at that satellite's own median in-orbit
+            // temperature. Its Eqs. 9 and 10 fit PRE-FLIGHT ground measurements (its Table 1 is
+            // titled "Pre-flight characteristics"), so the temperature is BTr's and the curve is
+            // the constellation's. Not in-orbit measurements, and not described as such.
+            ReadNoiseElectrons = 14.8,
+            DarkCurrentElectronsPerSecond = 12.9,
+            DetectorTemperatureCelsius = 15.0,
+            // Pablo Sect. II.3: "even a passive radiator was not an option". Weiss Sect. 6.2:
+            // "The CCD is not actively cooled." Hence a dark current three thousand times the
+            // RedCat's, from the same class of silicon.
+            CoolerDeltaBelowAmbientC = 0.0,
+
+            // Pablo Table 1, manufacturer specification at 40 C. Sect. II.2 explains it: a
+            // microlens over each pixel raises QE "from about 16% to nearly 50%". No numeric QE
+            // curve is published anywhere, so the scalar stands alone.
+            QuantumEfficiency = 0.50,
+            Technology = DetectorTechnology.Ccd,
+            // Pablo Table 2: "The mean bias level is 100 +/- 30 ADU at T <= 30 C".
+            BiasLevelAdu = 100.0,
+
+            // Deliberate, and the reason this instrument needed a new field. Pablo Sect. III.1:
+            // "a CCD offset of 0.0325 mm produced PSFs with minimum spikes, while ensuring that
+            // the light was distributed broadly enough (across a diameter of about 8 pixels) to
+            // avoid undersampling"; Weiss Sect. 6.2 gives the same "up to about 8 x 8 pixels".
+            // Radius is half that published diameter.
+            //
+            // Two honest limits. Only about a fifth of those 8 pixels is geometric defocus: the
+            // 0.0325 mm offset at f/2.333 spreads 13.93 um, which is 1.55 px, and the rest is
+            // aberration this uniform disc stands in for. And the real profile is spiky, not
+            // symmetric, and changes across the field (Pablo Sect. III.1, Popowicz Sect. 2),
+            // where the disc drawn here is round and flat. Pablo Fig. 5 measured the offset on
+            // UBr and reports "the outcomes were similar for BTr".
+            BuiltInDefocusDiscRadiusPx = 4.0,
+
+            // Zwintz Sect. 2: "an exposure which is one to eight seconds long". Operational, not
+            // instrumental: that sentence's own footnote 5 records "In very rare cases, exposures
+            // shorter than one second were used", and no instrumental floor is published.
+            MinExposureSeconds = 1.0f,
+            MaxExposureSeconds = 8.0f,
+            // Pablo describes no adjustable gain, and says by explicit contrast that the bias
+            // offset "can be adjusted in flight" (Sect. III.2.1).
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // One fixed filter, 550 to 700 nm (Zwintz Sect. 1). Weiss Sect. 6: "each BRITE
+            // carries a single fixed filter", the constellation covering two passbands by flying
+            // different satellites. The band is written on the Red position because that is what
+            // it is; there is no Luminance position on this instrument, which is why the camera's
+            // filter fallback had to stop assuming one.
+            //
+            // NOT PUBLISHED in numeric form: Weiss Fig. 6 is a relative-axis plot and its red
+            // trace is labelled for UniBRITE. Popowicz Sect. 5.1 notes only a "similarity of the
+            // BRITE red filter and SDSS r passbands", which is a resemblance, not a curve.
+            RedCentralWavelengthNm = 625.0,
+            RedBandwidthAngstrom = 1500.0,
+            RedFilterPeakTransmission = 1.0,
+            AvailableFilters = new[] { CameraFilter.Red },
+            NarrowbandFilters = null,
+
+            // NOT PUBLISHED, and each refused for its own reason rather than left blank. PRNU:
+            // Weiss Sect. 7 item 7 says intra-pixel variations "have been measured" and gives no
+            // figure. Fixed pattern: Pablo Table 2 gives a specification bound, "95% of pixels
+            // are within +/- 2 ADU of the mean", not a measured sigma. Linearity: Pablo
+            // Sect. III.2.3 publishes an onset, "deviation from linearity actually starts at
+            // around 9,000 ADU", not an amplitude at full well.
+            PhotoResponseNonUniformity = double.NaN,
+            OffsetFixedPatternElectrons = double.NaN,
+            LinearityDeviationAtFullWell = double.NaN,
+
+            // NOT PUBLISHED: no transient rate appears in any of the three papers. What they give
+            // is permanent damage, "just under 0.02% of the pixels per year" (Weiss Sect. 7 item
+            // 4), which is a different quantity. WFC3's 110 must not be borrowed: Pablo
+            // Sect. IV.2.3 records that BTr flew "additional radiation shielding compared to
+            // earlier BRITEs". Zero here produces no events, which is what a refusal looks like.
+            CosmicRayEventsPerMinutePerCm2 = 0.0,
+            CosmicRayElectronsPerEvent = 0.0,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            // The wrong physical quantity for what is published. The field is a blur AMPLITUDE
+            // with quadratic radial falloff; what Pablo Sect. III.1 and Popowicz Sect. 2 describe
+            // is a change of profile SHAPE with field position. Carried by the defocus disc above
+            // instead, which is at least the right kind of term.
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "BRITE-Toronto",
+
+                // Pablo Table 7: "FTAP stability, Goal 1.5' (3 pixels, 1 sigma), Achieved < 12''".
+                // An upper bound written into a field documented as an rms, so this jitter is at
+                // worst correct and possibly overstated.
+                PointingJitterArcsecRms = 12.0,
+
+                // Weiss Sect. 6.2: "Since there are no moving parts (other than the spinning
+                // reaction wheels), there is no lens cover for the telescope objective that can
+                // be opened and closed."
+                HasApertureDoor = false,
+
+                // Pablo Table 1. Corroborated by Weiss Sect. 5 item 3, an 11 Mpixel frame at
+                // "about 20 MB", which is 14.45 bits per pixel. The whole sensor is read, not
+                // only the imaging rectangle. Weiss also records what that costs: "Downlinking
+                // just one such frame needs about 3 hr of telemetry".
+                DownlinkBitsPerPixel = 14,
+                FullFramePixels = 4072L * 2720L,
+
+                // Every avoidance angle below is left at zero, and for BTr that is the published
+                // position rather than a gap. Sun: Weiss Sect. 6.2 says that if the Sun crossed
+                // the field "no damage to the CCD would result", and Pablo Sect. III.2.6 that
+                // "even four hours of sun staring would not cause the CCD to exceed the maximum
+                // allowable temperature of 70 C". Limbs: Weiss Sect. 7 item 8, "Stray light is
+                // not a concern so far", with no angle given anywhere. Moon: the 20 deg figure in
+                // Pablo Sect. IV.2.1 is a recovered star-tracker limitation on UBr and BAb, not a
+                // stray-light constraint, and does not transfer to BTr.
+                //
+                // DeliveredPsfFwhmArcsec is left null on purpose. Null means diffraction limited,
+                // and here that is true of the optics: the delivered spot is carried by the
+                // built-in defocus disc above, and adding a Gaussian term as well would count the
+                // same blur twice.
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }
