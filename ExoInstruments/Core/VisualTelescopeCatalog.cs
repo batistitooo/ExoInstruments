@@ -3116,9 +3116,15 @@ namespace ExoInstruments.Core
             // so it is sqrt(0.11) = 0.3317. Writing 0.11 here would model a telescope losing one
             // per cent of its light instead of eleven.
             SecondaryObstructionFraction = 0.3317,
-            // NOT PUBLISHED: Table 5 describes the obscuration and the cover, and gives no spider
-            // vane count or width. No spikes are drawn rather than plausible ones.
-            SpiderVaneCount = 0,
+            // Three blades, published in the instrument paper rather than in Table 5: the SiC
+            // metering structure is "a primary mirror (M1) bulkhead, short cylindrical section,
+            // and three-blade spider with secondary mirror (M2) mounting" (Cheng et al. 2008,
+            // Space Science Reviews 140, Sect. 4). Three blades give SIX diffraction spikes.
+            //
+            // The vane WIDTH is not published anywhere, and this pipeline needs both to draw
+            // them, so the count is recorded and the spikes are not drawn. Better than inventing
+            // a width, and it means the count is here when a figure turns up.
+            SpiderVaneCount = 3,
             SpiderVaneWidthMeters = 0.0,
             PrimaryMirrorPads = null,
             // A Ritchey-Chretien: primary and secondary. No published reflectivity, so the default
