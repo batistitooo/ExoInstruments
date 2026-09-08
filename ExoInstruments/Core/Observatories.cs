@@ -713,41 +713,10 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0,
         };
 
-        public static readonly InstrumentSpec IssNac = new InstrumentSpec
-        {
-            Name = "ISS NAC",
-            DisplayName = "Cassini ISS Narrow Angle Camera",
-            Method = DetectionMethod.SolarSystemPhotography,
-            ReferenceMagnitude = 0.0,
-            ReferencePrecision = 0.0,
-            PrecisionExponent = 0.0,
-            CadenceSeconds = 0.0,
-            Citation = "Porco et al. 2004, Space Science Reviews 115, 363, Table VII and Sect. 3.10; "
-                     + "PDS ISSNA instrument catalogue; ISS Data User's Guide Sect. 2.3 and Table A.2. "
-                     + "See VisualTelescopeCatalog.CassiniIssNac for the per-figure sourcing.",
-            Description = "The camera that took the pictures of Saturn everyone has seen, and the only "
-                        + "instrument here that can sound an atmosphere rather than photograph it. Two "
-                        + "independently stepped wheels of twelve filters, among them methane bands paired "
-                        + "with the continuum beside them: a giant planet is opaque in a methane band and "
-                        + "clear next to it, so the pair measures how deep a cloud sits instead of showing "
-                        + "the disc. Where LORRI is fast and has no filters at all, this one is slow and "
-                        + "sees colour. Like LORRI it is a payload: what it is worth is set by how close "
-                        + "you are willing to fly it.",
-            IsSpaceBased = true,
-            ApertureMeters = VisualTelescopeCatalog.CassiniIssNac.ApertureMeters,
-            SiteAltitudeMeters = 0.0,
-            VisualTelescope = VisualTelescopeCatalog.CassiniIssNac,
-            UnlockedByDefault = false,
-            UnlockCostFunds = 0.0,
-            UnlockScienceThreshold = 0.0,
-            ScanCostFunds = 0.0,
-            ScienceRewardMultiplier = 0.0,
-        };
-
         public static readonly InstrumentSpec[] All =
         {
             Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
-            BriteToronto, Lorri, IssNac, Wfpc2, AcsWideField, OrbitalObservatory
+            BriteToronto, Lorri, Wfpc2, AcsWideField, OrbitalObservatory
         };
     }
 }
