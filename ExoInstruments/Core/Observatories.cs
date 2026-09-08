@@ -682,10 +682,41 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0,
         };
 
+        public static readonly InstrumentSpec Lorri = new InstrumentSpec
+        {
+            Name = "LORRI",
+            DisplayName = "New Horizons LORRI (Reconnaissance Imager)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "Weaver et al. 2020, PASP 132, 035003 (arXiv:2001.03524), Table 5 and "
+                     + "Sects. 3, 3.1 and 3.4. See VisualTelescopeCatalog.NewHorizonsLorri for the "
+                     + "per-figure sourcing.",
+            Description = "A 21-centimetre telescope built to be carried rather than pointed. Left in orbit "
+                        + "here it is the worst instrument in the catalogue: at one arcsecond per pixel a "
+                        + "planet is a smudge and the whole roster beats it. Flown to one, it beats the whole "
+                        + "roster, because resolution on a body goes as the distance to it and no mirror size "
+                        + "makes up for being far away. Ten thousand kilometres from a moon it resolves fifty "
+                        + "metres, where an eight-metre telescope at home manages seven kilometres. There are "
+                        + "no filters, the longest exposure is 65 seconds, and the cover opens once. It is a "
+                        + "payload, not an observatory.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.NewHorizonsLorri.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.NewHorizonsLorri,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0,
+        };
+
         public static readonly InstrumentSpec[] All =
         {
             Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
-            BriteToronto, Wfpc2, AcsWideField, OrbitalObservatory
+            BriteToronto, Lorri, Wfpc2, AcsWideField, OrbitalObservatory
         };
     }
 }

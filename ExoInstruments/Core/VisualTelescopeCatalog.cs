@@ -3079,6 +3079,144 @@ namespace ExoInstruments.Core
             },
         };
 
-        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfpc2Pc1, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
+        /// <summary>
+        /// New Horizons LORRI, the Long Range Reconnaissance Imager: a 20.8 cm Ritchey-Chretien
+        /// built to be flown to its target rather than pointed at it from home.
+        ///
+        /// It is the smallest telescope here after BRITE and, used the way it was designed to be
+        /// used, the sharpest thing on the roster. Resolution on a body goes as the distance to it,
+        /// so a 20 cm tube taken to a moon beats an 8 metre mirror left at home by whatever factor
+        /// the player is willing to fly. Nothing else in this catalogue rewards a transfer burn.
+        ///
+        /// No filters at all, one 65 second exposure ceiling, and a cover that opens once. Every
+        /// figure below is Weaver et al. 2020, PASP 132, 035003 (arXiv:2001.03524), Table 5 unless
+        /// a section is named.
+        /// </summary>
+        public static readonly VisualTelescopeSpec NewHorizonsLorri = new VisualTelescopeSpec
+        {
+            Name = "New Horizons LORRI",
+            CameraName = "LORRI (e2v CCD47-20)",
+            SiteName = "Interplanetary space",
+            PartTitle = "the LORRI reconnaissance imager",
+
+            // "435-870 nm at 50% of peak QE / 360-910 nm at 10% of peak QE". The 10 per cent points
+            // bound the detector.
+            DetectorMinWavelengthNm = 360.0,
+            DetectorMaxWavelengthNm = 910.0,
+
+            // "20.8 cm primary mirror diameter", "Focal length = 261.908 cm", so f/12.6.
+            ApertureMeters = 0.208,
+            FocalLengthMeters = 2.61908,
+            BarlowFactor = 1.0,
+
+            // CONVERTED, and the conversion is the point. The paper's "~11% central obscuration" is
+            // an AREA fraction, which it fixes in the text: "Given the estimated LORRI obscuration
+            // of ~11% (i.e., Lobscure = 0.89), the largest possible effective area for LORRI is
+            // ~300 cm2", against an input aperture of 339.8 cm2. This field is a DIAMETER ratio,
+            // so it is sqrt(0.11) = 0.3317. Writing 0.11 here would model a telescope losing one
+            // per cent of its light instead of eleven.
+            SecondaryObstructionFraction = 0.3317,
+            // NOT PUBLISHED: Table 5 describes the obscuration and the cover, and gives no spider
+            // vane count or width. No spikes are drawn rather than plausible ones.
+            SpiderVaneCount = 0,
+            SpiderVaneWidthMeters = 0.0,
+            PrimaryMirrorPads = null,
+            // A Ritchey-Chretien: primary and secondary. No published reflectivity, so the default
+            // stands and the loss is unmodelled.
+            MirrorCount = 2,
+
+            // "1024 x 1024 optically active pixels, 13 micron square pixels". The published plate
+            // scale of 1.0231 arcsec and 0.29122 deg field both come back out of these to within
+            // 0.07 per cent, which is the rounding in the published figures.
+            NativeSensorWidthPx = 1024,
+            NativeSensorHeightPx = 1024,
+            NativePixelSizeMeters = 13.0e-6,
+
+            // "Full well ~80,000 e (linear range)", "Gain: 21.0 e DN-1 (1x1)", "CDS with 12-bit
+            // ADC", "Electronics noise ~24 e", "Dark current <=0.040 e s-1 pixel-1 (1x1 at NH
+            // operating temperature of -81 C)". The converter tops out at 4095 x 21.0 = 85,995 e-,
+            // just past the well, so unlike WFPC2 and BRITE this one saturates in the silicon.
+            FullWellElectrons = 80000.0,
+            ElectronsPerAduAtUnityGain = 21.0,
+            AdcBits = 12,
+            ReadNoiseElectrons = 24.0,
+            DarkCurrentElectronsPerSecond = 0.040,
+            DetectorTemperatureCelsius = -81.0,
+            CoolerDeltaBelowAmbientC = 0.0,
+            Technology = DetectorTechnology.Ccd,
+
+            // "Anti-blooming technology" is in Table 5, so a saturated pixel stops rather than
+            // spilling. IsInterlineTransfer is deliberately NOT set: this is a FRAME TRANSFER
+            // device, and its "~12 ms" shift is long enough against a short exposure to smear
+            // visibly, which is why the real pipeline corrects for it. Skipping the transfer
+            // smear here would be the wrong reading of a different architecture.
+            HasAntiBloomingDrain = true,
+
+            // "Mean QE ~47% over 400-850 nm" (Fig. 22 caption); Sect. 3.4 gives "~50% over much of
+            // the visible wavelength range (e.g., 480-700 nm)". The mean is taken, being the
+            // figure quoted over the whole band rather than over its best part.
+            QuantumEfficiency = 0.47,
+
+            // "Available exposure times: 0 ms to 64,967 ms at 1 ms spacings". A 65 second ceiling
+            // is short for a telescope: this instrument was built to fly past things, not to
+            // integrate on them. The 1 ms quantisation is not modelled, only the floor and ceiling.
+            MinExposureSeconds = 0.001f,
+            MaxExposureSeconds = 64.967f,
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // "Panchromatic (no filters)". One position, no wheel, and the pivot wavelength is the
+            // paper's own (Sect. 3, Eq. 6): 6076 A. The width is the published 50 per cent band,
+            // 435 to 870 nm. Luminance is the honest slot for a clear camera, and it is the only
+            // one this instrument has.
+            LuminanceCentralWavelengthNm = 607.6,
+            LuminanceBandwidthAngstrom = 4350.0,
+            LuminanceFilterPeakTransmission = 1.0,
+            AvailableFilters = new[] { CameraFilter.Luminance },
+            NarrowbandFilters = null,
+
+            // NOT PUBLISHED: no cosmic ray rate or per-event deposition appears in Weaver et al.
+            // The rate this instrument sees is a deep space one and would differ from every Earth
+            // orbit figure on this roster, so none of them is borrowed and no events are drawn.
+            CosmicRayEventsPerMinutePerCm2 = 0.0,
+            CosmicRayElectronsPerEvent = 0.0,
+            PhotoResponseNonUniformity = double.NaN,
+            OffsetFixedPatternElectrons = double.NaN,
+            LinearityDeviationAtFullWell = double.NaN,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "New Horizons",
+
+                // Sect. 3.1 publishes the PSF anisotropically, "(XFWHM, YFWHM) = (2.06, 2.65)"
+                // pixels, noting "the LORRI PSF is slightly undersampled (relative to Nyquist) in
+                // the X (row) direction". This field carries one number, so it is the geometric
+                // mean of the published pair, 2.336 px, which is 2.39 arcsec at this plate scale.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 607.6 }, new[] { 2.39 }),
+
+                // Table 5: the reaction control system holds the boresight "to an accuracy of
+                // +/-2 arcsec (1 sigma) for exposure times up to ~65 s", which is the whole
+                // exposure range, so the figure applies throughout.
+                PointingJitterArcsecRms = 2.0,
+
+                // "No moving parts, except for once-open telescope cover mounted to spacecraft".
+                // A cover that opens once is not a door the observer operates.
+                HasApertureDoor = false,
+
+                DownlinkBitsPerPixel = 12,
+                FullFramePixels = 1024L * 1024L,
+
+                // Every avoidance angle left unset: Weaver et al. publishes none, and the
+                // constraints a real New Horizons observation worked to were mission planning
+                // rather than instrument limits.
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { BriteToronto, NewHorizonsLorri, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfpc2Pc1, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }
