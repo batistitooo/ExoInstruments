@@ -59,7 +59,15 @@ namespace ExoInstruments.Visualization
         SII,       // [S II] 6716/6731
         NII,       // [N II] 6584, 20.65 Angstrom from H-alpha: needs under about 4 nm to separate
         OII,       // [O II] 3726/3729, below where an amateur CMOS has usable QE
-        OI         // [O I] 6300, which is also a bright terrestrial airglow line
+        OI,        // [O I] 6300, which is also a bright terrestrial airglow line
+
+        // Near-ultraviolet broadband positions, named for the band rather than for any one
+        // instrument's filter. Only a telescope above the atmosphere can carry them: ozone closes
+        // this window completely from the ground. Their parameters come from the same per
+        // instrument table the narrowband positions use.
+        Nuv220,
+        Nuv250,
+        Nuv330
     }
 
     /// <summary>
@@ -4967,6 +4975,9 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.NII:
                 case CameraFilter.OII:
                 case CameraFilter.OI:
+                case CameraFilter.Nuv220:
+                case CameraFilter.Nuv250:
+                case CameraFilter.Nuv330:
                 {
                     NarrowbandFilterSpec? nb = Spec.Narrowband(filter);
                     nm = nb.HasValue ? nb.Value.CentralWavelengthNm : 0.0;
@@ -6341,6 +6352,11 @@ namespace ExoInstruments.Visualization
                 // source of spatial shading for a resolved body, and a line lands in whichever
                 // channel covers its wavelength.
                 case CameraFilter.OII:    return c.b;  // 372.7 nm, the blue edge
+                // The render has no ultraviolet channel, so blue is the nearest edge of what it
+                // does have. A shading proxy only: the flux itself comes from the photon chain.
+                case CameraFilter.Nuv220:
+                case CameraFilter.Nuv250:
+                case CameraFilter.Nuv330:  return c.b;
                 case CameraFilter.OIII:   return c.g;  // 500.7 nm
                 case CameraFilter.OI:
                 case CameraFilter.NII:

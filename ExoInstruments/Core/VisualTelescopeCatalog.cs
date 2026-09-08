@@ -825,6 +825,25 @@ namespace ExoInstruments.Core
         private static readonly CameraFilter[] AllFilters =
             { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue, CameraFilter.HAlpha };
 
+        // The ACS High Resolution Channel adds three near-ultraviolet positions to the optical
+        // five. Nothing else on this roster reaches below 200 nm from the ground, because ozone
+        // does not allow it.
+        private static readonly CameraFilter[] HrcFilters =
+        {
+            CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue,
+            CameraFilter.HAlpha, CameraFilter.Nuv330, CameraFilter.Nuv250, CameraFilter.Nuv220,
+        };
+
+        // ACS Instrument Handbook, Table 5.2: F330W 3354/588, F250W 2696/549, F220W 2228/485
+        // (central wavelength and width, Angstroms). Peak transmission 1.0 is this file's
+        // convention for NOT PUBLISHED, not for a perfect filter.
+        private static readonly NarrowbandFilterSpec[] HrcNearUvSet =
+        {
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv330, CentralWavelengthNm = 335.4, BandwidthAngstrom = 588.0, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv250, CentralWavelengthNm = 269.6, BandwidthAngstrom = 549.0, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv220, CentralWavelengthNm = 222.8, BandwidthAngstrom = 485.0, PeakTransmission = 1.0 },
+        };
+
         // The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the three positions
         // an amateur narrowband wheel is actually sold with. [N II], [O II] and [O I] are deliberately absent;
         // [N II] at a width that separates it from H-alpha is a specialist item, [O II] at 372 nm is below
@@ -2809,11 +2828,10 @@ namespace ExoInstruments.Core
             CosmicRayEventsPerMinutePerCm2 = 1.013 * 60.0,
             CosmicRayElectronsPerEvent = 1000.0,
 
-            // Tables 5.1 and 5.2, the same five optical positions as the WFC entry so the two
-            // compare directly. NOT REPRESENTED: F220W, F250W and F330W, which are the HRC's real
-            // near-ultraviolet filters and the reason it is interesting below 3500 A. The filter
-            // set here is a closed five, and writing an ultraviolet band onto a slot named Blue
-            // would be a misdeclaration rather than a simplification. Recorded in section 12.
+            // Tables 5.1 and 5.2. The five optical positions are the WFC entry's, so the two
+            // channels compare directly, and three near-ultraviolet positions are added on top:
+            // F330W, F250W and F220W are what this channel is actually for, reaching to 1700 A
+            // where UVIS stops at 2000 and where no ground telescope reaches at all.
             LuminanceCentralWavelengthNm = 590.7,   // F606W
             LuminanceBandwidthAngstrom = 2342.0,
             BlueCentralWavelengthNm = 429.7,        // F435W
@@ -2829,7 +2847,8 @@ namespace ExoInstruments.Core
             GreenFilterPeakTransmission = 1.0,
             RedFilterPeakTransmission = 1.0,
             HAlphaFilterPeakTransmission = 1.0,
-            AvailableFilters = AllFilters,
+            AvailableFilters = HrcFilters,
+            NarrowbandFilters = HrcNearUvSet,
 
             SiteAltitudeMeters = 0.0,
             ZenithSeeingFwhmArcsec = 0.0,
