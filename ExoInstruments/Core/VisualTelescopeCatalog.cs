@@ -769,6 +769,13 @@ namespace ExoInstruments.Core
         public bool IsInterlineTransfer;
 
         /// <summary>
+        /// Fraction of pixels hot enough to be defects, when the instrument publishes its own.
+        /// NaN keeps the pipeline's shared default, which is what every instrument without a
+        /// published figure gets.
+        /// </summary>
+        public double HotPixelFraction = double.NaN;
+
+        /// <summary>
         /// True when the instrument carries an atmospheric dispersion corrector: a pair of
         /// counter-rotating prisms that cancels the atmosphere's own dispersion before it reaches the
         /// detector.
@@ -2519,6 +2526,10 @@ namespace ExoInstruments.Core
             // than a smaller one.
             HasAntiBloomingDrain = true,
             IsInterlineTransfer = true,
+            // Pablo Sect. III.2.4: "a few 'hot' pixels carrying much of the overall dark current",
+            // measured at 0.05 per cent of pixels above 400 ADU in a 10 s exposure at 22 to 23 C.
+            // An uncooled sensor is the one on this roster that earns its own figure.
+            HotPixelFraction = 0.0005,
             // Pablo Table 2: "The mean bias level is 100 +/- 30 ADU at T <= 30 C".
             BiasLevelAdu = 100.0,
 

@@ -6310,7 +6310,10 @@ namespace ExoInstruments.Visualization
             // reference frame unusable as a comparison.
             var rng = new Pcg32(Pcg32.MixSeed(SensorSerialSeed), Pcg32.StreamDefectMap);
             int total = TextureWidth * TextureHeight;
-            int hotCount = Mathf.Max(1, total / 3000);
+            // 1/3000 is the pipeline's shared default, kept for every instrument that publishes
+            // no figure of its own so their defect maps do not move.
+            double hotFraction = double.IsNaN(Spec.HotPixelFraction) ? 1.0 / 3000.0 : Spec.HotPixelFraction;
+            int hotCount = Mathf.Max(1, (int)(total * hotFraction));
             int deadCount = Mathf.Max(1, total / 6000);
             hotPixelIndices = new int[hotCount];
             for (int i = 0; i < hotCount; i++) hotPixelIndices[i] = rng.Next(total);
