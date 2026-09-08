@@ -171,8 +171,7 @@ namespace ExoInstruments
 
             if (all.Count == 0)
             {
-                GUILayout.Label("No telescope in orbit. Build one with the Orbital Astrophysics "
-                              + "Observatory part and launch it.");
+                GUILayout.Label("No telescope in orbit. Build one with a space telescope part and launch it.");
                 ApplySelectedTelescope(null);
                 return;
             }

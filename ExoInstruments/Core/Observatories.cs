@@ -552,8 +552,8 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly InstrumentSpec OrbitalObservatory = new InstrumentSpec
         {
-            Name = "Orbital Observatory",
-            DisplayName = "Orbital Observatory (Space Telescope)",
+            Name = "Hubble WFC3",
+            DisplayName = "Hubble Space Telescope (WFC3/UVIS)",
             Method = DetectionMethod.SolarSystemPhotography,
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
@@ -628,8 +628,8 @@ namespace ExoInstruments.Core
         // show whatever is really flying regardless of which was picked.
         public static readonly InstrumentSpec AcsWideField = new InstrumentSpec
         {
-            Name = "ACS Wide Field",
-            DisplayName = "ACS/WFC (Space Telescope)",
+            Name = "Hubble ACS",
+            DisplayName = "Hubble Space Telescope (ACS/WFC)",
             Method = DetectionMethod.SolarSystemPhotography,
             ReferenceMagnitude = 0.0,
             ReferencePrecision = 0.0,
