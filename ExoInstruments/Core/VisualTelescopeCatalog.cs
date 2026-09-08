@@ -3223,6 +3223,167 @@ namespace ExoInstruments.Core
             },
         };
 
-        public static readonly VisualTelescopeSpec[] All = { BriteToronto, NewHorizonsLorri, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfpc2Pc1, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
+        // Cassini ISS carries 24 filters on two independently stepped wheels, and every exposure is
+        // a COMBINATION of one from each. The eight positions here are the eight combinations whose
+        // measured bandpasses are tabulated, with the clear filter standing in the other wheel
+        // except where the pairing is itself the point.
+        private static readonly CameraFilter[] IssNacFilters =
+        {
+            CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue,
+            CameraFilter.HAlpha, CameraFilter.Methane727, CameraFilter.Continuum750,
+            CameraFilter.Methane889, CameraFilter.Continuum938,
+        };
+
+        // ISS Data User's Guide, Table A.2, central wavelength and bandpass FWHM measured in flight.
+        // MT2 and MT3 sit in methane absorption bands; CB2 and CB3 are the continuum beside them,
+        // and the pair is what sounds cloud depth. Peak transmission 1.0 is this file's convention
+        // for NOT PUBLISHED.
+        private static readonly NarrowbandFilterSpec[] IssNacMethaneSet =
+        {
+            new NarrowbandFilterSpec { Position = CameraFilter.Methane727,   CentralWavelengthNm = 727.421, BandwidthAngstrom =  41.124, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Continuum750, CentralWavelengthNm = 750.505, BandwidthAngstrom = 100.129, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Methane889,   CentralWavelengthNm = 889.194, BandwidthAngstrom = 104.720, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Continuum938, CentralWavelengthNm = 937.964, BandwidthAngstrom =  95.476, PeakTransmission = 1.0 },
+        };
+
+        /// <summary>
+        /// Cassini's Imaging Science Subsystem, Narrow Angle Camera: the camera that took the
+        /// pictures of Saturn everyone has seen, and the only instrument here that can sound an
+        /// atmosphere instead of photographing it.
+        ///
+        /// Two independently stepped filter wheels of twelve, and among them methane bands paired
+        /// with continuum bands on either side. A giant planet is opaque in a methane band and
+        /// clear beside it, so the pair measures how deep a cloud sits. LORRI has no filters at
+        /// all; this is the other end of that trade, and it is slow where LORRI is fast.
+        ///
+        /// Porco et al. 2004, Space Science Reviews 115, 363, Table VII, and the PDS ISSNA
+        /// instrument catalogue, unless another source is named.
+        /// </summary>
+        public static readonly VisualTelescopeSpec CassiniIssNac = new VisualTelescopeSpec
+        {
+            Name = "Cassini ISS Narrow Angle Camera",
+            CameraName = "ISS/NAC",
+            SiteName = "Interplanetary space",
+            PartTitle = "the ISS Narrow Angle Camera",
+
+            // "spectral range from 200 nm - 1100 nm" (PDS ISSNA_INST.CAT). Its response reaches the
+            // near ultraviolet through a Lumogen coating on the CCD.
+            DetectorMinWavelengthNm = 200.0,
+            DetectorMaxWavelengthNm = 1100.0,
+
+            // "an f/10.5 reflecting telescope", "focal length of 2002.70 +/- 0.07 mm in the clear
+            // filter". The aperture follows from the two, 2.00270 / 10.5.
+            ApertureMeters = 2.00270 / 10.5,
+            FocalLengthMeters = 2.00270,
+            BarlowFactor = 1.0,
+            // NOT PUBLISHED as a ratio: Porco Table XIII says the optics transmission term
+            // "Accounts for beam obscuration", so the obscuration is folded into a throughput this
+            // entry does not use, and no diameter ratio is given. Left at zero rather than guessed.
+            SecondaryObstructionFraction = 0.0,
+            // ISS Data User's Guide Sect. 2.3: "Point sources imaged by the NAC and WAC have 4 and
+            // 6 diffraction spikes, respectively." Four spikes is a four vane spider.
+            SpiderVaneCount = 4,
+            // NOT PUBLISHED: the spike count is given, the vane width is not.
+            SpiderVaneWidthMeters = 0.0,
+            PrimaryMirrorPads = null,
+            // A Ritchey-Chretien, primary and secondary "fused silica, aluminium-coated with
+            // multi-layer MgF2 overcoat". No reflectivity figure published.
+            MirrorCount = 2,
+
+            // "a square array of 1024 x 1024 pixels, each 12 microns on a side". The published
+            // 5.9907 microrad per pixel comes back out of 12 um over the focal length to within
+            // 0.02 per cent.
+            NativeSensorWidthPx = 1024,
+            NativeSensorHeightPx = 1024,
+            NativePixelSizeMeters = 12.0e-6,
+
+            // Table VII: "Pixel full well 120,000 e- (normal); 1,000,000 e- (low gain, 4x4)". The
+            // normal well is carried; the million-electron mode is a summed readout this pipeline
+            // does not express, and it is the largest well on the roster by a factor of eight.
+            FullWellElectrons = 120000.0,
+            // Table VII gain states 233 : 99 : 30 : 13 e-/DN. State 2, 30 e-/DN, is the one the
+            // camera flew most and the one its limiting magnitude is quoted at.
+            ElectronsPerAduAtUnityGain = 30.0,
+            // "Signal digitization 12 bits, 4095 DN".
+            AdcBits = 12,
+            // Sect. 3.10: read noise "equal to ~12 e-/pixel, and in the highest gain state with
+            // 13 e-/DN, is equal to 1 DN by design".
+            ReadNoiseElectrons = 12.0,
+            // PDS: -90 +/- 0.2 C was chosen as "a compromise between yielding an acceptably low
+            // dark current (</= 0.3 e-/sec/pixel)". A bound, and the only figure published.
+            DarkCurrentElectronsPerSecond = 0.3,
+            DetectorTemperatureCelsius = -90.0,
+            CoolerDeltaBelowAmbientC = 0.0,
+            Technology = DetectorTechnology.Ccd,
+
+            // PDS: anti-blooming is on by default, with the option to turn it off, and its
+            // published side effect is "to pump electrons into traps in the silicon at the expense
+            // of electrons in adjacent pixels... For long exposures this produces bright/dark pixel
+            // pairs". The drain is modelled; the trap pairs it leaves behind are not.
+            HasAntiBloomingDrain = true,
+
+            // NOT PUBLISHED as a single figure. The PDS gives ~1% QE at 1000 nm and the Data User's
+            // Guide credits "a flat 0.14 e-/photon response from 475 nm down to 200 nm" to the
+            // Lumogen coating. The visible-band value is taken, and the ultraviolet plateau and the
+            // infrared cutoff are not expressed by one scalar.
+            QuantumEfficiency = 0.14,
+
+            // Table VII: "Available exposures 64 commandable settings, 5 msec-1200 s". The 64
+            // discrete steps are not modelled, only the range.
+            MinExposureSeconds = 0.005f,
+            MaxExposureSeconds = 1200.0f,
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // ISS Data User's Guide Table A.2, in-flight measured central wavelength and bandpass
+            // FWHM for each two-filter combination. Broadband positions are taken through the clear
+            // filter in the other wheel, which is how the camera was normally used.
+            LuminanceCentralWavelengthNm = 610.675,   // CL1 + CL2
+            LuminanceBandwidthAngstrom = 3400.56,
+            BlueCentralWavelengthNm = 450.851,        // BL1 + CL2
+            BlueBandwidthAngstrom = 1029.96,
+            GreenCentralWavelengthNm = 568.134,       // CL1 + GRN
+            GreenBandwidthAngstrom = 1130.19,
+            RedCentralWavelengthNm = 650.086,         // RED + CL2
+            RedBandwidthAngstrom = 1499.98,
+            HAlphaCentralWavelengthNm = 655.663,      // HAL + CL2, carried for lightning
+            HAlphaBandwidthAngstrom = 92.647,
+            LuminanceFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
+            AvailableFilters = IssNacFilters,
+            NarrowbandFilters = IssNacMethaneSet,
+
+            // NOT PUBLISHED for this camera in deep space, and no Earth orbit rate on this roster
+            // describes where it flew.
+            CosmicRayEventsPerMinutePerCm2 = 0.0,
+            CosmicRayElectronsPerEvent = 0.0,
+            PhotoResponseNonUniformity = double.NaN,
+            OffsetFixedPatternElectrons = double.NaN,
+            LinearityDeviationAtFullWell = double.NaN,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Cassini",
+                // Table VII: "FWHM of PSF 1.3 pixels" through the clear filters, which at 1.2358
+                // arcsec per pixel is 1.61 arcsec. Table A.2 measures it per filter combination
+                // from 1.25 to 1.56 px; the clear figure is used, being the one Porco quotes.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 610.675 }, new[] { 1.61 }),
+                // NOT PUBLISHED as an instrument figure: Cassini's pointing was the spacecraft's
+                // and its stability depended on the reaction wheels and the observation.
+                HasApertureDoor = false,
+                DownlinkBitsPerPixel = 12,
+                FullFramePixels = 1024L * 1024L,
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { BriteToronto, NewHorizonsLorri, CassiniIssNac, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfpc2Pc1, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }

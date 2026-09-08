@@ -67,7 +67,16 @@ namespace ExoInstruments.Visualization
         // instrument table the narrowband positions use.
         Nuv220,
         Nuv250,
-        Nuv330
+        Nuv330,
+
+        // Methane absorption bands and the continuum bands that pair with them. A giant planet's
+        // atmosphere is opaque in a methane band and clear beside it, so the two together sound how
+        // deep a cloud sits rather than showing the disc. Parameters come from the same per
+        // instrument table the other narrow positions use.
+        Methane727,
+        Continuum750,
+        Methane889,
+        Continuum938
     }
 
     /// <summary>
@@ -4993,6 +5002,10 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Nuv220:
                 case CameraFilter.Nuv250:
                 case CameraFilter.Nuv330:
+                case CameraFilter.Methane727:
+                case CameraFilter.Continuum750:
+                case CameraFilter.Methane889:
+                case CameraFilter.Continuum938:
                 {
                     NarrowbandFilterSpec? nb = Spec.Narrowband(filter);
                     nm = nb.HasValue ? nb.Value.CentralWavelengthNm : 0.0;
@@ -6390,6 +6403,12 @@ namespace ExoInstruments.Visualization
                 case CameraFilter.Nuv220:
                 case CameraFilter.Nuv250:
                 case CameraFilter.Nuv330:  return c.b;
+                // 727 to 938 nm: past the red end of what the render carries, so red is the
+                // nearest edge. A shading proxy only, as above.
+                case CameraFilter.Methane727:
+                case CameraFilter.Continuum750:
+                case CameraFilter.Methane889:
+                case CameraFilter.Continuum938: return c.r;
                 case CameraFilter.OIII:   return c.g;  // 500.7 nm
                 case CameraFilter.OI:
                 case CameraFilter.NII:
