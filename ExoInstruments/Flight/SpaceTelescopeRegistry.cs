@@ -33,6 +33,15 @@ namespace ExoInstruments.Flight
         /// </summary>
         public ProtoPartModuleSnapshot ProtoModule;
 
+        /// <summary>True when this telescope is sitting on a surface rather than flying over one.</summary>
+        public bool IsLanded;
+
+        /// <summary>True when the body it is standing on has an atmosphere. Meaningless in flight.</summary>
+        public bool SurfaceBodyHasAtmosphere;
+
+        /// <summary>Name of the body it is standing on, for the panel's own message.</summary>
+        public string SurfaceBodyName = "";
+
         public bool ApertureDoorOpen;
         public double BlockedApertureFraction;
         public string BlockingPartTitle;
@@ -60,12 +69,37 @@ namespace ExoInstruments.Flight
             || !Instrument.SpacePlatform.HasApertureDoor
             || ApertureDoorOpen;
 
+        /// <summary>Whether this telescope is where its instrument needs to be, and null when it is.</summary>
+        public string SitingProblem
+        {
+            get
+            {
+                SpacePlatformSpec platform = Instrument != null ? Instrument.SpacePlatform : null;
+                if (platform == null) return null;
+
+                if (platform.IsSurfaceObservatory)
+                {
+                    if (!IsLanded) return "not landed: this observatory has to stand on a surface";
+                    if (platform.RequiresAirlessSurface && SurfaceBodyHasAtmosphere)
+                        return string.IsNullOrEmpty(SurfaceBodyName)
+                            ? "this atmosphere absorbs the band it works in"
+                            : SurfaceBodyName + "'s atmosphere absorbs the band it works in";
+                    return null;
+                }
+
+                return IsLanded ? "on the ground: this telescope has to be in flight" : null;
+            }
+        }
+
         public bool Operational =>
             Instrument != null
             && Instrument.SpacePlatform != null
+            && SitingProblem == null
             && ApertureUncovered
             && ApertureObstruction.IsClear(BlockedApertureFraction)
-            && ControlMode != AttitudeControlMode.Uncontrolled
+            // An observatory standing on a surface is held still by the ground, not by wheels.
+            && (Instrument.SpacePlatform.IsSurfaceObservatory
+                || ControlMode != AttitudeControlMode.Uncontrolled)
             && ElectricCharge > 0.01;
 
         /// <summary>Why it is not operational, in one phrase, or null when it is.</summary>
@@ -74,12 +108,15 @@ namespace ExoInstruments.Flight
             get
             {
                 if (Instrument == null || Instrument.SpacePlatform == null) return "instrument not configured";
+                string siting = SitingProblem;
+                if (siting != null) return siting;
                 if (!ApertureUncovered) return "aperture door closed";
                 if (!ApertureObstruction.IsClear(BlockedApertureFraction))
                     return string.IsNullOrEmpty(BlockingPartTitle)
                         ? string.Format("aperture blocked ({0:P0})", BlockedApertureFraction)
                         : string.Format("aperture blocked ({0:P0}) by {1}", BlockedApertureFraction, BlockingPartTitle);
-                if (ControlMode == AttitudeControlMode.Uncontrolled) return "no attitude control";
+                if (!Instrument.SpacePlatform.IsSurfaceObservatory
+                    && ControlMode == AttitudeControlMode.Uncontrolled) return "no attitude control";
                 if (ElectricCharge <= 0.01) return "no electric charge";
                 return null;
             }
@@ -148,9 +185,12 @@ namespace ExoInstruments.Flight
         }
 
         /// <summary>
-        /// Every telescope in the save that is in a state worth listing: on a vessel that is in
-        /// orbit (or at least not landed or splashed, since a telescope on the ground is not a
-        /// space telescope) and that carries the module.
+        /// Every telescope in the save worth listing, in orbit or standing on a surface.
+        ///
+        /// Landed vessels used to be dropped here on the grounds that a telescope on the ground is
+        /// not a space telescope. That was true while every instrument in the catalogue was meant
+        /// to fly; a surface observatory is a real thing, and whether a particular one can work
+        /// where it was put is a question for the instrument, not for this scan.
         /// </summary>
         public static List<SpaceTelescopeLink> FindAll()
         {
@@ -161,7 +201,6 @@ namespace ExoInstruments.Flight
             {
                 Vessel v = FlightGlobals.Vessels[i];
                 if (v == null || v.state == Vessel.State.DEAD) continue;
-                if (v.LandedOrSplashed) continue;
 
                 SpaceTelescopeLink link = v.loaded ? FromLoaded(v) : FromProto(v);
                 if (link != null) links.Add(link);
@@ -190,6 +229,9 @@ namespace ExoInstruments.Flight
             {
                 Vessel = v,
                 VesselName = v.vesselName,
+                IsLanded = v.LandedOrSplashed,
+                SurfaceBodyHasAtmosphere = v.mainBody != null && v.mainBody.atmosphere,
+                SurfaceBodyName = v.mainBody != null ? v.mainBody.bodyName : "",
                 Instrument = module.Instrument,
                 AlternateInstrumentName = module.alternateInstrumentName ?? "",
                 Module = module,
@@ -241,6 +283,9 @@ namespace ExoInstruments.Flight
                     {
                         Vessel = v,
                         VesselName = v.vesselName,
+                        IsLanded = v.LandedOrSplashed,
+                        SurfaceBodyHasAtmosphere = v.mainBody != null && v.mainBody.atmosphere,
+                        SurfaceBodyName = v.mainBody != null ? v.mainBody.bodyName : "",
                         Instrument = spec,
                         AlternateInstrumentName = alternateName ?? "",
                         Module = null,

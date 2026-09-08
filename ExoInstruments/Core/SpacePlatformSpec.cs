@@ -128,6 +128,29 @@ namespace ExoInstruments.Core
         /// control and risks pointing at the Sun. That is why it is modelled as a hard gate on
         /// observing rather than as a cosmetic animation.
         /// </summary>
+        /// <summary>
+        /// True when this instrument observes from a SURFACE rather than from orbit: it has to be
+        /// landed to work, and being in flight is what stops it.
+        /// </summary>
+        public bool IsSurfaceObservatory;
+
+        /// <summary>
+        /// True when the surface it stands on must have no atmosphere. Not a gameplay restriction:
+        /// an instrument working in the near ultraviolet has no ground-level photons to collect
+        /// under any appreciable air, which is the reason such a telescope is sent somewhere
+        /// airless in the first place.
+        /// </summary>
+        public bool RequiresAirlessSurface;
+
+        /// <summary>
+        /// The altitude window above the local horizon this instrument can actually point into,
+        /// in degrees. Equal values mean no restriction. A telescope that points by steering a
+        /// small flat mirror rather than by moving itself has a real and narrow one, and where it
+        /// was landed then decides what it can ever see.
+        /// </summary>
+        public double MinTargetAltitudeDeg;
+        public double MaxTargetAltitudeDeg;
+
         public bool HasApertureDoor = true;
 
         // --- Slewing -----------------------------------------------------------------------
