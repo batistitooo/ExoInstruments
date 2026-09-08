@@ -4662,6 +4662,11 @@ namespace ExoInstruments.Visualization
                 raw[i] += NextGaussian(rngRead, readNoiseElectrons)
                         + SensorNonUniformity.OffsetElectrons(offsetFpnMap, i);
 
+            // Last, because it undoes everything above rather than adding to it: there is no
+            // silicon between two butted chips, so the gap collected no photons, holds no dark
+            // current and was read by no amplifier.
+            ApplyChipGap(raw);
+
             // Digitisation: charge divided by the real conversion factor K, truncated to an integer
             // count the way an ADC actually works, and clipped at the converter's own top code,
             // which for FORS2 arrives well before its full well ever does.
@@ -5516,6 +5521,24 @@ namespace ExoInstruments.Visualization
         // CCD column/shift-register direction), which can themselves overflow in turn, producing the familiar
         // bloom trail through a saturated star or planet limb instead of a hard-clipped blob. Operates in
         // place, pre-clamp.
+        // Blanks the dead band between two butted CCDs. Centred on the short axis, which is where
+        // both mosaics on this roster are split, and scaled by the current binning.
+        private void ApplyChipGap(float[] raw)
+        {
+            if (Spec.ChipGapPixels <= 0) return;
+
+            int w = TextureWidth, h = TextureHeight;
+            int gap = Math.Max(1, Spec.ChipGapPixels / Math.Max(1, BinningFactor));
+            int start = (h - gap) / 2;
+            if (start < 0) return;
+
+            for (int y = start; y < start + gap && y < h; y++)
+            {
+                int row = y * w;
+                for (int x = 0; x < w; x++) raw[row + x] = 0f;
+            }
+        }
+
         private void ApplyBlooming(float[] raw, float fullWellElectrons)
         {
             int w = TextureWidth, h = TextureHeight;

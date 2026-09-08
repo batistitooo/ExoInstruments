@@ -769,6 +769,17 @@ namespace ExoInstruments.Core
         public bool IsInterlineTransfer;
 
         /// <summary>
+        /// Width in native pixels of the dead band between two butted CCDs, running across the
+        /// sensor's short axis. Zero for a monolithic detector.
+        ///
+        /// There is no silicon in the gap: it collects nothing, no amplifier reads it, and it
+        /// arrives in the frame as a blank band, which is what a real mosaic frame shows. The
+        /// sensor height carried by such an instrument is therefore the two chips PLUS this gap,
+        /// so the sky the frame spans is the sky the real instrument spans.
+        /// </summary>
+        public int ChipGapPixels;
+
+        /// <summary>
         /// Fraction of pixels hot enough to be defects, when the instrument publishes its own.
         /// NaN keeps the pipeline's shared default, which is what every instrument without a
         /// published figure gets.
@@ -1974,14 +1985,12 @@ namespace ExoInstruments.Core
             AdaptiveOpticsFwhmArcsec = 0.0,
 
             // WFC3 IHB Table 5.1: "2 butted 2051 x 4096, 31-pixel gap (1.2")", 15 um pixels.
-            // The imaging pipeline works on ONE rectangular frame, so the sensor carried here is
-            // one 4096 x 4102 chip: the two CCDs butted along their long edges, 2 x 2051 rows,
-            // WITHOUT the 31-pixel gap, which cannot be represented as a rectangle. The gap is a
-            // real feature of a real WFC3 frame and its absence is recorded in section 12. The
-            // downlink volume, where the gap does not matter, uses the true pixel count (see
-            // SpacePlatformSpec.FullFramePixels).
+            // Two CCDs butted along their long edges, so the height is 2 x 2051 rows plus the gap,
+            // and the gap itself is blanked in the frame the way a real WFC3 frame shows it. The
+            // downlink volume counts silicon only (see SpacePlatformSpec.FullFramePixels).
             NativeSensorWidthPx = 4096,
-            NativeSensorHeightPx = 4102,
+            NativeSensorHeightPx = 2 * 2051 + 31,
+            ChipGapPixels = 31,
             NativePixelSizeMeters = 15.0e-6,
 
             // WFC3 IHB Table 5.1: "50-59% @ 250 nm, 68-69% @ 600 nm, 47-52% @ 800 nm". Three
@@ -2145,9 +2154,8 @@ namespace ExoInstruments.Core
                 // multi-orbit visit is the same 6.5 minutes in Cycle 34, so nothing is lost by it.
                 GuideStarAcquisitionSeconds = 6.5 * 60.0,
 
-                // The true readout: two 2051 x 4096 CCDs. Used for the downlink volume, where the
-                // 31-pixel gap between them genuinely does not travel and the imaging pipeline's
-                // rectangular approximation does not apply.
+                // The true readout: two 2051 x 4096 CCDs. Silicon only, because the gap between
+                // them is blank in the frame and nothing about it is downlinked.
                 FullFramePixels = 2L * 2051L * 4096L,
                 DownlinkBitsPerPixel = 16,
             },
@@ -2688,11 +2696,13 @@ namespace ExoInstruments.Core
             // product would double count it. Same treatment as the WFC3 entries.
             MirrorCount = 0,
 
-            // "2 x 2048 x 4096 pixels", butted along the long edge. Carried as one 4096 x 4096
-            // rectangle: the pipeline works on one frame, so the interchip gap is absent here as
-            // it is in the WFC3/UVIS entry. Recorded in section 12.
+            // "2 x 2048 x 4096 pixels", butted along the long edge, with a gap of about 50
+            // pixels (2.5 arcsec at this plate scale) between the two chips. The height is the two
+            // chips plus that gap, so the frame spans the sky the real instrument spans and the
+            // dead band lands where the real one does.
             NativeSensorWidthPx = 4096,
-            NativeSensorHeightPx = 4096,
+            NativeSensorHeightPx = 2 * 2048 + 50,
+            ChipGapPixels = 50,
             NativePixelSizeMeters = 15.0e-6,
 
             // "~75% at 4000 A, ~81% at 6000 A, ~66% at 8000 A".
