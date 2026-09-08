@@ -2636,6 +2636,223 @@ namespace ExoInstruments.Core
             },
         };
 
-        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleWfc3Uvis, HubbleWfc3Ir };
+        /// <summary>
+        /// Hubble's Advanced Camera for Surveys, Wide Field Channel: the widest field ever flown on
+        /// this telescope, and the coarsest of its CCD cameras. Where WFC3/UVIS is sampled finely
+        /// enough to resolve the point spread function, ACS/WFC trades that away for area.
+        ///
+        /// All optics figures are the same 2.4 m OTA as the WFC3 entries, and sourced there. All
+        /// detector figures are the ACS Instrument Handbook, Table 3.1 (Sect. 3.5, Quick Reference
+        /// Guide) unless another section is named.
+        /// </summary>
+        public static readonly VisualTelescopeSpec HubbleAcsWfc = new VisualTelescopeSpec
+        {
+            Name = "Hubble Space Telescope (OTA/ACS-WFC)",
+            CameraName = "ACS/WFC",
+            SiteName = "Low Earth orbit",
+            PartTitle = "the Orbital Astrophysics Observatory (ACS/WFC)",
+
+            ApertureMeters = 2.4,
+            // From the published plate scale, as the WFC3 entries do: 206265 * 15 um / 0.05.
+            FocalLengthMeters = 206265.0 * 15.0e-6 / 0.05,
+            BarlowFactor = 1.0,
+            SecondaryObstructionFraction = 0.330,
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.022 * 1.2,
+            PrimaryMirrorPads = new[]
+            {
+                new PupilPad(0.8921,  0.0000, 0.065),
+                new PupilPad(-0.4615, 0.7555, 0.065),
+                new PupilPad(-0.4564, -0.7606, 0.065),
+            },
+            // STScI publishes throughput measured end to end, OTA included, so the reflection
+            // product would double count it. Same treatment as the WFC3 entries.
+            MirrorCount = 0,
+
+            // "2 x 2048 x 4096 pixels", butted along the long edge. Carried as one 4096 x 4096
+            // rectangle: the pipeline works on one frame, so the interchip gap is absent here as
+            // it is in the WFC3/UVIS entry. Recorded in section 12.
+            NativeSensorWidthPx = 4096,
+            NativeSensorHeightPx = 4096,
+            NativePixelSizeMeters = 15.0e-6,
+
+            // "~75% at 4000 A, ~81% at 6000 A, ~66% at 8000 A".
+            QuantumEfficiencyCurve = new SpectralCurve(
+                new[] { 400.0, 600.0, 800.0 },
+                new[] { 0.75,  0.81,  0.66 }),
+            // "~77,400 +/- 5000 e-". Sect. 4.3.1 adds that the well itself "can reach ~95,000 e-
+            // or more"; the saturation figure is the one that bounds a science frame.
+            FullWellElectrons = 77400.0,
+            // Midpoint of the published "3.75 e- to 5.65 e-". The pipeline carries one value where
+            // four amplifiers differ; Tables 4.2 and 4.3 give them individually.
+            ReadNoiseElectrons = 4.70,
+            DarkCurrentElectronsPerSecond = 0.0161,
+            DetectorTemperatureCelsius = -81.0,
+            CoolerDeltaBelowAmbientC = 0.0,
+            Technology = DetectorTechnology.Ccd,
+
+            AdcBits = 16,                                  // "Max 65,535 DN"
+            ElectronsPerAduAtUnityGain = 2.002,            // Table 4.2, amplifier A at the default GAIN=2
+            MinExposureSeconds = 0.5f,                     // Sect. 8.2
+            MaxExposureSeconds = 3600.0f,                  // Sect. 8.2
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // Miles et al. 2021, ApJ 918, 86, Table 6, ACS/WFC: 1.165 CR/s/cm2 measured over 12,806
+            // images. Table 4 gives that instrument's own median deposition.
+            CosmicRayEventsPerMinutePerCm2 = 1.165 * 60.0,
+            CosmicRayElectronsPerEvent = 1998.5,
+
+            // Tables 5.1 and 5.2. Five of the thirteen the channel carries, on the five positions
+            // this pipeline has: the widest broadband as luminance, then B, V and R, then H-alpha.
+            LuminanceCentralWavelengthNm = 590.7,   // F606W
+            LuminanceBandwidthAngstrom = 2342.0,
+            BlueCentralWavelengthNm = 429.7,        // F435W
+            BlueBandwidthAngstrom = 1038.0,
+            GreenCentralWavelengthNm = 534.6,       // F555W
+            GreenBandwidthAngstrom = 1193.0,
+            RedCentralWavelengthNm = 631.8,         // F625W
+            RedBandwidthAngstrom = 1442.0,
+            HAlphaCentralWavelengthNm = 658.4,      // F658N
+            HAlphaBandwidthAngstrom = 78.0,
+            // 1.0 means not applied here: the throughput curves already carry the filter.
+            LuminanceFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
+            AvailableFilters = AllFilters,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Hubble Space Telescope",
+                SunAvoidanceAngleDeg = 62.5,
+                BrightLimbAvoidanceAngleDeg = 20.0,
+                DarkLimbAvoidanceAngleDeg = 7.6,
+                MoonAvoidanceAngleDeg = 9.0,
+                PointingJitterArcsecRms = 0.008,
+                // Sect. 5.6: "The PSF FWHM in F550M, for example, can vary by 20% (0.10 to 0.13
+                // arcseconds) over the field." One filter, so the curve is flat at the midpoint,
+                // and this channel really does deliver about half WFC3/UVIS's resolution behind
+                // the same mirror. No ACS equivalent of WFC3 IHB Table 6.7 is published.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.115 }),
+                HasApertureDoor = true,
+                DownlinkBitsPerPixel = 16,
+                FullFramePixels = 2L * 2048L * 4096L,
+            },
+        };
+
+        /// <summary>
+        /// Hubble's ACS High Resolution Channel: the finest plate scale ever flown on this
+        /// telescope, and a field of 29 x 26 arcsec, which is smaller than Jupiter. Critically
+        /// sampled at 6300 A, where WFC3/UVIS is not.
+        ///
+        /// Unavailable since January 2007, so the handbook carries it for archive. Figures are the
+        /// ACS Instrument Handbook, Table 3.1, unless another section is named.
+        /// </summary>
+        public static readonly VisualTelescopeSpec HubbleAcsHrc = new VisualTelescopeSpec
+        {
+            Name = "Hubble Space Telescope (OTA/ACS-HRC)",
+            CameraName = "ACS/HRC",
+            SiteName = "Low Earth orbit",
+            PartTitle = "the Orbital Astrophysics Observatory (ACS/HRC)",
+
+            ApertureMeters = 2.4,
+            // 206265 * 21 um / 0.025. The published scale is anisotropic, "~0.028 x 0.025", and
+            // this pipeline carries one; the y axis is taken, as the WFC3/UVIS entry takes UVIS1's.
+            FocalLengthMeters = 206265.0 * 21.0e-6 / 0.025,
+            BarlowFactor = 1.0,
+            SecondaryObstructionFraction = 0.330,
+            SpiderVaneCount = 4,
+            SpiderVaneWidthMeters = 0.022 * 1.2,
+            PrimaryMirrorPads = new[]
+            {
+                new PupilPad(0.8921,  0.0000, 0.065),
+                new PupilPad(-0.4615, 0.7555, 0.065),
+                new PupilPad(-0.4564, -0.7606, 0.065),
+            },
+            MirrorCount = 0,
+
+            NativeSensorWidthPx = 1024,
+            NativeSensorHeightPx = 1024,
+            NativePixelSizeMeters = 21.0e-6,
+
+            // "~32% at 2500 A, ~69% at 6000 A, ~53% at 8000 A". The 2500 A point is the reason
+            // this channel exists: it reaches 1700 A, where WFC3/UVIS stops at 2000.
+            QuantumEfficiencyCurve = new SpectralCurve(
+                new[] { 250.0, 600.0, 800.0 },
+                new[] { 0.32,  0.69,  0.53 }),
+            // "~155,000 +/- 10,000 e-". Sect. 4.3.1 puts the variation across the detector at
+            // about 18 per cent.
+            FullWellElectrons = 155000.0,
+            ReadNoiseElectrons = 4.7,
+            DarkCurrentElectronsPerSecond = 0.0058,
+            DetectorTemperatureCelsius = -80.0,
+            CoolerDeltaBelowAmbientC = 0.0,
+            Technology = DetectorTechnology.Ccd,
+
+            AdcBits = 16,                                  // "Max 65,535 DN"
+            ElectronsPerAduAtUnityGain = 2.216,            // Table 4.2, amplifier C, the default
+            MinExposureSeconds = 0.1f,                     // Sect. 8.2
+            MaxExposureSeconds = 3600.0f,
+            MinGain = 1.0f,
+            MaxGain = 1.0f,
+
+            // Miles et al. 2021, Table 6, ACS/HRC: 1.013 CR/s/cm2 over 5,297 images. The charge
+            // per event is NOT that paper's HRC row, which was not read: it is the WFC3 IHB
+            // Sect. 5.4.10 median the two WFC3 entries already carry, and is not HRC specific.
+            CosmicRayEventsPerMinutePerCm2 = 1.013 * 60.0,
+            CosmicRayElectronsPerEvent = 1000.0,
+
+            // Tables 5.1 and 5.2, the same five optical positions as the WFC entry so the two
+            // compare directly. NOT REPRESENTED: F220W, F250W and F330W, which are the HRC's real
+            // near-ultraviolet filters and the reason it is interesting below 3500 A. The filter
+            // set here is a closed five, and writing an ultraviolet band onto a slot named Blue
+            // would be a misdeclaration rather than a simplification. Recorded in section 12.
+            LuminanceCentralWavelengthNm = 590.7,   // F606W
+            LuminanceBandwidthAngstrom = 2342.0,
+            BlueCentralWavelengthNm = 429.7,        // F435W
+            BlueBandwidthAngstrom = 1038.0,
+            GreenCentralWavelengthNm = 534.6,       // F555W
+            GreenBandwidthAngstrom = 1193.0,
+            RedCentralWavelengthNm = 631.8,         // F625W
+            RedBandwidthAngstrom = 1442.0,
+            HAlphaCentralWavelengthNm = 658.4,      // F658N
+            HAlphaBandwidthAngstrom = 78.0,
+            LuminanceFilterPeakTransmission = 1.0,
+            BlueFilterPeakTransmission = 1.0,
+            GreenFilterPeakTransmission = 1.0,
+            RedFilterPeakTransmission = 1.0,
+            HAlphaFilterPeakTransmission = 1.0,
+            AvailableFilters = AllFilters,
+
+            SiteAltitudeMeters = 0.0,
+            ZenithSeeingFwhmArcsec = 0.0,
+            AstigmatismStrengthPxAtCorner = 0.0f,
+            AlwaysAutoguided = true,
+
+            SpacePlatform = new SpacePlatformSpec
+            {
+                PlatformName = "Hubble Space Telescope",
+                SunAvoidanceAngleDeg = 62.5,
+                BrightLimbAvoidanceAngleDeg = 20.0,
+                DarkLimbAvoidanceAngleDeg = 7.6,
+                MoonAvoidanceAngleDeg = 9.0,
+                PointingJitterArcsecRms = 0.008,
+                // Sect. 5.6: "The HRC FWHM is 0.060 to 0.073 arcseconds in F550M." Flat at the
+                // midpoint, one filter, same limitation as the WFC entry.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.0665 }),
+                HasApertureDoor = true,
+                DownlinkBitsPerPixel = 16,
+                FullFramePixels = 1024L * 1024L,
+            },
+        };
+
+        public static readonly VisualTelescopeSpec[] All = { BriteToronto, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere, HubbleAcsWfc, HubbleAcsHrc, HubbleWfc3Uvis, HubbleWfc3Ir };
     }
 }

@@ -622,10 +622,65 @@ namespace ExoInstruments.Core
             ScienceRewardMultiplier = 0.0, // no detections to reward; this instrument does not feed the science economy
         };
 
+        public static readonly InstrumentSpec AcsWideField = new InstrumentSpec
+        {
+            Name = "ACS Wide Field",
+            DisplayName = "ACS/WFC (Space Telescope)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "ACS Instrument Handbook, Table 3.1 and Sects. 4.2, 4.3.1, 5.6, 8.2; "
+                     + "filters from Tables 5.1 and 5.2. See VisualTelescopeCatalog.HubbleAcsWfc for the "
+                     + "per-figure sourcing.",
+            Description = "The widest field ever flown on Hubble, and the coarsest of its CCD cameras. Four times the sky "
+                        + "of WFC3/UVIS in one frame, paid for in resolution: its delivered point spread "
+                        + "function is about 0.115 arcseconds against UVIS's 0.067, behind the same "
+                        + "2.4-metre mirror. The camera to point at something large.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.HubbleAcsWfc.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.HubbleAcsWfc,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0,
+        };
+
+        public static readonly InstrumentSpec AcsHighRes = new InstrumentSpec
+        {
+            Name = "ACS High Resolution",
+            DisplayName = "ACS/HRC (Space Telescope)",
+            Method = DetectionMethod.SolarSystemPhotography,
+            ReferenceMagnitude = 0.0,
+            ReferencePrecision = 0.0,
+            PrecisionExponent = 0.0,
+            CadenceSeconds = 0.0,
+            Citation = "ACS Instrument Handbook, Table 3.1 and Sects. 4.2, 4.3.1, 5.6, 8.2; "
+                     + "filters from Tables 5.1 and 5.2. See VisualTelescopeCatalog.HubbleAcsHrc for the "
+                     + "per-figure sourcing.",
+            Description = "The finest sampling ever flown on Hubble, critically sampled at 6300 Angstroms where UVIS is "
+                        + "not, and reaching 1700 Angstroms where UVIS stops at 2000. The price is the "
+                        + "field: 29 by 26 arcseconds is smaller than Jupiter, so no planet fits in it "
+                        + "whole and you are always looking at a crop. Unavailable on the real telescope "
+                        + "since January 2007.",
+            IsSpaceBased = true,
+            ApertureMeters = VisualTelescopeCatalog.HubbleAcsHrc.ApertureMeters,
+            SiteAltitudeMeters = 0.0,
+            VisualTelescope = VisualTelescopeCatalog.HubbleAcsHrc,
+            UnlockedByDefault = false,
+            UnlockCostFunds = 0.0,
+            UnlockScienceThreshold = 0.0,
+            ScanCostFunds = 0.0,
+            ScienceRewardMultiplier = 0.0,
+        };
+
         public static readonly InstrumentSpec[] All =
         {
             Speculoos, Wasp, Tess, Harps, Espresso, Sophie, Elt, RedCat51, Rc20, Cdk1000, Fors2Vlt, Sphere,
-            BriteToronto, OrbitalObservatory
+            BriteToronto, AcsWideField, AcsHighRes, OrbitalObservatory
         };
     }
 }
