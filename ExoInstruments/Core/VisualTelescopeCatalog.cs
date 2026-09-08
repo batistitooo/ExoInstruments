@@ -1922,7 +1922,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA)",
             CameraName = "WFC3/UVIS",
             SiteName = "Low Earth orbit",
-            PartTitle = "the Hubble Space Telescope",
+            PartTitle = "the Hubble Space Telescope (WFC3/UVIS)",
             // WFC3 IHB Table 5.1, "Operating Temperature": -83 C for the UVIS CCDs.
             DetectorTemperatureCelsius = -83.0,
             // No adjustable cooler: the detector runs at a fixed setpoint held by the
@@ -2194,7 +2194,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA/IR)",
             CameraName = "WFC3/IR",
             SiteName = "Low Earth orbit",
-            PartTitle = "the Hubble Space Telescope",
+            PartTitle = "the Hubble Space Telescope (WFC3/UVIS)",
 
             Technology = DetectorTechnology.HgCdTeArray,
 
@@ -2677,7 +2677,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA/ACS-WFC)",
             CameraName = "ACS/WFC",
             SiteName = "Low Earth orbit",
-            PartTitle = "the Hubble Space Telescope (ACS)",
+            PartTitle = "the Hubble Space Telescope (ACS/WFC)",
 
             ApertureMeters = 2.4,
             // From the published plate scale, as the WFC3 entries do: 206265 * 15 um / 0.05.
@@ -2789,7 +2789,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA/ACS-HRC)",
             CameraName = "ACS/HRC",
             SiteName = "Low Earth orbit",
-            PartTitle = "the Hubble Space Telescope (ACS)",
+            PartTitle = "the Hubble Space Telescope (ACS/WFC)",
 
             ApertureMeters = 2.4,
             // 206265 * 21 um / 0.025. The published scale is anisotropic, "~0.028 x 0.025", and
