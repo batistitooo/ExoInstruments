@@ -188,7 +188,18 @@ namespace ExoInstruments.Visualization
             ExposureSeconds = Mathf.Clamp(ExposureSeconds, MinExposureSeconds, MaxExposureSeconds);
             Gain = Mathf.Clamp(Gain, MinGain, MaxGain);
             if (Spec.AlwaysAutoguided) Autoguiding = true;
-            if (Array.IndexOf(Spec.AvailableFilters, Filter) < 0) Filter = CameraFilter.Luminance;
+            // Falls back to a position the instrument actually carries. Luminance is the right
+            // default for every wheel on the roster today and stays first choice, but it is not a
+            // position every real instrument has: a single-fixed-filter telescope would otherwise
+            // land on one it does not own, and read a central wavelength of zero from there into
+            // OpticalPsf and SystemBandpass.
+            if (Spec.AvailableFilters != null && Spec.AvailableFilters.Length > 0
+                && Array.IndexOf(Spec.AvailableFilters, Filter) < 0)
+            {
+                Filter = Array.IndexOf(Spec.AvailableFilters, CameraFilter.Luminance) >= 0
+                       ? CameraFilter.Luminance
+                       : Spec.AvailableFilters[0];
+            }
 
             // A cooler setpoint belongs to the camera that was on the telescope, not to the
             // observer: carrying -30 C from a TEC-cooled ZWO onto FORS2's cryogenic detector would
