@@ -754,6 +754,21 @@ namespace ExoInstruments.Core
         public double BuiltInDefocusDiscRadiusPx;
 
         /// <summary>
+        /// True when the sensor drains overfull pixels to the substrate instead of spilling them
+        /// into their neighbours. An anti-blooming device does not bloom, so the column spill is
+        /// skipped: what a saturated pixel does there is stop, not overflow.
+        /// </summary>
+        public bool HasAntiBloomingDrain;
+
+        /// <summary>
+        /// True for an interline-transfer sensor, which shifts every pixel into a shielded vertical
+        /// register in microseconds rather than clocking the image down through the light-sensitive
+        /// array. That is why such a sensor needs no mechanical shutter, and why the full-frame
+        /// transfer smear the rest of the roster carries does not apply to it.
+        /// </summary>
+        public bool IsInterlineTransfer;
+
+        /// <summary>
         /// True when the instrument carries an atmospheric dispersion corrector: a pair of
         /// counter-rotating prisms that cancels the atmosphere's own dispersion before it reaches the
         /// detector.
@@ -2495,6 +2510,15 @@ namespace ExoInstruments.Core
             // curve is published anywhere, so the scalar stands alone.
             QuantumEfficiency = 0.50,
             Technology = DetectorTechnology.Ccd,
+            // Pablo Sect. II.2, both of these: "The CCD has anti-blooming protection to reduce the
+            // spread of saturated signal to other pixels", the charge going "into the substrate
+            // before it is transferred into the vertical register"; and "It is a front-illuminated,
+            // interline-transfer (ILT) device, not requiring a mechanical shutter to avoid image
+            // smearing when read out." Every other CCD on this roster is full-frame and back
+            // illuminated, so these two are what make this sensor a different architecture rather
+            // than a smaller one.
+            HasAntiBloomingDrain = true,
+            IsInterlineTransfer = true,
             // Pablo Table 2: "The mean bias level is 100 +/- 30 ADU at T <= 30 C".
             BiasLevelAdu = 100.0,
 

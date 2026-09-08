@@ -4567,7 +4567,17 @@ namespace ExoInstruments.Visualization
             }
             else
             {
-                ApplyBlooming(raw, (float)FullWellElectrons);
+                // An anti-blooming sensor drains the excess instead of spilling it, so the well
+                // is capped where it would otherwise overflow into the column.
+                if (Spec.HasAntiBloomingDrain)
+                {
+                    float ceiling = (float)FullWellElectrons;
+                    for (int i = 0; i < n; i++) if (raw[i] > ceiling) raw[i] = ceiling;
+                }
+                else
+                {
+                    ApplyBlooming(raw, (float)FullWellElectrons);
+                }
                 DumpStage("blooming", raw);
 
                 // What this exposure leaves behind for the next one, taken from the well AFTER
@@ -4582,7 +4592,9 @@ namespace ExoInstruments.Visualization
                 // overexposure requires.
                 ApplyPersistenceCapture(raw);
 
-                ApplyChargeTransferSmear(raw);
+                // Interline transfer moves the frame into a shielded register in microseconds,
+                // so there is no clocking through the light-sensitive array to smear it.
+                if (!Spec.IsInterlineTransfer) ApplyChargeTransferSmear(raw);
                 DumpStage("cti", raw);
             }
 
