@@ -780,6 +780,18 @@ namespace ExoInstruments.Core
         public int ChipGapPixels;
 
         /// <summary>
+        /// The detector's own sensitivity range in nanometres, published per instrument. NaN falls
+        /// back to the pipeline's silicon-era default.
+        ///
+        /// This bounds the sub-bands a chromatic PSF is built over. It has to be the instrument's
+        /// range and not a shared constant: an infrared array works entirely above where a silicon
+        /// CCD stops, and a clamp written for silicon truncates its reddest filters or refuses them
+        /// a kernel outright.
+        /// </summary>
+        public double DetectorMinWavelengthNm = double.NaN;
+        public double DetectorMaxWavelengthNm = double.NaN;
+
+        /// <summary>
         /// Fraction of pixels hot enough to be defects, when the instrument publishes its own.
         /// NaN keeps the pipeline's shared default, which is what every instrument without a
         /// published figure gets.
@@ -1930,6 +1942,10 @@ namespace ExoInstruments.Core
             // dial. Same treatment as FORS2 and SPHERE.
             CoolerDeltaBelowAmbientC = 0.0,
 
+            // WFC3 IHB Table 5.1: the UVIS CCDs run 200 to 1000 nm, the near-ultraviolet no ground telescope reaches.
+            DetectorMinWavelengthNm = 200.0,
+            DetectorMaxWavelengthNm = 1000.0,
+
             ApertureMeters = 2.4,
 
             // THE EFFECTIVE FOCAL LENGTH AT WFC3/UVIS, NOT THE OTA's OWN. The telescope is f/24,
@@ -2204,6 +2220,10 @@ namespace ExoInstruments.Core
             DetectorTemperatureCelsius = 145.0 - 273.15,
 
             // ---- The OTA. Identical to WFC3/UVIS because it IS the same telescope. ----
+            // WFC3 IHB Table 5.1: the HgCdTe array runs 800 to 1700 nm, entirely above where silicon stops.
+            DetectorMinWavelengthNm = 800.0,
+            DetectorMaxWavelengthNm = 1700.0,
+
             ApertureMeters = 2.4,
             // As on UVIS, and it must be stated rather than left to default to zero: MinFovDeg is
             // MaxFovDeg / BarlowFactor, so a zero here makes the narrow end of the zoom infinite
@@ -2679,6 +2699,10 @@ namespace ExoInstruments.Core
             SiteName = "Low Earth orbit",
             PartTitle = "the Hubble Space Telescope (ACS WFC/HRC)",
 
+            // ACS Instrument Handbook, Table 3.1: "~3500 A to 11,000 A".
+            DetectorMinWavelengthNm = 350.0,
+            DetectorMaxWavelengthNm = 1100.0,
+
             ApertureMeters = 2.4,
             // From the published plate scale, as the WFC3 entries do: 206265 * 15 um / 0.05.
             FocalLengthMeters = 206265.0 * 15.0e-6 / 0.05,
@@ -2790,6 +2814,10 @@ namespace ExoInstruments.Core
             CameraName = "ACS/HRC",
             SiteName = "Low Earth orbit",
             PartTitle = "the Hubble Space Telescope (ACS WFC/HRC)",
+
+            // ACS Instrument Handbook, Table 3.1: "~1700 A to 11,000 A".
+            DetectorMinWavelengthNm = 170.0,
+            DetectorMaxWavelengthNm = 1100.0,
 
             ApertureMeters = 2.4,
             // 206265 * 21 um / 0.025. The published scale is anisotropic, "~0.028 x 0.025", and

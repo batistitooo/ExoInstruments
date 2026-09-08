@@ -3282,8 +3282,18 @@ namespace ExoInstruments.Visualization
             double bandwidth = FilterBandwidthAngstrom(Filter) * 1e-10;
             if (!(bandwidth > 0.0)) return null;
 
-            double lo = Math.Max(150e-9, centralWavelength - 0.75 * bandwidth);
-            double hi = Math.Min(1200e-9, centralWavelength + 0.75 * bandwidth);
+            // Bounded by the DETECTOR's own published range, not by a pipeline constant. The
+            // 150 to 1200 nm written here before was a silicon-era default, and on the infrared
+            // array it cut every passband short and left F160W, whose band starts at 1336 nm,
+            // with no chromatic kernel at all. NaN keeps the old default for anything that does
+            // not publish a range.
+            double detectorLo = double.IsNaN(Spec.DetectorMinWavelengthNm)
+                              ? 150e-9 : Spec.DetectorMinWavelengthNm * 1e-9;
+            double detectorHi = double.IsNaN(Spec.DetectorMaxWavelengthNm)
+                              ? 1200e-9 : Spec.DetectorMaxWavelengthNm * 1e-9;
+
+            double lo = Math.Max(detectorLo, centralWavelength - 0.75 * bandwidth);
+            double hi = Math.Min(detectorHi, centralWavelength + 0.75 * bandwidth);
             if (!(hi > lo)) return null;
 
             // Zero zenith geometry: there is no atmosphere to disperse anything, so every offset
