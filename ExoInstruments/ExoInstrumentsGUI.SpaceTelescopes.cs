@@ -73,6 +73,63 @@ namespace ExoInstruments
         // unlocks the orbital instrument row (see Observatories.OrbitalObservatory).
         private bool HasAnyOrbitalTelescope => AvailableTelescopes.Count > 0;
 
+        // Whether a telescope carrying THIS instrument is up there, which is what a roster of several
+        // orbital instruments needs: HasAnyOrbitalTelescope would unlock every one of them the moment
+        // the cheapest was launched. The alternate channel counts, because a part that declares one
+        // owns both detectors and can be switched between them without a new launch.
+        private bool HasOrbitalTelescopeCarrying(VisualTelescopeSpec spec)
+        {
+            if (spec == null) return false;
+
+            List<SpaceTelescopeLink> all = AvailableTelescopes;
+            for (int i = 0; i < all.Count; i++)
+            {
+                SpaceTelescopeLink link = all[i];
+                if (link.Instrument == spec) return true;
+                if (!string.IsNullOrEmpty(link.AlternateInstrumentName)
+                    && string.Equals(link.AlternateInstrumentName, spec.Name, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        // Per-instrument ordinal for the spacecraft list, so several telescopes carrying the same
+        // detector read as "#1", "#2" and so on.
+        //
+        // Ordered by launch time rather than by scan order: FindAll walks FlightGlobals.Vessels, whose
+        // order is KSP's and is not promised to survive a reload, and a number that changed between
+        // sessions would be worse than none. Losing a telescope renumbers the ones launched after it,
+        // which is the same thing the player would do counting the ones they still have.
+        private Dictionary<Guid, int> BuildTelescopeOrdinals(List<SpaceTelescopeLink> all)
+        {
+            var ordered = new List<SpaceTelescopeLink>(all);
+            ordered.Sort((a, b) =>
+            {
+                double ta = a.Vessel != null ? a.Vessel.launchTime : 0.0;
+                double tb = b.Vessel != null ? b.Vessel.launchTime : 0.0;
+                int byTime = ta.CompareTo(tb);
+                if (byTime != 0) return byTime;
+                // Same launch time is possible on a save edited by hand; the id is arbitrary but stable.
+                Guid ga = a.Vessel != null ? a.Vessel.id : Guid.Empty;
+                Guid gb = b.Vessel != null ? b.Vessel.id : Guid.Empty;
+                return ga.CompareTo(gb);
+            });
+
+            var counts = new Dictionary<string, int>();
+            var ordinals = new Dictionary<Guid, int>();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                SpaceTelescopeLink link = ordered[i];
+                if (link.Vessel == null) continue;
+
+                string key = link.Instrument != null ? link.Instrument.Name : "";
+                counts.TryGetValue(key, out int n);
+                counts[key] = ++n;
+                ordinals[link.Vessel.id] = n;
+            }
+            return ordinals;
+        }
+
         // Whether an orbital instrument may be commanded from where the player currently is. THE TWO CASES ARE
         // GENUINELY DIFFERENT and this is the requirement that made the telemetry model worth having. Flying
         // the spacecraft, the player is there: the exposure needs power and a clear aperture and nothing else.
@@ -130,6 +187,8 @@ namespace ExoInstruments
                 selectedTelescopeId = (best ?? all[0]).Vessel.id;
             }
 
+            Dictionary<Guid, int> ordinals = BuildTelescopeOrdinals(all);
+
             for (int i = 0; i < all.Count; i++)
             {
                 SpaceTelescopeLink link = all[i];
@@ -139,7 +198,14 @@ namespace ExoInstruments
                 CanCommand(link, out string reason);
 
                 GUILayout.BeginHorizontal();
-                string label = (isCurrent ? "> " : "  ") + link.VesselName;
+                // The detector leads, because that is what the player chose when they picked which
+                // part to launch, and the ordinal separates two spacecraft carrying the same one.
+                // The vessel's own name follows, since that is what they typed in the VAB.
+                string detector = link.Instrument == null ? "unknown instrument"
+                                : !string.IsNullOrEmpty(link.Instrument.CameraName) ? link.Instrument.CameraName
+                                : link.Instrument.Name;
+                string ordinal = ordinals.TryGetValue(link.Vessel.id, out int n) ? $" #{n}" : "";
+                string label = (isCurrent ? "> " : "  ") + detector + ordinal + "   " + link.VesselName;
                 if (GUILayout.Button(label, GUILayout.Height(22)))
                 {
                     selectedTelescopeId = link.Vessel.id;

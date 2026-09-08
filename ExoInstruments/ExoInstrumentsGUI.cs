@@ -4588,12 +4588,16 @@ namespace ExoInstruments
             // restored save index can reach it (see InstrumentSpec.UnderConstruction).
             if (instrument.UnderConstruction) return false;
 
-            // The orbital instrument is not bought, so no unlock list can answer for it: it is
-            // available exactly when the player has put one up there, in every game mode
+            // An orbital instrument is not bought, so no unlock list can answer for it: it is
+            // available exactly when the player has put THAT ONE up there, in every game mode
             // including sandbox. See Observatories.OrbitalObservatory for why it is gated this
             // way and not with Funds.
+            //
+            // Per instrument, not per class. Asking only whether some telescope is in orbit was
+            // right while the roster held one orbital row; with several it would hand the player
+            // every detector in the catalogue the moment they launched the cheapest part.
             if (instrument.VisualTelescope != null && instrument.VisualTelescope.IsSpaceBased)
-                return Instance != null && Instance.HasAnyOrbitalTelescope;
+                return Instance != null && Instance.HasOrbitalTelescopeCarrying(instrument.VisualTelescope);
 
             if (!CareerFogActive) return true;
             if (instrument.UnlockedByDefault) return true;
@@ -4624,8 +4628,13 @@ namespace ExoInstruments
             // only thing that unlocks it is launching one.
             if (instrument.VisualTelescope != null && instrument.VisualTelescope.IsSpaceBased)
             {
-                GUILayout.Label($"Locked: {instrument.DisplayName} - no telescope in orbit. "
-                              + "Launch the Orbital Astrophysics Observatory part and open its aperture door.");
+                // Names the part that carries THIS detector rather than the one part there used to
+                // be, so a roster of several orbital instruments tells the player which to launch.
+                string partTitle = string.IsNullOrEmpty(instrument.VisualTelescope.PartTitle)
+                                 ? "the orbital telescope part"
+                                 : instrument.VisualTelescope.PartTitle;
+                GUILayout.Label($"Locked: {instrument.DisplayName} - none in orbit. "
+                              + $"Launch {partTitle} and open its aperture door.");
                 return;
             }
 

@@ -56,6 +56,13 @@ namespace ExoInstruments.Core
         public string SiteName;
 
         /// <summary>
+        /// Title of the part that carries this instrument, for the locked-row message, so it names the
+        /// one to launch rather than a single part that stopped being the only one. Empty for a ground
+        /// instrument, and for any orbital one whose part title is not worth repeating.
+        /// </summary>
+        public string PartTitle = "";
+
+        /// <summary>
         /// The orbiting platform this instrument flies on, or null for a ground instrument.
         ///
         /// This one field is what the whole imaging pipeline branches on. Non-null means: no
@@ -1848,6 +1855,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA)",
             CameraName = "WFC3/UVIS",
             SiteName = "Low Earth orbit",
+            PartTitle = "the Orbital Astrophysics Observatory",
             // WFC3 IHB Table 5.1, "Operating Temperature": -83 C for the UVIS CCDs.
             DetectorTemperatureCelsius = -83.0,
             // No adjustable cooler: the detector runs at a fixed setpoint held by the
@@ -2122,6 +2130,7 @@ namespace ExoInstruments.Core
             Name = "Hubble Space Telescope (OTA/IR)",
             CameraName = "WFC3/IR",
             SiteName = "Low Earth orbit",
+            PartTitle = "the Orbital Astrophysics Observatory",
 
             Technology = DetectorTechnology.HgCdTeArray,
 
