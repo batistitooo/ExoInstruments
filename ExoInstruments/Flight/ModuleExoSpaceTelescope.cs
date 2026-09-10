@@ -199,6 +199,15 @@ namespace ExoInstruments.Flight
         [KSPField(isPersistant = true)]
         public double slewManoeuvreSeconds;
 
+        /// <summary>
+        /// Fastest the manoeuvre was planned to turn, deg/s. Stored rather than solved back out of
+        /// the duration, because solving it needs the vehicle's torque and that can change while
+        /// the slew runs: the shape and the duration then disagreed and the boresight jumped.
+        /// Zero in a save written before this field existed, and reconstructed as a triangle then.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public double slewPeakRateDegPerSecond;
+
         /// <summary>Guide-star acquisition after it, seconds.</summary>
         [KSPField(isPersistant = true)]
         public double slewAcquisitionSeconds;
@@ -233,9 +242,10 @@ namespace ExoInstruments.Flight
 
         private Transform boresight;
 
-        // Reused rather than rebuilt each physics frame: steering only needs the vessel, this
-        // module and the instrument, all of which are already here.
-        private SpaceTelescopeLink steeringLink;
+        // Reused rather than rebuilt each frame, and filled with everything the registry would put
+        // on it for this vessel: a link that describes a telescope only partly is how a reader ends
+        // up silently taking a missing field for a measured zero.
+        private SpaceTelescopeLink pointingLink;
         private Animation doorAnimation;
         private float lastStateRefresh = -999f;
 
@@ -426,14 +436,6 @@ namespace ExoInstruments.Flight
 
             double draw = Platform.IdleElectricChargePerSecond * TimeWarp.fixedDeltaTime;
             if (draw > 0.0) part.RequestResource(ElectricChargeId, draw);
-
-            // Point the vehicle where the observatory told it to look. The angle, the rate and the
-            // charge are all the ground station's; this only applies them.
-            if (steeringLink == null) steeringLink = new SpaceTelescopeLink();
-            steeringLink.Vessel = vessel;
-            steeringLink.Module = this;
-            steeringLink.Instrument = Instrument;
-            GroundStation.SteerLoaded(steeringLink, TimeWarp.fixedDeltaTime);
 
             // Keeps the ground ledger's clock current while the game is doing the accounting.
             // Advance bills whatever universal time has passed since this stamp, on the premise
@@ -742,13 +744,16 @@ namespace ExoInstruments.Flight
 
         private static int ElectricChargeId => PartResourceLibrary.Instance.GetDefinition("ElectricCharge").id;
 
-        // Commands the vessel's autopilot to put the boresight on the stored target. The rotation handed to SAS
-        // is exact rather than iterative: the shortest rotation taking the boresight's current world direction
-        // onto the target direction, applied to the vessel's current attitude, IS the attitude at which the
-        // boresight is on target. SAS then flies to it with whatever authority the vessel has, which is
-        // precisely the behaviour this model wants, since the difference between a vessel that gets there
-        // smoothly and one that hunts around the target is the difference the imaging pipeline is going to
-        // measure.
+        // Commands the vessel's autopilot to put the boresight where the manoeuvre says it should be. The
+        // rotation handed to SAS is exact rather than iterative: the shortest rotation taking the boresight's
+        // current world direction onto the commanded one, applied to the vessel's current attitude, IS the
+        // attitude at which the boresight is on target.
+        //
+        // WHAT SAS IS AIMED AT IS THE PROFILE'S WAYPOINT, not the destination, for as long as the manoeuvre
+        // runs. Aimed at the destination it arrives with whatever authority the vessel has, which is seconds
+        // where the ledger charged minutes; aimed at a setpoint advancing at the published rate it flies the
+        // manoeuvre that was priced. How it settles the last fraction of a degree is still its own, which is
+        // the part §13.4 measures.
         private void DrivePointing()
         {
             if (vessel == null || vessel.Autopilot == null || vessel.Autopilot.SAS == null) return;
@@ -763,16 +768,37 @@ namespace ExoInstruments.Flight
                 hasCommandedRotation = false;   // whatever was locked is stale by the time we return
                 return;
             }
-            if (!TryResolvePointingDirection(out Vector3d targetDirection)) return;
+            if (!TryResolvePointingDirection(out Vector3d destination)) return;
 
             Transform reference = vessel.ReferenceTransform;
             Transform bore = boresight;
-            if (reference == null || bore == null || targetDirection.sqrMagnitude < 1e-9) return;
+            if (reference == null || bore == null || destination.sqrMagnitude < 1e-9) return;
 
             // The player's hands win. Holding an attitude against someone actively steering is a
             // fight neither side can win, and from the cockpit it reads as the spacecraft refusing
             // to respond.
             if (PlayerIsSteering()) return;
+
+            // MID-MANOEUVRE, AIM WHERE THE PROFILE SAYS THE BORESIGHT SHOULD BE, not at the
+            // destination. SAS has far more authority than the published slew rate, so pointed at
+            // the destination it arrives in seconds and the vehicle never turns at the rate the
+            // ledger charged for. This setpoint advances at that rate, well inside SAS's authority,
+            // so the autopilot tracks it and the manoeuvre is flown rather than asserted.
+            Vector3d targetDirection = destination;
+            PointingReadout ground = GroundReadout();
+            if (ground.Phase == GroundPointingPhase.Slewing && ground.ProfileDirection.sqrMagnitude > 1e-12)
+                targetDirection = LeadingWaypoint(ground.ProfileDirection, ground.SlewRateDegPerSecond);
+
+            // THE ACTION GROUP HAS TO BE ON. VesselAutopilot.Update opens by disabling itself
+            // whenever ActionGroups[SAS] is false, which resets the PIDs and clears lockedRotation,
+            // and Enable does not set the group. So on a telescope nobody had ever pressed T on,
+            // every lock below was torn down on the next frame and the vehicle did not move at all
+            // while the panel counted down and the ledger billed the wheels.
+            if (!vessel.ActionGroups[KSPActionGroup.SAS])
+            {
+                vessel.ActionGroups.SetGroup(KSPActionGroup.SAS, true);
+                hasCommandedRotation = false;
+            }
 
             // STABILITY ASSIST SPECIFICALLY, and re-asserted rather than only switched on when the
             // autopilot is off. VesselAutopilot.Enable sets sas.lockedMode = (mode == StabilityAssist),
@@ -804,16 +830,21 @@ namespace ExoInstruments.Flight
             // Planetarium.Zup.Z is the celestial pole, which rotates with neither the planet nor the
             // vehicle, so the command is a function of the target alone and holds still. It also
             // comes out north-up, the convention the frames state their position angles in.
+            //
+            // THE BASIS IS CHOSEN ON THE DESTINATION, not on the waypoint. The waypoint moves, and
+            // a path that grazes the pole would cross the substitution threshold part way along and
+            // flip the whole commanded roll in one frame, by up to 180 degrees, at full authority.
+            // The destination holds still, so the choice is made once per command as it always was.
             Vector3d up = Planetarium.Zup.Z;
+            if (Math.Abs(Vector3d.Dot(up, destination.normalized)) > 0.999) up = Planetarium.Zup.X;
             Vector3d t = targetDirection.normalized;
-            if (Math.Abs(Vector3d.Dot(up, t)) > 0.999) up = Planetarium.Zup.X;   // target on the pole
 
             Quaternion boresightTarget = Quaternion.LookRotation((Vector3)t, (Vector3)up);
             Quaternion commanded = boresightTarget * Quaternion.Inverse(boresightRelativeToControl);
 
-            // Re-issued only when it has really moved. The command is stable by construction now,
-            // so for a catalogue target this settles to one value and stops; a body target drifts
-            // slowly and re-issues as it does.
+            // Re-issued only when it has really moved: a step quantiser while the waypoint is
+            // advancing, and a settle-and-stop past the manoeuvre. The step is well inside
+            // GroundStation.OnTargetToleranceDeg, so it cannot cost the target the detector.
             if (hasCommandedRotation && Quaternion.Angle(commandedRotation, commanded) < 0.01f) return;
 
             commandedRotation = commanded;
@@ -821,18 +852,58 @@ namespace ExoInstruments.Flight
             vessel.Autopilot.SAS.LockRotation(commanded);
         }
 
+        // The waypoint, held to within one second of the profile's own turning of where the vehicle
+        // really is.
+        //
+        // The profile's point is ABSOLUTE, a function of the start time and the clock, so any
+        // stretch the vehicle spent packed or unloaded leaves it far ahead: handing SAS that whole
+        // accumulated arc is the snap this exists to prevent. Clamped, the lead is closed at the
+        // modelled rate instead, which is the manoeuvre the ledger charged for, just later.
+        private Vector3d LeadingWaypoint(Vector3d waypoint, double rateDegPerSecond)
+        {
+            Vector3d here = BoresightWorldDirection;
+            if (here.sqrMagnitude < 1e-12) return waypoint;
+
+            double maxLeadDeg = Math.Max(1.0, rateDegPerSecond);
+            if (Vector3d.Angle(here, waypoint) <= maxLeadDeg) return waypoint;
+
+            return (Vector3d)Vector3.RotateTowards((Vector3)here.normalized, (Vector3)waypoint.normalized,
+                                                   (float)(maxLeadDeg * Math.PI / 180.0), 0f);
+        }
+
+        // This telescope's own ground-station readout. The link carries the attitude authority
+        // because the profile is rebuilt from it; see pointingLink.
+        private PointingReadout GroundReadout()
+        {
+            if (pointingLink == null) pointingLink = new SpaceTelescopeLink();
+            pointingLink.Vessel = vessel;
+            pointingLink.Module = this;
+            pointingLink.Instrument = Instrument;
+            pointingLink.ControlMode = controlMode;
+            pointingLink.ControlTorqueNm = controlTorqueCached;
+            pointingLink.InertiaKgM2 = inertiaCached;
+            return GroundStation.Readout(pointingLink);
+        }
+
         private Quaternion commandedRotation = Quaternion.identity;
         private bool hasCommandedRotation;
 
         // True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on its control-
         // detection, and this matches it rather than inventing a second one.
+        //
+        // FlightInputHandler.state, NOT vessel.ctrlState. VesselSAS.ControlUpdate writes its own
+        // response into ctrlState's pitch, yaw and roll, so reading that asked whether SAS was
+        // working and called it the player's hand. Harmless while the command was static; once the
+        // setpoint advances every frame it stalled the manoeuvre exactly when SAS was tracking it.
         private bool PlayerIsSteering()
         {
-            if (vessel == null || vessel.ctrlState == null) return false;
+            if (vessel == null || !vessel.isActiveVessel) return false;
+            FlightCtrlState s = FlightInputHandler.state;
+            if (s == null) return false;
             const float Threshold = 0.05f;
-            return Math.Abs(vessel.ctrlState.pitch) > Threshold
-                || Math.Abs(vessel.ctrlState.yaw) > Threshold
-                || Math.Abs(vessel.ctrlState.roll) > Threshold;
+            return Math.Abs(s.pitch) > Threshold
+                || Math.Abs(s.yaw) > Threshold
+                || Math.Abs(s.roll) > Threshold;
         }
 
         /// <summary>Angle between the boresight and the commanded target, degrees. NaN when nothing is commanded.</summary>

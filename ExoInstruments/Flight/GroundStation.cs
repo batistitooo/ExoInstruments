@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using ExoInstruments.Core;
-using UnityEngine;
 
 namespace ExoInstruments.Flight
 {
@@ -177,6 +176,7 @@ namespace ExoInstruments.Flight
             state.FromDirection = from.sqrMagnitude > 1e-12 ? from : target;
             state.SlewStartUt = Planetarium.GetUniversalTime();
             state.ManoeuvreSeconds = profile.ManoeuvreSeconds;
+            state.PeakRateDegPerSecond = profile.PeakRateDegPerSecond;
             state.AcquisitionSeconds = profile.AcquisitionSeconds;
             state.Write(link);
 
@@ -372,47 +372,6 @@ namespace ExoInstruments.Flight
         /// along the profile, which is not a fudge, because during a slew the boresight genuinely
         /// is between the two attitudes.
         /// </summary>
-        /// <summary>
-        /// Turns a loaded telescope toward what it was told to hold, at the rate its own profile
-        /// gives.
-        ///
-        /// Without this the command was bookkeeping. Readout reports a loaded vessel's boresight as
-        /// MEASURED, on the sound grounds that it is observable, so a vehicle that never turned
-        /// showed an error that never closed, and the aperture occlusion rays fired down a
-        /// boresight that was not looking where the observation was.
-        ///
-        /// Past the manoeuvre the profile's rate is zero and the attitude is set outright: the time
-        /// the slew costs has already been spent and charged by the ledger, so arriving is what the
-        /// model says happened.
-        /// </summary>
-        public static void SteerLoaded(SpaceTelescopeLink link, double dt)
-        {
-            if (link == null || link.Vessel == null || link.Module == null) return;
-            if (!link.Vessel.loaded || link.Vessel.packed || !(dt > 0.0)) return;
-
-            PointingReadout r = Readout(link);
-            if (!r.HasCommand || r.CommandedDirection.sqrMagnitude < 1e-12) return;
-
-            Vector3d bore = link.Module.BoresightWorldDirection;
-            if (bore.sqrMagnitude < 1e-12) return;
-
-            double angle = Vector3d.Angle(bore, r.CommandedDirection);
-            if (angle < 1e-3) return;
-
-            double step = r.SlewRateDegPerSecond > 0.0
-                        ? Math.Min(angle, r.SlewRateDegPerSecond * dt)
-                        : angle;
-
-            Vector3d axis = Vector3d.Cross(bore, r.CommandedDirection);
-            // Exactly opposed leaves no axis, so any perpendicular one will do to start the turn.
-            if (axis.sqrMagnitude < 1e-18) axis = Vector3d.Cross(bore, new Vector3d(0.0, 0.0, 1.0));
-            if (axis.sqrMagnitude < 1e-18) axis = Vector3d.Cross(bore, new Vector3d(0.0, 1.0, 0.0));
-            if (axis.sqrMagnitude < 1e-18) return;
-
-            Quaternion turn = Quaternion.AngleAxis((float)step, (Vector3)axis.normalized);
-            link.Vessel.SetRotation(turn * link.Vessel.transform.rotation, true);
-        }
-
         public static PointingReadout Readout(SpaceTelescopeLink link)
         {
             var r = new PointingReadout();
@@ -424,6 +383,7 @@ namespace ExoInstruments.Flight
 
             r.CommandedDirection = ResolveCommandedDirection(link, in state);
             r.CurrentDirection = CurrentDirection(link, in state);
+            r.ProfileDirection = ProfileDirection(link, in state);
             r.CommandedRaDeg = state.TargetRaDeg;
             r.CommandedDecDeg = state.TargetDecDeg;
             r.ErrorDeg = r.CurrentDirection.sqrMagnitude > 1e-12 && r.CommandedDirection.sqrMagnitude > 1e-12
@@ -494,6 +454,19 @@ namespace ExoInstruments.Flight
             if (!state.HasCommand)
                 return state.LastBoresight.sqrMagnitude > 1e-12 ? state.LastBoresight.normalized : Vector3d.zero;
 
+            return ProfileDirection(link, in state);
+        }
+
+        // Where along the manoeuvre the boresight is supposed to be at this instant, measured or not.
+        //
+        // The unloaded readout's own answer, and the setpoint a LOADED vehicle's autopilot is flown
+        // to. Aimed at the destination instead, SAS has far more authority than the published slew
+        // rate and arrives in seconds, so the vehicle never turns at the rate the ledger charged
+        // for. Chasing this is that manoeuvre, flown rather than asserted.
+        private static Vector3d ProfileDirection(SpaceTelescopeLink link, in TelescopeCommandState state)
+        {
+            if (!state.HasCommand) return Vector3d.zero;
+
             Vector3d to = ResolveCommandedDirection(link, in state);
             if (to.sqrMagnitude < 1e-12) return Vector3d.zero;
 
@@ -505,10 +478,14 @@ namespace ExoInstruments.Flight
             return Slerp(from, to, SlewDynamics.FractionOfAngleCovered(in profile, elapsed));
         }
 
-        // The manoeuvre currently in flight, rebuilt from what was stored when it was commanded. Not replanned
-        // from the angle: the vehicle's torque may have changed since (a wheel switched off, a stage dropped),
-        // and the slew running is the one that was planned, not the one that would be planned now. Only the
-        // peak rate has to be recovered, by solving the stored duration for it.
+        // The manoeuvre currently in flight, rebuilt from what was stored when it was commanded.
+        //
+        // FROM THE STORED PEAK RATE, not from the vehicle's present torque. Solving the shape out of
+        // a live acceleration let the shape and the stored duration disagree the moment anything
+        // changed (a wheel switched off, a stage dropped, mass gained by docking), and the
+        // interpolation then jumped: half the angle in one frame on a vehicle that merely lost a
+        // wheel. With the rate stored, theta = w (M - w/alpha) inverts to alpha = w / (M - theta/w)
+        // and the running profile is a function of the command alone.
         private static SlewProfile RebuildProfile(SpaceTelescopeLink link, in TelescopeCommandState state)
         {
             Vector3d to = ResolveCommandedDirection(link, in state);
@@ -517,26 +494,24 @@ namespace ExoInstruments.Flight
             var profile = new SlewProfile
             {
                 AngleDeg = from.sqrMagnitude > 1e-12 && to.sqrMagnitude > 1e-12 ? Vector3d.Angle(from, to) : 0.0,
-                AccelerationDegPerSecond2 = SlewDynamics.AngularAccelerationDegPerSecond2(
-                    link.ControlTorqueNm, link.InertiaKgM2),
                 ManoeuvreSeconds = state.ManoeuvreSeconds,
             };
 
-            double alpha = profile.AccelerationDegPerSecond2;
-            if (!(alpha > 0.0) || !(profile.ManoeuvreSeconds > 0.0)) return profile;
+            if (!(profile.ManoeuvreSeconds > 0.0) || double.IsInfinity(profile.ManoeuvreSeconds)
+                || !(profile.AngleDeg > 0.0)) return profile;
 
-            double triangularPeak = Math.Sqrt(alpha * profile.AngleDeg);
-            double triangularTime = 2.0 * Math.Sqrt(profile.AngleDeg / alpha);
-            if (profile.ManoeuvreSeconds > triangularTime * 1.000001)
-            {
-                // t = theta/w + w/alpha solved for w, taking the root below the triangular peak.
-                double b = profile.ManoeuvreSeconds * alpha;
-                double disc = b * b - 4.0 * alpha * profile.AngleDeg;
-                profile.PeakRateDegPerSecond = disc > 0.0 ? 0.5 * (b - Math.Sqrt(disc)) : triangularPeak;
-                profile.RateLimited = true;
-            }
-            else profile.PeakRateDegPerSecond = triangularPeak;
+            // What this angle in this time can be flown at: the mean rate at one end, where the
+            // ramps are instant, and twice it at the other, where the profile is a pure triangle
+            // with no coast. A rate outside that band, or none at all in a save written before it
+            // was stored, takes the triangle.
+            double meanRate = profile.AngleDeg / profile.ManoeuvreSeconds;
+            double peak = state.PeakRateDegPerSecond;
+            if (!(peak > meanRate) || peak > 2.0 * meanRate) peak = 2.0 * meanRate;
 
+            double ramp = profile.ManoeuvreSeconds - profile.AngleDeg / peak;   // = w / alpha
+            profile.PeakRateDegPerSecond = peak;
+            profile.AccelerationDegPerSecond2 = ramp > 0.0 ? peak / ramp : 0.0;
+            profile.RateLimited = 2.0 * ramp < profile.ManoeuvreSeconds;
             return profile;
         }
 
@@ -1091,6 +1066,9 @@ namespace ExoInstruments.Flight
         /// <summary>Unit world direction it has been told to hold.</summary>
         public Vector3d CommandedDirection;
 
+        /// <summary>Unit world direction the profile puts the boresight on right now. What a loaded vehicle's autopilot is flown to, so it turns at the rate the manoeuvre was priced at.</summary>
+        public Vector3d ProfileDirection;
+
         /// <summary>
         /// The commanded catalogue position, when the target is one; NaN for a body or a raw
         /// direction. The chart draws its marker from THESE rather than from CommandedDirection,
@@ -1142,6 +1120,7 @@ namespace ExoInstruments.Flight
         public double TargetDecDeg;
         public double SlewStartUt;
         public double ManoeuvreSeconds;
+        public double PeakRateDegPerSecond;
         public double AcquisitionSeconds;
         public double PowerLedgerUt;
 
@@ -1169,6 +1148,7 @@ namespace ExoInstruments.Flight
                 s.FromDirection = ParseDirection(m.slewFromDirection);
                 s.SlewStartUt = m.slewStartUt;
                 s.ManoeuvreSeconds = m.slewManoeuvreSeconds;
+                s.PeakRateDegPerSecond = m.slewPeakRateDegPerSecond;
                 s.AcquisitionSeconds = m.slewAcquisitionSeconds;
                 s.PowerLedgerUt = m.powerLedgerUt;
                 s.LastBoresight = ParseDirection(m.lastBoresightDirection);
@@ -1186,6 +1166,7 @@ namespace ExoInstruments.Flight
             s.FromDirection = ParseDirection(node.GetValue("slewFromDirection"));
             s.SlewStartUt = ReadDouble(node, "slewStartUt");
             s.ManoeuvreSeconds = ReadDouble(node, "slewManoeuvreSeconds");
+            s.PeakRateDegPerSecond = ReadDouble(node, "slewPeakRateDegPerSecond");
             s.AcquisitionSeconds = ReadDouble(node, "slewAcquisitionSeconds");
             s.PowerLedgerUt = ReadDouble(node, "powerLedgerUt");
             s.LastBoresight = ParseDirection(node.GetValue("lastBoresightDirection"));
@@ -1207,6 +1188,7 @@ namespace ExoInstruments.Flight
                 m.slewFromDirection = FormatDirection(FromDirection);
                 m.slewStartUt = SlewStartUt;
                 m.slewManoeuvreSeconds = ManoeuvreSeconds;
+                m.slewPeakRateDegPerSecond = PeakRateDegPerSecond;
                 m.slewAcquisitionSeconds = AcquisitionSeconds;
                 m.powerLedgerUt = PowerLedgerUt;
                 return;
@@ -1223,6 +1205,7 @@ namespace ExoInstruments.Flight
             Set(node, "slewFromDirection", FormatDirection(FromDirection));
             Set(node, "slewStartUt", SlewStartUt.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "slewManoeuvreSeconds", ManoeuvreSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            Set(node, "slewPeakRateDegPerSecond", PeakRateDegPerSecond.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "slewAcquisitionSeconds", AcquisitionSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "powerLedgerUt", PowerLedgerUt.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
 
