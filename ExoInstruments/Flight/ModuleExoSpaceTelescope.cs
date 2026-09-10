@@ -65,6 +65,21 @@ namespace ExoInstruments.Flight
         public string boresightTransformName = "boresight";
 
         /// <summary>
+        /// Two position markers the model may carry instead of an oriented boresight: the centre of
+        /// the entrance pupil, and any point further along the optical axis outside the instrument.
+        ///
+        /// The axis is the difference between them, so a model only has to place two empties and
+        /// never has to get a transform's rotation right. That is the whole reason this path
+        /// exists: an oriented boresight has to have its +Z on the optical axis, and a modeller
+        /// working in one axis convention and exporting into another gets it wrong silently.
+        /// </summary>
+        [KSPField]
+        public string opticPupilTransformName = "optic_pupil";
+
+        [KSPField]
+        public string opticAimTransformName = "optic_aim";
+
+        /// <summary>
         /// Where the entrance pupil sits along the part's own +Y axis, metres from the part
         /// origin, used only when the model carries no boresight transform of its own.
         ///
@@ -296,8 +311,9 @@ namespace ExoInstruments.Flight
 
             UpdateChannelEvent();
 
-            boresight = part.FindModelTransform(boresightTransformName);
-            if (boresight == null) boresight = CreateBoresightTransform();
+            boresight = part.FindModelTransform(boresightTransformName)
+                     ?? CreateBoresightFromMarkers()
+                     ?? CreateBoresightTransform();
 
             doorAnimation = FindDoorAnimation();
             ApplyDoorPoseImmediately();
@@ -310,6 +326,37 @@ namespace ExoInstruments.Flight
         public void OnDestroy()
         {
             SpaceTelescopeRegistry.Unregister(this);
+        }
+
+        // Builds the boresight from the model's two position markers, when it carries them. Parented to
+        // the pupil marker so a mount that moves carries the optical axis with it, which is what makes an
+        // animated mount drive the physics rather than only the picture.
+        private Transform CreateBoresightFromMarkers()
+        {
+            Transform pupil = part.FindModelTransform(opticPupilTransformName);
+            Transform aim = part.FindModelTransform(opticAimTransformName);
+            if (pupil == null || aim == null) return null;
+
+            Vector3 axis = aim.position - pupil.position;
+            if (axis.sqrMagnitude < 1e-8f)
+            {
+                Debug.LogWarning($"[ExoInstruments] {part.partInfo?.title}: '{opticPupilTransformName}' and "
+                               + $"'{opticAimTransformName}' are at the same place, so they define no optical axis.");
+                return null;
+            }
+            axis.Normalize();
+
+            // LookRotation degenerates when its two arguments are parallel, and the part's up is the
+            // likelier of the two to be the optical axis, so the reference is chosen against that.
+            Vector3 reference = Mathf.Abs(Vector3.Dot(axis, part.transform.up)) > 0.99f
+                              ? part.transform.forward
+                              : part.transform.up;
+
+            var go = new GameObject(boresightTransformName + "_from_markers");
+            go.transform.SetParent(pupil, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.rotation = Quaternion.LookRotation(axis, reference);
+            return go.transform;
         }
 
         // Builds the boresight as an empty child of the part's model, when the model does not supply one. A
