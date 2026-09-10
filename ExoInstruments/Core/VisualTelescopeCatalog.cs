@@ -2793,7 +2793,7 @@ namespace ExoInstruments.Core
                 // arcseconds) over the field." One filter, so the curve is flat at the midpoint,
                 // and this channel really does deliver about half WFC3/UVIS's resolution behind
                 // the same mirror. No ACS equivalent of WFC3 IHB Table 6.7 is published.
-                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.115 }),
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 350.0, 1100.0 }, new[] { 0.115, 0.115 }),
                 HasApertureDoor = true,
                 DownlinkBitsPerPixel = 16,
                 FullFramePixels = 2L * 2048L * 4096L,
@@ -2903,7 +2903,7 @@ namespace ExoInstruments.Core
                 PointingJitterArcsecRms = 0.008,
                 // Sect. 5.6: "The HRC FWHM is 0.060 to 0.073 arcseconds in F550M." Flat at the
                 // midpoint, one filter, same limitation as the WFC entry.
-                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.0665 }),
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 170.0, 1100.0 }, new[] { 0.0665, 0.0665 }),
                 HasApertureDoor = true,
                 DownlinkBitsPerPixel = 16,
                 FullFramePixels = 1024L * 1024L,
@@ -3069,7 +3069,7 @@ namespace ExoInstruments.Core
                 // rather than left null because null in this field means DIFFRACTION LIMITED, and
                 // a 2.4 m at 550 nm gives 0.058 arcsec, which would make this camera a third
                 // sharper than it is.
-                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 550.0 }, new[] { 0.088 }),
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 121.6, 1100.0 }, new[] { 0.088, 0.088 }),
 
                 HasApertureDoor = true,
                 // A real WFPC2 exposure always reads all four CCDs through the pyramid mirror, so
@@ -3203,7 +3203,7 @@ namespace ExoInstruments.Core
                 // pixels, noting "the LORRI PSF is slightly undersampled (relative to Nyquist) in
                 // the X (row) direction". This field carries one number, so it is the geometric
                 // mean of the published pair, 2.336 px, which is 2.39 arcsec at this plate scale.
-                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 607.6 }, new[] { 2.39 }),
+                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 360.0, 910.0 }, new[] { 2.39, 2.39 }),
 
                 // Table 5: the reaction control system holds the boresight "to an accuracy of
                 // +/-2 arcsec (1 sigma) for exposure times up to ~65 s", which is the whole
