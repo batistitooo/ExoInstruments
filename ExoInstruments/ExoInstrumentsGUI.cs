@@ -2785,17 +2785,27 @@ namespace ExoInstruments
 
             // ND filter: real optical-density stops for targets too bright for exposure/gain
             // alone; Kerbin's compressed-scale system puts nearby moons in that regime.
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("ND filter", GUILayout.Width(150));
-            GUI.enabled = !stackBatchRunning;
-            foreach (NdFilterStop stop in (NdFilterStop[])Enum.GetValues(typeof(NdFilterStop)))
+            //
+            // Only what the instrument declares. The stops used to be the enum's own values, which
+            // offered a solar filter to a nanosatellite whose published description is that it has
+            // no moving parts at all beyond its reaction wheels.
+            NdFilterStop[] ndStops = SolarSystemCameraTexture.Spec != null
+                                   ? SolarSystemCameraTexture.Spec.AvailableNdFilters : null;
+            if (ndStops != null && ndStops.Length > 0)
             {
-                bool sel = solarSystemCamera.NdFilter == stop;
-                if (GUILayout.Toggle(sel, " " + NdFilterLabel(stop), GUILayout.Width(58)) && !sel)
-                    solarSystemCamera.NdFilter = stop;
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("ND filter", GUILayout.Width(150));
+                GUI.enabled = !stackBatchRunning;
+                for (int i = 0; i < ndStops.Length; i++)
+                {
+                    NdFilterStop stop = ndStops[i];
+                    bool sel = solarSystemCamera.NdFilter == stop;
+                    if (GUILayout.Toggle(sel, " " + NdFilterLabel(stop), GUILayout.Width(58)) && !sel)
+                        solarSystemCamera.NdFilter = stop;
+                }
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
             }
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
 
             // Focus: autofocus toggle + manual slider.
             GUILayout.BeginHorizontal();

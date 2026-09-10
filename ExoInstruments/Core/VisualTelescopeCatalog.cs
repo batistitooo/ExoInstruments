@@ -780,6 +780,13 @@ namespace ExoInstruments.Core
         public int ChipGapPixels;
 
         /// <summary>
+        /// The neutral density stops this instrument actually carries. Null or empty means none,
+        /// and none is the default: a filter has to be in the instrument's own configuration to be
+        /// offered, because a telescope with no wheel and no drawer has nowhere to put one.
+        /// </summary>
+        public NdFilterStop[] AvailableNdFilters;
+
+        /// <summary>
         /// The detector's own sensitivity range in nanometres, published per instrument. NaN falls
         /// back to the pipeline's silicon-era default.
         ///
@@ -845,6 +852,13 @@ namespace ExoInstruments.Core
         // for it, and until those central wavelengths, widths and transmissions are read off the instrument
         // manual it carries no narrowband position rather than one with numbers borrowed from an amateur
         // filter.
+        // The full amateur ND range, for the instruments that carry a drawer or a wheel to hold one.
+        private static readonly NdFilterStop[] AllNdStops =
+        {
+            NdFilterStop.None, NdFilterStop.Nd8, NdFilterStop.Nd64,
+            NdFilterStop.Nd1000, NdFilterStop.Nd6300, NdFilterStop.Nd100000,
+        };
+
         private static readonly CameraFilter[] AllFilters =
             { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue, CameraFilter.HAlpha };
 
@@ -932,6 +946,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Rc20 = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "PlaneWave RC20",
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Observatoire de Haute-Provence",
@@ -1136,6 +1151,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec RedCat51 = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "William Optics RedCat 51",
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Observatoire de Haute-Provence",
@@ -1291,6 +1307,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Cdk1000 = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "PlaneWave CDK1000",
             CameraName = "ZWO ASI294MM Pro",
             SiteName = "Palomar Observatory",
@@ -1498,6 +1515,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Fors2Vlt = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "ESO-VLT-U1",
             CameraName = "FORS2",
             SiteName = "Paranal Observatory",
@@ -1740,6 +1758,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Sphere = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "ESO-VLT-U3",
             CameraName = "SPHERE/ZIMPOL",
             SiteName = "Paranal Observatory",
@@ -1931,6 +1950,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfc3Uvis = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "Hubble Space Telescope (OTA)",
             CameraName = "WFC3/UVIS",
             SiteName = "Low Earth orbit",
@@ -2204,6 +2224,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfc3Ir = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             // A DISTINCT Name, because Name is the key ModuleExoSpaceTelescope resolves a saved
             // telescope through, and two entries sharing one would make the second unreachable.
             // The platform is the same telescope and says so; the channel is what differs.
@@ -2694,6 +2715,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleAcsWfc = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "Hubble Space Telescope (OTA/ACS-WFC)",
             CameraName = "ACS/WFC",
             SiteName = "Low Earth orbit",
@@ -2810,6 +2832,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleAcsHrc = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "Hubble Space Telescope (OTA/ACS-HRC)",
             CameraName = "ACS/HRC",
             SiteName = "Low Earth orbit",
@@ -2922,6 +2945,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfpc2Pc1 = new VisualTelescopeSpec
         {
+            AvailableNdFilters = AllNdStops,
             Name = "Hubble Space Telescope (OTA/WFPC2-PC1)",
             CameraName = "WFPC2/PC1",
             SiteName = "Low Earth orbit",

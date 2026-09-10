@@ -201,6 +201,13 @@ namespace ExoInstruments.Visualization
             // position every real instrument has: a single-fixed-filter telescope would otherwise
             // land on one it does not own, and read a central wavelength of zero from there into
             // OpticalPsf and SystemBandpass.
+            // A neutral density stop the instrument does not carry cannot stay selected across a
+            // change of telescope, for the same reason a filter cannot.
+            if (NdFilter != NdFilterStop.None
+                && (Spec.AvailableNdFilters == null
+                    || Array.IndexOf(Spec.AvailableNdFilters, NdFilter) < 0))
+                NdFilter = NdFilterStop.None;
+
             if (Spec.AvailableFilters != null && Spec.AvailableFilters.Length > 0
                 && Array.IndexOf(Spec.AvailableFilters, Filter) < 0)
             {
