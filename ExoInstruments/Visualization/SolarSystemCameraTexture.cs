@@ -2307,7 +2307,8 @@ namespace ExoInstruments.Visualization
             if (!TryResolveLineOfSight(target, out Vector3d lineOfSight)) return false;
 
             SkyVector los = ObservingPlatform.ToSky(lineOfSight);
-            if (!ObservingPlatform.TryBuildContext(los, out SpaceObserverContext ctx)) return false;
+            if (!ObservingPlatform.TryBuildContext(los, target.IsBody ? target.Body : null,
+                                                   out SpaceObserverContext ctx)) return false;
 
             snapshot = SpaceObservingConditions.Evaluate(los, in ctx, Spec.SpacePlatform);
             return true;

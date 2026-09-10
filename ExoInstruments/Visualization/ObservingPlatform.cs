@@ -79,7 +79,7 @@ namespace ExoInstruments.Visualization
         /// game. Returns false when there is no space telescope selected or the geometry cannot
         /// be resolved, in which case nothing orbital applies and the ground path stands.
         /// </summary>
-        public static bool TryBuildContext(SkyVector lineOfSight, out SpaceObserverContext ctx)
+        public static bool TryBuildContext(SkyVector lineOfSight, CelestialBody target, out SpaceObserverContext ctx)
         {
             ctx = default(SpaceObserverContext);
             SpaceTelescopeLink link = ActiveSpaceTelescope;
@@ -104,7 +104,7 @@ namespace ExoInstruments.Visualization
             ctx.SunFromObserver = ToSky(sunFromObserver);
             ctx.OrbitNormal = link.OrbitNormal();
             ctx.OrbitPeriodSeconds = link.OrbitPeriodSeconds;
-            ctx.Moons = BuildMoons(host, observer);
+            ctx.Moons = BuildMoons(host, observer, target);
 
             // The ecliptic is the HOME body's orbital plane, whatever body this telescope
             // happens to be orbiting (see EclipticFrame): the zodiacal cloud belongs to the
@@ -128,7 +128,11 @@ namespace ExoInstruments.Visualization
         // The host body's natural satellites, as the avoidance check needs them. Only bodies that are actually
         // up there: a moon on the far side of its primary is behind the planet and cannot constrain a pointing
         // the planet is already blocking.
-        private static SpaceMoonContext[] BuildMoons(CelestialBody host, Vector3d observer)
+        // The target is excluded, and that is not a nicety. A moon avoidance angle exists to keep a
+        // bright nearby body out of a frame pointed elsewhere; the body being photographed is not in
+        // the way of itself. Without this, an instrument with any avoidance angle at all can never
+        // photograph a moon of the world it orbits, because the angle to the target is zero.
+        private static SpaceMoonContext[] BuildMoons(CelestialBody host, Vector3d observer, CelestialBody target)
         {
             if (host == null || host.orbitingBodies == null || host.orbitingBodies.Count == 0)
                 return null;
@@ -137,7 +141,7 @@ namespace ExoInstruments.Visualization
             for (int i = 0; i < host.orbitingBodies.Count; i++)
             {
                 CelestialBody moon = host.orbitingBodies[i];
-                if (moon == null) continue;
+                if (moon == null || moon == target) continue;
 
                 Vector3d toMoon = moon.position - observer;
                 double distance = toMoon.magnitude;
