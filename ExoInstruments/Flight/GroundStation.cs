@@ -372,6 +372,47 @@ namespace ExoInstruments.Flight
         /// along the profile, which is not a fudge, because during a slew the boresight genuinely
         /// is between the two attitudes.
         /// </summary>
+        /// <summary>
+        /// Turns a loaded telescope toward what it was told to hold, at the rate its own profile
+        /// gives.
+        ///
+        /// Without this the command was bookkeeping. Readout reports a loaded vessel's boresight as
+        /// MEASURED, on the sound grounds that it is observable, so a vehicle that never turned
+        /// showed an error that never closed, and the aperture occlusion rays fired down a
+        /// boresight that was not looking where the observation was.
+        ///
+        /// Past the manoeuvre the profile's rate is zero and the attitude is set outright: the time
+        /// the slew costs has already been spent and charged by the ledger, so arriving is what the
+        /// model says happened.
+        /// </summary>
+        public static void SteerLoaded(SpaceTelescopeLink link, double dt)
+        {
+            if (link == null || link.Vessel == null || link.Module == null) return;
+            if (!link.Vessel.loaded || link.Vessel.packed || !(dt > 0.0)) return;
+
+            PointingReadout r = Readout(link);
+            if (!r.HasCommand || r.CommandedDirection.sqrMagnitude < 1e-12) return;
+
+            Vector3d bore = link.Module.BoresightWorldDirection;
+            if (bore.sqrMagnitude < 1e-12) return;
+
+            double angle = Vector3d.Angle(bore, r.CommandedDirection);
+            if (angle < 1e-3) return;
+
+            double step = r.SlewRateDegPerSecond > 0.0
+                        ? Math.Min(angle, r.SlewRateDegPerSecond * dt)
+                        : angle;
+
+            Vector3d axis = Vector3d.Cross(bore, r.CommandedDirection);
+            // Exactly opposed leaves no axis, so any perpendicular one will do to start the turn.
+            if (axis.sqrMagnitude < 1e-18) axis = Vector3d.Cross(bore, new Vector3d(0.0, 0.0, 1.0));
+            if (axis.sqrMagnitude < 1e-18) axis = Vector3d.Cross(bore, new Vector3d(0.0, 1.0, 0.0));
+            if (axis.sqrMagnitude < 1e-18) return;
+
+            Quaternion turn = Quaternion.AngleAxis((float)step, (Vector3)axis.normalized);
+            link.Vessel.SetRotation(turn * link.Vessel.transform.rotation, true);
+        }
+
         public static PointingReadout Readout(SpaceTelescopeLink link)
         {
             var r = new PointingReadout();

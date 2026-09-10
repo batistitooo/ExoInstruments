@@ -232,6 +232,10 @@ namespace ExoInstruments.Flight
         private const float StateRefreshIntervalSeconds = 1.0f;
 
         private Transform boresight;
+
+        // Reused rather than rebuilt each physics frame: steering only needs the vessel, this
+        // module and the instrument, all of which are already here.
+        private SpaceTelescopeLink steeringLink;
         private Animation doorAnimation;
         private float lastStateRefresh = -999f;
 
@@ -422,6 +426,14 @@ namespace ExoInstruments.Flight
 
             double draw = Platform.IdleElectricChargePerSecond * TimeWarp.fixedDeltaTime;
             if (draw > 0.0) part.RequestResource(ElectricChargeId, draw);
+
+            // Point the vehicle where the observatory told it to look. The angle, the rate and the
+            // charge are all the ground station's; this only applies them.
+            if (steeringLink == null) steeringLink = new SpaceTelescopeLink();
+            steeringLink.Vessel = vessel;
+            steeringLink.Module = this;
+            steeringLink.Instrument = Instrument;
+            GroundStation.SteerLoaded(steeringLink, TimeWarp.fixedDeltaTime);
 
             // Keeps the ground ledger's clock current while the game is doing the accounting.
             // Advance bills whatever universal time has passed since this stamp, on the premise
