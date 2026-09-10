@@ -12,7 +12,12 @@ using ExoInstruments.Visualization;
 
 namespace ExoInstruments
 {
-    [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
+    /// <summary>
+    /// The panel runs in two scenes, and KSPAddon takes one apiece, so each is a subclass that adds
+    /// nothing. Flight is there because the orbital instruments already promise it: commanding a
+    /// telescope you are flying needs no radio, and CanCommand has always short-circuited on it,
+    /// but the only window that would call that branch did not exist there.
+    /// </summary>
     public partial class ExoInstrumentsGUI : MonoBehaviour
     {
         private ApplicationLauncherButton button;
@@ -21,6 +26,16 @@ namespace ExoInstruments
         private Vector2 scrollPosRight;
 
         private List<StarTarget> catalog;
+
+        // Loaded once per game, not once per scene. Every loader below writes into a static that
+        // already survives a scene change, and none of them checked, so returning to the space
+        // centre reread and reallocated the lot. Now that the panel also runs in flight, that would
+        // have been every launch as well.
+        //
+        // The consequence, stated because it is real: building the sky surveys with setup_data.py
+        // while the game is running needs a restart to be seen.
+        private static List<StarTarget> cachedCatalog;
+        private static bool staticSkyDataLoaded;
         private StarTarget selectedStar;
         private int selectedObservatoryIndex = 0;
         private bool observatoryMenuOpen = false;
@@ -299,12 +314,18 @@ namespace ExoInstruments
 
         void Start()
         {
-            catalog = LoadCatalog();
-            LoadRenderedStarCatalog();
-            LoadDustMap();
-            LoadEmissionMap();
-            LoadEmissionPatches();
-            LoadGalaxyCatalog();
+            if (cachedCatalog == null) cachedCatalog = LoadCatalog();
+            catalog = cachedCatalog;
+
+            if (!staticSkyDataLoaded)
+            {
+                LoadRenderedStarCatalog();
+                LoadDustMap();
+                LoadEmissionMap();
+                LoadEmissionPatches();
+                LoadGalaxyCatalog();
+                staticSkyDataLoaded = true;
+            }
             DebugScreenConsole.AddConsoleCommand(
                 ConsoleCommand,
                 args => OpenObservatoryWindow(),
@@ -811,7 +832,7 @@ namespace ExoInstruments
                     OnToggleOn,
                     OnToggleOff,
                     null, null, null, null,
-                    ApplicationLauncher.AppScenes.SPACECENTER,
+                    ApplicationLauncher.AppScenes.SPACECENTER | ApplicationLauncher.AppScenes.FLIGHT,
                     icon
                 );
             }
@@ -7017,4 +7038,11 @@ namespace ExoInstruments
             ClearTextures();
         }
     }
+
+    [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
+    public class ExoInstrumentsGUISpaceCentre : ExoInstrumentsGUI { }
+
+    [KSPAddon(KSPAddon.Startup.Flight, false)]
+    public class ExoInstrumentsGUIFlight : ExoInstrumentsGUI { }
+
 }
