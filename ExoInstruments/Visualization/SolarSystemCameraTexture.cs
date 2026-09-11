@@ -1452,14 +1452,16 @@ namespace ExoInstruments.Visualization
                 DistanceMetres = diameterRad > 0.0 && target.IsBody && target.Body != null
                                ? 2.0 * target.Body.Radius / diameterRad : 0.0,
                 TargetAngularDiameterArcsec = targetDiameterArcsec,
-                FieldWidthArcsec = LastFieldWidthArcsec,
+                // THE SHORT SIDE, not the long one. Six detectors in the roster are not square, and
+                // framing means the whole disc is on silicon, so the narrower axis is what decides.
+                FieldWidthArcsec = Math.Min(TextureWidth, TextureHeight) * EffectivePlateScaleArcsecPerPixel,
                 TargetInFrame = LastTargetInFrame,
                 // Filled from the background pass in PollProcessTask, where the blur terms this
                 // frame really delivered are known.
                 ResolutionElementArcsec = 0.0,
             };
             pendingPlateScaleArcsec = inputs.PlateScaleArcsec;
-            pendingDefocusDiscArcsec = 2.0 * inputs.DefocusDiscRadiusPx * inputs.PlateScaleArcsec;
+            pendingDefocusDiscArcsec = LastDefocusDiscArcsec;
             pendingBodySignalToNoise = 0.0;
 
             isProcessing = true;
@@ -2286,7 +2288,14 @@ namespace ExoInstruments.Visualization
             // assembly HAS, which for a deliberately defocused survey photometer is not a point.
             double manualDefocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
             double defocusDiscRadiusPx = Math.Max(Spec.BuiltInDefocusDiscRadiusPx, manualDefocusDiscRadiusPx);
-            LastDefocusDiscArcsec = 2.0 * defocusDiscRadiusPx * EffectivePlateScaleArcsecPerPixel;
+            // NATIVE pixels, so the binning has to come back out: EffectivePlateScaleArcsecPerPixel
+            // is per BINNED pixel (NativePlateScaleArcsecPerPixel already multiplies the pitch by
+            // BinningFactor). Without the divide, BRITE's fixed 4-pixel disc measured 212 arcsec at
+            // 1x1 and 849 at 4x4, the same optics delivering four times the blur from a display
+            // setting, which is the exact error ComputeGroundSeeingFwhmArcsec's comment exists to
+            // prevent. It was cosmetic while this only fed the PSF; it is a Science floor now.
+            LastDefocusDiscArcsec = 2.0 * defocusDiscRadiusPx
+                                  * EffectivePlateScaleArcsecPerPixel / Math.Max(1, BinningFactor);
 
             var inputs = new FrameComputeInputs
             {
@@ -2318,7 +2327,12 @@ namespace ExoInstruments.Visualization
                 : AtmosphericImagingNoise.ScintillationExcessSigma(
                       Spec.ApertureMeters, Spec.SiteAltitudeMeters, airmass, exposureSeconds, 0.0);
 
+            // Cleared on the ground path, because one camera instance serves every instrument and
+            // the property is only ever written by the branch below. A frame shot mid-slew on a
+            // space telescope otherwise left its jitter in place for the next ground exposure, and
+            // the resolution element takes it in quadrature.
             if (spaceBased) GatherSpacecraftPointing(ref inputs, exposureSeconds);
+            else LastPointingBudget = default(PointingBudget);
 
             if (spaceBased) GatherOrbitalSkyBackground(ref inputs, target);
             else GatherSkyBackground(ref inputs, targetAltDeg, sunAltDeg, haveSunAlt, coverage);

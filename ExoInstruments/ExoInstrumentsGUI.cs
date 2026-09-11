@@ -4039,50 +4039,75 @@ namespace ExoInstruments
             if (!(m.SignalToNoise >= ScienceRewards.ImagingMinimumSignalToNoise)) return;
             if (m.SaturatedFraction > ScienceRewards.ImagingMaximumSaturatedFraction) return;
 
-            double award = 0.0;
-            string detail = null;
+            // SATURATION IS MEASURED AGAINST THE TARGET, not against the frame. LastSaturatedFraction
+            // is blown pixels over ALL pixels, so a completely white Eve covering 3% of a wide field
+            // passed a 35% frame-wide gate untouched, and the gate only bit once the body filled the
+            // frame, which is the one case where the detail claim is least at stake.
+            // The plate scale comes back out of the field exactly, because FieldWidthArcsec is the
+            // short side times it. Deriving it from the resolution element instead would be right
+            // only while the detector is the limit and wrong on every seeing-limited frame.
+            int shortSidePx = Math.Min(SolarSystemCameraTexture.TextureWidth,
+                                       SolarSystemCameraTexture.TextureHeight);
+            double plateScale = shortSidePx > 0 ? m.FieldWidthArcsec / shortSidePx : 0.0;
+            double discPx = plateScale > 0.0 ? m.TargetAngularDiameterArcsec / plateScale : 0.0;
+            double discPixels = Math.Max(1.0, Math.PI * 0.25 * discPx * discPx);
+            double blownPixels = m.SaturatedFraction
+                               * SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight;
+            if (blownPixels > ScienceRewards.ImagingMaximumSaturatedFraction * discPixels) return;
 
+            // NOTHING IS BANKED UNTIL THE PAYMENT IS KNOWN. A ratchet consumed against an award that
+            // turns out to be zero, because the body carries no stock science value or because the
+            // career's Science slider is at zero, is a rung the player can never earn again.
             int rung = ImagingScience.DetailRung(m.TargetAngularDiameterArcsec, m.FieldWidthArcsec,
                                                  m.ResolutionElementArcsec, ScienceRewards.ResolutionRungCap);
-            if (scenario.TryBankImagingRung(key, rung, out int previous))
-            {
-                award += ImagingScience.LadderTotal(rung, ScienceRewards.ScienceRewardResolutionRung,
-                                                    ScienceRewards.ResolutionRungsPerDoubling)
-                       - ImagingScience.LadderTotal(previous, ScienceRewards.ScienceRewardResolutionRung,
-                                                    ScienceRewards.ResolutionRungsPerDoubling);
-                detail = previous > 0
-                    ? $"finest detail on {m.BodyName} improved, {1 << previous} to {1 << rung} elements across it"
-                    : $"first resolved image of {m.BodyName}, {1 << rung} elements across it";
-            }
+            int bankedDetail = scenario.BestImagingRung(key);
+            double detailAward = rung > bankedDetail
+                ? ImagingScience.LadderTotal(rung, ScienceRewards.ScienceRewardResolutionRung,
+                                             ScienceRewards.ResolutionRungsPerDoubling)
+                - ImagingScience.LadderTotal(bankedDetail, ScienceRewards.ScienceRewardResolutionRung,
+                                             ScienceRewards.ResolutionRungsPerDoubling)
+                : 0.0;
 
-            // The second claim, and the one that says you flew there. Absolute metres per element,
-            // so unlike the detail rung it keeps improving as the spacecraft closes, and unlike a
-            // threshold against the body's own radius it has a range in it that cannot cancel.
-            // Scaled by the body's own stock science value, which is the game's own statement of
-            // how hard it is to reach.
             double sample = ImagingScience.GroundSampleMetres(m.DistanceMetres, m.ResolutionElementArcsec);
             int groundRung = ImagingScience.GroundSampleRung(
                 sample, ScienceRewards.GroundSampleReferenceMetres, ScienceRewards.GroundSampleRungCap);
-            if (scenario.TryBankGroundSampleRung(key, groundRung, out int groundPrevious))
-            {
-                double rungs = ImagingScience.LadderTotal(groundRung, ScienceRewards.ScienceRewardGroundSampleRung,
-                                                          ScienceRewards.ResolutionRungsPerDoubling)
-                             - ImagingScience.LadderTotal(groundPrevious, ScienceRewards.ScienceRewardGroundSampleRung,
-                                                          ScienceRewards.ResolutionRungsPerDoubling);
-                award += rungs * BodyReconnaissanceValue(m.BodyName);
-                detail = $"{m.BodyName} at {sample:N0} m per resolution element";
-            }
+            int bankedGround = scenario.BestGroundSampleRung(key);
+            double groundAward = groundRung > bankedGround
+                ? (ImagingScience.LadderTotal(groundRung, ScienceRewards.ScienceRewardGroundSampleRung,
+                                              ScienceRewards.ResolutionRungsPerDoubling)
+                 - ImagingScience.LadderTotal(bankedGround, ScienceRewards.ScienceRewardGroundSampleRung,
+                                              ScienceRewards.ResolutionRungsPerDoubling))
+                  * BodyReconnaissanceValue(m.BodyName)
+                : 0.0;
 
+            double award = detailAward + groundAward;
             if (!(award > 0.0)) return;
 
             float paid = ApplyScienceDifficulty((float)award);
+            if (!(paid > 0.0)) return;
+
+            if (detailAward > 0.0) scenario.TryBankImagingRung(key, rung, out int _);
+            if (groundAward > 0.0) scenario.TryBankGroundSampleRung(key, groundRung, out int _);
+
+            // Both halves are named when both fire. The first close pass of a world is the single
+            // most valuable frame in the programme and it claims both, and reporting one of them
+            // reads as a payout that does not match its own explanation.
+            string detail = m.BodyName;
+            if (detailAward > 0.0)
+                detail += bankedDetail > 0
+                    ? $" resolved to {1 << rung} elements across, was {1 << bankedDetail}"
+                    : $" first resolved, {1 << rung} elements across";
+            if (groundAward > 0.0)
+                detail += (detailAward > 0.0 ? " and " : " ") + $"at {sample:N0} m per element";
+
             scenario.AddEarnedScience(paid);
             ResearchAndDevelopment.Instance.AddScience(paid, TransactionReasons.ScienceTransmission);
 
             ScreenMessages.PostScreenMessage($"{detail}  (+{paid:F1} Science)",
                                              8f, ScreenMessageStyle.UPPER_CENTER);
-            Debug.Log($"[ExoInstruments] Imaging science: {detail}, rung {rung} (was {previous}), "
-                    + $"element {m.ResolutionElementArcsec:F3}\", field {m.FieldWidthArcsec:F0}\", "
+            Debug.Log($"[ExoInstruments] Imaging science: {detail}. Detail rung {rung} (was {bankedDetail}), "
+                    + $"ground rung {groundRung} (was {bankedGround}), {sample:N0} m/element, "
+                    + $"element {m.ResolutionElementArcsec:F3}\", short field {m.FieldWidthArcsec:F0}\", "
                     + $"disc {m.TargetAngularDiameterArcsec:F0}\", SNR {m.SignalToNoise:F1}, "
                     + $"saturated {m.SaturatedFraction:P1}, +{paid:F2} Science");
         }
