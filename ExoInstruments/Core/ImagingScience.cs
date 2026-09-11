@@ -11,23 +11,30 @@ namespace ExoInstruments.Core
     /// has to be, because the shutter is not a limit here: the RC20's minimum exposure is 32
     /// microseconds, so a frame costs one reduction pass and not two minutes of anybody's time.
     ///
-    /// CLAIM A, DETAIL, counts resolution elements across the target and pays for doubling that
-    /// count. It is clipped by the FIELD, because a detector cannot record detail it has no pixels
-    /// for, and the clip is what makes a wide instrument and a narrow one differ honestly.
+    /// CLAIM A, DETAIL, counts resolution elements across the target, AND ONLY WHEN THE TARGET
+    /// FITS IN THE FRAME. Clipping to the field instead was the first version and it was wrong
+    /// twice over: the count collapsed to sensor width over twice the plate scale, a property of
+    /// the camera with no body, range or aperture in it, so a telescope in low orbit scored the
+    /// ladder's ceiling on a featureless patch of surface, and every body over the field width
+    /// scored identically. Requiring the whole disc is the honest reading of "photographed it", and
+    /// it gives each instrument a range band: Hubble's 0.045 degree field cannot frame the Mun from
+    /// anywhere, and LORRI's 0.29 degree field frames Jool from its sphere of influence boundary
+    /// almost exactly, which is the mission New Horizons actually flew.
     ///
-    /// CLAIM B, RECONNAISSANCE, is the ground sample distance: how many metres of the target one
-    /// resolution element covers. The sensor does not cap that, which is why it is a separate claim:
-    /// once a body overflows the field, Claim A saturates into a property of the camera alone and
-    /// stops being able to tell one world from another. Claim B is the half that says you flew
-    /// there.
+    /// CLAIM B, GROUND SAMPLE, is metres of target per resolution element, against a fixed
+    /// reference rather than against the body's own size. Against the body's size it was purely
+    /// angular: distance times element under radius over five hundred cancels the range out
+    /// completely, so an 8 metre telescope on the ground claimed Jool without anything flying. In
+    /// absolute metres the range cannot cancel, and it is a ratchet rather than a threshold so
+    /// getting closer keeps paying. This is the half that says you flew there.
     ///
     /// WHAT IS SOURCED AND WHAT IS CHOSEN, stated plainly because the rest of this mod is sourced.
     /// The floor of the detail ladder is: two resolution elements across a target is the point it
     /// stops being a dot, which is the same threshold ResolvedBodyMinDiameterPx already applies.
     /// The Nyquist floor on the resolution element is standard sampling theory. Everything above
-    /// that is a game-balance choice: the factor-two rungs, the payout per rung, and the /500 in
-    /// the reconnaissance threshold. None of them has a citation and none is dressed up as having
-    /// one. They are measured against the tech tree in ScienceRewards.
+    /// that is a game-balance choice: the factor-two rungs, the payout per rung, and the metre
+    /// reference the ground sample is counted down from. None of them has a citation and none is
+    /// dressed up as having one. They are measured against the tech tree in ScienceRewards.
     /// </summary>
     public static class ImagingScience
     {
@@ -37,10 +44,13 @@ namespace ExoInstruments.Core
         /// How fine a detail this frame can actually hold, arcseconds: the blur the optics and the
         /// air and the spacecraft deliver, but never finer than the detector samples it.
         ///
-        /// The Nyquist floor is what stops binning being a free multiplier. Binning divides the
-        /// pixel count and multiplies the plate scale by the same factor, so on a sampling-limited
-        /// instrument the two cancel and the ladder does not move; on a blur-limited one, binning
-        /// genuinely loses nothing and the ladder says so.
+        /// The Nyquist floor is why binning matters here and is not an exploit. The field in
+        /// arcseconds does not move with binning; the element does. So binning up coarsens the
+        /// element and costs rungs on a sampling-limited instrument, binning back down recovers
+        /// them, and on a blur-limited one neither direction changes anything. Unbinning does pay,
+        /// and it should: it is a genuinely better photograph, bought with memory and reduction
+        /// time. An earlier comment here claimed the floor made binning inert in both directions,
+        /// which was simply false in the direction a player actually clicks.
         /// </summary>
         public static double ResolutionElementArcsec(double diffractionFwhmArcsec, double atmosphericFwhmArcsec,
                                                      double jitterFwhmArcsec, double plateScaleArcsecPerPixel,
@@ -55,19 +65,23 @@ namespace ExoInstruments.Core
             return Math.Max(Math.Max(blur, nyquist), Math.Max(0.0, defocusDiscDiameterArcsec));
         }
 
+        /// <summary>Whether the whole target fits in the frame. Nothing is paid for detail unless it does.</summary>
+        public static bool Frames(double targetDiameterArcsec, double fieldWidthArcsec)
+        {
+            return targetDiameterArcsec > 0.0 && fieldWidthArcsec > 0.0
+                && targetDiameterArcsec <= fieldWidthArcsec;
+        }
+
         /// <summary>
-        /// Resolution elements recorded across the target: its own angular size, or the field,
-        /// whichever is smaller, over the resolution element. A body larger than the field is
-        /// recorded a field at a time, and that is what the frame contains.
+        /// Resolution elements across the target, and zero unless the whole of it is in the frame.
+        /// A body that overflows the field is not photographed, it is skimmed.
         /// </summary>
         public static double ResolvedElements(double targetDiameterArcsec, double fieldWidthArcsec,
                                               double resolutionElementArcsec)
         {
-            if (!(resolutionElementArcsec > 0.0) || !(targetDiameterArcsec > 0.0)) return 0.0;
-            double recorded = fieldWidthArcsec > 0.0
-                ? Math.Min(targetDiameterArcsec, fieldWidthArcsec)
-                : targetDiameterArcsec;
-            return recorded / resolutionElementArcsec;
+            if (!(resolutionElementArcsec > 0.0)) return 0.0;
+            if (!Frames(targetDiameterArcsec, fieldWidthArcsec)) return 0.0;
+            return targetDiameterArcsec / resolutionElementArcsec;
         }
 
         /// <summary>
@@ -109,13 +123,18 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Ground sample a reconnaissance claim asks for: the body across five hundred elements.
-        /// A chosen number, and the one lever that decides how hard the flying half is.
+        /// The ground-sample rung a frame reaches: how many halvings below the reference its metres
+        /// per element sit. Absolute, so the range cannot cancel out of it the way it did against
+        /// the body's own radius, and a ratchet, so closing on a world keeps paying.
         /// </summary>
-        public static double ReconnaissanceThresholdMetres(double bodyRadiusMetres, double elementsAcrossRadius)
+        public static int GroundSampleRung(double groundSampleMetres, double referenceMetres, int rungCap)
         {
-            if (!(bodyRadiusMetres > 0.0) || !(elementsAcrossRadius > 0.0)) return 0.0;
-            return bodyRadiusMetres / elementsAcrossRadius;
+            if (!(groundSampleMetres > 0.0) || !(referenceMetres > 0.0)) return 0;
+            if (groundSampleMetres >= referenceMetres) return 0;
+
+            int rung = (int)Math.Floor(Math.Log(referenceMetres / groundSampleMetres, 2.0));
+            if (rung < 1) rung = 1;
+            return rung > rungCap ? rungCap : rung;
         }
     }
 }

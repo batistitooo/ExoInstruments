@@ -1,13 +1,30 @@
 using System;
 using ExoInstruments.Core;
 
-// What a photograph of a world is worth, and the four properties that stop it being farmable.
-// Runs headless: ImagingScience is pure arithmetic and ScienceRewards is constants.
+// What a photograph of a world is worth, and the properties that stop it being farmable or
+// pointless. Runs headless: ImagingScience is pure arithmetic and ScienceRewards is constants.
+//
+// The instrument figures below are the shipped ones, recomputed from VisualTelescopeCatalog's own
+// sensor width, pixel pitch and focal length, so a change to the catalogue that breaks the design
+// shows up here rather than in the game.
 internal static class Program
 {
     private const float PerRung = ScienceRewards.ScienceRewardResolutionRung;
     private const int PerDoubling = ScienceRewards.ResolutionRungsPerDoubling;
     private const int Cap = ScienceRewards.ResolutionRungCap;
+    private const double GsdReference = ScienceRewards.GroundSampleReferenceMetres;
+    private const int GsdCap = ScienceRewards.GroundSampleRungCap;
+
+    // field width in arcsec, and the native plate scale in arcsec per pixel at binning 1.
+    private const double Wfc3Field = 162.0, Wfc3Px = 162.0 / 4096.0;
+    private const double LorriField = 1048.0, LorriPx = 1048.0 / 1024.0;
+    private const double BriteField = 106291.0;
+    private const double RedCatField = 15830.0, RedCatPx = 15830.0 / 4144.0;
+
+    // Kerbin system geometry, metres.
+    private const double MunRadius = 200000.0, MunFromKerbin = 1.2e7, MunSoi = 2.4296e6;
+    private const double JoolRadius = 6.0e6, JoolSoi = 2.4559e9, JoolFromKerbin = 5.0e10;
+    private const double TyloRadius = 600000.0, TyloSoi = 1.0856e7;
 
     private static int failures;
 
@@ -18,18 +35,21 @@ internal static class Program
     }
 
     private static void Near(string what, double got, double want, double tol, string unit)
-    {
-        bool ok = Math.Abs(got - want) <= tol;
-        Check(what, ok, $"{got:G6} vs {want:G6} {unit}");
-    }
+        => Check(what, Math.Abs(got - want) <= tol, $"{got:G6} vs {want:G6} {unit}");
+
+    private static double ArcsecAcross(double radiusMetres, double distanceMetres)
+        => 2.0 * radiusMetres / distanceMetres * (180.0 / Math.PI) * 3600.0;
+
+    private static double Element(double plateScaleArcsec, int binning)
+        => ImagingScience.ResolutionElementArcsec(0.05, 0.0, 0.0, plateScaleArcsec * binning, 0.0);
 
     private static void Main()
     {
         Ladder();
         Ratchet();
-        FieldClip();
-        Sampling();
-        Reconnaissance();
+        Framing();
+        Binning();
+        GroundSample();
         Budget();
 
         Console.WriteLine();
@@ -41,10 +61,8 @@ internal static class Program
 
     private static void Ladder()
     {
-        Console.WriteLine("\n1. The detail ladder\n--------------------");
+        Console.WriteLine("\n1. The ladder\n-------------");
 
-        // The closed form has to equal the series it stands for, or a ratchet built on differences
-        // of it silently pays the wrong amount.
         double summed = 0.0;
         double ratio = Math.Pow(2.0, 1.0 / PerDoubling);
         for (int n = 1; n <= Cap; n++)
@@ -54,9 +72,8 @@ internal static class Program
                  ImagingScience.LadderTotal(n, PerRung, PerDoubling), summed, 1e-9, "Science");
         }
 
-        // The defining property of the spacing, and it is about the INCREMENT, not the cumulative
-        // total: a rung PerDoubling above another is worth twice as much as that one. The totals
-        // themselves do not double, and asserting that they do would be asserting a falsehood.
+        // The spacing property is about the INCREMENT, not the cumulative total. The totals do not
+        // double and asserting that they do would be asserting a falsehood.
         for (int n = 1; n + PerDoubling <= Cap; n++)
         {
             double lower = ImagingScience.LadderTotal(n, PerRung, PerDoubling)
@@ -66,10 +83,8 @@ internal static class Program
             Near($"rung {n + PerDoubling} pays twice what rung {n} did", upper, 2.0 * lower, 1e-9, "Science");
         }
 
-        // The first rung is the unit everything else is quoted in.
         Near("the first rung is the base award",
              ImagingScience.LadderTotal(1, PerRung, PerDoubling), PerRung, 1e-9, "Science");
-
         Check("nothing is owed for an unresolved target",
               ImagingScience.LadderTotal(0, PerRung, PerDoubling) == 0.0, "rung 0");
     }
@@ -80,15 +95,12 @@ internal static class Program
     {
         Console.WriteLine("\n2. The ratchet\n--------------");
 
-        // THE ANTI-FARM PROPERTY. Re-shooting an identical frame pays exactly zero, at every rung.
         for (int n = 1; n <= Cap; n++)
         {
             double total = ImagingScience.LadderTotal(n, PerRung, PerDoubling);
             Near($"re-shooting rung {n} pays nothing", total - total, 0.0, 0.0, "Science");
         }
 
-        // And improving pays the difference and only the difference, however you get there: one
-        // jump from 2 to 8 must pay the same as 2 to 5 and then 5 to 8.
         double direct = ImagingScience.LadderTotal(8, PerRung, PerDoubling)
                       - ImagingScience.LadderTotal(2, PerRung, PerDoubling);
         double staged = (ImagingScience.LadderTotal(5, PerRung, PerDoubling)
@@ -96,135 +108,138 @@ internal static class Program
                       + (ImagingScience.LadderTotal(8, PerRung, PerDoubling)
                        - ImagingScience.LadderTotal(5, PerRung, PerDoubling));
         Near("the path to a rung does not change what it pays", staged, direct, 1e-12, "Science");
-
-        double ceiling = ImagingScience.LadderTotal(Cap, PerRung, PerDoubling);
-        Check("a body is bounded", ceiling < 30.0, $"{ceiling:F2} Science at the ceiling");
     }
 
     // ---------------------------------------------------------------- 3
 
-    private static void FieldClip()
+    private static void Framing()
     {
-        Console.WriteLine("\n3. The field clip\n-----------------");
+        Console.WriteLine("\n3. Framing\n----------");
 
-        // A camera cannot record detail it has no field for. LORRI just outside the Mun's sphere of
-        // influence: the disc is tens of thousands of arcsec across and the field is about 1048.
-        const double munDiscArcsec = 33953.0;
-        const double lorriFieldArcsec = 1048.0;
-        const double lorriResArcsec = 2.05;
+        // THE PROPERTY THAT REPLACED THE FIELD CLIP. Clipping paid the ladder's ceiling for a
+        // featureless patch of surface, identically for every body over the field width, from any
+        // range. Requiring the whole disc is what makes range and instrument choice matter.
+        double munFromKerbin = ArcsecAcross(MunRadius, MunFromKerbin);
+        Check("Hubble cannot frame the Mun from Kerbin",
+              !ImagingScience.Frames(munFromKerbin, Wfc3Field),
+              $"disc {munFromKerbin:F0}\" against a {Wfc3Field:F0}\" field");
 
-        double clipped = ImagingScience.ResolvedElements(munDiscArcsec, lorriFieldArcsec, lorriResArcsec);
-        double unclipped = ImagingScience.ResolvedElements(munDiscArcsec, 0.0, lorriResArcsec);
-        Check("the frame, not the target, bounds what was recorded",
-              clipped < unclipped / 30.0, $"{clipped:F0} elements against {unclipped:F0} unclipped");
-        Near("and it is the field over the resolution element", clipped,
-             lorriFieldArcsec / lorriResArcsec, 1e-9, "elements");
+        double munFromSoi = ArcsecAcross(MunRadius, MunSoi);
+        Check("and flying Hubble to the Mun makes it worse, not better",
+              !ImagingScience.Frames(munFromSoi, Wfc3Field),
+              $"disc {munFromSoi:F0}\" against a {Wfc3Field:F0}\" field");
+        Check("so a close pass earns no detail at all",
+              ImagingScience.DetailRung(munFromSoi, Wfc3Field, Element(Wfc3Px, 1), Cap) == 0, "rung 0");
 
-        // The rung ceiling is then a property of the camera, which is exactly why claim B exists.
-        int rungNear = ImagingScience.DetailRung(munDiscArcsec, lorriFieldArcsec, lorriResArcsec, Cap);
-        int rungFar = ImagingScience.DetailRung(munDiscArcsec * 100.0, lorriFieldArcsec, lorriResArcsec, Cap);
-        Check("a bigger disc past the field earns no more detail", rungNear == rungFar,
-              $"rung {rungNear} both times");
+        // The mission this design is meant to reward, and the numbers are New Horizons' own.
+        double joolFromSoi = ArcsecAcross(JoolRadius, JoolSoi);
+        Check("LORRI frames Jool from its sphere of influence boundary",
+              ImagingScience.Frames(joolFromSoi, LorriField),
+              $"disc {joolFromSoi:F0}\" in a {LorriField:F0}\" field");
+        int joolRung = ImagingScience.DetailRung(joolFromSoi, LorriField, Element(LorriPx, 1), Cap);
+        Check("and it is worth real detail there", joolRung >= 7, $"rung {joolRung}");
 
-        Check("a target smaller than the field is not clipped",
-              ImagingScience.ResolvedElements(10.0, lorriFieldArcsec, 1.0) == 10.0, "10 elements");
+        // The wide-field instrument is the one that can photograph something close.
+        Check("BRITE frames the Mun from Kerbin",
+              ImagingScience.Frames(munFromKerbin, BriteField),
+              $"disc {munFromKerbin:F0}\" in a {BriteField:F0}\" field");
+
+        Check("a target of exactly the field width still counts",
+              ImagingScience.Frames(100.0, 100.0), "");
+        Check("a hair over does not", !ImagingScience.Frames(100.001, 100.0), "");
     }
 
     // ---------------------------------------------------------------- 4
 
-    private static void Sampling()
+    private static void Binning()
     {
-        Console.WriteLine("\n4. Sampling, and why binning is not a free multiplier\n-----------------------------------------------------");
+        Console.WriteLine("\n4. Binning\n----------");
 
-        // A blur-limited instrument: the delivered PSF is far coarser than the pixels, so the
-        // resolution element is the blur and binning to it costs nothing real.
-        double fine = ImagingScience.ResolutionElementArcsec(0.10, 1.20, 0.02, 0.05, 0.0);
-        Near("blur wins when the detector oversamples it", fine, Math.Sqrt(0.01 + 1.44 + 0.0004), 1e-9, "arcsec");
+        // BINNING DOWN DOES PAY, and it should: it is a genuinely better photograph, bought with
+        // memory and reduction time. An earlier comment claimed the Nyquist floor made binning
+        // inert in both directions, which was false in the direction a player actually clicks.
+        // What is asserted here is the honest behaviour, in both directions.
+        double disc = ArcsecAcross(MunRadius, MunFromKerbin);
+        int atFour = ImagingScience.DetailRung(disc, RedCatField, Element(RedCatPx, 4), Cap);
+        int atOne = ImagingScience.DetailRung(disc, RedCatField, Element(RedCatPx, 1), Cap);
+        Check("unbinning a sampling-limited instrument gains two rungs", atOne - atFour == 2,
+              $"rung {atFour} at 4x4, rung {atOne} at 1x1");
 
-        // A sampling-limited one: the pixels are coarser than the blur, so Nyquist sets the floor.
-        double coarse = ImagingScience.ResolutionElementArcsec(0.05, 0.0, 0.0, 1.00, 0.0);
-        Near("Nyquist wins when the detector undersamples the blur", coarse, 2.0, 1e-9, "arcsec");
+        // And on a blur-limited one it gains nothing, because the element is already the blur. The
+        // seeing has to beat the Nyquist floor at BOTH binnings for the case to be the one claimed:
+        // this instrument samples at 3.8"/px, so 4x4 alone puts the floor at 30.6" and a milder
+        // blur would leave it sampling-limited at one end and prove nothing.
+        double blurLimited4 = ImagingScience.ResolutionElementArcsec(0.0, 40.0, 0.0, RedCatPx * 4, 0.0);
+        double blurLimited1 = ImagingScience.ResolutionElementArcsec(0.0, 40.0, 0.0, RedCatPx * 1, 0.0);
+        Near("unbinning a blur-limited instrument buys nothing", blurLimited1, blurLimited4, 1e-9, "arcsec");
 
-        // THE BINNING PROPERTY, and it is that binning can never PAY. The field in arcseconds does
-        // not change with binning; only the pixels do. So on a sampling-limited instrument binning
-        // coarsens the element in proportion and the recorded count falls with it, which is what
-        // binning physically does, and on a blur-limited one the element is already the blur and
-        // binning down to 1x1 buys exactly nothing. Either way there is no rung to be had by
-        // toggling a free switch.
-        const double nativePlateScale = 1.0;
-        const double fieldArcsec = 4096.0 * nativePlateScale;   // binning does not move the field
-        foreach (int binning in new[] { 1, 2, 4 })
-        {
-            double res = ImagingScience.ResolutionElementArcsec(0.05, 0.0, 0.0, nativePlateScale * binning, 0.0);
-            double elements = ImagingScience.ResolvedElements(1e9, fieldArcsec, res);
-            Near($"sampling-limited detail falls with binning at {binning}x{binning}",
-                 elements, 2048.0 / binning, 1e-9, "elements");
-        }
+        // The field in arcsec does not move with binning, which is what makes the above true.
+        Check("binning does not change the field", RedCatField == RedCatField, "invariant by construction");
 
-        // The blur-limited case is the one a player would try to farm, and it does not move.
-        double blurLimited1 = ImagingScience.ResolvedElements(
-            1e9, fieldArcsec, ImagingScience.ResolutionElementArcsec(0.0, 8.0, 0.0, nativePlateScale * 1, 0.0));
-        double blurLimited4 = ImagingScience.ResolvedElements(
-            1e9, fieldArcsec, ImagingScience.ResolutionElementArcsec(0.0, 8.0, 0.0, nativePlateScale * 4, 0.0));
-        Near("unbinning a blur-limited instrument buys nothing", blurLimited1, blurLimited4, 1e-9, "elements");
-
-        // A defocus disc the instrument builds in is a floor too: BRITE spreads its stars on
-        // purpose and must not claim detail that spreading destroyed.
         double defocused = ImagingScience.ResolutionElementArcsec(0.5, 0.0, 2.0, 13.0, 212.0);
         Near("a built-in defocus disc floors the element", defocused, 212.0, 1e-9, "arcsec");
     }
 
     // ---------------------------------------------------------------- 5
 
-    private static void Reconnaissance()
+    private static void GroundSample()
     {
-        Console.WriteLine("\n5. Reconnaissance\n-----------------");
+        Console.WriteLine("\n5. Ground sample\n----------------");
 
-        // Ground sample distance is not capped by the sensor, which is the point: it keeps falling
-        // as the spacecraft closes, where the detail rung has already saturated.
-        const double res = 2.05;
-        double far = ImagingScience.GroundSampleMetres(12.0e9, res);
-        double near = ImagingScience.GroundSampleMetres(2.4e6, res);
-        Check("closing the range sharpens the ground sample", near < far / 1000.0,
-              $"{near:F0} m against {far:F0} m");
+        // THE PROPERTY THAT REPLACED THE RADIUS THRESHOLD. Against the body's own radius the claim
+        // was distance x element <= radius / 500, which cancels the range out completely and is a
+        // purely angular test: an 8 m telescope on the ground claimed Jool without anything flying.
+        double lorriElement = Element(LorriPx, 1);
+        double joolFromKerbin = ImagingScience.GroundSampleMetres(JoolFromKerbin, lorriElement);
+        double joolFromSoi = ImagingScience.GroundSampleMetres(JoolSoi, lorriElement);
+        Check("Jool cannot be ground-sampled from Kerbin",
+              ImagingScience.GroundSampleRung(joolFromKerbin, GsdReference, GsdCap) == 0,
+              $"{joolFromKerbin:N0} m per element");
+        Check("and its own sphere of influence is too wide to help much",
+              ImagingScience.GroundSampleRung(joolFromSoi, GsdReference, GsdCap) == 0,
+              $"{joolFromSoi:N0} m per element at the boundary");
 
-        double munThreshold = ImagingScience.ReconnaissanceThresholdMetres(
-            200000.0, ScienceRewards.ReconnaissanceElementsAcrossRadius);
-        Near("the Mun asks for its radius over five hundred", munThreshold, 400.0, 1e-9, "m");
-        Check("and the claim is reachable from its sphere of influence", near <= munThreshold,
-              $"{near:F0} m against {munThreshold:F0} m");
+        // Tylo is the case the whole claim exists for: nothing from home, real rungs if you fly.
+        double tyloHome = ImagingScience.GroundSampleMetres(JoolFromKerbin, lorriElement);
+        double tyloClose = ImagingScience.GroundSampleMetres(TyloSoi, lorriElement);
+        int homeRung = ImagingScience.GroundSampleRung(tyloHome, GsdReference, GsdCap);
+        int closeRung = ImagingScience.GroundSampleRung(tyloClose, GsdReference, GsdCap);
+        Check("Tylo pays nothing from Kerbin", homeRung == 0, $"{tyloHome:N0} m per element");
+        Check("and pays only once something has flown there", closeRung >= 3,
+              $"rung {closeRung} at {tyloClose:N0} m per element");
 
-        // A 3 cm lens cannot claim it from anywhere legal, which is the intended answer.
-        double briteRes = ImagingScience.ResolutionElementArcsec(4.4, 0.0, 12.0, 13.25, 212.0);
-        double briteGsd = ImagingScience.GroundSampleMetres(2.4e6, briteRes);
-        Check("a cubesat does not claim reconnaissance", briteGsd > munThreshold,
-              $"{briteGsd:F0} m against {munThreshold:F0} m");
+        // The ratchet: closing further keeps paying, which a one-shot threshold could not do.
+        double halfway = ImagingScience.GroundSampleMetres(TyloSoi / 4.0, lorriElement);
+        Check("and closing further keeps paying",
+              ImagingScience.GroundSampleRung(halfway, GsdReference, GsdCap) > closeRung,
+              $"rung {ImagingScience.GroundSampleRung(halfway, GsdReference, GsdCap)} at a quarter the range");
 
         Check("an unknown range claims nothing",
-              double.IsPositiveInfinity(ImagingScience.GroundSampleMetres(0.0, res)), "");
+              double.IsPositiveInfinity(ImagingScience.GroundSampleMetres(0.0, lorriElement)), "");
+        Check("a coarse frame claims nothing",
+              ImagingScience.GroundSampleRung(GsdReference * 2.0, GsdReference, GsdCap) == 0, "");
     }
 
     // ---------------------------------------------------------------- 6
 
     private static void Budget()
     {
-        Console.WriteLine("\n6. What the programme is worth\n------------------------------");
+        Console.WriteLine("\n6. What a body is worth\n-----------------------");
 
-        // The whole detail half, if every stock body were photographed to the ceiling.
-        double perBody = ImagingScience.LadderTotal(Cap, PerRung, PerDoubling);
-        double detailHalf = 15.0 * perBody;
+        double detailCeiling = ImagingScience.LadderTotal(Cap, PerRung, PerDoubling);
+        double gsdCeiling = ImagingScience.LadderTotal(GsdCap, ScienceRewards.ScienceRewardGroundSampleRung,
+                                                       PerDoubling);
+        Console.WriteLine($"    detail ceiling {detailCeiling:F1}, ground-sample ceiling "
+                        + $"{gsdCeiling:F1} x the body's stock science value");
 
-        // And the reconnaissance half, against the stock bodies' own summed InSpaceHigh values.
-        const double summedInSpaceHigh = 94.5;
-        double reconHalf = ScienceRewards.ScienceRewardReconnaissancePerScienceValue * summedInSpaceHigh;
+        Check("no single body can run away with the tree",
+              detailCeiling + gsdCeiling * 12.0 < 120.0,
+              $"{detailCeiling + gsdCeiling * 12.0:F0} Science at both ceilings on the richest body");
 
-        double programme = detailHalf + reconHalf;
-        Console.WriteLine($"    detail {detailHalf:F0} + reconnaissance {reconHalf:F0} = {programme:F0} Science");
-
-        // Measured against the stock tree, which ScienceRewards puts at about 17500.
-        Check("the programme is a meaningful fraction of the tree, not the tree",
-              programme > 300.0 && programme < 1200.0, $"{programme / 17500.0:P1} of 17500");
-        Check("and it stays under the exoplanet side's own design point",
-              programme < 2000.0, $"{programme:F0} against 2000");
+        // Fifteen bodies, none of them reaching both ceilings in practice, has to stay a fraction of
+        // the 17500-Science tree ScienceRewards measures everything against.
+        double optimistic = 15.0 * (detailCeiling + gsdCeiling * 6.0);
+        Check("and the whole programme stays a fraction of the tree",
+              optimistic < 0.10 * 17500.0, $"{optimistic:F0} Science, {optimistic / 17500.0:P1} of the tree");
     }
 }

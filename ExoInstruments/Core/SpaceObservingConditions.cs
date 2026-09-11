@@ -32,6 +32,13 @@ namespace ExoInstruments.Core
         /// <summary>Natural satellites of the host body, for the moon avoidance angle. Null or empty for none.</summary>
         public SpaceMoonContext[] Moons;
 
+        /// <summary>
+        /// True when the thing being photographed IS the body this telescope orbits. A body cannot
+        /// hide behind itself, and the limb avoidance that keeps a telescope from skimming the
+        /// planet's edge while looking PAST it has nothing to say about looking AT it.
+        /// </summary>
+        public bool TargetIsHostBody;
+
         /// <summary>The target's ecliptic latitude, degrees, and its heliocentric ecliptic longitude, for the zodiacal light.</summary>
         public double TargetEclipticLatitudeDeg;
         public double TargetHeliocentricLongitudeDeg;
@@ -114,12 +121,19 @@ namespace ExoInstruments.Core
             s.Host = OrbitalVisibility.EvaluateLimb(
                 ctx.PositionFromHostBody, lineOfSight, ctx.HostBodyRadiusMeters, ctx.SunFromHostBody);
 
-            s.OccultedByHost = s.Host.Occulted;
+            // A BODY DOES NOT OCCULT ITSELF, and it does not shine into its own observation from
+            // its own limb either. Both tests ask about the host getting in the way of something
+            // behind it; with the host as the target there is nothing behind it to protect. Without
+            // this, a telescope inside a body's sphere of influence could not photograph that body
+            // at all, which ruled out every close pass and made the whole gas giant unphotographable
+            // from anywhere near it. Same rule the moon list already applies one level down.
+            s.OccultedByHost = s.Host.Occulted && !ctx.TargetIsHostBody;
 
             double limbAvoidance = s.Host.LimbIsSunlit
                 ? platform.BrightLimbAvoidanceAngleDeg
                 : platform.DarkLimbAvoidanceAngleDeg;
-            s.InsideLimbAvoidance = !s.OccultedByHost && s.Host.LimbAngleDeg < limbAvoidance;
+            s.InsideLimbAvoidance = !ctx.TargetIsHostBody
+                                 && !s.OccultedByHost && s.Host.LimbAngleDeg < limbAvoidance;
 
             s.SunAngleDeg = OrbitalVisibility.SeparationDeg(lineOfSight, ctx.SunFromObserver);
             s.InsideSunAvoidance = s.SunAngleDeg < platform.SunAvoidanceAngleDeg;

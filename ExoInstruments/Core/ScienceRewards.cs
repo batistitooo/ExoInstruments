@@ -97,26 +97,28 @@ namespace ExoInstruments.Core
         public const int ResolutionRungsPerDoubling = 3;
 
         /// <summary>
-        /// Where the ladder stops. Eleven rungs is about 2048 resolution elements across a target,
-        /// which is past what any instrument in the roster records in one frame.
+        /// Where the detail ladder stops. Eleven rungs is 2048 resolution elements across a disc,
+        /// which needs the whole body framed at that sampling: reachable, but only by matching the
+        /// instrument's field to the target's range.
         /// </summary>
         public const int ResolutionRungCap = 11;
 
         /// <summary>
-        /// Reconnaissance, as a multiple of the body's own stock InSpaceHigh science value. The one
-        /// place a stock KSP balance number is borrowed, and it is borrowed for the one thing it
-        /// measures: how hard the body is to reach. Across the fifteen stock bodies this is about
-        /// 283 Science if every one of them is imaged from close enough.
+        /// The ground-sample ladder's first rung, and its ceiling. Smaller per rung than the detail
+        /// ladder because this one is also multiplied by the body's own stock InSpaceHigh science
+        /// value, which is the one stock balance number borrowed here and is borrowed for the one
+        /// thing it measures: how hard the body is to get to.
         /// </summary>
-        public const float ScienceRewardReconnaissancePerScienceValue = 3.0f;
+        public const float ScienceRewardGroundSampleRung = 0.12f;
+        public const int GroundSampleRungCap = 12;
 
         /// <summary>
-        /// Resolution elements across the body's RADIUS that a reconnaissance claim asks for.
-        /// A chosen number, and the lever that decides how hard the flying half is: at 500, a
-        /// good orbital camera claims most bodies from their sphere of influence boundary and
-        /// a 3 cm cubesat claims none of them.
+        /// Metres per resolution element the ground-sample ladder counts down from. Chosen: a
+        /// kilometre is about where a frame stops being a dot with a colour and starts showing
+        /// which part of a world you are over. Absolute on purpose, because measuring it against
+        /// the body's own radius cancelled the range out and let a ground telescope claim Jool.
         /// </summary>
-        public const double ReconnaissanceElementsAcrossRadius = 500.0;
+        public const double GroundSampleReferenceMetres = 1000.0;
 
         /// <summary>
         /// Signal to noise a frame needs before it counts as a measurement, the same five sigma

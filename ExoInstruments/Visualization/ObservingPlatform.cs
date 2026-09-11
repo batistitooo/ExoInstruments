@@ -105,6 +105,7 @@ namespace ExoInstruments.Visualization
             ctx.OrbitNormal = link.OrbitNormal();
             ctx.OrbitPeriodSeconds = link.OrbitPeriodSeconds;
             ctx.Moons = BuildMoons(host, observer, target);
+            ctx.TargetIsHostBody = target != null && target == host;
 
             // The ecliptic is the HOME body's orbital plane, whatever body this telescope
             // happens to be orbiting (see EclipticFrame): the zodiacal cloud belongs to the

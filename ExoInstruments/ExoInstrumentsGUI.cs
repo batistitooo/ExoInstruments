@@ -2514,22 +2514,18 @@ namespace ExoInstruments
                     string key = ExoInstrumentsScenario.ImagingKey(selectedPhotographyBody.bodyName);
                     int banked = ExoInstrumentsScenario.Instance.BestImagingRung(key);
 
-                    double recorded = Math.Min(diskArcsec, field);
-                    double needed = recorded / Math.Pow(2.0, Math.Min(rung + 1, ScienceRewards.ResolutionRungCap));
-                    string science = $"Detail rung {rung}, banked {banked}";
-                    if (rung <= banked && rung < ScienceRewards.ResolutionRungCap)
-                        science += $", next at {Arcsec(needed)}";
+                    string science = ImagingScience.Frames(diskArcsec, field)
+                        ? $"Detail rung {rung}, banked {banked}"
+                        : $"Detail: disc {diskArcsec / Math.Max(1e-9, field):F0}x the field, nothing framed";
 
-                    if (!ExoInstrumentsScenario.Instance.IsReconnoitred(key))
-                    {
-                        double range = diskArcsec > 0.0
-                            ? 2.0 * selectedPhotographyBody.Radius / (diskArcsec * Math.PI / (180.0 * 3600.0))
-                            : 0.0;
-                        double sample = ImagingScience.GroundSampleMetres(range, element);
-                        double threshold = ImagingScience.ReconnaissanceThresholdMetres(
-                            selectedPhotographyBody.Radius, ScienceRewards.ReconnaissanceElementsAcrossRadius);
-                        science += $"  |  recon {sample:N0} m/element, claim at {threshold:N0} m";
-                    }
+                    double range = diskArcsec > 0.0
+                        ? 2.0 * selectedPhotographyBody.Radius / (diskArcsec * Math.PI / (180.0 * 3600.0))
+                        : 0.0;
+                    double sample = ImagingScience.GroundSampleMetres(range, element);
+                    int groundRung = ImagingScience.GroundSampleRung(
+                        sample, ScienceRewards.GroundSampleReferenceMetres, ScienceRewards.GroundSampleRungCap);
+                    science += $"  |  {sample:N0} m/element, rung {groundRung}, banked "
+                             + $"{ExoInstrumentsScenario.Instance.BestGroundSampleRung(key)}";
                     GUILayout.Label(science, smallCaptionStyle);
                 }
 
@@ -4027,7 +4023,9 @@ namespace ExoInstruments
         /// </summary>
         void CheckImagingScience(SolarSystemCameraTexture.CapturedFrameMeasurement m)
         {
-            if (!ScienceEconomyActive) return;
+            // Both of these are checked before anything is banked. A ratchet consumed against a
+            // payment that then cannot be credited is a rung the player paid for and never got.
+            if (!ScienceEconomyActive || ResearchAndDevelopment.Instance == null) return;
             ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
             if (scenario == null) return;
 
@@ -4057,27 +4055,29 @@ namespace ExoInstruments
                     : $"first resolved image of {m.BodyName}, {1 << rung} elements across it";
             }
 
-            // The second claim, and the only one that can tell one world from another once the body
-            // overflows the field: past that point the rung above is a property of the camera alone.
-            if (!scenario.IsReconnoitred(key))
+            // The second claim, and the one that says you flew there. Absolute metres per element,
+            // so unlike the detail rung it keeps improving as the spacecraft closes, and unlike a
+            // threshold against the body's own radius it has a range in it that cannot cancel.
+            // Scaled by the body's own stock science value, which is the game's own statement of
+            // how hard it is to reach.
+            double sample = ImagingScience.GroundSampleMetres(m.DistanceMetres, m.ResolutionElementArcsec);
+            int groundRung = ImagingScience.GroundSampleRung(
+                sample, ScienceRewards.GroundSampleReferenceMetres, ScienceRewards.GroundSampleRungCap);
+            if (scenario.TryBankGroundSampleRung(key, groundRung, out int groundPrevious))
             {
-                double sample = ImagingScience.GroundSampleMetres(m.DistanceMetres, m.ResolutionElementArcsec);
-                double threshold = ImagingScience.ReconnaissanceThresholdMetres(
-                    m.BodyRadiusMetres, ScienceRewards.ReconnaissanceElementsAcrossRadius);
-                if (threshold > 0.0 && sample <= threshold && scenario.MarkReconnoitred(key))
-                {
-                    award += ScienceRewards.ScienceRewardReconnaissancePerScienceValue
-                           * BodyReconnaissanceValue(m.BodyName);
-                    detail = $"reconnaissance of {m.BodyName}, {sample:F0} m per resolution element";
-                }
+                double rungs = ImagingScience.LadderTotal(groundRung, ScienceRewards.ScienceRewardGroundSampleRung,
+                                                          ScienceRewards.ResolutionRungsPerDoubling)
+                             - ImagingScience.LadderTotal(groundPrevious, ScienceRewards.ScienceRewardGroundSampleRung,
+                                                          ScienceRewards.ResolutionRungsPerDoubling);
+                award += rungs * BodyReconnaissanceValue(m.BodyName);
+                detail = $"{m.BodyName} at {sample:N0} m per resolution element";
             }
 
             if (!(award > 0.0)) return;
 
             float paid = ApplyScienceDifficulty((float)award);
             scenario.AddEarnedScience(paid);
-            if (ResearchAndDevelopment.Instance != null)
-                ResearchAndDevelopment.Instance.AddScience(paid, TransactionReasons.ScienceTransmission);
+            ResearchAndDevelopment.Instance.AddScience(paid, TransactionReasons.ScienceTransmission);
 
             ScreenMessages.PostScreenMessage($"{detail}  (+{paid:F1} Science)",
                                              8f, ScreenMessageStyle.UPPER_CENTER);
