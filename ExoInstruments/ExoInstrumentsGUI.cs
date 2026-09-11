@@ -2365,14 +2365,14 @@ namespace ExoInstruments
             // exposure instead.
             bool wasDumping = SolarSystemCameraTexture.StageDumpDirectory != null;
             bool wantDump = GUILayout.Toggle(wasDumping,
-                " Diagnostics: dump every pipeline stage to Screenshots/ExoInstruments/stages/ (one frame-sized file per stage)");
+                " Dump every pipeline stage to Screenshots/ExoInstruments/stages/");
             if (wantDump != wasDumping)
                 SolarSystemCameraTexture.StageDumpDirectory = wantDump
                     ? KSPUtil.ApplicationRootPath + "Screenshots/ExoInstruments/stages"
                     : null;
 
             saveDiagnosticFrames = GUILayout.Toggle(saveDiagnosticFrames,
-                " Diagnostics: also save the raw render on Save Photo (attributes a bad frame to the game's rendering vs. this mod's pipeline)");
+                " Also save the raw render on Save Photo");
 
             DrawDisplayStretchControls();
             DrawResolvingPowerDiagnostic();
@@ -2399,7 +2399,7 @@ namespace ExoInstruments
                 }
             }
             bool autoScale = SolarSystemCameraTexture.AutoScaleDisplay;
-            if (GUILayout.Toggle(autoScale, " Auto black/white points (zscale, as DS9 and IRAF do it)") != autoScale)
+            if (GUILayout.Toggle(autoScale, " Auto black/white points (zscale)") != autoScale)
             {
                 SolarSystemCameraTexture.AutoScaleDisplay = !autoScale;
                 solarSystemCamera.UploadDisplayTextures();
@@ -2494,10 +2494,9 @@ namespace ExoInstruments
                 double delivered = Math.Sqrt(diff * diff + atm * atm);
 
                 GUILayout.Label(
-                    $"PSF: diffraction {Arcsec(diff)} + atmosphere {Arcsec(atm)} = {Arcsec(delivered)} delivered "
-                    + $"({delivered / plateScale:F1} px"
-                    + (diskPx > 0.0 ? $", {delivered / Math.Max(1e-9, diskArcsec) * 100.0:F1}% of disk)" : ")")
-                    + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
+                    $"PSF {Arcsec(delivered)} = {delivered / plateScale:F1} px "
+                    + $"(diffraction {Arcsec(diff)}, atmosphere {Arcsec(atm)})"
+                    + $"  |  kernel {2f * blurPx + 1f:F0} px",
                     smallCaptionStyle);
 
                 // WHAT THIS FRAME IS WORTH, and what the next rung would cost, because a ratchet the
@@ -2517,13 +2516,9 @@ namespace ExoInstruments
 
                     double recorded = Math.Min(diskArcsec, field);
                     double needed = recorded / Math.Pow(2.0, Math.Min(rung + 1, ScienceRewards.ResolutionRungCap));
-                    GUILayout.Label(
-                        $"Detail: element {Arcsec(element)} over {recorded / Math.Max(1e-9, element):F0} elements "
-                        + $"= rung {rung}, banked {banked}"
-                        + (rung > banked ? "  (this frame pays)" : rung >= ScienceRewards.ResolutionRungCap
-                            ? "  (ladder complete here)"
-                            : $"  (next rung needs {Arcsec(needed)})"),
-                        smallCaptionStyle);
+                    string science = $"Detail rung {rung}, banked {banked}";
+                    if (rung <= banked && rung < ScienceRewards.ResolutionRungCap)
+                        science += $", next at {Arcsec(needed)}";
 
                     if (!ExoInstrumentsScenario.Instance.IsReconnoitred(key))
                     {
@@ -2533,11 +2528,9 @@ namespace ExoInstruments
                         double sample = ImagingScience.GroundSampleMetres(range, element);
                         double threshold = ImagingScience.ReconnaissanceThresholdMetres(
                             selectedPhotographyBody.Radius, ScienceRewards.ReconnaissanceElementsAcrossRadius);
-                        GUILayout.Label(
-                            $"Reconnaissance: {sample:N0} m per element, claim at {threshold:N0} m"
-                            + (sample <= threshold ? "  (this frame claims it)" : "  (fly closer, or bring a longer focal length)"),
-                            smallCaptionStyle);
+                        science += $"  |  recon {sample:N0} m/element, claim at {threshold:N0} m";
                     }
+                    GUILayout.Label(science, smallCaptionStyle);
                 }
 
                 // Atmospheric dispersion: the atmosphere refracts blue more than red, so a source at
@@ -2545,34 +2538,40 @@ namespace ExoInstruments
                 // length of it across the active filter, which is the number that says whether the
                 // frame's stars are points.
                 double smear = solarSystemCamera.LastDispersionSmearArcsec;
-                if (smear > 0.0)
-                {
-                    double smearPx = smear / plateScale;
-                    GUILayout.Label(
-                        $"Atmospheric dispersion: {smear:F3}\" across this filter at z = "
-                        + $"{solarSystemCamera.LastZenithDistanceDeg:F0} deg = {smearPx:F1} px toward the zenith"
-                        + (SolarSystemCameraTexture.Spec.HasAtmosphericDispersionCorrector
-                            ? ", after the instrument's dispersion corrector" : ""),
-                        smallCaptionStyle);
-                }
 
                 // A single per-exposure draw applied to the whole target, so it is the reason two
                 // otherwise identical captures differ in brightness. It can never be negative;
                 // if it ever reads below zero, the running build predates that fix.
                 float sc = solarSystemCamera.LastScintillationFactor;
-                GUILayout.Label(
-                    $"Scintillation this frame: x{sc:F3} (sigma {solarSystemCamera.LastScintillationSigma:F2})"
-                    + (sc < 0f ? "  <-- NEGATIVE: stale build, restart KSP" : ""),
-                    smallCaptionStyle);
+                if (smear > 0.0 || sc != 1f)
+                {
+                    GUILayout.Label(
+                        (smear > 0.0
+                            ? $"Dispersion {smear:F3}\" at z {solarSystemCamera.LastZenithDistanceDeg:F0} deg "
+                              + $"= {smear / plateScale:F1} px"
+                              + (SolarSystemCameraTexture.Spec.HasAtmosphericDispersionCorrector ? " (corrected)" : "")
+                              + "  |  "
+                            : "")
+                        + $"scintillation x{sc:F3}, sigma {solarSystemCamera.LastScintillationSigma:F2}"
+                        + (sc < 0f ? "  <-- NEGATIVE: stale build, restart KSP" : ""),
+                        smallCaptionStyle);
+                }
 
                 // The three numbers that describe the sky the subject was photographed against:
                 // how dark it was, how faint this exposure could reach, and what it actually
                 // caught. All are quantities a real observer records with the frame.
                 double skyMag = solarSystemCamera.LastSkyBrightnessVMagPerArcsec2;
                 string sky = double.IsPositiveInfinity(skyMag) ? "-" : $"{skyMag:F2} mag/arcsec²";
+                double airglowR = solarSystemCamera.LastAirglowRayleighsInBand;
+                double ebv = solarSystemCamera.LastFieldReddeningEBv;
                 GUILayout.Label(
-                    $"Sky {sky}  |  limiting magnitude V {solarSystemCamera.LastLimitingVMag:F1}"
-                    + $"  |  {solarSystemCamera.LastStarsDrawn} catalog stars in frame",
+                    $"Sky {sky}  |  limit V {solarSystemCamera.LastLimitingVMag:F1}"
+                    + $"  |  {solarSystemCamera.LastStarsDrawn} stars"
+                    + (airglowR > 0.0
+                        ? $"  |  airglow {airglowR:F0} R, {solarSystemCamera.LastAirglowLineShare * 100.0:F0}% lines"
+                        : "")
+                    + (double.IsNaN(ebv) ? ""
+                        : $"  |  E(B-V) {ebv:F3}, A(V) {ebv * InterstellarExtinction.MilkyWayRv:F2}"),
                     smallCaptionStyle);
 
                 // Where the target actually landed. The aim and the star field share one geometry,
@@ -2586,28 +2585,15 @@ namespace ExoInstruments
                         ? $"{fieldArcsec:F1}\""
                         : $"{fieldArcsec / 60.0:F1}'";
                     GUILayout.Label(
-                        $"Pointing: target at ({solarSystemCamera.LastTargetPixelX:F0}, "
-                        + $"{solarSystemCamera.LastTargetPixelY:F0}) px, {offset:F2}\" from centre, "
-                        + $"field {field} wide"
+                        $"Target at ({solarSystemCamera.LastTargetPixelX:F0}, "
+                        + $"{solarSystemCamera.LastTargetPixelY:F0}) px, {offset:F2}\" off centre, field {field}"
                         + (solarSystemCamera.LastTargetInFrame ? "" : "  <-- OUTSIDE THE FRAME"),
                         smallCaptionStyle);
                 }
                 else if (fieldArcsec > 0.0)
                 {
-                    GUILayout.Label($"Pointing: target did not project into the field "
-                                  + $"(field {fieldArcsec / 60.0:F1}' wide)", smallCaptionStyle);
-                }
-
-                // What the sky itself emits into this filter, the number a nebula's surface
-                // brightness competes against, and the reason [O I] is not imaged from the ground.
-                double airglow = solarSystemCamera.LastAirglowRayleighsInBand;
-                if (airglow > 0.0)
-                {
-                    GUILayout.Label(
-                        $"Airglow in this band: {airglow:F1} R "
-                        + $"({solarSystemCamera.LastAirglowLineShare * 100.0:F0}% sky emission lines, "
-                        + "ESO SkyCalc / Hanuschik 2003)",
-                        smallCaptionStyle);
+                    GUILayout.Label($"Target did not project into the field ({fieldArcsec / 60.0:F1}')",
+                                    smallCaptionStyle);
                 }
 
                 double emission = solarSystemCamera.LastEmissionRayleighs;
@@ -2615,86 +2601,56 @@ namespace ExoInstruments
                 {
                     double peak = solarSystemCamera.LastEmissionPeakElectrons;
                     double well = SolarSystemCameraTexture.FullWellElectrons;
-                    GUILayout.Label(
-                        $"Diffuse line emission in this filter: {emission:F1} R mean over the field"
-                        + (solarSystemCamera.LastEmissionLines != null
-                            ? $" from {solarSystemCamera.LastEmissionLines}" : "")
-                        + (double.IsNaN(solarSystemCamera.LastEmissionTemperatureK) ? ""
-                            : $", forbidden-line ratios at T_e = {solarSystemCamera.LastEmissionTemperatureK:F0} K"),
-                        smallCaptionStyle);
-
-                    // MEASURED OR DERIVED, said plainly, because it is the difference between a
-                    // survey of this line and a model of it. [O III] is only ever measured: no
-                    // relation derives it from H-alpha, and a frame that shows it without saying so
-                    // invites the reading that the ratio model produced it.
-                    if (solarSystemCamera.LastEmissionMeasuredLines != null)
-                        GUILayout.Label(
-                            $"   {solarSystemCamera.LastEmissionMeasuredLines} measured by the survey; "
-                            + "any other line here is derived from H-alpha",
-                            smallCaptionStyle);
-
-                    // Which layer answered, and at what beam. This is the number that decides
-                    // whether the frame can show structure at all, so it is on the frame.
+                    // Measured and derived are distinguished on screen because they are different
+                    // claims: [O III] is only ever measured, and a frame showing it without saying
+                    // so invites the reading that the ratio model produced it.
                     double beam = solarSystemCamera.LastEmissionResolutionArcmin;
-                    if (beam > 0.0)
-                    {
-                        GUILayout.Label(
-                            solarSystemCamera.LastEmissionPatchName != null
-                                ? $"   {solarSystemCamera.LastEmissionPatchCoverage * 100.0:F0}% of the frame from the "
-                                  + $"{solarSystemCamera.LastEmissionPatchName} patch at {beam:F2}' sampling, "
-                                  + "the rest from the all-sky map"
-                                : $"   from the all-sky map at {beam:F2}' sampling (6' beam); no patch covers this field",
-                            smallCaptionStyle);
-                    }
-                    if (!double.IsNaN(peak) && well > 0.0)
-                    {
-                        // The number that answers "why can I not see it": a nebula this bright is a
-                        // fraction of a percent of full well in one sub, which no linear stretch can
-                        // show. Stacking and a log or asinh stretch is not a display trick, it is
-                        // the technique the exposure requires.
-                        GUILayout.Label(
-                            $"   brightest pixel of it: {peak:F1} e- = {100.0 * peak / well:F3}% of full well"
-                            + (peak < 0.01 * well ? ", below what a linear stretch can show; use log/asinh and stack" : ""),
-                            smallCaptionStyle);
-                    }
+                    string source = solarSystemCamera.LastEmissionPatchName != null
+                        ? $"{solarSystemCamera.LastEmissionPatchCoverage * 100.0:F0}% {solarSystemCamera.LastEmissionPatchName} patch"
+                        : "all-sky map";
+
+                    GUILayout.Label(
+                        $"Line emission {emission:F1} R"
+                        + (solarSystemCamera.LastEmissionLines != null ? $" in {solarSystemCamera.LastEmissionLines}" : "")
+                        + (solarSystemCamera.LastEmissionMeasuredLines != null
+                            ? $", {solarSystemCamera.LastEmissionMeasuredLines} measured, rest derived" : "")
+                        + (double.IsNaN(solarSystemCamera.LastEmissionTemperatureK) ? ""
+                            : $", T_e {solarSystemCamera.LastEmissionTemperatureK:F0} K")
+                        + (beam > 0.0 ? $"  |  {source} at {beam:F2}'" : "")
+                        + (!double.IsNaN(peak) && well > 0.0
+                            ? $"  |  peak {peak:F1} e-, {100.0 * peak / well:F3}% of well"
+                              + (peak < 0.01 * well ? ", use log/asinh and stack" : "")
+                            : ""),
+                        smallCaptionStyle);
                 }
 
                 if (solarSystemCamera.LastGalaxiesDrawn > 0)
                 {
                     double well = SolarSystemCameraTexture.FullWellElectrons;
-                    GUILayout.Label(
-                        $"Galaxies in frame: {solarSystemCamera.LastGalaxiesDrawn} drawn, "
-                        + $"{solarSystemCamera.LastGalaxyElectrons:E2} e- between them"
-                        + (solarSystemCamera.LastGalaxiesWithModelledColour > 0
-                            ? $" ({solarSystemCamera.LastGalaxiesWithModelledColour} with no catalogued colour, "
-                              + "band conversion from the mean colour of their type)"
-                            : ""),
-                        smallCaptionStyle);
-
-                    // Which of the two a galaxy came from decides what is on the screen: a real
-                    // image of it, or a smooth ellipse with the right total brightness and no
-                    // structure at all. And when it is a real image, the map's own sampling against
-                    // this instrument's pixel says whether the structure is the survey's or an
-                    // interpolation of it, the same way the emission map reports its beam.
+                    // Imagery and profile are distinguished on screen because they put different
+                    // things on it: a measured picture, or a smooth ellipse of the right total
+                    // brightness with no structure at all.
                     int fromImages = solarSystemCamera.LastGalaxiesFromImages;
                     int fromProfile = solarSystemCamera.LastGalaxiesDrawn - fromImages;
                     double sampling = solarSystemCamera.LastGalaxyMapSamplingArcsec;
                     double framePlateScale = solarSystemCamera.EffectivePlateScaleArcsecPerPixel;
-                    string detail = fromImages > 0
-                        ? $"   {fromImages} from measured survey imagery"
-                          + (double.IsNaN(sampling) ? ""
-                             : $" sampled at {sampling:F2}\"/px against this frame's {framePlateScale:F2}\"/px"
-                               + (sampling > 1.5 * framePlateScale
-                                  ? $", so structure finer than {sampling * 2.0:F1}\" is interpolated"
-                                  : ""))
-                        : "";
-                    if (fromProfile > 0)
-                        detail += (detail.Length > 0 ? "; " : "   ")
-                                + $"{fromProfile} from a Sersic profile, which is a smooth ellipse: "
-                                + "no arms, no dust lane, no knots"
-                                + (SolarSystemCameraTexture.GalaxyImages == null
-                                   ? " (no shape maps installed; see tools/pack_galaxy_images.py)" : "");
-                    if (detail.Length > 0) GUILayout.Label(detail, smallCaptionStyle);
+
+                    GUILayout.Label(
+                        $"Galaxies {solarSystemCamera.LastGalaxiesDrawn}, "
+                        + $"{solarSystemCamera.LastGalaxyElectrons:E2} e-"
+                        + (fromImages > 0
+                            ? $"  |  {fromImages} imaged"
+                              + (double.IsNaN(sampling) ? ""
+                                 : $" at {sampling:F2}\"/px against {framePlateScale:F2}\"/px"
+                                   + (sampling > 1.5 * framePlateScale ? $", finer than {sampling * 2.0:F1}\" interpolated" : ""))
+                            : "")
+                        + (fromProfile > 0
+                            ? $"  |  {fromProfile} Sersic profile, no structure"
+                              + (SolarSystemCameraTexture.GalaxyImages == null ? " (no shape maps installed)" : "")
+                            : "")
+                        + (solarSystemCamera.LastGalaxiesWithModelledColour > 0
+                            ? $"  |  {solarSystemCamera.LastGalaxiesWithModelledColour} colour from type" : ""),
+                        smallCaptionStyle);
                 }
 
                 // What the exposure cost to reduce, and where. Shown because "the shutter closed a
@@ -2705,20 +2661,11 @@ namespace ExoInstruments
                 if (!string.IsNullOrEmpty(solarSystemCamera.LastStageTimings))
                 {
                     GUILayout.Label(
-                        $"Reduction: {solarSystemCamera.LastReductionMilliseconds:F0} ms on "
-                        + $"{ParallelWork.MaxWorkers} core(s) -- {solarSystemCamera.LastStageTimings}",
+                        $"Reduction {solarSystemCamera.LastReductionMilliseconds:F0} ms on "
+                        + $"{ParallelWork.MaxWorkers} core(s): {solarSystemCamera.LastStageTimings}",
                         smallCaptionStyle);
                 }
 
-                double fieldEbv = solarSystemCamera.LastFieldReddeningEBv;
-                if (!double.IsNaN(fieldEbv))
-                {
-                    GUILayout.Label(
-                        $"Galactic extinction toward this field: E(B-V) = {fieldEbv:F3}, "
-                        + $"A(V) = {fieldEbv * InterstellarExtinction.MilkyWayRv:F2} mag "
-                        + "(whole column, so it applies beyond the Galaxy rather than to stars in frame)",
-                        smallCaptionStyle);
-                }
             }
 
             // Saturation is the one failure here that silently destroys real detail rather than
@@ -2728,8 +2675,8 @@ namespace ExoInstruments
             if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.LastSaturatedFraction > 0.01f)
             {
                 GUILayout.Label(
-                    "Over-exposed: saturated pixels have lost their real surface contrast. "
-                    + "Shorten the exposure, drop the gain, or add ND, exactly what a real observer does on a bright target.",
+                    $"Over-exposed, {solarSystemCamera.LastSaturatedFraction * 100f:F1}% saturated. "
+                    + "Shorten the exposure, drop the gain, or add ND.",
                     smallCaptionStyle);
             }
         }
