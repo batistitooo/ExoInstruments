@@ -5,6 +5,18 @@ code, documentation, assets, and data files) are the exclusive proprietary
 property of the copyright holder. This is a source-available license, not
 an open-source license.
 
+THIRD-PARTY MATERIAL
+
+The paragraph above covers the work of the copyright holder and nothing else.
+This repository also carries third-party material that is not his and is not
+licensed by him: the vendored Python environments under env/ and tools/env/
+(NumPy, SciPy, Astropy, dustmaps and their dependencies), and the astronomical
+survey data cached under tools/ and at the repository root (Gaia catalogue
+extracts, the SFD dust maps, the H-alpha maps). Each remains under its own
+licence and its own terms, held by its own authors. None of it is redistributed
+in the release archive, which ships the plugin, the parts and the documentation
+only; it is present here so the data pipeline can be rebuilt from source.
+
 PERMITTED USE
 
 Any person may download and use this mod, in its original and unmodified

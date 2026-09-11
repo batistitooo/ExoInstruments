@@ -46,7 +46,7 @@ find rather than failing.
   - **Radial velocity**: recovering the host star's reflex Doppler wobble, including multi-planet systems resolved through iterative signal prewhitening.
   - **Direct imaging**: resolving a companion at its real angular separation and thermal contrast against the diffraction limit and a decaying speckle floor.
 
-<p align="center"><img src="images/DirectImagery.png" alt="51 Peg b: direct-imaging frame of the star hosting the first-ever discovered exoplanet" width="300"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/DirectImagery.png" alt="51 Peg b: direct-imaging frame of the star hosting the first-ever discovered exoplanet" width="300"></p>
 
 - **Simultaneous multi-planet transit modeling.** Compact systems (TRAPPIST-1 style) superpose every transiting member on one light curve; the detector separates them by iterative in-transit masking, and a multi-planet campaign pays a jackpot bonus.
 
@@ -60,11 +60,11 @@ find rather than failing.
 
 - **BetterTimeWarp integration (soft dependency).** When [BetterTimeWarpContinued](https://github.com/linuxgurugamer/BetterTimeWarpContinued) is installed, every "Warp to..." button in the mod uses it to lift stock KSP's silent 100,000x warp cap; without it, everything falls back to stock behavior untouched.
 
-<p align="center"><img src="images/wasp14ab-lightcurve.png" alt="WASP-14 Ab light curve: raw time series and phase-folded transit" width="520"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/wasp14ab-lightcurve.png" alt="WASP-14 Ab light curve: raw time series and phase-folded transit" width="520"></p>
 
 - **Ground-based observing windows.** Every ground-based instrument only collects data when the Sun is below twilight and the target is above the telescope's altitude limit; real diurnal gaps and window-function aliases, the same artifact real BLS searches fight.
 
-<p align="center"><img src="images/ObservationSchedule.png" alt="Observation schedule: live table of ideal observation time" width="480"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/ObservationSchedule.png" alt="Observation schedule: live table of ideal observation time" width="480"></p>
 
 - **Stellar activity as the true noise floor.** Every star carries persistent RV jitter (Wright 2005) and quasi-periodic starspot modulation (McQuillan et al. 2014; Basri et al. 2013) that the instruments have to see past.
 
@@ -105,8 +105,8 @@ find rather than failing.
 - **RC20 image stacking.** Capture a series of subs per filter and combine them into one clean LRGB composite: cosmetic (bad-pixel-map) correction before alignment (the same calibration step real pipelines like PixInsight and IRAF/ccdproc run before registration), optional centroid alignment between frames, robust sky-background subtraction, luminance-transfer color composition (R/G/B scaled by the deeper L stack, capped against noise blow-up), an optional Hα blend into the red channel, and a display-only asinh stretch to bring out faint stacked detail; the same reason real astrophotographers shoot many short exposures instead of one long one. An optional **lucky imaging** mode keeps only the sharpest subs (ranked by a real variance-of-Laplacian focus metric, Pech-Pacheco et al. 2000) before stacking, following the same selective-frame principle real lucky imaging uses to beat atmospheric seeing (Fried 1978).
 
 <p align="center">
-  <img src="images/minmus-before-stack.png" alt="Minmus: single raw sub, before stacking" width="360">
-  <img src="images/minmus-after-stack.png" alt="Minmus: composite after LRGB stacking" width="360">
+  <img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/minmus-before-stack.png" alt="Minmus: single raw sub, before stacking" width="360">
+  <img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/minmus-after-stack.png" alt="Minmus: composite after LRGB stacking" width="360">
 </p>
 <p align="center"><em>Minmus: a single raw L sub (left) vs. the stacked LRGB composite (right).</em></p>
 
@@ -116,7 +116,7 @@ find rather than failing.
 
 - **A target search engine, not a name filter.** The right-hand half of the target-selection view is a search box over *everything the telescope can point at*, the planets and moons of whatever planet pack is installed, the whole star catalogue, the nebulae, every galaxy in the installed catalogue, and every Messier and named NGC/IC object, about sixteen thousand targets in a stock install with the optional catalogues. Type a name in any form it is written in and the list narrows as you type: `M31`, `NGC 224`, `NGC0224` and `Andromeda` all find one entry, `Vega` finds the Bright Star Catalogue's `alf Lyr`, and `M13` finds a globular cluster that no catalogue in this mod carries at all. Matching is on canonical **designations**, not substrings, so `NGC 24` returns NGC 24 and not the two hundred designations it is a substring of. Filter by what a thing is (`type:galaxy`, `type:nebula`, `type:cluster`, or the one-click buttons), by where it is (`in:Ori`, `in:Orion`, `in:Orionis`, the real IAU boundary, see below), by how bright (`mag:<9`) and by whether it is up right now (`alt:>30`). Every result carries its type, magnitude, apparent size, constellation, coordinates, current altitude, **and which catalogue it came from**, two rows in one list can be measured to entirely different standards, and you are entitled to know which is which before spending a night on one. Clicking a result points the telescope; the sky chart on the left simultaneously lights up every match and steps everything else back, so the list and the chart are two views of one search.
 
-<p align="center"><img src="images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/StarChart1.png" alt="Star chart: catalog of available stars" width="420"></p>
 
 - **The IAU constellations, done properly.** Every fixed target knows which of the 88 constellations it lies in, and the search can filter on it. This is not a lookup table of approximate regions: Delporte's boundaries (adopted by the IAU in 1928, published 1930, unchanged since) are lines of constant right ascension and declination **in the mean equinox of B1875 and in no other frame**, so a J2000 catalogue position is carried there through the real chain, Murray (1989)'s FK5-to-FK4 rotation including its rotating-system term, then Newcomb's precession, before Roman (1987)'s ordered scan of the boundary arcs. `tools/constellation-tests` reproduces astropy's own FK4 transform to **3 nanoarcseconds**, reproduces all eight worked examples published with the boundary catalogue, and shows that the 0.04% of a quarter-million-point grid where it disagrees with astropy's `get_constellation` are all closer to a boundary than astropy's own two routes to "B1875" are to each other.
 
@@ -130,7 +130,7 @@ find rather than failing.
 
 Each instrument's reference precision and cadence are drawn directly from its own instrument paper (see in-code citations).
 
-<p align="center"><img src="images/observatory-selection.png" alt="In-game observatory selection menu" width="460"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/batistitooo/ExoInstruments/main/images/observatory-selection.png" alt="In-game observatory selection menu" width="460"></p>
 
 | Instrument | Type | Detection Method | Relative Noise Level | Academic Role |
 |---|---|---|---|---|
@@ -145,17 +145,22 @@ Each instrument's reference precision and cadence are drawn directly from its ow
 | **CDK1000** | PlaneWave CDK1000, 1.0 m Corrected Dall-Kirkham (Palomar-class) | Solar-System Photography | N/A; not an exoplanet detector | Research-grade step up from the RC20: nearly four times the light-collecting area |
 | **VLT FORS2** | Real VLT Unit Telescope 1, 8.2 m, real FORS2 imager | Solar-System Photography | N/A; not an exoplanet detector | The actual Very Large Telescope, pointed at the neighborhood instead of a distant galaxy |
 | **VLT SPHERE** | Real VLT Unit Telescope 3, 8.2 m, real SPHERE/ZIMPOL adaptive optics | Solar-System Photography | N/A; not an exoplanet detector | Same VLT, extreme adaptive optics: real ~25 mas resolution instead of ordinary seeing |
-| **Orbital Observatory** | HST's 2.4 m OTA with WFC3/UVIS, *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The near-ultraviolet the atmosphere blocks outright, an identical PSF in every frame, and a sky with no airglow in it |
+| **Hubble (WFC3 UVIS/IR)** | HST's 2.4 m OTA with WFC3, *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The near-ultraviolet the atmosphere blocks outright, an identical PSF in every frame, and a sky with no airglow in it. Two channels, switched in flight: UVIS CCDs at 200-1000 nm, or the IR array at 800-1700 nm |
+| **Hubble (ACS WFC/HRC)** | Same 2.4 m OTA, Advanced Camera for Surveys | Solar-System Photography | N/A; not an exoplanet detector | The widest field ever flown on this telescope, and in its other channel the finest plate scale ever flown on it, over a field smaller than Jupiter |
+| **Hubble (WFPC2/PC1)** | Same 2.4 m OTA, Wide Field and Planetary Camera 2 | Solar-System Photography | N/A; not an exoplanet detector | The chip that took the images of the 1990s. Twelve bits over a 90,000-electron well, so it saturates digitally at about 27,000 and the top two thirds of the well is unreachable |
+| **LORRI** | New Horizons' 20.8 cm Ritchey-Chretien, *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | One panchromatic band, no filter wheel, no door. Worth the transfer burn you spend on it and nothing else: apparent size is computed from where the spacecraft really is |
+| **BRITE-Toronto** | 3 cm lens in a 20 cm cube, *a part you launch yourself* | Solar-System Photography | N/A; not an exoplanet detector | The cheapest way above the atmosphere. One fixed red filter, stars deliberately defocused across eight pixels, and a 29 degree field: the one instrument that can frame a moon from close up |
 
 ## Building a space telescope
 
 Every other instrument above is somebody else's telescope, whose time you buy. This one does not
 exist until you launch it.
 
-**The part.** *Orbital Astrophysics Observatory*, in the Science category. Its model is the mod's own:
-a bare optical-tube assembly modelled for this part, which replaced the Tarsier Space Technology
-placeholder that stood in for it while there was no bespoke mesh.
-It carries the telescope, its aperture door, and its own reaction wheels. It appears in the observatory's instrument list only
+**The parts.** Five, all in the Science category: three Hubble variants carrying WFC3, ACS and
+WFPC2, *LORRI Reconnaissance Imager*, and *BRITE-Toronto Nanosatellite Telescope*. Their models are
+the mod's own, bare optical-tube assemblies modelled for these parts, which replaced the Tarsier
+Space Technology placeholder that stood in while there was no bespoke mesh.
+Each carries its telescope, its aperture door where the real instrument has one, and its own reaction wheels. It appears in the observatory's instrument list only
 once you have one in orbit; there is no Funds price, because the cost is the part, the launch, and
 building a spacecraft that can actually hold a target still.
 

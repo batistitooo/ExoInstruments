@@ -2812,6 +2812,15 @@ namespace ExoInstruments.Core
             SpacePlatform = new SpacePlatformSpec
             {
                 PlatformName = "Hubble Space Telescope",
+
+                // THE SPACECRAFT'S FIGURES, not the camera's, so all five HST entries carry them.
+                // Leaving them unset on this one made the same telescope repoint in tens of seconds
+                // through one instrument and fifteen minutes through another, and left
+                // ReserveChargeUnits (idle draw times acquisition) at exactly zero, so nothing held
+                // charge back for the guide-star lock after a slew. Sources are on the WFC3/UVIS
+                // entry above: HST Primer, Pointing/Orientation/Roll, and Orbital Visibility.
+                MaxSlewRateDegPerSecond = 6.0 / 60.0,
+                GuideStarAcquisitionSeconds = 6.5 * 60.0,
                 SunAvoidanceAngleDeg = 62.5,
                 BrightLimbAvoidanceAngleDeg = 20.0,
                 DarkLimbAvoidanceAngleDeg = 7.6,
@@ -2925,6 +2934,15 @@ namespace ExoInstruments.Core
             SpacePlatform = new SpacePlatformSpec
             {
                 PlatformName = "Hubble Space Telescope",
+
+                // THE SPACECRAFT'S FIGURES, not the camera's, so all five HST entries carry them.
+                // Leaving them unset on this one made the same telescope repoint in tens of seconds
+                // through one instrument and fifteen minutes through another, and left
+                // ReserveChargeUnits (idle draw times acquisition) at exactly zero, so nothing held
+                // charge back for the guide-star lock after a slew. Sources are on the WFC3/UVIS
+                // entry above: HST Primer, Pointing/Orientation/Roll, and Orbital Visibility.
+                MaxSlewRateDegPerSecond = 6.0 / 60.0,
+                GuideStarAcquisitionSeconds = 6.5 * 60.0,
                 SunAvoidanceAngleDeg = 62.5,
                 BrightLimbAvoidanceAngleDeg = 20.0,
                 DarkLimbAvoidanceAngleDeg = 7.6,
@@ -3085,6 +3103,15 @@ namespace ExoInstruments.Core
             SpacePlatform = new SpacePlatformSpec
             {
                 PlatformName = "Hubble Space Telescope",
+
+                // THE SPACECRAFT'S FIGURES, not the camera's, so all five HST entries carry them.
+                // Leaving them unset on this one made the same telescope repoint in tens of seconds
+                // through one instrument and fifteen minutes through another, and left
+                // ReserveChargeUnits (idle draw times acquisition) at exactly zero, so nothing held
+                // charge back for the guide-star lock after a slew. Sources are on the WFC3/UVIS
+                // entry above: HST Primer, Pointing/Orientation/Roll, and Orbital Visibility.
+                MaxSlewRateDegPerSecond = 6.0 / 60.0,
+                GuideStarAcquisitionSeconds = 6.5 * 60.0,
                 SunAvoidanceAngleDeg = 62.5,
                 BrightLimbAvoidanceAngleDeg = 20.0,
                 DarkLimbAvoidanceAngleDeg = 7.6,
