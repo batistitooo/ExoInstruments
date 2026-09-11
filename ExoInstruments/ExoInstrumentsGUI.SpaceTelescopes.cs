@@ -454,6 +454,16 @@ namespace ExoInstruments
                 case GroundPointingPhase.Slewing:
                     phase = string.Format("Slewing, {0} of turning left", FormatDuration(r.SecondsRemaining - r.AcquisitionRemaining));
                     break;
+                case GroundPointingPhase.Acquiring when r.Stalled:
+                {
+                    // A vehicle that ran its clock out without arriving. Saying "pointed" here, with
+                    // a countdown already at zero, is the one thing the readout must not do: it is
+                    // the case where the player has to be told what to fix.
+                    string why = StalledReason(link);
+                    phase = "Not there. The manoeuvre's time is spent and the boresight has not arrived"
+                          + (why != null ? ": " + why + "." : ".");
+                    break;
+                }
                 case GroundPointingPhase.Acquiring:
                     phase = string.Format("Pointed. Not turning any more: the fine guidance sensors are locking "
                                         + "onto their guide stars, {0} left of the {1} that takes.",
@@ -481,6 +491,18 @@ namespace ExoInstruments
             }
 
             if (r.Phase != GroundPointingPhase.OnTarget) DrawProgressBar(r.SlewProgress);
+        }
+
+        // Why a telescope that was commanded is not turning, in one phrase, or null when nothing on
+        // this list is wrong and it is simply slower than the model priced. Only the two that stop a
+        // vehicle ROTATING: an aperture door has no bearing on whether it can point.
+        private static string StalledReason(SpaceTelescopeLink link)
+        {
+            if (link == null) return null;
+            if (link.ControlMode == AttitudeControlMode.Uncontrolled)
+                return "this vehicle has no attitude control, so check its reaction wheels and its charge";
+            if (link.ElectricCharge <= 0.01) return "the battery is flat";
+            return null;
         }
 
         // The battery, what the pending exposure would cost it, and how long it lasts. The panel half that

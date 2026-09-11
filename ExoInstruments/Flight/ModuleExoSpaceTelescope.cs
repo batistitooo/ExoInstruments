@@ -784,10 +784,15 @@ namespace ExoInstruments.Flight
             // the destination it arrives in seconds and the vehicle never turns at the rate the
             // ledger charged for. This setpoint advances at that rate, well inside SAS's authority,
             // so the autopilot tracks it and the manoeuvre is flown rather than asserted.
+            // AND IT IS AN ABSOLUTE POINT ON THE ARC, never one measured off the vehicle. Clamping the
+            // waypoint to stay a degree ahead of the boresight looks like a sensible catch-up limit
+            // and is a runaway: the error SAS sees is then a degree whatever the vehicle does, so
+            // nothing nulls it, the integrator winds up, and the spacecraft spins faster and faster
+            // until the clock runs out. A setpoint has to have a fixed point the vehicle can reach.
             Vector3d targetDirection = destination;
             PointingReadout ground = GroundReadout();
             if (ground.Phase == GroundPointingPhase.Slewing && ground.ProfileDirection.sqrMagnitude > 1e-12)
-                targetDirection = LeadingWaypoint(ground.ProfileDirection, ground.SlewRateDegPerSecond);
+                targetDirection = ground.ProfileDirection;
 
             // THE ACTION GROUP HAS TO BE ON. VesselAutopilot.Update opens by disabling itself
             // whenever ActionGroups[SAS] is false, which resets the PIDs and clears lockedRotation,
@@ -852,27 +857,8 @@ namespace ExoInstruments.Flight
             vessel.Autopilot.SAS.LockRotation(commanded);
         }
 
-        // The waypoint, held to within one second of the profile's own turning of where the vehicle
-        // really is.
-        //
-        // The profile's point is ABSOLUTE, a function of the start time and the clock, so any
-        // stretch the vehicle spent packed or unloaded leaves it far ahead: handing SAS that whole
-        // accumulated arc is the snap this exists to prevent. Clamped, the lead is closed at the
-        // modelled rate instead, which is the manoeuvre the ledger charged for, just later.
-        private Vector3d LeadingWaypoint(Vector3d waypoint, double rateDegPerSecond)
-        {
-            Vector3d here = BoresightWorldDirection;
-            if (here.sqrMagnitude < 1e-12) return waypoint;
-
-            double maxLeadDeg = Math.Max(1.0, rateDegPerSecond);
-            if (Vector3d.Angle(here, waypoint) <= maxLeadDeg) return waypoint;
-
-            return (Vector3d)Vector3.RotateTowards((Vector3)here.normalized, (Vector3)waypoint.normalized,
-                                                   (float)(maxLeadDeg * Math.PI / 180.0), 0f);
-        }
-
-        // This telescope's own ground-station readout. The link carries the attitude authority
-        // because the profile is rebuilt from it; see pointingLink.
+        // This telescope's own ground-station readout, off a link filled the way the registry fills
+        // one; see pointingLink.
         private PointingReadout GroundReadout()
         {
             if (pointingLink == null) pointingLink = new SpaceTelescopeLink();
@@ -891,19 +877,23 @@ namespace ExoInstruments.Flight
         // True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on its control-
         // detection, and this matches it rather than inventing a second one.
         //
-        // FlightInputHandler.state, NOT vessel.ctrlState. VesselSAS.ControlUpdate writes its own
-        // response into ctrlState's pitch, yaw and roll, so reading that asked whether SAS was
-        // working and called it the player's hand. Harmless while the command was static; once the
-        // setpoint advances every frame it stalled the manoeuvre exactly when SAS was tracking it.
+        // THE BINDINGS, not a FlightCtrlState. VesselSAS writes its own response into
+        // vessel.ctrlState, so reading that asked whether SAS was working and called it the
+        // player's hand. FlightInputHandler.state is no better: it carries TRIM, which is sticky,
+        // so one Alt-key nudge would have switched the pointing hold off for good. This is the test
+        // VesselSAS.CheckPitchInput itself makes.
         private bool PlayerIsSteering()
         {
             if (vessel == null || !vessel.isActiveVessel) return false;
-            FlightCtrlState s = FlightInputHandler.state;
-            if (s == null) return false;
+
+            if (GameSettings.PITCH_DOWN.GetKey() || GameSettings.PITCH_UP.GetKey()
+             || GameSettings.YAW_LEFT.GetKey() || GameSettings.YAW_RIGHT.GetKey()
+             || GameSettings.ROLL_LEFT.GetKey() || GameSettings.ROLL_RIGHT.GetKey()) return true;
+
             const float Threshold = 0.05f;
-            return Math.Abs(s.pitch) > Threshold
-                || Math.Abs(s.yaw) > Threshold
-                || Math.Abs(s.roll) > Threshold;
+            return Math.Abs(GameSettings.AXIS_PITCH.GetAxis()) > Threshold
+                || Math.Abs(GameSettings.AXIS_YAW.GetAxis()) > Threshold
+                || Math.Abs(GameSettings.AXIS_ROLL.GetAxis()) > Threshold;
         }
 
         /// <summary>Angle between the boresight and the commanded target, degrees. NaN when nothing is commanded.</summary>

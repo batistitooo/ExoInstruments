@@ -416,6 +416,7 @@ namespace ExoInstruments.Flight
                 && !double.IsNaN(r.ErrorDeg) && r.ErrorDeg > r.ToleranceDeg)
             {
                 r.Phase = GroundPointingPhase.Acquiring;
+                r.Stalled = true;
             }
 
             r.Settled = r.Phase == GroundPointingPhase.OnTarget;
@@ -1097,6 +1098,14 @@ namespace ExoInstruments.Flight
         /// <summary>Of that, how much is guide-star acquisition rather than turning, and the total acquisition this repoint costs.</summary>
         public double AcquisitionRemaining;
         public double AcquisitionSeconds;
+
+        /// <summary>
+        /// True when the manoeuvre's whole clock has run out and the boresight still is not on
+        /// target. Not the same as acquiring: acquiring is a vehicle that arrived and is locking
+        /// on. This is one that did not arrive, which the panel has to say rather than counting a
+        /// timer that already reached zero.
+        /// </summary>
+        public bool Stalled;
 
         /// <summary>True when an exposure may start: pointed, and guiding.</summary>
         public bool Settled;
