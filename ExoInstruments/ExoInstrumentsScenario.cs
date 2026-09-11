@@ -58,6 +58,14 @@ namespace ExoInstruments
         private long supernovaSeed;
         private readonly Dictionary<string, string> discoveredSupernovae = new Dictionary<string, string>();
 
+        // The astrophotography programme, and it is deliberately a separate space from everything
+        // above. Bodies photographed, keyed "body:<bodyName>", against the finest detail rung ever
+        // recorded on each; and the bodies whose one-time reconnaissance claim has been made. Both
+        // are high-water marks, which is what makes re-shooting a frame worth nothing without a
+        // cooldown or a cap anywhere. See Core/ImagingScience.cs.
+        private readonly Dictionary<string, int> imagedBodyRungs = new Dictionary<string, int>();
+        private readonly HashSet<string> reconnoitredBodies = new HashSet<string>();
+
         private const string ScannedValueName = "scannedStar";
         private const string RewardedValueName = "rewardedDetection";
         private const string CharacterizedValueName = "characterizedStar";
@@ -67,6 +75,8 @@ namespace ExoInstruments
         private const string TotalScienceEarnedValueName = "totalScienceEarned";
         private const string SupernovaSeedValueName = "supernovaSeed";
         private const string DiscoveredSupernovaValueName = "discoveredSupernova";
+        private const string ImagedBodyRungValueName = "imagedBodyRung";
+        private const string ReconnoitredBodyValueName = "reconnoitredBody";
 
         public double TotalScienceEarned => totalScienceEarned;
 
@@ -238,6 +248,43 @@ namespace ExoInstruments
             return catalogKey != null && rmRewardedHosts.Add(catalogKey);
         }
 
+        /// <summary>The key a photographed body is banked under. Prefixed so the space cannot collide with a star designation.</summary>
+        public static string ImagingKey(string bodyName)
+        {
+            return string.IsNullOrEmpty(bodyName) ? null : "body:" + bodyName;
+        }
+
+        /// <summary>The finest detail rung ever recorded on this body, or zero for one never resolved.</summary>
+        public int BestImagingRung(string imagingKey)
+        {
+            return imagingKey != null && imagedBodyRungs.TryGetValue(imagingKey, out int rung) ? rung : 0;
+        }
+
+        /// <summary>
+        /// Banks a rung if it beats what this body already stood at, reporting what it stood at so
+        /// the caller can pay the difference and only the difference. False, and nothing written,
+        /// when the frame did not better the record: that is the whole anti-farm rule.
+        /// </summary>
+        public bool TryBankImagingRung(string imagingKey, int rung, out int previous)
+        {
+            previous = BestImagingRung(imagingKey);
+            if (imagingKey == null || rung <= previous) return false;
+            imagedBodyRungs[imagingKey] = rung;
+            return true;
+        }
+
+        /// <summary>True when this call newly claimed the body's one-time reconnaissance award.</summary>
+        public bool MarkReconnoitred(string imagingKey)
+        {
+            return imagingKey != null && reconnoitredBodies.Add(imagingKey);
+        }
+
+        /// <summary>True when this body's reconnaissance has already been claimed.</summary>
+        public bool IsReconnoitred(string imagingKey)
+        {
+            return imagingKey != null && reconnoitredBodies.Contains(imagingKey);
+        }
+
         public override void OnLoad(ConfigNode node)
         {
             base.OnLoad(node);
@@ -250,6 +297,8 @@ namespace ExoInstruments
             totalScienceEarned = 0.0;
             supernovaSeed = 0;
             discoveredSupernovae.Clear();
+            imagedBodyRungs.Clear();
+            reconnoitredBodies.Clear();
             if (node.HasValue(SupernovaSeedValueName))
                 long.TryParse(node.GetValue(SupernovaSeedValueName), NumberStyles.Integer,
                               CultureInfo.InvariantCulture, out supernovaSeed);
@@ -258,6 +307,14 @@ namespace ExoInstruments
                 int split = entry.IndexOf('=');
                 if (split > 0) discoveredSupernovae[entry.Substring(0, split)] = entry.Substring(split + 1);
             }
+            foreach (string entry in node.GetValues(ImagedBodyRungValueName))
+            {
+                int split = entry.IndexOf('=');
+                if (split > 0 && int.TryParse(entry.Substring(split + 1), NumberStyles.Integer,
+                                              CultureInfo.InvariantCulture, out int rung))
+                    imagedBodyRungs[entry.Substring(0, split)] = rung;
+            }
+            foreach (string key in node.GetValues(ReconnoitredBodyValueName)) reconnoitredBodies.Add(key);
             foreach (string key in node.GetValues(ScannedValueName)) scannedStars.Add(key);
             foreach (string key in node.GetValues(RewardedValueName)) rewardedDetections.Add(key);
             foreach (string key in node.GetValues(CharacterizedValueName)) characterizedStars.Add(key);
@@ -283,6 +340,10 @@ namespace ExoInstruments
             node.AddValue(SupernovaSeedValueName, SupernovaSeed.ToString(CultureInfo.InvariantCulture));
             foreach (KeyValuePair<string, string> kv in discoveredSupernovae)
                 node.AddValue(DiscoveredSupernovaValueName, kv.Key + "=" + kv.Value);
+            foreach (KeyValuePair<string, int> kv in imagedBodyRungs)
+                node.AddValue(ImagedBodyRungValueName,
+                              kv.Key + "=" + kv.Value.ToString(CultureInfo.InvariantCulture));
+            foreach (string key in reconnoitredBodies) node.AddValue(ReconnoitredBodyValueName, key);
         }
     }
 }

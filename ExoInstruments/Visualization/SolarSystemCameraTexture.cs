@@ -1149,11 +1149,66 @@ namespace ExoInstruments.Visualization
             public double RegistrationY;
         }
 
+        /// <summary>
+        /// What a finished frame measured about its target, for the astrophotography science
+        /// award. Everything here is snapshotted rather than read live, for the reason
+        /// CapturedFrameGeometry gives: by the time a consumer sees it the next exposure has
+        /// already been gathered over the live properties.
+        /// </summary>
+        public struct CapturedFrameMeasurement
+        {
+            /// <summary>The body photographed. Empty for anything that is not one, which earns nothing here.</summary>
+            public string BodyName;
+            public double BodyRadiusMetres;
+            public double DistanceMetres;
+            public double TargetAngularDiameterArcsec;
+
+            /// <summary>The frame's own width on the sky, which is what clips the recorded detail.</summary>
+            public double FieldWidthArcsec;
+
+            /// <summary>The finest detail this frame could hold: blur, sampling and defocus together.</summary>
+            public double ResolutionElementArcsec;
+
+            public double SignalToNoise;
+            public double SaturatedFraction;
+            public bool TargetInFrame;
+        }
+
         /// <summary>The geometry of the frame currently held in lastCaptureSnapshot; see CapturedFrameGeometry.</summary>
         public CapturedFrameGeometry LastCaptureGeometry { get; private set; }
 
+        // A QUEUE, NOT A FLAG, and that is the whole point of it. The obvious hook, watching
+        // HasCapturedPhoto go true, cannot fire during a stacking batch: TickCapture polls the
+        // finished frame and renders the next one inside one Update, and the batch collector
+        // consumes the flag in that same Update, so the transition is never observed on the
+        // following pass and the player doing the most work earns the least. A queue drained
+        // unconditionally cannot miss a frame however the caller is pacing them.
+        private readonly Queue<CapturedFrameMeasurement> capturedMeasurements = new Queue<CapturedFrameMeasurement>();
+
+        // The target half, snapshotted when the exposure starts; the photometric half is filled
+        // from the background pass when it finishes.
+        private CapturedFrameMeasurement pendingCaptureMeasurement;
+        private double pendingBodySignalToNoise;
+        private double pendingPlateScaleArcsec;
+        private double pendingDefocusDiscArcsec;
+
+        /// <summary>Takes the next finished frame's measurement, or false when none is waiting.</summary>
+        public bool TryDequeueMeasurement(out CapturedFrameMeasurement measurement)
+        {
+            if (capturedMeasurements.Count == 0)
+            {
+                measurement = default(CapturedFrameMeasurement);
+                return false;
+            }
+            measurement = capturedMeasurements.Dequeue();
+            return true;
+        }
+
         // The geometry of the exposure being reduced right now, waiting to be published with its pixels.
         private CapturedFrameGeometry pendingCaptureGeometry;
+
+        /// <summary>Diameter of the defocus disc this instrument spreads a point into, arcsec. A floor on the resolution element, because a deliberately defocused photometer cannot claim detail its own optics destroy.</summary>
+        public double LastDefocusDiscArcsec { get; private set; }
 
         /// <summary>Airmass the last capture was taken through; +Infinity if the target was below the horizon.</summary>
         public double LastAirmass { get; private set; }
@@ -1385,6 +1440,28 @@ namespace ExoInstruments.Visualization
                 RegistrationY = LastTargetPixelY,
             };
 
+            // Same snapshot rule. The range comes out of the apparent diameter rather than from a
+            // second observer lookup, because the diameter was measured from the observing platform
+            // and dividing it back is the one answer guaranteed to agree with the frame.
+            double targetDiameterArcsec = inputs.TargetAngularDiameterArcsec;
+            double diameterRad = targetDiameterArcsec * Math.PI / (180.0 * 3600.0);
+            pendingCaptureMeasurement = new CapturedFrameMeasurement
+            {
+                BodyName = target.IsBody && target.Body != null ? target.Body.bodyName : "",
+                BodyRadiusMetres = target.IsBody && target.Body != null ? target.Body.Radius : 0.0,
+                DistanceMetres = diameterRad > 0.0 && target.IsBody && target.Body != null
+                               ? 2.0 * target.Body.Radius / diameterRad : 0.0,
+                TargetAngularDiameterArcsec = targetDiameterArcsec,
+                FieldWidthArcsec = LastFieldWidthArcsec,
+                TargetInFrame = LastTargetInFrame,
+                // Filled from the background pass in PollProcessTask, where the blur terms this
+                // frame really delivered are known.
+                ResolutionElementArcsec = 0.0,
+            };
+            pendingPlateScaleArcsec = inputs.PlateScaleArcsec;
+            pendingDefocusDiscArcsec = 2.0 * inputs.DefocusDiscRadiusPx * inputs.PlateScaleArcsec;
+            pendingBodySignalToNoise = 0.0;
+
             isProcessing = true;
             processTask = Task.Run(() => ComputeFramePixels(inputs));
         }
@@ -1450,6 +1527,16 @@ namespace ExoInstruments.Visualization
             // Published with the snapshot, in the same statement group, because the two describe
             // the same exposure and any gap between them is where the pipelined next frame gets in.
             LastCaptureGeometry = pendingCaptureGeometry;
+
+            // The blur terms are this frame's, set at the end of the background pass that has just
+            // completed, so the element can only be computed here and not when the shutter opened.
+            CapturedFrameMeasurement measurement = pendingCaptureMeasurement;
+            measurement.ResolutionElementArcsec = Core.ImagingScience.ResolutionElementArcsec(
+                LastDiffractionFwhmArcsec, LastAtmosphericFwhmArcsec,
+                LastPointingBudget.EquivalentFwhmArcsec, pendingPlateScaleArcsec, pendingDefocusDiscArcsec);
+            measurement.SignalToNoise = pendingBodySignalToNoise;
+            measurement.SaturatedFraction = lastSaturatedFraction;
+            capturedMeasurements.Enqueue(measurement);
 
             HasCapturedPhoto = true;
             UploadDisplayTextures();
@@ -2097,6 +2184,9 @@ namespace ExoInstruments.Visualization
 
             /// <summary>The spacecraft's pointing budget over this exposure. Zeroed for a ground instrument, which has no attitude to hold.</summary>
             public PointingBudget Pointing;
+
+            /// <summary>The target body's apparent diameter, arcsec; zero for a point source.</summary>
+            public double TargetAngularDiameterArcsec;
         }
 
         // Gathers every CelestialBody/Unity-API-touching input ComputeFramePixels needs, on the main thread.
@@ -2196,6 +2286,7 @@ namespace ExoInstruments.Visualization
             // assembly HAS, which for a deliberately defocused survey photometer is not a point.
             double manualDefocusDiscRadiusPx = Autofocus ? 0.0 : Mathf.Abs(FocusOffset) * MaxDefocusBlurPx;
             double defocusDiscRadiusPx = Math.Max(Spec.BuiltInDefocusDiscRadiusPx, manualDefocusDiscRadiusPx);
+            LastDefocusDiscArcsec = 2.0 * defocusDiscRadiusPx * EffectivePlateScaleArcsecPerPixel;
 
             var inputs = new FrameComputeInputs
             {
@@ -2212,6 +2303,7 @@ namespace ExoInstruments.Visualization
                 PlateScaleArcsec = EffectivePlateScaleArcsecPerPixel,
                 SeeingFwhmArcsec = seeingFwhmArcsec,
                 DefocusDiscRadiusPx = defocusDiscRadiusPx,
+                TargetAngularDiameterArcsec = AngularDiameterArcsec(target),
                 IsSpaceBased = spaceBased,
             };
 
@@ -5153,6 +5245,24 @@ namespace ExoInstruments.Visualization
             }
 
             lastStarsDrawnInternal = drawn;
+
+            // THE TARGET BODY'S OWN SIGNIFICANCE, on the same CcdEquation, so the imaging award and
+            // the supernova award apply one five-sigma rule and not two. The aperture is the disc
+            // when the body is resolved and the delivered PSF when it is not, which is what the
+            // source covers in either case.
+            double bodyElectrons = Math.Max(0.0, inputs.TotalElectrons);
+            if (bodyElectrons > 0.0 && inputs.TargetAngularDiameterArcsec > 0.0)
+            {
+                double discPx = inputs.TargetAngularDiameterArcsec / Math.Max(1e-9, inputs.PlateScaleArcsec);
+                double aperturePixels = discPx >= ResolvedBodyMinDiameterPx
+                    ? Math.Max(1.0, Math.PI * 0.25 * discPx * discPx)
+                    : SupernovaAperturePixels(inputs);
+                pendingBodySignalToNoise = CcdEquation.SignalToNoise(
+                    bodyElectrons, aperturePixels, BackgroundAnnulusPixels(aperturePixels),
+                    Math.Max(0.0, inputs.SkyElectronsPerPixel),
+                    Spec.DarkCurrentElectronsPerSecond * BinningFactor * BinningFactor * inputs.ExposureSeconds,
+                    Spec.ReadNoiseElectrons, ElectronsPerAdu(Gain));
+            }
         }
 
         // Pixels the detection aperture covers, from the frame's own delivered PSF width and plate scale

@@ -661,11 +661,24 @@ namespace ExoInstruments
             PollTransitAnalysisTask();
             PollRvAnalysisTask();
             BetterTimeWarpIntegration.PollRestore();
-            // Discovery is checked on the TRANSITION to a finished photo: the sightings list
-            // belongs to that frame, and rechecking every Update would re-toast every pass.
-            bool hasPhotoNow = solarSystemCamera != null && solarSystemCamera.HasCapturedPhoto;
-            if (hasPhotoNow && !hadCapturedPhotoLastUpdate) CheckSupernovaDiscoveries();
-            hadCapturedPhotoLastUpdate = hasPhotoNow;
+            // EVERY FINISHED FRAME IS DRAINED, and it is not a transition any more. Watching
+            // HasCapturedPhoto go true missed the frames that matter most: TickCapture polls a
+            // finished exposure and renders the next inside one Update, and a stacking batch
+            // consumes the flag in that same Update, so the transition was never observed on the
+            // following pass and a player running series earned nothing at all. The camera queues
+            // one measurement per completed frame and this drains it whatever the pacing.
+            //
+            // Unconditional, and outside the window and method test below on purpose: a frame that
+            // finished is a frame that finished, and closing a panel is not a reason to be unpaid.
+            if (solarSystemCamera != null)
+            {
+                while (solarSystemCamera.TryDequeueMeasurement(
+                           out SolarSystemCameraTexture.CapturedFrameMeasurement measurement))
+                {
+                    CheckImagingScience(measurement);
+                    CheckSupernovaDiscoveries();
+                }
+            }
 
             if (windowVisible && SelectedInstrument.Method == DetectionMethod.SolarSystemPhotography)
             {
@@ -2487,6 +2500,46 @@ namespace ExoInstruments
                     + $"  |  kernel {2f * blurPx + 1f:F0} px  |  saturated {solarSystemCamera.LastSaturatedFraction * 100f:F1}%",
                     smallCaptionStyle);
 
+                // WHAT THIS FRAME IS WORTH, and what the next rung would cost, because a ratchet the
+                // player cannot see the next step of is a ratchet they stop turning. The element is
+                // the one the award is computed from, Nyquist and defocus floors included, which is
+                // also the honest answer to why binning down does not always help.
+                if (hasDisk && ScienceEconomyActive && ExoInstrumentsScenario.Instance != null)
+                {
+                    double element = ImagingScience.ResolutionElementArcsec(
+                        diff, atm, solarSystemCamera.LastPointingBudget.EquivalentFwhmArcsec,
+                        plateScale, solarSystemCamera.LastDefocusDiscArcsec);
+                    double field = SolarSystemCameraTexture.TextureWidth * plateScale;
+                    int rung = ImagingScience.DetailRung(diskArcsec, field, element,
+                                                         ScienceRewards.ResolutionRungCap);
+                    string key = ExoInstrumentsScenario.ImagingKey(selectedPhotographyBody.bodyName);
+                    int banked = ExoInstrumentsScenario.Instance.BestImagingRung(key);
+
+                    double recorded = Math.Min(diskArcsec, field);
+                    double needed = recorded / Math.Pow(2.0, Math.Min(rung + 1, ScienceRewards.ResolutionRungCap));
+                    GUILayout.Label(
+                        $"Detail: element {Arcsec(element)} over {recorded / Math.Max(1e-9, element):F0} elements "
+                        + $"= rung {rung}, banked {banked}"
+                        + (rung > banked ? "  (this frame pays)" : rung >= ScienceRewards.ResolutionRungCap
+                            ? "  (ladder complete here)"
+                            : $"  (next rung needs {Arcsec(needed)})"),
+                        smallCaptionStyle);
+
+                    if (!ExoInstrumentsScenario.Instance.IsReconnoitred(key))
+                    {
+                        double range = diskArcsec > 0.0
+                            ? 2.0 * selectedPhotographyBody.Radius / (diskArcsec * Math.PI / (180.0 * 3600.0))
+                            : 0.0;
+                        double sample = ImagingScience.GroundSampleMetres(range, element);
+                        double threshold = ImagingScience.ReconnaissanceThresholdMetres(
+                            selectedPhotographyBody.Radius, ScienceRewards.ReconnaissanceElementsAcrossRadius);
+                        GUILayout.Label(
+                            $"Reconnaissance: {sample:N0} m per element, claim at {threshold:N0} m"
+                            + (sample <= threshold ? "  (this frame claims it)" : "  (fly closer, or bring a longer focal length)"),
+                            smallCaptionStyle);
+                    }
+                }
+
                 // Atmospheric dispersion: the atmosphere refracts blue more than red, so a source at
                 // low altitude is drawn out into a short spectrum pointing at the zenith. This is the
                 // length of it across the active filter, which is the number that says whether the
@@ -4016,7 +4069,86 @@ namespace ExoInstruments
             return true;
         }
 
-        private bool hadCapturedPhotoLastUpdate;
+        /// <summary>
+        /// Science for photographing a world, paid for what this frame newly SHOWED. Two ratchets
+        /// on a per-body high-water mark, so a re-shoot pays exactly zero and there is no rate to
+        /// farm; see Core/ImagingScience.cs for why that shape and not a per-frame award.
+        ///
+        /// Bodies only. A deep-sky target earns nothing here, and deliberately: GatherFrameInputs
+        /// leaves TotalElectrons at zero for anything that is not a body, so there is no per-source
+        /// measurement to gate on and a reward would be paid on a number nobody computed.
+        /// </summary>
+        void CheckImagingScience(SolarSystemCameraTexture.CapturedFrameMeasurement m)
+        {
+            if (!ScienceEconomyActive) return;
+            ExoInstrumentsScenario scenario = ExoInstrumentsScenario.Instance;
+            if (scenario == null) return;
+
+            string key = ExoInstrumentsScenario.ImagingKey(m.BodyName);
+            if (key == null) return;
+
+            // The three gates that decide whether this frame is a measurement at all. The
+            // saturation one is why the neutral-density filters have a payoff: a blown-out frame of
+            // something too bright destroyed the detail it is asking to be paid for.
+            if (!m.TargetInFrame) return;
+            if (!(m.SignalToNoise >= ScienceRewards.ImagingMinimumSignalToNoise)) return;
+            if (m.SaturatedFraction > ScienceRewards.ImagingMaximumSaturatedFraction) return;
+
+            double award = 0.0;
+            string detail = null;
+
+            int rung = ImagingScience.DetailRung(m.TargetAngularDiameterArcsec, m.FieldWidthArcsec,
+                                                 m.ResolutionElementArcsec, ScienceRewards.ResolutionRungCap);
+            if (scenario.TryBankImagingRung(key, rung, out int previous))
+            {
+                award += ImagingScience.LadderTotal(rung, ScienceRewards.ScienceRewardResolutionRung,
+                                                    ScienceRewards.ResolutionRungsPerDoubling)
+                       - ImagingScience.LadderTotal(previous, ScienceRewards.ScienceRewardResolutionRung,
+                                                    ScienceRewards.ResolutionRungsPerDoubling);
+                detail = previous > 0
+                    ? $"finest detail on {m.BodyName} improved, {1 << previous} to {1 << rung} elements across it"
+                    : $"first resolved image of {m.BodyName}, {1 << rung} elements across it";
+            }
+
+            // The second claim, and the only one that can tell one world from another once the body
+            // overflows the field: past that point the rung above is a property of the camera alone.
+            if (!scenario.IsReconnoitred(key))
+            {
+                double sample = ImagingScience.GroundSampleMetres(m.DistanceMetres, m.ResolutionElementArcsec);
+                double threshold = ImagingScience.ReconnaissanceThresholdMetres(
+                    m.BodyRadiusMetres, ScienceRewards.ReconnaissanceElementsAcrossRadius);
+                if (threshold > 0.0 && sample <= threshold && scenario.MarkReconnoitred(key))
+                {
+                    award += ScienceRewards.ScienceRewardReconnaissancePerScienceValue
+                           * BodyReconnaissanceValue(m.BodyName);
+                    detail = $"reconnaissance of {m.BodyName}, {sample:F0} m per resolution element";
+                }
+            }
+
+            if (!(award > 0.0)) return;
+
+            float paid = ApplyScienceDifficulty((float)award);
+            scenario.AddEarnedScience(paid);
+            if (ResearchAndDevelopment.Instance != null)
+                ResearchAndDevelopment.Instance.AddScience(paid, TransactionReasons.ScienceTransmission);
+
+            ScreenMessages.PostScreenMessage($"{detail}  (+{paid:F1} Science)",
+                                             8f, ScreenMessageStyle.UPPER_CENTER);
+            Debug.Log($"[ExoInstruments] Imaging science: {detail}, rung {rung} (was {previous}), "
+                    + $"element {m.ResolutionElementArcsec:F3}\", field {m.FieldWidthArcsec:F0}\", "
+                    + $"disc {m.TargetAngularDiameterArcsec:F0}\", SNR {m.SignalToNoise:F1}, "
+                    + $"saturated {m.SaturatedFraction:P1}, +{paid:F2} Science");
+        }
+
+        // How hard the body was to reach, in the game's own currency for exactly that. The one place
+        // a stock balance number is borrowed, and it is borrowed for the one thing it measures.
+        static float BodyReconnaissanceValue(string bodyName)
+        {
+            if (string.IsNullOrEmpty(bodyName) || FlightGlobals.Bodies == null) return 0f;
+            CelestialBody body = FlightGlobals.Bodies.Find(b => b != null && b.bodyName == bodyName);
+            return body != null && body.scienceValues != null ? body.scienceValues.InSpaceHighDataValue : 0f;
+        }
+
 
         /// <summary>
         /// Checks the finished frame for supernovae bright enough to notice, and turns the new
