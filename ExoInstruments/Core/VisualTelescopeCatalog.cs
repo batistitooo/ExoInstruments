@@ -2681,6 +2681,12 @@ namespace ExoInstruments.Core
                 // be opened and closed."
                 HasApertureDoor = false,
 
+                // ITS OWN BUS, NOT HUBBLE'S. SpacePlatformSpec's defaults (2.0 EC/s exposing, 0.35
+                // idle) are stated there as game-balance numbers for a 4.5 t observatory, and
+                // inheriting them billed a 7 kg cubesat twice its entire battery for a frame. Scaled to what this is.
+                ExposureElectricChargePerSecond = 0.08,
+                IdleElectricChargePerSecond = 0.02,
+
                 // Pablo Table 1. Corroborated by Weiss Sect. 5 item 3, an 11 Mpixel frame at
                 // "about 20 MB", which is 14.45 bits per pixel. The whole sensor is read, not
                 // only the imaging rectangle. Weiss also records what that costs: "Downlinking
@@ -3237,6 +3243,12 @@ namespace ExoInstruments.Core
                 // "No moving parts, except for once-open telescope cover mounted to spacecraft".
                 // A cover that opens once is not a door the observer operates.
                 HasApertureDoor = false,
+
+                // ITS OWN BUS, NOT HUBBLE'S. SpacePlatformSpec's defaults (2.0 EC/s exposing, 0.35
+                // idle) are stated there as game-balance numbers for a 4.5 t observatory, and
+                // inheriting them billed an 8.6 kg camera Hubble's own draw for a frame. Scaled to what this is.
+                ExposureElectricChargePerSecond = 0.25,
+                IdleElectricChargePerSecond = 0.05,
 
                 DownlinkBitsPerPixel = 12,
                 FullFramePixels = 1024L * 1024L,
