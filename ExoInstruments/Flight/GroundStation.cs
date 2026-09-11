@@ -176,6 +176,7 @@ namespace ExoInstruments.Flight
             state.FromDirection = from.sqrMagnitude > 1e-12 ? from : target;
             state.SlewStartUt = Planetarium.GetUniversalTime();
             state.ManoeuvreSeconds = profile.ManoeuvreSeconds;
+            state.AngleDeg = profile.AngleDeg;
             state.PeakRateDegPerSecond = profile.PeakRateDegPerSecond;
             state.AcquisitionSeconds = profile.AcquisitionSeconds;
             state.Write(link);
@@ -493,9 +494,17 @@ namespace ExoInstruments.Flight
             Vector3d to = ResolveCommandedDirection(link, in state);
             Vector3d from = state.FromDirection.sqrMagnitude > 1e-12 ? state.FromDirection.normalized : to;
 
+            // THE ANGLE IS THE COMMANDED ONE. A body's direction is re-resolved every frame, so
+            // recomputing it here let the shape of the manoeuvre drift under the manoeuvre it is
+            // meant to be describing. The live angle is the fallback for a save written before it
+            // was stored.
+            double angleDeg = state.AngleDeg > 0.0
+                ? state.AngleDeg
+                : (from.sqrMagnitude > 1e-12 && to.sqrMagnitude > 1e-12 ? Vector3d.Angle(from, to) : 0.0);
+
             var profile = new SlewProfile
             {
-                AngleDeg = from.sqrMagnitude > 1e-12 && to.sqrMagnitude > 1e-12 ? Vector3d.Angle(from, to) : 0.0,
+                AngleDeg = angleDeg,
                 ManoeuvreSeconds = state.ManoeuvreSeconds,
             };
 
@@ -1133,6 +1142,7 @@ namespace ExoInstruments.Flight
         public double TargetDecDeg;
         public double SlewStartUt;
         public double ManoeuvreSeconds;
+        public double AngleDeg;
         public double PeakRateDegPerSecond;
         public double AcquisitionSeconds;
         public double PowerLedgerUt;
@@ -1161,6 +1171,7 @@ namespace ExoInstruments.Flight
                 s.FromDirection = ParseDirection(m.slewFromDirection);
                 s.SlewStartUt = m.slewStartUt;
                 s.ManoeuvreSeconds = m.slewManoeuvreSeconds;
+                s.AngleDeg = m.slewAngleDeg;
                 s.PeakRateDegPerSecond = m.slewPeakRateDegPerSecond;
                 s.AcquisitionSeconds = m.slewAcquisitionSeconds;
                 s.PowerLedgerUt = m.powerLedgerUt;
@@ -1179,6 +1190,7 @@ namespace ExoInstruments.Flight
             s.FromDirection = ParseDirection(node.GetValue("slewFromDirection"));
             s.SlewStartUt = ReadDouble(node, "slewStartUt");
             s.ManoeuvreSeconds = ReadDouble(node, "slewManoeuvreSeconds");
+            s.AngleDeg = ReadDouble(node, "slewAngleDeg");
             s.PeakRateDegPerSecond = ReadDouble(node, "slewPeakRateDegPerSecond");
             s.AcquisitionSeconds = ReadDouble(node, "slewAcquisitionSeconds");
             s.PowerLedgerUt = ReadDouble(node, "powerLedgerUt");
@@ -1201,6 +1213,7 @@ namespace ExoInstruments.Flight
                 m.slewFromDirection = FormatDirection(FromDirection);
                 m.slewStartUt = SlewStartUt;
                 m.slewManoeuvreSeconds = ManoeuvreSeconds;
+                m.slewAngleDeg = AngleDeg;
                 m.slewPeakRateDegPerSecond = PeakRateDegPerSecond;
                 m.slewAcquisitionSeconds = AcquisitionSeconds;
                 m.powerLedgerUt = PowerLedgerUt;
@@ -1218,6 +1231,7 @@ namespace ExoInstruments.Flight
             Set(node, "slewFromDirection", FormatDirection(FromDirection));
             Set(node, "slewStartUt", SlewStartUt.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "slewManoeuvreSeconds", ManoeuvreSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            Set(node, "slewAngleDeg", AngleDeg.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "slewPeakRateDegPerSecond", PeakRateDegPerSecond.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "slewAcquisitionSeconds", AcquisitionSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Set(node, "powerLedgerUt", PowerLedgerUt.ToString("R", System.Globalization.CultureInfo.InvariantCulture));

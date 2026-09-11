@@ -200,6 +200,14 @@ namespace ExoInstruments.Flight
         public double slewManoeuvreSeconds;
 
         /// <summary>
+        /// Eigenaxis angle the manoeuvre was planned to cover, degrees. Stored for the same reason
+        /// as the rate below: a body's direction is re-resolved every frame, so recomputing the
+        /// angle let the shape of the running manoeuvre drift under it. Zero in an older save.
+        /// </summary>
+        [KSPField(isPersistant = true)]
+        public double slewAngleDeg;
+
+        /// <summary>
         /// Fastest the manoeuvre was planned to turn, deg/s. Stored rather than solved back out of
         /// the duration, because solving it needs the vehicle's torque and that can change while
         /// the slew runs: the shape and the duration then disagreed and the boresight jumped.
