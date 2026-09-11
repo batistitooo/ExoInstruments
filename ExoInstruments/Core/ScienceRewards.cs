@@ -80,6 +80,53 @@ namespace ExoInstruments.Core
         /// </summary>
         public const float ScienceRewardSupernovaDiscovery = 30.0f;
 
+        // --- Astrophotography: see Core/ImagingScience.cs for what these shape ---------------
+
+        /// <summary>
+        /// The first rung of the detail ladder, and the unit every later rung is a multiple of.
+        /// A body photographed to the ladder's ceiling is worth about 27 Science, and there are
+        /// fifteen of them, so the detail half of the programme tops out near 400.
+        /// </summary>
+        public const float ScienceRewardResolutionRung = 0.6f;
+
+        /// <summary>
+        /// Rungs that make a doubling of the PAYOUT. Each rung is a doubling of recorded detail,
+        /// so at three the payout doubles for every eightfold gain in what the frame shows: a
+        /// better telescope is always worth something and never worth everything.
+        /// </summary>
+        public const int ResolutionRungsPerDoubling = 3;
+
+        /// <summary>
+        /// Where the ladder stops. Eleven rungs is about 2048 resolution elements across a target,
+        /// which is past what any instrument in the roster records in one frame.
+        /// </summary>
+        public const int ResolutionRungCap = 11;
+
+        /// <summary>
+        /// Reconnaissance, as a multiple of the body's own stock InSpaceHigh science value. The one
+        /// place a stock KSP balance number is borrowed, and it is borrowed for the one thing it
+        /// measures: how hard the body is to reach. Across the fifteen stock bodies this is about
+        /// 283 Science if every one of them is imaged from close enough.
+        /// </summary>
+        public const float ScienceRewardReconnaissancePerScienceValue = 3.0f;
+
+        /// <summary>
+        /// Resolution elements across the body's RADIUS that a reconnaissance claim asks for.
+        /// A chosen number, and the lever that decides how hard the flying half is: at 500, a
+        /// good orbital camera claims most bodies from their sphere of influence boundary and
+        /// a 3 cm cubesat claims none of them.
+        /// </summary>
+        public const double ReconnaissanceElementsAcrossRadius = 500.0;
+
+        /// <summary>
+        /// Signal to noise a frame needs before it counts as a measurement, the same five sigma
+        /// the supernova award applies, and the saturated fraction above which it does not count
+        /// at all. The second is what stops a blown-out frame of the Sun paying for detail it
+        /// destroyed, and it is why the neutral-density filters have a payoff.
+        /// </summary>
+        public const double ImagingMinimumSignalToNoise = 5.0;
+        public const double ImagingMaximumSaturatedFraction = 0.35;
+
         /// <summary>
         /// The first-scan award once <paramref name="scansAlreadyCompleted"/> stars have been
         /// surveyed. Kept here rather than in the GUI so the curve is stated once, next to the
