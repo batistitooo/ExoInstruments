@@ -181,9 +181,17 @@
         loudly if it ever cannot.
 
         %(ModifiedTime) on an item whose identity is the destination is empty when that
-        file does not exist yet, which is the "copy it, there is nothing there" case. When
-        it does exist, MSBuild's stamp format (yyyy-MM-dd HH:mm:ss.fffffff) is fixed-width,
-        so an ordinal string compare is a chronological compare.
+        file does not exist yet. When it does exist, MSBuild's stamp format
+        (yyyy-MM-dd HH:mm:ss.fffffff) is fixed-width, so an ordinal string compare is a
+        chronological compare.
+
+        A PULL ONLY EVER UPDATES, NEVER CREATES, and that asymmetry is deliberate. The empty
+        stamp used to mean "copy it, there is nothing there", which made the install able to
+        put files INTO the repo: deleting a part from the repo and building resurrected it
+        from the last deploy, and the next commit quietly took it back. A part is authored in
+        the repo and pushed outwards; the only thing worth carrying back is a re-export
+        landing on a file that already exists. Anything in the install with no counterpart
+        here is named in a warning instead, so a genuinely new export is still seen.
 
         @thumbs/ is skipped in both directions: KSP regenerates those part icons from the
         models, they go stale the moment a model is re-exported, and .gitignore keeps them
@@ -202,9 +210,14 @@
                 <SourceStamp>%(_PartsInInstall.ModifiedTime)</SourceStamp>
             </_PartPull>
         </ItemGroup>
+        <ItemGroup>
+            <_PartPullOrphan Include="@(_PartPull)" Condition="'%(_PartPull.ModifiedTime)' == ''" />
+        </ItemGroup>
+        <Warning Condition="'@(_PartPullOrphan)' != ''"
+                 Text="PullParts: the install carries Parts files this repo does not, and a pull will not create them: @(_PartPullOrphan->'%(Filename)%(Extension)', ', '). Add them here deliberately, or delete them from the install." />
         <Copy SourceFiles="%(_PartPull.Source)"
               DestinationFiles="%(_PartPull.Identity)"
-              Condition="'%(_PartPull.ModifiedTime)' == '' Or $([System.String]::CompareOrdinal('%(_PartPull.SourceStamp)', '%(_PartPull.ModifiedTime)')) &gt; 0" />
+              Condition="'%(_PartPull.ModifiedTime)' != '' And $([System.String]::CompareOrdinal('%(_PartPull.SourceStamp)', '%(_PartPull.ModifiedTime)')) &gt; 0" />
     </Target>
 
     <Target Name="CopyParts" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
@@ -249,7 +262,14 @@
             <DistDir>$(ProjectDir)..\dist\</DistDir>
             <PackageStageDir>$(DistDir)stage\</PackageStageDir>
             <PackageModDir>$(PackageStageDir)GameData\ExoInstruments\</PackageModDir>
-            <PackageZipName Condition="'$(ReleaseVersion)' == ''">ExoInstruments.zip</PackageZipName>
+            <!--
+                Defaulted to ModVersion, not to a bare name. ReleaseVersion is defined nowhere else
+                in this file and reaches it only from the command line, so forgetting the flag used
+                to produce an unversioned zip that overwrote the last one, or worse, a zip named for
+                one version carrying the .version file of another. ModVersion is the single source
+                the header above promises it is; pass ReleaseVersion only to override it deliberately.
+            -->
+            <PackageZipName Condition="'$(ReleaseVersion)' == ''">ExoInstruments-$(ModVersion).zip</PackageZipName>
             <PackageZipName Condition="'$(ReleaseVersion)' != ''">ExoInstruments-$(ReleaseVersion).zip</PackageZipName>
         </PropertyGroup>
 
