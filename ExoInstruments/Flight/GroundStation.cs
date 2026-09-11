@@ -384,6 +384,7 @@ namespace ExoInstruments.Flight
             r.CommandedDirection = ResolveCommandedDirection(link, in state);
             r.CurrentDirection = CurrentDirection(link, in state);
             r.ProfileDirection = ProfileDirection(link, in state);
+            r.StartDirection = state.FromDirection.sqrMagnitude > 1e-12 ? state.FromDirection.normalized : Vector3d.zero;
             r.CommandedRaDeg = state.TargetRaDeg;
             r.CommandedDecDeg = state.TargetDecDeg;
             r.ErrorDeg = r.CurrentDirection.sqrMagnitude > 1e-12 && r.CommandedDirection.sqrMagnitude > 1e-12
@@ -1069,6 +1070,9 @@ namespace ExoInstruments.Flight
 
         /// <summary>Unit world direction the profile puts the boresight on right now. What a loaded vehicle's autopilot is flown to, so it turns at the rate the manoeuvre was priced at.</summary>
         public Vector3d ProfileDirection;
+
+        /// <summary>Unit world direction the manoeuvre started from. With the two ends in hand the attitude can be interpolated rather than rebuilt at each waypoint, which is what carries the roll.</summary>
+        public Vector3d StartDirection;
 
         /// <summary>
         /// The commanded catalogue position, when the target is one; NaN for a body or a raw

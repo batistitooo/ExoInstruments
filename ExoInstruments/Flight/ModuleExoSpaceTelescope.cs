@@ -789,10 +789,11 @@ namespace ExoInstruments.Flight
             // and is a runaway: the error SAS sees is then a degree whatever the vehicle does, so
             // nothing nulls it, the integrator winds up, and the spacecraft spins faster and faster
             // until the clock runs out. A setpoint has to have a fixed point the vehicle can reach.
-            Vector3d targetDirection = destination;
             PointingReadout ground = GroundReadout();
-            if (ground.Phase == GroundPointingPhase.Slewing && ground.ProfileDirection.sqrMagnitude > 1e-12)
-                targetDirection = ground.ProfileDirection;
+            bool slewing = ground.Phase == GroundPointingPhase.Slewing
+                        && ground.ProfileDirection.sqrMagnitude > 1e-12
+                        && ground.StartDirection.sqrMagnitude > 1e-12;
+            Vector3d targetDirection = slewing ? ground.ProfileDirection : destination;
 
             // THE ACTION GROUP HAS TO BE ON. VesselAutopilot.Update opens by disabling itself
             // whenever ActionGroups[SAS] is false, which resets the PIDs and clears lockedRotation,
@@ -842,15 +843,32 @@ namespace ExoInstruments.Flight
             // The destination holds still, so the choice is made once per command as it always was.
             Vector3d up = Planetarium.Zup.Z;
             if (Math.Abs(Vector3d.Dot(up, destination.normalized)) > 0.999) up = Planetarium.Zup.X;
-            Vector3d t = targetDirection.normalized;
 
-            Quaternion boresightTarget = Quaternion.LookRotation((Vector3)t, (Vector3)up);
+            Quaternion boresightTarget = Quaternion.LookRotation((Vector3)destination.normalized, (Vector3)up);
+
+            // AND THE ROLL IS CARRIED THROUGH THE MANOEUVRE, not rebuilt at each waypoint. Rebuilt,
+            // it is the north-up roll AT that waypoint, and a path passing near the celestial pole
+            // sweeps that at tens of degrees a second for a repoint priced at a fraction of one: the
+            // vehicle rolls hard in the middle of an otherwise calm slew. Interpolating the two end
+            // attitudes is one eigenaxis rotation, which is what a three-axis vehicle flies anyway.
+            if (slewing)
+            {
+                Quaternion startAttitude = Quaternion.LookRotation(
+                    (Vector3)ground.StartDirection.normalized, (Vector3)up);
+                double whole = Vector3d.Angle(ground.StartDirection, destination);
+                double done = Vector3d.Angle(ground.StartDirection, targetDirection);
+                float fraction = whole > 1e-6 ? (float)Math.Min(1.0, done / whole) : 1f;
+                boresightTarget = Quaternion.Slerp(startAttitude, boresightTarget, fraction);
+            }
+
             Quaternion commanded = boresightTarget * Quaternion.Inverse(boresightRelativeToControl);
 
-            // Re-issued only when it has really moved: a step quantiser while the waypoint is
-            // advancing, and a settle-and-stop past the manoeuvre. The step is well inside
-            // GroundStation.OnTargetToleranceDeg, so it cannot cost the target the detector.
-            if (hasCommandedRotation && Quaternion.Angle(commandedRotation, commanded) < 0.01f) return;
+            // The deadband was written for a command that settles to one value and stops, and it
+            // still is one past the manoeuvre. While the waypoint is advancing it would only
+            // quantise it into steps, and LockRotation is a single field store, so there is nothing
+            // to save by holding them back.
+            if (!slewing && hasCommandedRotation
+                && Quaternion.Angle(commandedRotation, commanded) < 0.01f) return;
 
             commandedRotation = commanded;
             hasCommandedRotation = true;
