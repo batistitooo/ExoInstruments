@@ -432,6 +432,8 @@ namespace ExoInstruments
             if (!r.HasCommand)
             {
                 GUILayout.Label("Boresight: nothing commanded. Click a target to slew the spacecraft onto it.");
+                if (!string.IsNullOrEmpty(spaceCommandMessage))
+                    GUILayout.Label("Last command refused: " + spaceCommandMessage, smallCaptionStyle);
                 return;
             }
 
@@ -490,6 +492,9 @@ namespace ExoInstruments
                     FormatAngle(streakDeg)));
             }
 
+            if (r.Phase != GroundPointingPhase.OnTarget && !CanHoldAttitude(link))
+                GUILayout.Label("No SAS: needs a pilot or a probe core. Steer it by hand.", smallCaptionStyle);
+
             if (r.Phase != GroundPointingPhase.OnTarget) DrawProgressBar(r.SlewProgress);
         }
 
@@ -502,7 +507,18 @@ namespace ExoInstruments
             if (link.ControlMode == AttitudeControlMode.Uncontrolled)
                 return "this vehicle has no attitude control, so check its reaction wheels and its charge";
             if (link.ElectricCharge <= 0.01) return "the battery is flat";
+            if (!CanHoldAttitude(link)) return "no SAS, which needs a pilot or a probe core";
             return null;
+        }
+
+        // Whether a loaded vessel can run Stability Assist, which is what the pointing hold drives. Reaction
+        // wheels give torque, but only a pilot or a SAS probe core gives the autopilot that uses it. An
+        // unloaded vessel is answered true: the ground station models its turn without SAS.
+        private static bool CanHoldAttitude(SpaceTelescopeLink link)
+        {
+            if (link == null || link.Module == null || link.Vessel == null) return true;
+            VesselAutopilot autopilot = link.Vessel.Autopilot;
+            return autopilot != null && autopilot.SAS != null && autopilot.SAS.CanEngageSAS();
         }
 
         // The battery, what the pending exposure would cost it, and how long it lasts. The panel half that

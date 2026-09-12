@@ -48,14 +48,28 @@ namespace ExoInstruments.Flight
         }
 
         /// <summary>
-        /// True when commands can reach this spacecraft from the ground: it has an antenna with a
-        /// path home, or the save is not playing with CommNet at all.
+        /// True when commands can reach this spacecraft: it has an antenna with a path home, the save
+        /// is not playing with CommNet at all, or the player is flying it and so is aboard.
         /// </summary>
         public static bool HasCommandPath(SpaceTelescopeLink link)
         {
             if (link == null || link.Vessel == null) return false;
             if (!CommNetEnforced) return true;
+
+            // Aboard is a command path. CanCommand already exempted the flown vessel and this did not,
+            // so a crewed telescope out of radio range could not be pointed from inside it.
+            if (IsBeingFlown(link)) return true;
+
             return link.HasCommLink;
+        }
+
+        // The telescope's vessel is the one the player is flying right now.
+        private static bool IsBeingFlown(SpaceTelescopeLink link)
+        {
+            return HighLogic.LoadedSceneIsFlight
+                && FlightGlobals.ActiveVessel != null
+                && link.Vessel != null
+                && FlightGlobals.ActiveVessel.id == link.Vessel.id;
         }
 
         // ---------------------------------------------------------------- commanding
