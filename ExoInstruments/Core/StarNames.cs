@@ -67,6 +67,9 @@ namespace ExoInstruments.Core
             { "ursae minoris", "umi" },
         };
 
+        // First words of the pairs above; a token that is none of them cannot start a pair.
+        private static readonly HashSet<string> PairFirstWords = FirstWords(ConstellationGenitivePairs.Keys);
+
         // Single-word constellation genitives -> IAU 3-letter abbreviation
         // (lowercase on both sides; the 3-letter abbreviations themselves need
         // no entry because lowercasing already canonicalizes "UMa"/"Uma"/"uma").
@@ -109,7 +112,8 @@ namespace ExoInstruments.Core
             RegexOptions.Compiled);
 
         private static readonly Regex ParentheticalRegex = new Regex(@"\([^)]*\)", RegexOptions.Compiled);
-        private static readonly Regex TrailingDigitRegex = new Regex(@"^([a-z]+)([1-9])$", RegexOptions.Compiled);
+
+        private static readonly char[] TokenSeparators = { ' ', '\t' };
 
         // "HD 217014", "HD217014", "hd 217014  b"; the digits are what matters.
         private static readonly Regex HdRegex = new Regex(@"\bHD[\s-]*(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -125,24 +129,26 @@ namespace ExoInstruments.Core
         {
             if (string.IsNullOrWhiteSpace(rawName)) return null;
 
-            string s = HtmlEntityRegex.Replace(rawName, "$1");
-            s = ParentheticalRegex.Replace(s, " ");
+            // Neither regex can match without its opening character, and Replace would return the text unchanged.
+            string s = rawName.IndexOf('&') < 0 ? rawName : HtmlEntityRegex.Replace(rawName, "$1");
+            if (s.IndexOf('(') >= 0) s = ParentheticalRegex.Replace(s, " ");
             s = s.ToLowerInvariant();
 
-            string[] rawTokens = s.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            var tokens = new List<string>(rawTokens.Length);
+            // Canonical tokens are written back over the front of the array; each one consumes at least one raw token.
+            string[] tokens = s.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries);
+            int count = 0;
 
-            for (int i = 0; i < rawTokens.Length; i++)
+            for (int i = 0; i < tokens.Length; i++)
             {
-                string token = rawTokens[i];
+                string token = tokens[i];
 
                 // Two-word genitives first ("ursae majoris" -> "uma").
-                if (i + 1 < rawTokens.Length)
+                if (i + 1 < tokens.Length && PairFirstWords.Contains(token))
                 {
-                    string pair = token + " " + rawTokens[i + 1];
+                    string pair = token + " " + tokens[i + 1];
                     if (ConstellationGenitivePairs.TryGetValue(pair, out string pairAbbrev))
                     {
-                        tokens.Add(pairAbbrev);
+                        tokens[count++] = pairAbbrev;
                         i++;
                         continue;
                     }
@@ -150,29 +156,48 @@ namespace ExoInstruments.Core
 
                 if (ConstellationGenitive.TryGetValue(token, out string constAbbrev))
                 {
-                    tokens.Add(constAbbrev);
+                    tokens[count++] = constAbbrev;
                     continue;
                 }
 
                 // Greek letter, possibly with an attached index ("rho1", "ups2").
                 string bare = token;
                 string index = "";
-                Match m = TrailingDigitRegex.Match(token);
-                if (m.Success)
+                int digit = TrailingDigitPosition(token);
+                if (digit >= 0)
                 {
-                    bare = m.Groups[1].Value;
-                    index = m.Groups[2].Value;
+                    bare = token.Substring(0, digit);
+                    index = token.Substring(digit, 1);
                 }
                 if (GreekCanonical.TryGetValue(bare, out string greek))
                 {
-                    tokens.Add(greek + index);
+                    tokens[count++] = greek + index;
                     continue;
                 }
 
-                tokens.Add(token);
+                tokens[count++] = token;
             }
 
-            return tokens.Count == 0 ? null : string.Join(" ", tokens);
+            return count == 0 ? null : string.Join(" ", tokens, 0, count);
+        }
+
+        // Position of the digit when the token matches ^([a-z]+)([1-9])$, else -1. As in .NET regex, '$' also
+        // matches before a final '\n'.
+        private static int TrailingDigitPosition(string token)
+        {
+            int end = token.Length;
+            if (end > 0 && token[end - 1] == '\n') end--;
+            if (end < 2 || token[end - 1] < '1' || token[end - 1] > '9') return -1;
+            for (int i = 0; i < end - 1; i++)
+                if (token[i] < 'a' || token[i] > 'z') return -1;
+            return end - 1;
+        }
+
+        private static HashSet<string> FirstWords(IEnumerable<string> pairs)
+        {
+            var words = new HashSet<string>();
+            foreach (string pair in pairs) words.Add(pair.Substring(0, pair.IndexOf(' ')));
+            return words;
         }
 
         /// <summary>
@@ -182,21 +207,21 @@ namespace ExoInstruments.Core
         /// </summary>
         public static List<int> ExtractHdNumbers(params string[] designations)
         {
-            return ExtractNumbers(HdRegex, designations);
+            return ExtractNumbers(HdRegex, 'd', designations);
         }
 
         /// <summary>Every HR (Bright Star) number found in the given designation strings.</summary>
         public static List<int> ExtractHrNumbers(params string[] designations)
         {
-            return ExtractNumbers(HrRegex, designations);
+            return ExtractNumbers(HrRegex, 'r', designations);
         }
 
-        private static List<int> ExtractNumbers(Regex regex, string[] designations)
+        private static List<int> ExtractNumbers(Regex regex, char secondLetter, string[] designations)
         {
             var numbers = new List<int>();
             foreach (string text in designations)
             {
-                if (string.IsNullOrWhiteSpace(text)) continue;
+                if (string.IsNullOrWhiteSpace(text) || !ContainsLetterPair(text, secondLetter)) continue;
                 foreach (Match m in regex.Matches(text))
                 {
                     if (int.TryParse(m.Groups[1].Value, out int n) && !numbers.Contains(n))
@@ -204,6 +229,19 @@ namespace ExoInstruments.Core
                 }
             }
             return numbers;
+        }
+
+        // In every culture IgnoreCase matches the pattern's "H" only to 'H'/'h' and its second letter only to its two
+        // ASCII cases, so text without such a pair has no match.
+        private static bool ContainsLetterPair(string text, char secondLetter)
+        {
+            char upper = char.ToUpperInvariant(secondLetter);
+            for (int i = 0; i + 1 < text.Length; i++)
+            {
+                char c = text[i];
+                if ((c == 'h' || c == 'H') && (text[i + 1] == secondLetter || text[i + 1] == upper)) return true;
+            }
+            return false;
         }
 
         /// <summary>

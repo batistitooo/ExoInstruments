@@ -57,6 +57,7 @@ namespace ExoInstruments.Core
 
             var lines = tsvText.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
             Dictionary<string, int> colIndex = null;
+            int hrCol = -1, raCol = -1, decCol = -1, vmagCol = -1, hdCol = -1, bvCol = -1, nameCol = -1;
 
             foreach (string line in lines)
             {
@@ -68,6 +69,15 @@ namespace ExoInstruments.Core
                     colIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < headers.Length; i++)
                         colIndex[headers[i].Trim()] = i;
+
+                    // Column positions, -1 when the header lacks the column.
+                    hrCol = ColumnOf(colIndex, "HR");
+                    raCol = ColumnOf(colIndex, "_RAJ2000");
+                    decCol = ColumnOf(colIndex, "_DEJ2000");
+                    vmagCol = ColumnOf(colIndex, "Vmag");
+                    hdCol = ColumnOf(colIndex, "HD");
+                    bvCol = ColumnOf(colIndex, "B-V");
+                    nameCol = ColumnOf(colIndex, "Name");
                     continue;
                 }
 
@@ -75,27 +85,27 @@ namespace ExoInstruments.Core
 
                 // The units row ("deg deg ... mag") and the dashes row fail this
                 // parse, which is exactly why HR is checked first.
-                int? hr = GetInt(row, colIndex, "HR");
+                int? hr = GetInt(row, hrCol);
                 if (!hr.HasValue) continue;
 
-                double? raDeg = GetDouble(row, colIndex, "_RAJ2000");
-                double? decDeg = GetDouble(row, colIndex, "_DEJ2000");
+                double? raDeg = GetDouble(row, raCol);
+                double? decDeg = GetDouble(row, decCol);
                 if (!raDeg.HasValue || !decDeg.HasValue)
                 {
                     result.SkippedNoPosition++;
                     continue;
                 }
 
-                double? vmag = GetDouble(row, colIndex, "Vmag");
+                double? vmag = GetDouble(row, vmagCol);
                 if (!vmag.HasValue)
                 {
                     result.SkippedNoMagnitude++;
                     continue;
                 }
 
-                int? hd = GetInt(row, colIndex, "HD");
-                double? teffK = StellarColor.TeffFromColorIndexBV(GetDouble(row, colIndex, "B-V"));
-                string rawName = GetRaw(row, colIndex, "Name");
+                int? hd = GetInt(row, hdCol);
+                double? teffK = StellarColor.TeffFromColorIndexBV(GetDouble(row, bvCol));
+                string rawName = GetRaw(row, nameCol);
 
                 ParseBscName(rawName, out string flamsteed, out string bayer, out string constellation);
                 string friendlyName = BuildFriendlyName(flamsteed, bayer, constellation, hd, hr.Value);
@@ -217,22 +227,27 @@ namespace ExoInstruments.Core
             }
         }
 
-        private static string GetRaw(string[] row, Dictionary<string, int> colIndex, string column)
+        private static int ColumnOf(Dictionary<string, int> colIndex, string column)
         {
-            if (!colIndex.TryGetValue(column, out int i) || i >= row.Length) return null;
-            return row[i];
+            return colIndex.TryGetValue(column, out int i) ? i : -1;
         }
 
-        private static double? GetDouble(string[] row, Dictionary<string, int> colIndex, string column)
+        private static string GetRaw(string[] row, int column)
         {
-            string v = GetRaw(row, colIndex, column)?.Trim();
+            if (column < 0 || column >= row.Length) return null;
+            return row[column];
+        }
+
+        private static double? GetDouble(string[] row, int column)
+        {
+            string v = GetRaw(row, column)?.Trim();
             if (string.IsNullOrEmpty(v)) return null;
             return double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out double result) ? result : (double?)null;
         }
 
-        private static int? GetInt(string[] row, Dictionary<string, int> colIndex, string column)
+        private static int? GetInt(string[] row, int column)
         {
-            string v = GetRaw(row, colIndex, column)?.Trim();
+            string v = GetRaw(row, column)?.Trim();
             if (string.IsNullOrEmpty(v)) return null;
             return int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out int result) ? result : (int?)null;
         }
