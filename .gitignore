@@ -9,7 +9,6 @@ riderModule.iml
 
 .DS_Store
 .idea/
-.claude/
 
 # Harness virtualenvs and their dumps. Anchored rather than global: the older harnesses
 # already have theirs committed.
