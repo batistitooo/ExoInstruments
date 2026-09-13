@@ -10,7 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DumpKernel.cs" />
-    <!-- CameraFilter, restated so the REAL VisualTelescopeCatalog compiles here. Same reason as
+    <!-- CameraFilter and NdFilterStop, restated so the REAL catalogue compiles here. Same reason as
          tools/bandpass-wcs-tests/Stub.cs: the instrument parameters this harness feeds to GalSim
          must be the ones the mod ships, not a second copy free to drift from them. -->
     <Compile Include="Stub.cs" />
