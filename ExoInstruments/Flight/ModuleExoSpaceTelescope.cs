@@ -650,6 +650,12 @@ namespace ExoInstruments.Flight
 
         // ------------------------------------------------------------------ attitude
 
+        // KSP quotes part forces and torques in kilo-units, because its rigidbody masses are tonnes:
+        // FlightIntegrator hands Part.torque to Rigidbody.AddTorque against a mass set from the config's
+        // `mass` in tonnes, so a wheel's PitchTorque of 12 is 12 kN m. The ...Nm fields hold newton metres,
+        // so the conversion happens where the game is read.
+        private const double KiloUnitsToSi = 1000.0;
+
         // Works out how, and whether, this vehicle can hold an attitude, from the hardware on it. The order is
         // the order of preference a real spacecraft has, and for the same reason: momentum-exchange devices
         // point finely and cost only power, thrusters point coarsely and cost propellant, so nothing that has
@@ -674,7 +680,7 @@ namespace ExoInstruments.Flight
                     // The smallest of the three axes: a telescope has to be pointed in every
                     // direction, so the axis with the least authority is the one that decides
                     // whether it can be held.
-                    double t = Math.Min(w.PitchTorque, Math.Min(w.YawTorque, w.RollTorque));
+                    double t = Math.Min(w.PitchTorque, Math.Min(w.YawTorque, w.RollTorque)) * KiloUnitsToSi;
                     if (t > 0.0) wheelTorque += t * w.authorityLimiter / 100.0;
                 }
             }
@@ -686,7 +692,7 @@ namespace ExoInstruments.Flight
                 return;
             }
 
-            double rcsThrust = 0.0;
+            double rcsThrustNewtons = 0.0;
             List<ModuleRCS> thrusters = vessel.FindPartModulesImplementing<ModuleRCS>();
             if (thrusters != null)
             {
@@ -694,16 +700,16 @@ namespace ExoInstruments.Flight
                 {
                     ModuleRCS r = thrusters[i];
                     if (r == null || !r.rcsEnabled || !r.moduleIsEnabled) continue;
-                    rcsThrust += r.thrusterPower;
+                    rcsThrustNewtons += r.thrusterPower * KiloUnitsToSi;
                 }
             }
 
-            if (rcsThrust > 0.0 && vessel.ActionGroups[KSPActionGroup.RCS])
+            if (rcsThrustNewtons > 0.0 && vessel.ActionGroups[KSPActionGroup.RCS])
             {
                 controlMode = AttitudeControlMode.ReactionControl;
                 // Torque is thrust times moment arm; the arm is taken as the vessel's own bounding
                 // radius, which is what the thrusters are mounted out at on any real design.
-                availableTorqueNm = rcsThrust * Math.Max(0.5, VesselRadiusMeters());
+                availableTorqueNm = rcsThrustNewtons * Math.Max(0.5, VesselRadiusMeters());
             }
         }
 

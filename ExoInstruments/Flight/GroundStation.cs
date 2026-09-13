@@ -1017,21 +1017,24 @@ namespace ExoInstruments.Flight
         }
 
         // Moment arm the thrusters act at: the same bounding radius ModuleExoSpaceTelescope used to turn thrust
-        // into torque, so the two agree by construction.
+        // into torque, so the two agree by construction. thrusterPower is kN, so it is converted here for the
+        // same reason it is converted there: dividing newton metres by kilonewtons gives kilometres.
         private static double ThrusterMomentArmMeters(SpaceTelescopeLink link)
         {
+            const double KilonewtonsToNewtons = 1000.0;
             if (link == null || !(link.ControlTorqueNm > 0.0)) return 1.0;
 
-            double thrust = 0.0;
+            double thrustNewtons = 0.0;
             Vessel v = link.Vessel;
             if (v != null && v.loaded)
             {
                 List<ModuleRCS> thrusters = v.FindPartModulesImplementing<ModuleRCS>();
                 if (thrusters != null)
                     for (int i = 0; i < thrusters.Count; i++)
-                        if (thrusters[i] != null && thrusters[i].rcsEnabled) thrust += thrusters[i].thrusterPower;
+                        if (thrusters[i] != null && thrusters[i].rcsEnabled)
+                            thrustNewtons += thrusters[i].thrusterPower * KilonewtonsToNewtons;
             }
-            return thrust > 0.0 ? Math.Max(0.5, link.ControlTorqueNm / thrust) : 1.0;
+            return thrustNewtons > 0.0 ? Math.Max(0.5, link.ControlTorqueNm / thrustNewtons) : 1.0;
         }
 
         // The best specific impulse among the vessel's thrusters, seconds; KSP's stock monopropellant default
