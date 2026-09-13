@@ -785,7 +785,11 @@ namespace ExoInstruments.Flight
             // The player's hands win. Holding an attitude against someone actively steering is a
             // fight neither side can win, and from the cockpit it reads as the spacecraft refusing
             // to respond.
-            if (PlayerIsSteering()) return;
+            if (PlayerIsSteering())
+            {
+                hasRollReference = false;   // keep the roll the player leaves it at
+                return;
+            }
 
             // MID-MANOEUVRE, AIM WHERE THE PROFILE SAYS THE BORESIGHT SHOULD BE, not at the
             // destination. SAS has far more authority than the published slew rate, so pointed at
@@ -834,40 +838,17 @@ namespace ExoInstruments.Flight
             // attitude next frame, and the vessel chased its own error in circles.
             Quaternion boresightRelativeToControl = Quaternion.Inverse(reference.rotation) * bore.rotation;
 
-            // AND THE ROLL HAS TO BE DEFINED. Quaternion.FromToRotation(boresight, target) is *a*
-            // rotation carrying one vector onto the other and says nothing about roll: its axis is
-            // boresight x target, so the attitude depends on where the boresight is at this instant,
-            // and recomputing per frame moved the commanded attitude every frame. That cross product
-            // also VANISHES when the two are antiparallel, leaving a repoint near 180 degrees with a
-            // numerically arbitrary axis free to flip between frames: the vessel tumbled.
-            //
-            // Planetarium.Zup.Z is the celestial pole, which rotates with neither the planet nor the
-            // vehicle, so the command is a function of the target alone and holds still. It also
-            // comes out north-up, the convention the frames state their position angles in.
-            //
-            // THE BASIS IS CHOSEN ON THE DESTINATION, not on the waypoint. The waypoint moves, and
-            // a path that grazes the pole would cross the substitution threshold part way along and
-            // flip the whole commanded roll in one frame, by up to 180 degrees, at full authority.
-            // The destination holds still, so the choice is made once per command as it always was.
-            Vector3d up = Planetarium.Zup.Z;
-            if (Math.Abs(Vector3d.Dot(up, destination.normalized)) > 0.999) up = Planetarium.Zup.X;
-
-            Quaternion boresightTarget = Quaternion.LookRotation((Vector3)destination.normalized, (Vector3)up);
-
-            // AND THE ROLL IS CARRIED THROUGH THE MANOEUVRE, not rebuilt at each waypoint. Rebuilt,
-            // it is the north-up roll AT that waypoint, and a path passing near the celestial pole
-            // sweeps that at tens of degrees a second for a repoint priced at a fraction of one: the
-            // vehicle rolls hard in the middle of an otherwise calm slew. Interpolating the two end
-            // attitudes is one eigenaxis rotation, which is what a three-axis vehicle flies anyway.
-            if (slewing)
+            // THE ROLL IS LEFT WHERE THE VEHICLE HAS IT, as stock SAS Target hold does. Commanding
+            // north-up spun the whole vehicle about its boresight whenever it started at any other
+            // roll. The attitude is swung from one latched per manoeuvre, so the command depends on
+            // the target alone and holds still.
+            if (!hasRollReference || rollReferenceSlewUt != slewStartUt)
             {
-                Quaternion startAttitude = Quaternion.LookRotation(
-                    (Vector3)ground.StartDirection.normalized, (Vector3)up);
-                double whole = Vector3d.Angle(ground.StartDirection, destination);
-                double done = Vector3d.Angle(ground.StartDirection, targetDirection);
-                float fraction = whole > 1e-6 ? (float)Math.Min(1.0, done / whole) : 1f;
-                boresightTarget = Quaternion.Slerp(startAttitude, boresightTarget, fraction);
+                rollReference = bore.rotation;
+                rollReferenceSlewUt = slewStartUt;
+                hasRollReference = true;
             }
+            Quaternion boresightTarget = SwingRollReference((Vector3)targetDirection.normalized);
 
             Quaternion commanded = boresightTarget * Quaternion.Inverse(boresightRelativeToControl);
 
@@ -899,6 +880,20 @@ namespace ExoInstruments.Flight
 
         private Quaternion commandedRotation = Quaternion.identity;
         private bool hasCommandedRotation;
+
+        private Quaternion rollReference = Quaternion.identity;
+        private bool hasRollReference;
+        private double rollReferenceSlewUt;
+
+        // The latched attitude turned by the shortest rotation that puts its boresight on direction.
+        private Quaternion SwingRollReference(Vector3 direction)
+        {
+            Vector3 from = rollReference * Vector3.forward;
+            Quaternion swing = Vector3.Dot(from, direction) < -0.99999f
+                             ? Quaternion.AngleAxis(180f, rollReference * Vector3.up)
+                             : Quaternion.FromToRotation(from, direction);
+            return swing * rollReference;
+        }
 
         // True while the player is giving rotation input. KSP's own SAS uses a 0.05 threshold on its control-
         // detection, and this matches it rather than inventing a second one.
