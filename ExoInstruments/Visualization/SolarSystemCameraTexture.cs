@@ -4207,7 +4207,7 @@ namespace ExoInstruments.Visualization
 
         // Apparent diameter, in pixels, below which a body is treated as a point source rather than a rendered
         // disk. Two pixels is the sampling limit; below it there is no disk to resolve.
-        private const double ResolvedBodyMinDiameterPx = 2.0;
+        public const double ResolvedBodyMinDiameterPx = 2.0;
 
         // Observatory's local (north, east, up) basis in world space, built once per capture by
         // TryBuildFieldGeometry and reused for every body projected into that frame.

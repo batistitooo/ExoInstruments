@@ -2672,11 +2672,51 @@ namespace ExoInstruments
             // just softening it, and on a large-aperture instrument it is the DEFAULT outcome on a
             // bright disk, worth calling out explicitly instead of leaving it as a percentage
             // the player has to know how to interpret.
-            if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.LastSaturatedFraction > 0.01f)
+            // Binning sums charge ahead of one converter, so once the ADC is the cap a disc saturates
+            // up to bin^2 sooner.
+            int bin = SolarSystemCameraTexture.BinningFactor;
+            VisualTelescopeSpec spec = SolarSystemCameraTexture.Spec;
+            double binnedCap = SolarSystemCameraTexture.SaturationElectrons(solarSystemCamera.Gain);
+            double nativeCap = Math.Min(spec.FullWellElectrons,
+                                        SolarSystemCameraTexture.DigitalSaturationElectrons(solarSystemCamera.Gain));
+            double binningCost = binnedCap > 0.0 ? nativeCap * bin * bin / binnedCap : 1.0;
+            if (hasDisk && bin > 1 && binningCost > 1.05
+                && diskPx >= SolarSystemCameraTexture.ResolvedBodyMinDiameterPx)
             {
                 GUILayout.Label(
-                    $"Over-exposed, {solarSystemCamera.LastSaturatedFraction * 100f:F1}% saturated. "
-                    + "Shorten the exposure, drop the gain, or add ND.",
+                    $"{bin}x{bin} binning sums {bin * bin} pixels into one {spec.AdcBits}-bit "
+                    + $"reading capped at {binnedCap:N0} e-, so this disc saturates {binningCost:F1}x sooner than at 1x1.",
+                    smallCaptionStyle);
+            }
+
+            if (solarSystemCamera.HasCapturedPhoto && solarSystemCamera.LastSaturatedFraction > 0.01f)
+            {
+                // Only the remedies still left on this instrument: a narrower filter once there is no
+                // stronger ND to add. Stops are listed weakest first.
+                var remedies = new List<string>();
+                if (solarSystemCamera.ExposureSeconds > SolarSystemCameraTexture.MinExposureSeconds * 1.001f)
+                    remedies.Add("shorten the exposure");
+                if (solarSystemCamera.Gain > SolarSystemCameraTexture.MinGain * 1.001f) remedies.Add("drop the gain");
+                NdFilterStop[] nd = spec.AvailableNdFilters;
+                if (nd != null && nd.Length > 1 && solarSystemCamera.NdFilter != nd[nd.Length - 1])
+                    remedies.Add(solarSystemCamera.NdFilter == NdFilterStop.None ? "add ND" : "use a stronger ND");
+                else if (spec.AvailableFilters != null && spec.AvailableFilters.Length > 1)
+                    remedies.Add("use a narrower filter");
+                if (bin > 1 && binningCost > 1.05) remedies.Add("bin 1x1");
+                string advice;
+                if (remedies.Count == 0)
+                {
+                    advice = "The target saturates this instrument even at its shortest exposure.";
+                }
+                else
+                {
+                    string list = remedies.Count == 1 ? remedies[0]
+                        : string.Join(", ", remedies.GetRange(0, remedies.Count - 1).ToArray())
+                          + " or " + remedies[remedies.Count - 1];
+                    advice = char.ToUpperInvariant(list[0]) + list.Substring(1) + ".";
+                }
+                GUILayout.Label(
+                    $"Over-exposed, {solarSystemCamera.LastSaturatedFraction * 100f:F1}% saturated. " + advice,
                     smallCaptionStyle);
             }
         }
