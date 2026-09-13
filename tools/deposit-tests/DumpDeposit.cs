@@ -26,7 +26,7 @@ static class DumpDeposit
         map.Load(mapPath);
         Console.WriteLine($"map: nside {map.Nside}, {map.Source}");
 
-        // The user's own configuration: RedCat at 1x1, pointed at the Horsehead.
+        // The reference capture: RedCat at 1x1, pointed at the Horsehead.
         const int w = 4144, h = 2822;
         const double plateScale = 3.8200;
         const double raDeg = 85.25, decDeg = -2.20472;

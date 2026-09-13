@@ -28,7 +28,7 @@ static class DumpFrame
         var map = new EmissionMap();
         map.Load(mapPath);
 
-        // The user's configuration.
+        // The reference capture's configuration.
         const int w = 4144, h = 2822;
         const double plateScale = 3.8200;
         const double raDeg = 85.25, decDeg = -2.20472, latitudeDeg = 28.53;
