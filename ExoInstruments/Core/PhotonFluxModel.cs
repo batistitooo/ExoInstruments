@@ -87,6 +87,16 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
+        /// V magnitude of the Sun seen from distanceMeters. referenceDistanceMeters is where it delivers the
+        /// solar constant (SunApparentMagnitudeV there): AuMeters for the real sky, the home world's orbit in KSP.
+        /// </summary>
+        public static double SunApparentMagnitude(double distanceMeters, double referenceDistanceMeters)
+        {
+            if (!(distanceMeters > 0.0) || !(referenceDistanceMeters > 0.0)) return double.PositiveInfinity;
+            return SunApparentMagnitudeV + 5.0 * Math.Log10(distanceMeters / referenceDistanceMeters);
+        }
+
+        /// <summary>
         /// Real apparent magnitude of a sunlit spherical body, via the standard planetary
         /// H-G-system flux-ratio formalism: fluxRatio = albedo * (R/d_obs)^2 * (d_ref/d_sun)^2 *
         /// phi(alpha), m_body = m_sun - 2.5*log10(fluxRatio). radiusMeters/distances are the

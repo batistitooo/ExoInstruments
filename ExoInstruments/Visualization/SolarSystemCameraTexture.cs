@@ -2786,9 +2786,20 @@ namespace ExoInstruments.Visualization
             if (!(radius > 0.0) || distance <= radius) return 0.0;
             if (!ObservingPlatform.IsSpaceBased && Vector3d.Dot(toCentre, siteUp) <= 0.0) return 0.0;
 
-            double phase = Vector3d.Angle(sun.position - body.position, observer - body.position) * Math.PI / 180.0;
-            double wholeDisc = (2.0 * Math.PI / 3.0) * (radius / distance) * (radius / distance)
-                             * PhotonFluxModel.LambertianPhaseFunction(phase);
+            // The Sun lights itself: every sightline onto it counts in full, against its whole cap.
+            bool selfLit = body == sun;
+            double wholeDisc;
+            if (selfLit)
+            {
+                double s = radius / distance;
+                wholeDisc = 2.0 * Math.PI * (1.0 - Math.Sqrt(1.0 - s * s));
+            }
+            else
+            {
+                double phase = Vector3d.Angle(sun.position - body.position, observer - body.position) * Math.PI / 180.0;
+                wholeDisc = (2.0 * Math.PI / 3.0) * (radius / distance) * (radius / distance)
+                          * PhotonFluxModel.LambertianPhaseFunction(phase);
+            }
             if (!(wholeDisc > 0.0)) return 0.0;
             Vector3d sunDir = (sun.position - body.position).normalized;
 
@@ -2826,7 +2837,7 @@ namespace ExoInstruments.Visualization
                     if (t <= 0.0) continue;
 
                     Vector3d normal = (u * t - toCentre) / radius;
-                    double mu0 = Vector3d.Dot(normal, sunDir);
+                    double mu0 = selfLit ? 1.0 : Vector3d.Dot(normal, sunDir);
                     if (mu0 <= 0.0) continue;
 
                     double cosOff = Math.Max(0.0, d.Dot(axis));
@@ -5576,6 +5587,9 @@ namespace ExoInstruments.Visualization
         // and no wavelength dependence to read (see SourceSpectra). nonAtmosphericTransmission carries the
         // losses the response does not: cloud cover. The ND filter is applied here, as it always was. Zero if
         // any required geometry is missing.
+        //
+        // The Sun itself reflects nothing and sits at zero distance from itself, so this used to return zero
+        // for it and a frame of the Sun came out black. It shines by its own flux instead.
         private double ComputeCollectedElectrons(CelestialBody targetBody, SystemResponse response,
                                                  double nonAtmosphericTransmission, float exposureSeconds)
         {
@@ -5589,16 +5603,26 @@ namespace ExoInstruments.Visualization
 
             Vector3d obsPos = ObservingPlatform.WorldPosition(home);
             double distanceToObserverMeters = (targetBody.position - obsPos).magnitude;
-            double distanceToSunMeters = (targetBody.position - sun.position).magnitude;
-            if (distanceToObserverMeters < 1.0 || distanceToSunMeters < 1.0) return 0.0;
+            if (distanceToObserverMeters < 1.0) return 0.0;
 
-            Vector3d toSunFromBody = (sun.position - targetBody.position).normalized;
-            Vector3d toObserverFromBody = (obsPos - targetBody.position).normalized;
-            double phaseAngleRad = Vector3d.Angle(toSunFromBody, toObserverFromBody) * Math.PI / 180.0;
+            double magnitude;
+            if (targetBody == sun)
+            {
+                magnitude = PhotonFluxModel.SunApparentMagnitude(distanceToObserverMeters, referenceMeters);
+            }
+            else
+            {
+                double distanceToSunMeters = (targetBody.position - sun.position).magnitude;
+                if (distanceToSunMeters < 1.0) return 0.0;
 
-            double magnitude = PhotonFluxModel.ApparentMagnitude(
-                targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad,
-                referenceMeters);
+                Vector3d toSunFromBody = (sun.position - targetBody.position).normalized;
+                Vector3d toObserverFromBody = (obsPos - targetBody.position).normalized;
+                double phaseAngleRad = Vector3d.Angle(toSunFromBody, toObserverFromBody) * Math.PI / 180.0;
+
+                magnitude = PhotonFluxModel.ApparentMagnitude(
+                    targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad,
+                    referenceMeters);
+            }
 
             double width = response.EffectiveWidthAngstromForTemperature(SourceSpectra.SolarPhotosphereTemperatureK);
             double apertureAreaCm2 = RealApertureAreaCm2();
