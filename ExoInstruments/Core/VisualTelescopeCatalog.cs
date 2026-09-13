@@ -2015,13 +2015,10 @@ namespace ExoInstruments.Core
                 new PupilPad(-0.4564, -0.7606, 0.065),
             },
 
-            // Two mirrors in the OTA, and WFC3 adds its own pick-off mirror and channel-select
-            // optics. Their combined throughput is not carried as a reflectivity product here,
-            // because STScI publishes the whole chain measured end to end instead: the handbook's
-            // throughput curves "include the throughput of the OTA, all of the optical elements"
-            // and the QE. Multiplying an assumed 0.87^N on top of a measured system throughput
-            // would double-count it. MirrorCount is therefore 0 and the loss lives in the
-            // measured QE figures below, which is where the measurement put it.
+            // Two OTA mirrors, then WFC3's pick-off mirror, two UVIS mirrors and two windows.
+            // STScI measures that chain end to end (IHB 6.5: "the HST OTA, WFC3 UVIS-channel
+            // internal throughput, filter transmittance"), so it is carried in the per-filter
+            // peaks below rather than as 0.87^N. Not in the QE: Table 5.1 is the bare detector.
             MirrorCount = 0,
             RelayOpticsTransmission = 1.0,
 
@@ -2133,15 +2130,15 @@ namespace ExoInstruments.Core
             HAlphaCentralWavelengthNm = 656.1,      // F656N
             HAlphaBandwidthAngstrom = 18.0,
 
-            // Not applied: STScI publishes full system throughput curves that already include
-            // each filter's transmission along with the OTA and the QE, so a separate peak
-            // transmission here would double-count. 1.0 by this file's convention means the
-            // separate figure is not modelled, which is exactly the case.
-            LuminanceFilterPeakTransmission = 1.0,
-            RedFilterPeakTransmission = 1.0,
-            GreenFilterPeakTransmission = 1.0,
-            BlueFilterPeakTransmission = 1.0,
-            HAlphaFilterPeakTransmission = 1.0,
+            // IHB Table 6.2 peak system throughput over this top-hat's mean Table 5.1 QE, so the
+            // QE curve only shapes the band and peak times width returns the published integral
+            // (stsynphot wfc3,uvis1: within 4 per cent). The quotient, 0.36 to 0.45, is the OTA,
+            // WFC3's optics, the filter and STScI's on-orbit correction.
+            LuminanceFilterPeakTransmission = 0.29 / 0.651,   // F606W
+            RedFilterPeakTransmission = 0.28 / 0.651,         // F625W
+            GreenFilterPeakTransmission = 0.27 / 0.663,       // F547M
+            BlueFilterPeakTransmission = 0.24 / 0.618,        // F438W
+            HAlphaFilterPeakTransmission = 0.23 / 0.632,      // F656N
 
             AvailableFilters = new[]
             {
