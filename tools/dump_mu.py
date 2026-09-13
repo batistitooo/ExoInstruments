@@ -25,9 +25,10 @@ def walk(obj, depth=0):
     if getattr(obj, "renderer", None) is not None:
         n = len(obj.renderer.materials)
         bits.append(f"renderer({n} mat)")
-        # Unity redraws the last submesh in each extra material, so per-face materials are lost.
-        if getattr(obj, "shared_mesh", None) is not None and n > len(obj.shared_mesh.submeshes):
-            bits.append("MORE MATERIALS THAN SUBMESHES")
+        # KSP sets Renderer.sharedMaterial, so only the last material survives, on the first
+        # submesh. tools/split_mu_materials.py gives each material its own object.
+        if n > 1:
+            bits.append("SEVERAL MATERIALS, KSP KEEPS ONLY THE LAST")
     if getattr(obj, "collider", None) is not None:
         bits.append("collider")
     anim = getattr(obj, "animation", None)
