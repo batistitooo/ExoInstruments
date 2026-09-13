@@ -870,13 +870,29 @@ namespace ExoInstruments.Flight
             // vehicle stopped. The threshold is raised while the hold runs, and the lock is compared
             // against what SAS actually holds rather than against our own copy.
             HoldDampingOverride(vessel.Autopilot.SAS);
-            if (!slewing && hasCommandedRotation
-                && Quaternion.Angle(commandedRotation, commanded) < 0.01f
-                && Quaternion.Angle(vessel.Autopilot.SAS.lockedRotation, commanded) < 0.01f) return;
+            // THE DEADBAND IS A TENTH OF THE FIELD'S HALF-WIDTH, measured in double, and the lock after
+            // a waypoint is always issued. A flat 0.01 degree test through Quaternion.Angle, which
+            // reads zero below 0.16 degrees, kept SAS on the last waypoint: one physics step short,
+            // 23" on HST's slew, outside PC1's 18" half-width and never corrected.
+            double deadbandDeg = ground.ToleranceDeg > 0.0 ? 0.1 * ground.ToleranceDeg : 0.01;
+            if (!slewing && hasCommandedRotation && !commandedIsWaypoint
+                && RotationAngleDeg(commandedRotation, commanded) < deadbandDeg
+                && RotationAngleDeg(vessel.Autopilot.SAS.lockedRotation, commanded) < deadbandDeg) return;
 
             commandedRotation = commanded;
+            commandedIsWaypoint = slewing;
             hasCommandedRotation = true;
             vessel.Autopilot.SAS.LockRotation(commanded);
+        }
+
+        private bool commandedIsWaypoint;
+
+        // Angle between two attitudes, degrees, resolved to well under an arcsecond.
+        private static double RotationAngleDeg(Quaternion a, Quaternion b)
+        {
+            Quaternion d = Quaternion.Inverse(a) * b;
+            double v = Math.Sqrt((double)d.x * d.x + (double)d.y * d.y + (double)d.z * d.z);
+            return 2.0 * Math.Atan2(v, Math.Abs((double)d.w)) * (180.0 / Math.PI);
         }
 
         // This telescope's own ground-station readout, off a link filled the way the registry fills
