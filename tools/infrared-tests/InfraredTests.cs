@@ -3,7 +3,7 @@ using System.Globalization;
 using ExoInstruments.Core;
 
 // Headless checks on the HgCdTe infrared chain: Core/HgCdTePersistence.cs, Core/InfraredArray.cs,
-// and the sourcing of WFC3/IR in the shipped catalogue.
+// Core/PixelKernel.cs, and the sourcing of WFC3/IR in the shipped catalogue.
 //
 // Run:  dotnet run -p:Core=../../ExoInstruments/Core
 internal static class InfraredTests
@@ -273,6 +273,54 @@ internal static class InfraredTests
         for (int i = 0; i < flat.Length; i++) worstEdge = Math.Max(worstEdge, Math.Abs(flat[i] - 998.5f));
         Check("a uniform frame stays uniform (edges replicate, not zero-pad)", worstEdge < 1e-2,
               "worst deviation from 1000 x 0.9985 = 998.5 is " + F(worstEdge));
+
+        // The frame is binned and the kernel is not, so it is rescaled. Checked against an
+        // independent route: one evenly lit bin, coupled at native scale, summed into bins.
+        Check("at 1x1 binning the kernel is used as measured", ReferenceEquals(PixelKernel.AtBinning(k, 1), k), "");
+        for (int b = 2; b <= 4; b++)
+        {
+            var binned = PixelKernel.AtBinning(k, b);
+            var viaNative = CoupleOneBinAtNativeScale(k, b);
+            double worstCell = 0.0, binnedSum = 0.0;
+            for (int r = 0; r < 3; r++)
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    worstCell = Math.Max(worstCell, Math.Abs(binned[r, c] - viaNative[r, c]));
+                    binnedSum += binned[r, c];
+                }
+            }
+            Check(b + "x" + b + ": the binned kernel matches one bin coupled at native scale", worstCell < 1e-6,
+                  "worst cell off by " + worstCell.ToString("E2", CultureInfo.InvariantCulture)
+                  + "; above " + F(binned[0, 1]) + ", left " + F(binned[1, 0]) + ", corner " + F(binned[0, 0]));
+            Check(b + "x" + b + ": the binned kernel keeps the published 0.9985 sum",
+                  Math.Abs(binnedSum - InfraredArray.Wfc3IrKernelSum) < 1e-12, F(binnedSum));
+        }
+
+        // Without the rescaling, the default 4x4 overstates the coupling out of a bin about fourfold.
+        var at4 = PixelKernel.AtBinning(k, 4);
+        double leak4 = -at4[1, 1];
+        foreach (double v in at4) leak4 += v;
+        double overstated = (sum - k[1, 1]) / leak4;
+        Check("at the default 4x4 the native kernel would overstate the coupling about fourfold",
+              overstated > 3.5 && overstated < 4.5, F(overstated) + " times");
+    }
+
+    // Lights the centre bin of a 3x3-bin frame evenly, couples it at native scale, sums into bins.
+    private static double[,] CoupleOneBinAtNativeScale(double[,] kernel, int b)
+    {
+        int n = 3 * b;
+        var native = new float[n * n];
+        for (int y = b; y < 2 * b; y++)
+            for (int x = b; x < 2 * b; x++)
+                native[y * n + x] = 1f;
+        InfraredArray.ApplyCoupling(native, n, n, kernel);
+
+        var bins = new double[3, 3];
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+                bins[y / b, x / b] += native[y * n + x] / ((double)b * b);
+        return bins;
     }
 
     // ---------------------------------------------------------------- D

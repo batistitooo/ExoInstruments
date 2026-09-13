@@ -4940,9 +4940,12 @@ namespace ExoInstruments.Visualization
             //
             // Off on every CCD here; the kernel is Core.InfraredArray's transcription of WFC3 ISR
             // 2011-10's on-orbit measurement.
+            //
+            // Measured on native pixels, so rescaled for the binned frame first; see Core.PixelKernel.
             if (Spec.InterpixelCapacitanceKernel != null)
             {
-                InfraredArray.ApplyCoupling(raw, TextureWidth, TextureHeight, Spec.InterpixelCapacitanceKernel);
+                InfraredArray.ApplyCoupling(raw, TextureWidth, TextureHeight,
+                    PixelKernel.AtBinning(Spec.InterpixelCapacitanceKernel, BinningFactor));
                 DumpStage("ipc", raw);
             }
 

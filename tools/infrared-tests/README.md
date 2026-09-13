@@ -1,7 +1,7 @@
 # infrared-tests
 
-Headless checks on the HgCdTe chain: `Core/HgCdTePersistence.cs`, `Core/InfraredArray.cs`, and the
-sourcing of `VisualTelescopeCatalog.HubbleWfc3Ir`.
+Headless checks on the HgCdTe chain: `Core/HgCdTePersistence.cs`, `Core/InfraredArray.cs`,
+`Core/PixelKernel.cs`, and the sourcing of `VisualTelescopeCatalog.HubbleWfc3Ir`.
 
 ```
 dotnet run -p:Core=../../ExoInstruments/Core
@@ -63,7 +63,7 @@ The kernel is checked cell by cell against Table 2, for its **published 0.9985 s
 renormalised to 1; that sum is the report's own), and for the anisotropy the report resolves:
 identical above and below, identical left and right, the two pairs differing.
 
-Then three behavioural checks:
+Then four behavioural checks:
 
 - **A point source spreads by exactly the kernel.** This is the check that caught a real bug: the
   coupling was first written as a correlation rather than a convolution, which flips the kernel. On a
@@ -72,6 +72,12 @@ Then three behavioural checks:
 - **A uniform frame stays uniform**, which is what proves the edges replicate rather than zero-pad.
   Zero-padding would darken the border by the coupling fraction and put a one-pixel ring around every
   image.
+- **The kernel is rescaled for the binned frame.** The camera couples binned pixels (4x4 by default)
+  and the kernel is measured on native ones, where only a bin's edge pixels couple across it.
+  `PixelKernel.AtBinning` is checked at 1x1 (the kernel as measured), then at 2x2, 3x3 and 4x4
+  against an independent route: one bin lit evenly at native scale, coupled there, and summed into
+  bins. The 0.9985 sum survives the rescaling, and at 4x4 the unscaled kernel would overstate the
+  coupling out of a bin 3.8 times.
 - **Agreement with an independent device.** Seshadri et al. (2008) measured a very similar HgCdTe
   array by resetting individual pixels: 1.4-1.55 % adjacent, 0.13 % corner, against this kernel's
   1.27-1.64 % and 0.11 %.
