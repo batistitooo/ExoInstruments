@@ -41,11 +41,13 @@ namespace ExoInstruments.Visualization
     internal struct AstroSub
     {
         /// <summary>
-        /// The frame as stored: the normalised [0,1] pixels quantised onto AstroImageStack.SubScale.
-        /// Sixteen bits, not thirty-two, because sixteen is how many the converter produced; see
-        /// AstroImageStack.StoredBytesPerPixel. Decode with AstroImageStack.SubInvScale.
+        /// The frame as stored: the converter's raw ADU, pedestal included. Sixteen bits, not thirty-two,
+        /// because sixteen is how many the converter produced; see AstroImageStack.StoredBytesPerPixel.
         /// </summary>
         public ushort[] Pixels;
+        /// <summary>The pedestal and the range above it this sub's normalised frame was built with.</summary>
+        public float BiasAdu;
+        public float AduRange;
         public float FovDeg;
         /// <summary>Where the aim point landed in this sub, pixels. NaN when the camera could not measure it.</summary>
         public double RegistrationX;
@@ -93,20 +95,9 @@ namespace ExoInstruments.Visualization
         private const int MinSubsPerFilter = 3;
         private const int MaxSubsPerFilterCeiling = 30; // never allow more than this even at low resolution/binning, diminishing returns past this many subs
 
-        // What one stored pixel costs, and why it is two bytes rather than four. The frame this class receives
-        // is SolarSystemCameraTexture's normalised display frame: (adu - bias) / (adcMax - bias), where adu is
-        // the integer count an ADC of at most sixteen bits produced (AdcBits is 14 on the ASI294MM instruments,
-        // 16 on FORS2 and ZIMPOL). It therefore holds at most 65536 distinct values however it is stored, and a
-        // 32-bit float spends twice the memory carrying none of them. Quantising back onto a 16-bit grid is
-        // what a real acquisition chain does with its own subs: raw frames are written BITPIX=16 unsigned, and
-        // every reduction package (PixInsight, IRAF/ccdproc, ESO Reflex) reads them at that width. SubScale
-        // (65535) is at least as fine as the widest converter's own grid, so distinct ADU levels stay distinct
-        // and the round trip costs under half a count. This is what sets MaxSubsPerFilter, so it is also the
-        // difference between a batch of 4 and a batch of 8 fitting at 1x1 binning on a full-frame sensor.
+        // What one stored pixel costs. A sub is stored as the converter's own integer counts, exact for any
+        // converter up to 16 bits, as raw frames are written BITPIX=16. This is what sets MaxSubsPerFilter.
         private const int StoredBytesPerPixel = sizeof(ushort);
-
-        private const float SubScale = 65535f;
-        private const float SubInvScale = 1f / SubScale;
 
         public static int MaxSubsPerFilter
         {
@@ -172,22 +163,11 @@ namespace ExoInstruments.Visualization
         /// reached or if fovDeg doesn't match the existing subs, since mixing FOVs makes alignment
         /// meaningless. defectPixelIndices (SolarSystemCameraTexture.GetDefectPixelIndices) is
         /// cosmetically corrected out before the sub is stored; see CosmeticCorrect.
-        /// </summary>
-        public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds, int[] defectPixelIndices)
-            => AddSub(filter, gray, fovDeg, exposureSeconds, defectPixelIndices,
-                      new SolarSystemCameraTexture.CapturedFrameGeometry
-                      {
-                          // Explicit NaN, not the struct's default zero: zero is a legitimate
-                          // registration reference (a target on the frame's first pixel) and
-                          // HasRegistration would accept it as one.
-                          RegistrationX = double.NaN,
-                          RegistrationY = double.NaN,
-                      });
-
-        /// <summary>
-        /// As above, recording the geometry the camera froze with this exposure's pixels: where the
-        /// aim point landed, so the stack can register on the KNOWN offset rather than estimate one
-        /// from the pixels, and where the frame pointed, so an exported sub can carry its own WCS.
+        ///
+        /// geometry is what the camera froze with this exposure's pixels: where the aim point landed,
+        /// so the stack can register on the KNOWN offset rather than estimate one from the pixels,
+        /// where the frame pointed, so an exported sub can carry its own WCS, and the pedestal and
+        /// range that turn the signed plane back into counts.
         /// </summary>
         public AstroSubResult AddSub(CameraFilter filter, float[] gray, float fovDeg, float exposureSeconds,
                                      int[] defectPixelIndices,
@@ -195,6 +175,8 @@ namespace ExoInstruments.Visualization
         {
             if (gray == null || gray.Length != SolarSystemCameraTexture.TextureWidth * SolarSystemCameraTexture.TextureHeight)
                 return AstroSubResult.FovMismatch; // malformed input, treat like an incompatible sub rather than silently accepting it
+            // Without the frozen pedestal and range the counts cannot be recovered, so the same refusal.
+            if (!(geometry.AduRange > 0.0) || double.IsNaN(geometry.BiasLevelAdu)) return AstroSubResult.FovMismatch;
 
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list))
             {
@@ -208,13 +190,17 @@ namespace ExoInstruments.Visualization
             if (list.Count >= MaxSubsPerFilter) return AstroSubResult.FilterFull;
 
             float[] corrected = CosmeticCorrect(gray, defectPixelIndices);
+            float bias = (float)Math.Max(0.0, geometry.BiasLevelAdu);
+            float range = (float)geometry.AduRange;
             list.Add(new AstroSub
             {
                 // Scored before packing, on the frame at the precision it arrived in: the sharpness
                 // metric is a variance of differences and is the one quantity here that a quantisation
                 // step could bias, so it is measured once and kept rather than recomputed from storage.
                 Quality = ComputeSharpness(corrected),
-                Pixels = Pack(corrected),
+                Pixels = Pack(corrected, bias, range),
+                BiasAdu = bias,
+                AduRange = range,
                 FovDeg = fovDeg,
                 ExposureSeconds = exposureSeconds,
                 RegistrationX = geometry.RegistrationX,
@@ -225,27 +211,25 @@ namespace ExoInstruments.Visualization
             return AstroSubResult.Added;
         }
 
-        // Normalised [0,1] pixels onto the 16-bit storage grid; see StoredBytesPerPixel for why that is the
-        // right width.
-        private static ushort[] Pack(float[] gray)
+        // Signed normalised pixels back onto the converter's own integer counts, which a ushort holds exactly.
+        private static ushort[] Pack(float[] gray, float bias, float range)
         {
             var packed = new ushort[gray.Length];
             for (int i = 0; i < gray.Length; i++)
             {
-                float v = gray[i];
-                if (v <= 0f) packed[i] = 0;
-                else if (v >= 1f) packed[i] = ushort.MaxValue;
-                else packed[i] = (ushort)(v * SubScale + 0.5f);
+                double adu = Math.Round(gray[i] * (double)range + bias);
+                packed[i] = (ushort)(adu <= 0.0 ? 0.0 : adu >= ushort.MaxValue ? ushort.MaxValue : adu);
             }
             return packed;
         }
 
         // The inverse of Pack, for the callers that hand a whole frame out (SubFrame) rather than reading it
         // pixel by pixel.
-        private static float[] Unpack(ushort[] packed)
+        private static float[] Unpack(AstroSub sub)
         {
-            var gray = new float[packed.Length];
-            for (int i = 0; i < packed.Length; i++) gray[i] = packed[i] * SubInvScale;
+            var gray = new float[sub.Pixels.Length];
+            float inv = 1f / sub.AduRange;
+            for (int i = 0; i < gray.Length; i++) gray[i] = (sub.Pixels[i] - sub.BiasAdu) * inv;
             return gray;
         }
 
@@ -359,7 +343,39 @@ namespace ExoInstruments.Visualization
         {
             if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return null;
             if (index < 0 || index >= list.Count) return null;
-            return Unpack(list[index].Pixels);
+            return Unpack(list[index]);
+        }
+
+        /// <summary>That sub as the converter's raw counts, pedestal included: what its FITS carries.</summary>
+        public float[] SubFrameAdu(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return null;
+            if (index < 0 || index >= list.Count) return null;
+            ushort[] pixels = list[index].Pixels;
+            var adu = new float[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++) adu[i] = pixels[i];
+            return adu;
+        }
+
+        /// <summary>Mean pedestal and range of a filter's subs, ADU: what puts its stack back onto counts.</summary>
+        public bool TryStackAduScale(CameraFilter filter, out float pedestalAdu, out float rangeAdu)
+        {
+            pedestalAdu = 0f;
+            rangeAdu = 1f;
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list) || list.Count == 0) return false;
+            double bias = 0.0, range = 0.0;
+            foreach (AstroSub sub in list) { bias += sub.BiasAdu; range += sub.AduRange; }
+            pedestalAdu = (float)(bias / list.Count);
+            rangeAdu = (float)(range / list.Count);
+            return true;
+        }
+
+        /// <summary>The pedestal that sub's counts sit on, ADU.</summary>
+        public float SubBiasAdu(CameraFilter filter, int index)
+        {
+            if (!rawSubs.TryGetValue(filter, out List<AstroSub> list)) return 0f;
+            if (index < 0 || index >= list.Count) return 0f;
+            return list[index].BiasAdu;
         }
 
         /// <summary>That sub's own integration time, which is what its FITS header has to carry rather than the stack's total.</summary>
@@ -480,9 +496,11 @@ namespace ExoInstruments.Visualization
         // Adds a shifted sub into the accumulator and marks which pixels it reached, so the average can divide
         // by what actually landed. Pixels the shift vacated are left untouched in BOTH arrays rather than
         // filled with zeros, which is the whole point.
-        private static void AccumulateShifted(float[] sum, float[] coverage, ushort[] pixels, int dx, int dy)
+        private static void AccumulateShifted(float[] sum, float[] coverage, AstroSub sub, int dx, int dy)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            ushort[] pixels = sub.Pixels;
+            float bias = sub.BiasAdu, inv = 1f / sub.AduRange;
             for (int y = 0; y < h; y++)
             {
                 int sourceY = y - dy;
@@ -494,7 +512,7 @@ namespace ExoInstruments.Visualization
                     // Unpacked here rather than into a decoded copy of the frame: a decoded copy is
                     // the 32-bit array this class stopped storing, and allocating one per sub during
                     // the stack would put the memory straight back at the moment it is scarcest.
-                    sum[destRow + x] += pixels[sourceRow + x - dx] * SubInvScale;
+                    sum[destRow + x] += (pixels[sourceRow + x - dx] - bias) * inv;
                     coverage[destRow + x] += 1f;
                 }
             }
@@ -529,7 +547,8 @@ namespace ExoInstruments.Visualization
                 foreach (AstroSub sub in subs)
                 {
                     ushort[] pixels = sub.Pixels;
-                    for (int i = 0; i < n; i++) { sum[i] += pixels[i] * SubInvScale; coverage[i] += 1f; }
+                    float bias = sub.BiasAdu, inv = 1f / sub.AduRange;
+                    for (int i = 0; i < n; i++) { sum[i] += (pixels[i] - bias) * inv; coverage[i] += 1f; }
                 }
             }
             else
@@ -549,13 +568,14 @@ namespace ExoInstruments.Visualization
                 bool haveReference = HasRegistration(subs[0]);
                 (double refX, double refY) = haveReference
                     ? (subs[0].RegistrationX, subs[0].RegistrationY)
-                    : ComputeCentroid(subs[0].Pixels);
+                    : ComputeCentroid(subs[0]);
                 LastAlignmentUsedPointing = haveReference;
 
                 double maxShift = 0.0;
                 for (int s = 0; s < subs.Count; s++)
                 {
                     ushort[] pixels = subs[s].Pixels;
+                    float bias = subs[s].BiasAdu, inv = 1f / subs[s].AduRange;
                     double cx, cy;
                     if (haveReference && HasRegistration(subs[s]))
                     {
@@ -564,7 +584,7 @@ namespace ExoInstruments.Visualization
                     }
                     else
                     {
-                        (cx, cy) = ComputeCentroid(pixels);
+                        (cx, cy) = ComputeCentroid(subs[s]);
                     }
 
                     int dx = Mathf.Clamp((int)Math.Round(refX - cx), -MaxAlignShiftPx, MaxAlignShiftPx);
@@ -573,10 +593,10 @@ namespace ExoInstruments.Visualization
 
                     if (dx == 0 && dy == 0)
                     {
-                        for (int i = 0; i < n; i++) { sum[i] += pixels[i] * SubInvScale; coverage[i] += 1f; }
+                        for (int i = 0; i < n; i++) { sum[i] += (pixels[i] - bias) * inv; coverage[i] += 1f; }
                         continue;
                     }
-                    AccumulateShifted(sum, coverage, pixels, dx, dy);
+                    AccumulateShifted(sum, coverage, subs[s], dx, dy);
                 }
                 LastAlignmentShiftPx = maxShift;
             }
@@ -590,8 +610,9 @@ namespace ExoInstruments.Visualization
             LastFullCoverageFraction = (double)full / Math.Max(1, n);
 
             // Subtract background once on the averaged stack, not per-sub, to avoid uneven amplification from noisy individual estimates.
+            // Signed afterwards, as imcombine leaves it: a clamp at zero blacked out half the sky.
             float background = EstimateBackground(sum);
-            for (int i = 0; i < n; i++) sum[i] = Mathf.Max(0f, sum[i] - background);
+            for (int i = 0; i < n; i++) sum[i] = coverage[i] > 0f ? sum[i] - background : 0f;
 
             return sum;
         }
@@ -625,16 +646,18 @@ namespace ExoInstruments.Visualization
         // Brightness-weighted centroid in pixel coordinates, ignoring anything below CentroidThreshold. Falls
         // back to the frame center when nothing exceeds it (target too faint/absent to detect, avoids a divide-
         // by-zero and just skips alignment for that sub).
-        private static (double cx, double cy) ComputeCentroid(ushort[] pixels)
+        private static (double cx, double cy) ComputeCentroid(AstroSub sub)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
+            ushort[] pixels = sub.Pixels;
+            float bias = sub.BiasAdu, inv = 1f / sub.AduRange;
             double sumW = 0, sumX = 0, sumY = 0;
             for (int y = 0; y < h; y++)
             {
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                 {
-                    float v = pixels[row + x] * SubInvScale;
+                    float v = (pixels[row + x] - bias) * inv;
                     if (v <= CentroidThreshold) continue;
                     sumW += v;
                     sumX += v * x;

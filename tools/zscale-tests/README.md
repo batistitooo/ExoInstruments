@@ -28,21 +28,33 @@ python3 -m venv env && ./env/bin/pip install numpy astropy
 
 ## Results
 
-Against `astropy.visualization.ZScaleInterval`, the same algorithm implemented independently:
+Against `astropy.visualization.ZScaleInterval`, the same algorithm implemented independently, fed the
+same even 2D grid of samples `ZScale.TryLimits` takes, as IRAF samples. A single stride through the
+row-major array, which this used before, landed on as few as 5 columns on WFPC2.
 
 | frame | agreement |
 |---|---|
 | faint nebula on a sky pedestal | 0.00% of the displayed span |
-| star field with saturated stars | 0.16% |
+| star field with saturated stars | 0.00% |
+| bright nebula | 0.00% |
 | flat field | 0.00% |
-| bright planet | 0.05% |
+| bright planet | 0.00% |
 | linear gradient | 0.00% |
+| raw read-noise frame (LORRI 1 ms, signed about the bias) | 0.00% |
 
-On the faint frame it is a **697x stretch**: the subject goes from 0.4 of 255 display levels to all
+The rejection grow is astropy's, a window ngrow wide; IRAF itself grows ngrow either side. With the
+same samples the two implementations now agree to the last digit printed.
+
+On the faint frame it is a **704x stretch**: the subject goes from 0.4 of 255 display levels to all
 255. On the star field the white point stays at 0.0026 of full scale while the frame reaches 1.0;
-the saturated stars are rejected from the fit rather than setting the scale.
+the saturated stars are rejected from the fit rather than setting the scale. On the raw read-noise
+frame the window runs from -5 to +3 ADU about the bias with 0.03% of pixels outside it: the display
+straddles the pedestal, as DS9's does on the counts.
 
 ## The other half: an extended subject
+
+This half now serves only the colour composite. The raw frame viewer takes zscale and DS9's own limit
+modes (zmax, 99.5%, minmax) instead, because the block-median white point exists in neither IRAF nor DS9.
 
 zscale finds the sky beautifully, and sets the white point from the sky's own noise on the
 assumption that **sources are a small minority of pixels**. A nebula filling a third of the frame
@@ -65,6 +77,6 @@ a star field set the white point seven times too high and compressed the sky aga
 |---|---|---|
 | faint nebula | 0.0% | 0.0% |
 | star field | 0.0% | 0.0% (identical limits) |
-| **bright nebula** | **12.1%** | **0.6%** |
+| **bright nebula** | **11.8%** | **0.6%** |
 | bright planet | 4.2% | 1.8% |
-| linear gradient | 9.8% | 1.0% |
+| linear gradient | 0.8% | 0.8% |

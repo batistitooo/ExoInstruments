@@ -18,6 +18,13 @@ import numpy as np
 from astropy.visualization import ZScaleInterval
 
 failures = []
+W, H = 400, 300
+
+
+def grid(frame, n=1000):
+    """The even 2D grid ZScale.TryLimits samples, so astropy sees the same pixels."""
+    step = int(np.ceil(np.sqrt(W * H / n)))
+    return frame.reshape(H, W)[::step, ::step].ravel()
 
 
 def load(name):
@@ -32,14 +39,15 @@ def main():
     rows = np.atleast_1d(rows)
 
     print("\n1. Black and white points, against astropy")
-    interval = ZScaleInterval(nsamples=1000, contrast=0.25, max_reject=0.5,
+    interval = ZScaleInterval(n_samples=10**9, contrast=0.25, max_reject=0.5,
                               min_npixels=5, krej=2.5, max_iterations=5)
     worst = 0.0
     for row in rows:
         name = str(row["name"])
         frame = load(name)
-        ref_lo, ref_hi = interval.get_limits(frame)
-        span = max(1e-30, abs(ref_hi - ref_lo))
+        ref_lo, ref_hi = interval.get_limits(grid(frame))
+        # A zero-width window (the flat frame) has no span to be a fraction of; compare at its own scale.
+        span = max(abs(ref_hi - ref_lo), 1e-9 * max(abs(ref_lo), abs(ref_hi)), 1e-30)
         d_lo = abs(row["black"] - ref_lo) / span
         d_hi = abs(row["white"] - ref_hi) / span
         dev = max(d_lo, d_hi)
@@ -50,7 +58,7 @@ def main():
         print(f"  [{'ok  ' if ok else 'FAIL'}] {name:<15} ours [{row['black']:.6g}, {row['white']:.6g}]  "
               f"astropy [{ref_lo:.6g}, {ref_hi:.6g}]  ->  {dev*100:.2f}% of the span")
 
-    print("\n1b. The extended-source limits, which is what the display actually uses")
+    print("\n1b. The extended-source limits, which the colour composite uses")
     for row in rows:
         name = str(row["name"])
         frame = load(name)
@@ -82,6 +90,16 @@ def main():
         failures.append("star_field white point")
     print(f"  [{'ok  ' if ok else 'FAIL'}] frame reaches {frame.max():.3f}; white point stays at "
           f"{row['white']:.4f}, set by the sky's own noise rather than by the brightest pixel")
+
+    print("\n4. A raw read-noise frame's window straddles the pedestal")
+    frame = load("bias_frame")
+    row = rows[[str(r["name"]) for r in rows].index("bias_frame")]
+    outside = float(((frame < row["black"]) | (frame > row["white"])).mean())
+    ok = row["black"] < 0.0 < row["white"] and outside < 0.02
+    if not ok:
+        failures.append("bias_frame straddle")
+    print(f"  [{'ok  ' if ok else 'FAIL'}] limits [{row['black'] * 4089:.2f}, {row['white'] * 4089:.2f}] ADU about "
+          f"the bias; {outside*100:.2f}% of pixels outside them")
 
     print("\n" + "-" * 78)
     print(f"NOTE: zscale matches astropy to {worst*100:.2f}% of the displayed span over "

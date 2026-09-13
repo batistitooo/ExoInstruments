@@ -2402,23 +2402,32 @@ namespace ExoInstruments
                     solarSystemCamera.UploadDisplayTextures();
                 }
             }
-            bool autoScale = SolarSystemCameraTexture.AutoScaleDisplay;
-            if (GUILayout.Toggle(autoScale, " Auto black/white points (zscale)") != autoScale)
+            GUILayout.EndHorizontal();
+
+            // DS9's limit modes. zscale shows the sky and noise; zmax, 99.5% and minmax show a bright subject.
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Display limits:", GUILayout.Width(110));
+            var limits = SolarSystemCameraTexture.Limits;
+            foreach (DisplayLimits mode in new[] { DisplayLimits.ZScale, DisplayLimits.ZMax, DisplayLimits.Clip995, DisplayLimits.MinMax })
             {
-                SolarSystemCameraTexture.AutoScaleDisplay = !autoScale;
-                solarSystemCamera.UploadDisplayTextures();
+                bool selected = limits == mode;
+                if (GUILayout.Toggle(selected, " " + LimitsLabel(mode), GUILayout.Width(76)) && !selected)
+                {
+                    SolarSystemCameraTexture.Limits = mode;
+                    solarSystemCamera.UploadDisplayTextures();
+                }
             }
             GUILayout.EndHorizontal();
             GUILayout.Label(StretchDescription(SolarSystemCameraTexture.Stretch), smallCaptionStyle);
 
-            if (SolarSystemCameraTexture.AutoScaleDisplay && solarSystemCamera.HasCapturedPhoto)
+            // In raw ADU, with the frame's extremes against the converter's top, so white can be told
+            // from saturated.
+            if (solarSystemCamera.HasCapturedPhoto)
             {
-                double black = solarSystemCamera.LastDisplayBlackPoint;
-                double white = solarSystemCamera.LastDisplayWhitePoint;
-                double wellFraction = white - black;
                 GUILayout.Label(
-                    $"   showing {black * 100.0:F3}% to {white * 100.0:F3}% of full scale"
-                    + (wellFraction > 0.0 ? $", i.e. a {1.0 / wellFraction:F0}x stretch of the range the frame occupies" : ""),
+                    $"   showing {solarSystemCamera.LastDisplayBlackAdu:F1} to {solarSystemCamera.LastDisplayWhiteAdu:F1} ADU; frame spans "
+                    + $"{solarSystemCamera.LastDisplayMinAdu:F0} to {solarSystemCamera.LastDisplayMaxAdu:F0} of {SolarSystemCameraTexture.AdcMaxCount} ADU, "
+                    + $"bias {solarSystemCamera.LastCaptureGeometry.BiasLevelAdu:F0}",
                     smallCaptionStyle);
             }
         }
@@ -2433,16 +2442,27 @@ namespace ExoInstruments
             }
         }
 
+        static string LimitsLabel(DisplayLimits mode)
+        {
+            switch (mode)
+            {
+                case DisplayLimits.ZMax:    return "zmax";
+                case DisplayLimits.Clip995: return "99.5%";
+                case DisplayLimits.MinMax:  return "minmax";
+                default:                    return "zscale";
+            }
+        }
+
         static string StretchDescription(DisplayStretch mode)
         {
             switch (mode)
             {
                 case DisplayStretch.Log:
-                    return "Logarithmic (DS9 formulation, a=1000): strongest lift of faint detail, compresses the bright end hard. Viewer only; the FITS stays linear.";
+                    return "Logarithmic, DS9's log with a = 1000: strongest lift of faint detail, compresses the bright end hard. Viewer only; the FITS stays linear.";
                 case DisplayStretch.Asinh:
-                    return "Asinh (Lupton et al. 2004, the SDSS standard): linear near zero, logarithmic beyond, so faint surface detail lifts without crushing bright regions. Viewer only; the FITS stays linear.";
+                    return "Asinh, DS9's asinh(10x)/3: lifts faint structure between the limits. Viewer only; the FITS stays linear.";
                 default:
-                    return "Linear: the detector's raw signal. Faithful, but a bright resolved disk hides its own few-percent surface contrast in a handful of display levels.";
+                    return "Linear, the default of IRAF and DS9: counts straight to grey between the limits. Viewer only; the FITS stays linear.";
             }
         }
 
@@ -3386,9 +3406,11 @@ namespace ExoInstruments
             {
                 float[] stacked = astroStack.StackedFrame(filter, stackAlignSubs, stackLuckyImaging);
                 if (stacked == null) continue;
+                astroStack.TryStackAduScale(filter, out float pedestal, out float range);
                 written += WriteFrame(dir, stacked, FilterLabel(filter) + "_stack", filter,
                                      astroStack.TotalExposureSeconds(filter),
-                                     astroStack.SubCount(filter), calibrated: false);
+                                     astroStack.SubCount(filter), calibrated: false,
+                                     biasLevelAdu: pedestal, aduRange: range);
             }
             return written;
         }
@@ -3402,7 +3424,7 @@ namespace ExoInstruments
                 int count = astroStack.SubCount(filter);
                 for (int i = 0; i < count; i++)
                 {
-                    float[] sub = astroStack.SubFrame(filter, i);
+                    float[] sub = astroStack.SubFrameAdu(filter, i);
                     if (sub == null) continue;
                     // A sub is one pointing at one instant and nothing has been registered into it,
                     // so unlike the stack it can carry its own WCS: the one recorded when this very
@@ -3410,7 +3432,8 @@ namespace ExoInstruments
                     written += WriteFrame(dir, sub, $"{FilterLabel(filter)}_sub{i + 1:D3}", filter,
                                           astroStack.SubExposureSeconds(filter, i), 1, calibrated: true,
                                           wcs: astroStack.SubWcs(filter, i),
-                                          trailed: astroStack.SubTrailed(filter, i));
+                                          trailed: astroStack.SubTrailed(filter, i),
+                                          biasLevelAdu: astroStack.SubBiasAdu(filter, i));
                 }
             }
             return written;
@@ -3428,10 +3451,14 @@ namespace ExoInstruments
         /// knows whether the pixels are one exposure or several: an individual sub passes the
         /// pointing recorded with it, a registered stack passes none, for the reason spelled out in
         /// ExportComposite.
+        ///
+        /// aduRange is NaN for raw counts (a sub); otherwise gray is the signed plane in units of that
+        /// range, written back onto counts above biasLevelAdu (a stack).
         /// </summary>
         int WriteFrame(string dir, float[] gray, string suffix, CameraFilter filter,
                        float exposureSeconds, int subCount, bool calibrated,
-                       Core.FitsWcs wcs = default(Core.FitsWcs), bool trailed = false)
+                       Core.FitsWcs wcs = default(Core.FitsWcs), bool trailed = false,
+                       double biasLevelAdu = double.NaN, double aduRange = double.NaN)
         {
             int w = SolarSystemCameraTexture.TextureWidth, h = SolarSystemCameraTexture.TextureHeight;
             if (gray.Length != w * h) return 0;
@@ -3460,8 +3487,14 @@ namespace ExoInstruments
             fitsInfo.FilterBandwidthNm = SolarSystemCameraTexture.BandwidthNmOf(filter);
             fitsInfo.StackedSubs = subCount;
 
+            // A sub is raw counts on its own pedestal. A sky-subtracted stack goes back onto counts above
+            // its subs' mean pedestal, which BIASLVL then states, as a signed image needs one in BITPIX=16.
+            bool rawCounts = double.IsNaN(aduRange);
+            fitsInfo.BiasLevelAdu = double.IsNaN(biasLevelAdu) ? 0.0 : biasLevelAdu;
+
             string baseName = System.IO.Path.Combine(dir, $"{TargetFileName()}_{suffix}");
-            FitsWriter.WriteGrayscale(baseName + ".fits", ToAduScaleGray(gray), w, h, fitsInfo);
+            float[] counts = rawCounts ? gray : ToAduScaleGray(gray, fitsInfo.BiasLevelAdu, aduRange);
+            FitsWriter.WriteGrayscale(baseName + ".fits", counts, w, h, fitsInfo);
 
             byte[] rgb = SolarSystemCameraTexture.RenderMonoPreviewRgb24(gray, w, h);
             int count = 1;
@@ -3477,13 +3510,15 @@ namespace ExoInstruments
             return count;
         }
 
-        /// <summary>Fractions of full scale to ADU, for a monochrome plane rather than a Color[].</summary>
-        static float[] ToAduScaleGray(float[] gray)
+        /// <summary>
+        /// A signed plane, in units of the range above the pedestal, back to ADU with the pedestal added.
+        /// Unclamped: FitsWriter clips only at the 16-bit encoding, so the sky's negative half survives.
+        /// </summary>
+        static float[] ToAduScaleGray(float[] gray, double pedestalAdu, double rangeAdu)
         {
             if (gray == null) return null;
-            int max = SolarSystemCameraTexture.AdcMaxCount;
             var outp = new float[gray.Length];
-            for (int i = 0; i < gray.Length; i++) outp[i] = Mathf.Clamp01(gray[i]) * max;
+            for (int i = 0; i < gray.Length; i++) outp[i] = (float)(gray[i] * rangeAdu + pedestalAdu);
             return outp;
         }
 

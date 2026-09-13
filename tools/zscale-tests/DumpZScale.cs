@@ -21,7 +21,7 @@ static class DumpZScale
 
         foreach (var (name, frame) in Frames())
         {
-            ZScale.TryLimits(frame, out double black, out double white);
+            ZScale.TryLimits(frame, 400, 300, out double black, out double white);
             bool ok = ZScale.TryExtendedSourceLimits(frame, 400, 300, out double eBlack, out double eWhite);
             meta.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},{1:R},{2:R},{3:R},{4:R}",
                 name, black, white, eBlack, eWhite));
@@ -81,6 +81,9 @@ static class DumpZScale
         }));
 
         yield return ("gradient", Build(w, h, (x, y, rng) => 0.1 + 0.6 * x / (double)w));
+
+        // A raw 1 ms LORRI read-noise plane, signed about its pedestal: 24 e- at 21 e-/ADU, bias 6 of 4095.
+        yield return ("bias_frame", Build(w, h, (x, y, rng) => Math.Floor(1.143 * rng.NextGaussian()) / 4089.0));
     }
 
     static float[] Build(int w, int h, Func<int, int, Gauss, double> f)

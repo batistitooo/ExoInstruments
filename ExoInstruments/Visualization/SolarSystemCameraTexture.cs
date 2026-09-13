@@ -26,7 +26,7 @@ namespace ExoInstruments.Visualization
     /// </summary>
     public enum DisplayStretch
     {
-        /// <summary>Raw linear signal, faithful to the detector but the hardest to read on a bright extended source.</summary>
+        /// <summary>Counts mapped straight to grey between the limits; the default of IRAF and DS9.</summary>
         Linear,
         /// <summary>
         /// Logarithmic, DS9's own formulation y = log(a*x + 1) / log(a + 1) with its default a = 1000 (Joye &
@@ -35,12 +35,24 @@ namespace ExoInstruments.Visualization
         /// </summary>
         Log,
         /// <summary>
-        /// Inverse hyperbolic sine, the astronomical standard from Lupton et al. 2004 (PASP 116, 133,
-        /// "Preparing Red-Green-Blue Images from CCD Data"). Linear near zero and logarithmic far from it, so
-        /// it lifts faint structure without crushing bright regions the way a pure log does, what SDSS's own
-        /// imagery uses.
+        /// DS9's asinh, y = asinh(10x)/3 (the curve of Lupton et al. 2004, PASP 116, 133, at DS9's softening).
+        /// Linear near zero and logarithmic far from it, so it lifts faint structure without crushing bright
+        /// regions the way a pure log does.
         /// </summary>
         Asinh
+    }
+
+    /// <summary>How the viewer picks black and white: the Limits modes of SAOImage DS9's Scale menu.</summary>
+    public enum DisplayLimits
+    {
+        /// <summary>IRAF's zscale (Tody 1986), on by default in IRAF's display task.</summary>
+        ZScale,
+        /// <summary>DS9's zmax: black from zscale, white at the brightest pixel.</summary>
+        ZMax,
+        /// <summary>DS9's 99.5%: a quarter of a percent of pixels clips at each end.</summary>
+        Clip995,
+        /// <summary>The frame's own extremes, DS9's out-of-the-box mode.</summary>
+        MinMax,
     }
 
     public enum CameraFilter
@@ -700,7 +712,8 @@ namespace ExoInstruments.Visualization
 
         /// <summary>
         /// Renders a monochrome frame to 8-bit RGB through the SAME display chain a live preview
-        /// gets: zscale limits from the frame's own extended structure, then the selected stretch.
+        /// gets: black and white from the viewer's limit mode (zscale by default), then the selected
+        /// stretch. Both are affine-invariant, so raw ADU and the normalised plane render alike.
         ///
         /// Exists so an exported per-filter or per-sub PNG looks like what the observer saw rather
         /// than like a second, differently-scaled rendering of it. The FITS beside it carries the
@@ -710,12 +723,9 @@ namespace ExoInstruments.Visualization
         {
             if (gray == null || width <= 0 || height <= 0 || gray.Length != width * height) return null;
 
-            double black = 0.0, white = 1.0;
-            bool scaled = AutoScaleDisplay
-                       && ZScale.TryExtendedSourceLimits(gray, width, height, out black, out white)
-                       && white > black;
-            float offset = scaled ? (float)black : 0f;
-            float invRange = scaled ? (float)(1.0 / (white - black)) : 1f;
+            SelectDisplayLimits(gray, width, height, out double black, out double white, out _, out _);
+            float offset = (float)black;
+            float invRange = (float)(1.0 / (white - black));
 
             var rgb = new byte[gray.Length * 3];
             for (int i = 0; i < gray.Length; i++)
@@ -733,32 +743,67 @@ namespace ExoInstruments.Visualization
         /// <summary>
         /// Display transfer function for finished frames. Affects only what is shown and the PNG
         /// quick-look; the FITS export and the stacking path always get the linear signal.
+        /// Linear, the default of IRAF's display task and of DS9.
         /// </summary>
-        public static DisplayStretch Stretch { get; set; } = DisplayStretch.Asinh;
+        public static DisplayStretch Stretch { get; set; } = DisplayStretch.Linear;
 
         /// <summary>
-        /// Whether the display picks its own black and white points from the frame (zscale) rather
-        /// than mapping the converter's whole range. On by default, because off is only right for
-        /// a frame whose subject fills that range, a bright planet, and wrong for everything
-        /// faint, where it buries the subject in the bottom few percent of the display.
-        ///
-        /// A VIEWER control, like Stretch: the FITS export and the stacker always get the linear
-        /// frame regardless.
+        /// How the viewer picks black and white (see DisplayLimits). A VIEWER control, like Stretch:
+        /// the FITS export and the stacker always get the linear frame regardless.
         /// </summary>
-        public static bool AutoScaleDisplay { get; set; } = true;
+        public static DisplayLimits Limits { get; set; } = DisplayLimits.ZScale;
 
-        /// <summary>Where the last displayed frame's black and white points landed, as fractions of full scale. Diagnostics.</summary>
-        public double LastDisplayBlackPoint { get; private set; }
-        public double LastDisplayWhitePoint { get; private set; } = 1.0;
+        /// <summary>The last displayed frame's limits and extremes in raw ADU, as a FITS viewer shows them.</summary>
+        public double LastDisplayBlackAdu { get; private set; }
+        public double LastDisplayWhiteAdu { get; private set; }
+        public double LastDisplayMinAdu { get; private set; }
+        public double LastDisplayMaxAdu { get; private set; }
+
+        // Black and white points by the selected limit mode, in the frame's own units. Non-finite pixels
+        // are skipped, as DS9 skips NaN and BLANK.
+        private static void SelectDisplayLimits(float[] frame, int width, int height,
+                                                out double black, out double white, out double min, out double max)
+        {
+            min = double.PositiveInfinity; max = double.NegativeInfinity;
+            for (int i = 0; i < frame.Length; i++)
+            {
+                float v = frame[i];
+                if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+            if (!(max >= min)) { min = 0.0; max = 0.0; }
+            black = min; white = max;
+            switch (Limits)
+            {
+                case DisplayLimits.ZScale:
+                    if (!ZScale.TryLimits(frame, width, height, out black, out white)) { black = min; white = max; }
+                    break;
+                case DisplayLimits.ZMax:
+                    if (!ZScale.TryLimits(frame, width, height, out black, out _)) black = min;
+                    white = max;
+                    break;
+                case DisplayLimits.Clip995:
+                    if (!ZScale.TryPercentileLimits(frame, width, height, 0.995, out black, out white))
+                    {
+                        black = min; white = max;
+                    }
+                    break;
+            }
+            if (white > black) return;
+            if (max > min) { black = min; white = max; return; }
+
+            // One value everywhere (saturated edge to edge): centre the window on it, so it shows grey.
+            double half = Math.Max(1e-9, 1e-5 * Math.Abs(min));
+            black = min - half;
+            white = min + half;
+        }
 
         // DS9's own default scaling constant for its log transfer function.
         private const double LogStretchA = 1000.0;
 
-        // Softening parameter of the asinh stretch: the signal level, as a fraction of full scale, below which
-        // the curve stays essentially linear. 0.02 puts the turnover just above this pipeline's real noise
-        // floor, so genuine faint structure is lifted while the noise itself is not amplified into visible
-        // grain.
-        private const double AsinhSoftening = 0.02;
+        // DS9's asinh, y = asinh(10x)/3 (tksao colorscale.C): softening 0.1 of the displayed window.
+        private const double AsinhSoftening = 0.1;
 
         // Radius ceiling for the seeing-halo kernel, which is now only the FALLBACK path; see ApplyPsf, which
         // applies the halo as a transfer function and truncates nothing. The kernel form could not be made
@@ -821,6 +866,8 @@ namespace ExoInstruments.Visualization
         /// </summary>
         public double LastBiasLevelAdu => lastBiasLevelAdu;
         private double lastBiasLevelAdu;
+        // The range above that pedestal the last display plane was divided by, ADU.
+        private double lastAduRange = 1.0;
 
         /// <summary>
         /// Photometric zero point of the last capture: m = -2.5 log10(ADU/s) + ZP, for a flat
@@ -927,7 +974,8 @@ namespace ExoInstruments.Visualization
         ///
         /// This is what FITS export writes, unaltered, so that EGAIN converts it back to
         /// electrons and the frame reduces like an observed one. Distinct from CapturedPhoto and
-        /// GetLastCaptureFullPrecision, which are display frames normalised to [0,1].
+        /// GetLastCaptureFullPrecision, which carry the display plane: bias-subtracted, signed, and in
+        /// units of the range above the pedestal.
         /// </summary>
         public float[] GetLastCaptureAdu() => lastAduFrame != null ? (float[])lastAduFrame.Clone() : null;
         private float[] lastAduFrame;
@@ -1166,6 +1214,12 @@ namespace ExoInstruments.Visualization
             /// <summary>Where the aim point landed in this frame, pixels; NaN when it could not be measured.</summary>
             public double RegistrationX;
             public double RegistrationY;
+            /// <summary>
+            /// The pedestal these pixels sit on, and the range above it the display plane is a fraction of,
+            /// ADU. Not geometry, but frozen with the pixels for the same reason.
+            /// </summary>
+            public double BiasLevelAdu;
+            public double AduRange;
         }
 
         /// <summary>
@@ -1548,7 +1602,11 @@ namespace ExoInstruments.Visualization
 
             // Published with the snapshot, in the same statement group, because the two describe
             // the same exposure and any gap between them is where the pipelined next frame gets in.
-            LastCaptureGeometry = pendingCaptureGeometry;
+            // The pedestal comes from the pass that has just finished, so it is this frame's.
+            CapturedFrameGeometry geometry = pendingCaptureGeometry;
+            geometry.BiasLevelAdu = lastBiasLevelAdu;
+            geometry.AduRange = lastAduRange;
+            LastCaptureGeometry = geometry;
 
             // The blur terms are this frame's, set at the end of the background pass that has just
             // completed, so the element can only be computed here and not when the shutter opened.
@@ -1595,16 +1653,16 @@ namespace ExoInstruments.Visualization
             // Black and white points BEFORE the curve. A transfer function decides how the range
             // between them is distributed; it cannot decide where they are, and on a frame whose
             // subject spans twenty counts of a sixteen-thousand-count converter that is the larger
-            // question. See ZScale.
-            double black = 0.0, white = 1.0;
-            bool scaled = AutoScaleDisplay
-                       && ZScale.TryExtendedSourceLimits(lastCaptureSnapshot, TextureWidth, TextureHeight,
-                                                         out black, out white)
-                       && white > black;
-            LastDisplayBlackPoint = scaled ? black : 0.0;
-            LastDisplayWhitePoint = scaled ? white : 1.0;
-            float invRange = scaled ? (float)(1.0 / (white - black)) : 1f;
-            float offset = scaled ? (float)black : 0f;
+            // question. Picked by the viewer's limit mode, zscale by default; see ZScale.
+            SelectDisplayLimits(lastCaptureSnapshot, TextureWidth, TextureHeight,
+                                out double black, out double white, out double min, out double max);
+            double bias = LastCaptureGeometry.BiasLevelAdu, range = Math.Max(1.0, LastCaptureGeometry.AduRange);
+            LastDisplayBlackAdu = black * range + bias;
+            LastDisplayWhiteAdu = white * range + bias;
+            LastDisplayMinAdu = min * range + bias;
+            LastDisplayMaxAdu = max * range + bias;
+            float offset = (float)black;
+            float invRange = (float)(1.0 / (white - black));
 
             for (int i = 0; i < n; i++)
             {
@@ -1624,6 +1682,8 @@ namespace ExoInstruments.Visualization
         // Input and output are both normalised to [0,1].
         private static float ApplyDisplayStretch(float linear)
         {
+            // NaN passes Clamp01 and would be cast to a byte; show it black.
+            if (float.IsNaN(linear)) return 0f;
             float v = Mathf.Clamp01(linear);
             switch (Stretch)
             {
@@ -1632,8 +1692,8 @@ namespace ExoInstruments.Visualization
                     return (float)(Math.Log(LogStretchA * v + 1.0) / Math.Log(LogStretchA + 1.0));
 
                 case DisplayStretch.Asinh:
-                    // Lupton et al. 2004. The softening parameter sets where the curve turns over
-                    // from linear to logarithmic; normalising by asinh(1/beta) keeps white at 1.
+                    // Lupton et al. 2004 at DS9's softening, asinh(10x)/3. Normalising by
+                    // asinh(1/beta) keeps white at 1, and equals DS9's /3 to 0.06%.
                     return (float)(Math.Log(v / AsinhSoftening + Math.Sqrt(v * v / (AsinhSoftening * AsinhSoftening) + 1.0))
                                  / Math.Log(1.0 / AsinhSoftening + Math.Sqrt(1.0 / (AsinhSoftening * AsinhSoftening) + 1.0)));
 
@@ -4635,6 +4695,7 @@ namespace ExoInstruments.Visualization
             lastElectronsPerAdu = chain.ElectronsPerAdu;
             lastSaturationElectrons = chain.SaturationElectrons;
             lastBiasLevelAdu = chain.BiasLevelAdu;
+            lastAduRange = chain.DisplayRangeAdu;
 
             // The zero point, so the exported frame can actually be turned back into magnitudes:
             //   m = -2.5 log10(ADU/s) + ZP,   ZP = 2.5 log10(F0 * W * A * T_nd / K)
@@ -4676,6 +4737,7 @@ namespace ExoInstruments.Visualization
             public double ElectronsPerAdu;
             public double SaturationElectrons;
             public double BiasLevelAdu;
+            public double DisplayRangeAdu;
             public float SaturatedFraction;
         }
 
@@ -4932,6 +4994,7 @@ namespace ExoInstruments.Visualization
             // arbitrary and its PRESENCE is not.
             result.BiasLevelAdu = Spec.EffectiveBiasLevelAdu(result.ElectronsPerAdu);
             double displayRange = Math.Max(1.0, adcMax - result.BiasLevelAdu);
+            result.DisplayRangeAdu = displayRange;
 
             int saturated = 0;
             for (int i = 0; i < n; i++)
@@ -4946,13 +5009,10 @@ namespace ExoInstruments.Visualization
 
                 if (displayPixels != null)
                 {
-                    // Display only: bias-subtracted and normalised by the range left above the
-                    // pedestal, so the stretch functions keep working on [0,1] and the pedestal does
-                    // not read as a grey floor. The calibratable data is the RAW ADU count above,
-                    // pedestal included, which is what the FITS export receives.
-                    float value = (float)((adu - result.BiasLevelAdu) / displayRange);
-                    if (value < 0f) value = 0f; else if (value > 1f) value = 1f;
-                    displayPixels[i] = value;
+                    // Display only: bias-subtracted and normalised by the range above the pedestal.
+                    // Signed, as the counts are: read noise below the pedestal stays below zero, where a
+                    // viewer shows it as grey. The FITS receives the RAW ADU count above, pedestal included.
+                    displayPixels[i] = (float)((adu - result.BiasLevelAdu) / displayRange);
                 }
             }
             result.SaturatedFraction = n > 0 ? (float)saturated / n : 0f;

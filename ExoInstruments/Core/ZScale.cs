@@ -24,16 +24,16 @@ namespace ExoInstruments.Core
     /// extremes; so one saturated star cannot flatten the whole image, which is exactly what a
     /// max-based or high-percentile clip does.
     ///
-    /// This is a faithful transcription of the IRAF algorithm, the same one astropy's
-    /// ZScaleInterval implements, and tools/zscale-tests compares the two on real frames.
+    /// A transcription of astropy's ZScaleInterval, rejection grow window included (IRAF grows
+    /// ngrow either side, astropy a window ngrow wide); tools/zscale-tests compares the two.
     ///
     /// Pure C#, no Unity dependency.
     /// </summary>
     public static class ZScale
     {
         /// <summary>
-        /// Samples drawn from the frame. IRAF's own default; more does not move the answer, because the fit is
-        /// to the sorted distribution rather than to individual pixels.
+        /// Samples drawn from the frame. 1000 is IRAF display's nsample; DS9 uses 600. More does not move the
+        /// answer, because the fit is to the sorted distribution rather than to individual pixels.
         /// </summary>
         public const int DefaultSamples = 1000;
 
@@ -56,23 +56,32 @@ namespace ExoInstruments.Core
         /// carries too little structure for the fit to mean anything, a flat field, or one whose
         /// samples are nearly all identical.
         /// </summary>
-        public static bool TryLimits(float[] image, out double blackPoint, out double whitePoint,
+        public static bool TryLimits(float[] image, int width, int height,
+                                     out double blackPoint, out double whitePoint,
                                      int sampleCount = DefaultSamples, double contrast = DefaultContrast)
         {
             blackPoint = 0.0;
             whitePoint = 1.0;
-            if (image == null || image.Length == 0) return false;
+            if (image == null || image.Length == 0 || width <= 0 || height <= 0) return false;
+            if (image.Length != width * height) return false;
 
-            // Strided sampling, as IRAF does it: a regular stride across the whole frame rather
-            // than a random draw, so the answer is reproducible and covers the field evenly.
-            int stride = Math.Max(1, image.Length / Math.Max(1, sampleCount));
-            int count = 0;
-            for (int i = 0; i < image.Length && count < sampleCount; i += stride) count++;
+            // An even grid of columns and lines, as IRAF samples. One stride through the row-major
+            // array lands on a few columns whenever it nears a multiple of the width (5 on WFPC2).
+            int step = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((double)width * height / Math.Max(1, sampleCount))));
+            int count = ((width + step - 1) / step) * ((height + step - 1) / step);
             if (count < MinPixels) return false;
 
+            // Non-finite pixels are skipped, as astropy and DS9 skip NaN and BLANK.
             var samples = new double[count];
             int k = 0;
-            for (int i = 0; i < image.Length && k < count; i += stride) samples[k++] = image[i];
+            for (int y = 0; y < height; y += step)
+                for (int x = 0; x < width; x += step)
+                {
+                    float v = image[y * width + x];
+                    if (!float.IsNaN(v) && !float.IsInfinity(v)) samples[k++] = v;
+                }
+            if (k < MinPixels) return false;
+            if (k < count) Array.Resize(ref samples, k);
             Array.Sort(samples);
 
             int npix = samples.Length;
@@ -116,11 +125,12 @@ namespace ExoInstruments.Core
                 }
 
                 // Grow the rejected regions, which is what stops a single outlier's neighbours from
-                // dragging the next fit back toward it.
+                // dragging the next fit back toward it. A window ngrow wide, as numpy.convolve 'same'
+                // places astropy's kernel.
                 for (int i = 0; i < npix; i++)
                 {
                     if (!rejected[i]) continue;
-                    int lo = Math.Max(0, i - ngrow / 2), hi = Math.Min(npix - 1, i + ngrow / 2);
+                    int lo = Math.Max(0, i - (ngrow - 1) / 2), hi = Math.Min(npix - 1, i + ngrow / 2);
                     for (int j = lo; j <= hi; j++) bad[j] = true;
                 }
 
@@ -167,6 +177,8 @@ namespace ExoInstruments.Core
         /// brightest extended structure and not by a star. That is the right answer on physical
         /// grounds; a stretch exists to show structure, and a point source has none; and it is
         /// also what every real astrophotograph does, clipping its stars to white.
+        ///
+        /// Used by the colour composite; the raw frame viewer uses zscale and DS9's limit modes.
         /// </summary>
         public static bool TryExtendedSourceLimits(float[] image, int width, int height,
                                                    out double blackPoint, out double whitePoint)
@@ -176,7 +188,7 @@ namespace ExoInstruments.Core
             if (image == null || image.Length == 0 || width <= 0 || height <= 0) return false;
             if (image.Length != width * height) return false;
 
-            if (!TryLimits(image, out double zBlack, out double zWhite)) return false;
+            if (!TryLimits(image, width, height, out double zBlack, out double zWhite)) return false;
             blackPoint = zBlack;
             whitePoint = zWhite;
 
@@ -214,6 +226,46 @@ namespace ExoInstruments.Core
             // Never darker than zscale's own white point: on a frame with no extended source at all
             // the block average is just the sky, and taking it would leave nothing above black.
             if (extendedWhite > whitePoint) whitePoint = extendedWhite;
+            return whitePoint > blackPoint;
+        }
+
+        /// <summary>
+        /// DS9's percentage limits: that fraction of pixels lies between black and white, the rest split
+        /// equally between the ends (FitsData::autoCut).
+        /// </summary>
+        public static bool TryPercentileLimits(float[] image, int width, int height, double fraction,
+                                               out double blackPoint, out double whitePoint)
+        {
+            blackPoint = 0.0;
+            whitePoint = 1.0;
+            if (image == null || image.Length == 0 || image.Length != width * height) return false;
+            double min = double.PositiveInfinity, max = double.NegativeInfinity;
+            long finite = 0;
+            foreach (float v in image)
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+                if (v < min) min = v;
+                if (v > max) max = v;
+                finite++;
+            }
+            if (!(max > min)) return false;
+
+            // 65536 bins resolve every count of a 16-bit converter, so the histogram is exact on this data.
+            const int Bins = 65536;
+            var hist = new int[Bins];
+            double scale = (Bins - 1) / (max - min);
+            foreach (float v in image)
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v)) continue;
+                hist[Math.Max(0, Math.Min(Bins - 1, (int)((v - min) * scale)))]++;
+            }
+            long cutoff = (long)(0.5 * (1.0 - fraction) * finite);
+            int lo = 0;
+            for (long c = 0; lo < Bins - 1; lo++) { c += hist[lo]; if (c > cutoff) break; }
+            int hi = Bins - 1;
+            for (long c = 0; hi > lo; hi--) { c += hist[hi]; if (c > cutoff) break; }
+            blackPoint = min + lo / scale;
+            whitePoint = min + hi / scale;
             return whitePoint > blackPoint;
         }
 
