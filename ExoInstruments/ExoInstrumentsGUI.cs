@@ -2341,22 +2341,26 @@ namespace ExoInstruments
             }
 
             // The one failure mode that looks like an ordinary under-exposure: the physics computed
-            // a real electron count for the target, and the render drew none of it, so the frame
+            // a real electron count for the resolved bodies, and the render drew none of it, so the frame
             // comes out with its sky, noise and stars but no body. Reported here because no amount
             // of looking at the picture can distinguish it from a frame that was simply too faint.
-            if (solarSystemCamera.LastTargetElectrons > 0.0 && solarSystemCamera.LastRenderedLuminanceSum <= 1e-6)
+            if (solarSystemCamera.LastSceneElectrons > 0.0 && solarSystemCamera.LastRenderedLuminanceSum <= 1e-6)
             {
                 GUILayout.Label(
-                    $"Last capture: the physics computed {solarSystemCamera.LastTargetElectrons:E2} electrons from the "
-                    + $"target, but the scene render came back empty ({w}x{h}). The target is ABSENT from that frame; "
-                    + "this is a rendering failure, not an exposure problem. Try a higher binning factor.",
+                    $"Last capture: the physics computed {solarSystemCamera.LastSceneElectrons:E2} e- from the resolved "
+                    + $"bodies in the field, but the scene render came back empty ({w}x{h}). They are ABSENT from that "
+                    + "frame; this is a rendering fault, not an exposure problem. Check the Alt+F12 log for a refused "
+                    + "render target.",
                     smallCaptionStyle);
             }
-            else if (solarSystemCamera.LastRenderedLuminanceSum > 0.0)
+            else if (solarSystemCamera.LastRenderedLuminanceSum > 0.0 || solarSystemCamera.LastTargetIsPointSource)
             {
                 GUILayout.Label(
-                    $"Last capture: {solarSystemCamera.LastTargetElectrons:E2} e- from the target, rendered luminance sum "
-                    + $"{solarSystemCamera.LastRenderedLuminanceSum:E2}.", smallCaptionStyle);
+                    $"Last capture: {solarSystemCamera.LastTargetElectrons:E2} e- from the target"
+                    + (solarSystemCamera.LastTargetIsPointSource
+                        ? ", unresolved, drawn as a point source."
+                        : $", rendered luminance sum {solarSystemCamera.LastRenderedLuminanceSum:E2}."),
+                    smallCaptionStyle);
             }
 
             // Off by default: this is for attributing a bad frame, not part of normal use.
@@ -4018,7 +4022,7 @@ namespace ExoInstruments
         /// farm; see Core/ImagingScience.cs for why that shape and not a per-frame award.
         ///
         /// Bodies only. A deep-sky target earns nothing here, and deliberately: GatherFrameInputs
-        /// leaves TotalElectrons at zero for anything that is not a body, so there is no per-source
+        /// leaves TargetElectrons at zero for anything that is not a body, so there is no per-source
         /// measurement to gate on and a reward would be paid on a number nobody computed.
         /// </summary>
         void CheckImagingScience(SolarSystemCameraTexture.CapturedFrameMeasurement m)

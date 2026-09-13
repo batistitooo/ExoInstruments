@@ -841,14 +841,24 @@ namespace ExoInstruments.Visualization
         ///
         /// LastTargetElectrons is what the physics computed the body should deliver: aperture,
         /// exposure, bandpass, distance, phase. LastRenderedLuminanceSum is what Unity actually
-        /// drew of it. The pipeline multiplies the render by their ratio, so a healthy capture has
-        /// both non-zero; electrons without luminance means the physics is fine and the RENDER
-        /// produced nothing, which is the one failure that looks exactly like an under-exposure.
+        /// drew of it. The pipeline multiplies the render by LastSceneElectrons over that sum, so a
+        /// healthy capture with a resolved body has both non-zero; electrons without luminance means
+        /// the physics is fine and the RENDER produced nothing, which is the one failure that looks
+        /// exactly like an under-exposure.
         /// </summary>
         public double LastTargetElectrons => lastTargetElectrons;
         public double LastRenderedLuminanceSum => lastRenderedLuminanceSum;
+        /// <summary>
+        /// Electrons the render was calibrated against: every resolved body in frame, the target only when
+        /// resolved.
+        /// </summary>
+        public double LastSceneElectrons => lastSceneElectrons;
+        /// <summary>True when the last capture's target was unresolved and went in as a point source.</summary>
+        public bool LastTargetIsPointSource => lastTargetIsPointSource;
         private double lastTargetElectrons;
         private double lastRenderedLuminanceSum;
+        private double lastSceneElectrons;
+        private bool lastTargetIsPointSource;
 
         /// <summary>
         /// The 64-bit seed the last capture's noise was drawn from. Written to the FITS RANDSEED
@@ -1493,15 +1503,16 @@ namespace ExoInstruments.Visualization
             LastProcessingError = null;
 
             // The empty-render failure, reported here rather than from the background pass that
-            // detected it: the target's own electron count was computed and the render drew none
+            // detected it: the resolved bodies' electrons were computed and the render drew none
             // of it, so the frame carries its sky, its noise and its stars but no body.
-            if (lastTargetElectrons > 0.0 && lastRenderedLuminanceSum <= 1e-6)
+            if (lastSceneElectrons > 0.0 && lastRenderedLuminanceSum <= 1e-6)
             {
                 Debug.LogError(
                     $"[ExoInstruments] The scene render came back empty at {TextureWidth}x{TextureHeight} "
                   + $"(binning {BinningFactor}): summed luminance {lastRenderedLuminanceSum:E3}, while the physics "
-                  + $"computed {lastTargetElectrons:E3} electrons from the target. It is absent from this frame. "
-                  + "Use a higher binning factor.");
+                  + $"computed {lastSceneElectrons:E3} electrons from the resolved bodies in the field. They are absent "
+                  + "from this frame. A rendering fault, not exposure; binning only matters if the graphics device "
+                  + "refused the render target.");
             }
 
             pixelScratch = processTask.Result;
@@ -2095,6 +2106,10 @@ namespace ExoInstruments.Visualization
             public double MoonSkyExcess;
             public float CloudCoverage;
             public double TotalElectrons;
+            /// <summary>The target body's electrons in frame, however drawn. Zero for a fixed target.</summary>
+            public double TargetElectrons;
+            /// <summary>True when the target is too small to resolve and goes in as a point source.</summary>
+            public bool TargetIsPointSource;
             // PSF ingredients rather than a finished kernel. Building the kernel is pure C# that
             // touches nothing Unity-owned, so it belongs on the background side of this boundary;
             // doing it here would stall the main thread at the moment the player presses
@@ -2308,6 +2323,7 @@ namespace ExoInstruments.Visualization
                 MoonSkyExcess = moonSkyExcess,
                 CloudCoverage = coverage,
                 TotalElectrons = totalElectrons,
+                TargetElectrons = totalElectrons,
                 Response = response,
                 PlateScaleArcsec = EffectivePlateScaleArcsecPerPixel,
                 SeeingFwhmArcsec = seeingFwhmArcsec,
@@ -2669,8 +2685,11 @@ namespace ExoInstruments.Visualization
             inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
             inputs.Galaxies = SearchGalaxyCatalog(inputs, latitudeDeg);
             inputs.Supernovae = GatherSupernovae(inputs);
+            // The target goes in exactly once: as a rendered disc, or as a point beside the stars.
+            inputs.TargetIsPointSource = target.IsBody && !IsResolvedByOptics(target.Body, inputs.PlateScaleArcsec);
             inputs.UnresolvedBodies = GatherUnresolvedBodies(inputs, target, projection, exposureSeconds);
-            inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds);
+            inputs.TotalElectrons = ComputeSceneElectrons(inputs, target, projection, exposureSeconds,
+                                                          out inputs.TargetElectrons);
         }
 
         // Where the target actually lands in the finished frame, measured through the very projection that
@@ -2739,17 +2758,25 @@ namespace ExoInstruments.Visualization
         // the frame's TOTAL, and leaves the renderer's own shading to decide how that total is divided between
         // them; since the renderer already lights each body from the same Sun with its own albedo map, that
         // division is close to right. Bodies too small to resolve are excluded here because they are drawn
-        // separately as point sources, so nothing is counted twice.
+        // separately as point sources, so nothing is counted twice. That includes the target.
         private double ComputeSceneElectrons(FrameComputeInputs inputs, SkyTarget target,
-                                             GnomonicProjection projection, float exposureSeconds)
+                                             GnomonicProjection projection, float exposureSeconds,
+                                             out double targetElectrons)
         {
             // Extinction is inside inputs.Response, so only the cloud term is handed over here.
             double bodyTransmission = inputs.CloudTransmission;
             CelestialBody targetBody = target.Body;
-            double total = target.IsBody
-                ? ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds)
-                  * LitFractionInFrame(targetBody, projection)
-                : 0.0;
+            targetElectrons = 0.0;
+            if (target.IsBody)
+            {
+                double collected = ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds);
+                // A point target is deposited whole by GatherUnresolvedBodies, so it stays out of
+                // the calibration.
+                targetElectrons = inputs.TargetIsPointSource
+                    ? (LastTargetInFrame ? collected : 0.0)
+                    : collected * LitFractionInFrame(targetBody, projection);
+            }
+            double total = inputs.TargetIsPointSource ? 0.0 : targetElectrons;
             if (FlightGlobals.Bodies == null) return total;
 
             foreach (CelestialBody body in FlightGlobals.Bodies)
@@ -4134,13 +4161,12 @@ namespace ExoInstruments.Visualization
         // flux, which is how the moons of a giant planet show up as points beside it in a real photograph. A
         // body large enough to be resolved is left to the renderer, and is instead counted in the electron
         // budget the rendered image is calibrated against (see ComputeSceneElectrons), so it is never drawn
-        // twice.
+        // twice. The target follows the same rule.
         private List<PointSource> GatherUnresolvedBodies(FrameComputeInputs inputs, SkyTarget target,
                                                          GnomonicProjection projection, float exposureSeconds)
         {
             var sources = new List<PointSource>();
             if (FlightGlobals.Bodies == null) return sources;
-            CelestialBody targetBody = target.Body;
 
             // ComputeCollectedElectrons applies the ND filter itself and takes extinction from the
             // response, so it is handed the cloud term only; passing the full star chain would
@@ -4149,7 +4175,7 @@ namespace ExoInstruments.Visualization
 
             foreach (CelestialBody body in FlightGlobals.Bodies)
             {
-                if (body == null || body == targetBody) continue;
+                if (body == null) continue;
                 if (IsResolvedByOptics(body, inputs.PlateScaleArcsec)) continue;
                 if (!TryProjectBody(body, projection, out double px, out double py)) continue;
 
@@ -4503,7 +4529,9 @@ namespace ExoInstruments.Visualization
             // exposure that simply missed the target. There is no way to tell that apart from a
             // genuinely too-faint frame by looking at it, which is exactly why it is reported.
             lastRenderedLuminanceSum = totalRenderedLuminance;
-            lastTargetElectrons = inputs.TotalElectrons;
+            lastSceneElectrons = inputs.TotalElectrons;
+            lastTargetElectrons = inputs.TargetElectrons;
+            lastTargetIsPointSource = inputs.TargetIsPointSource;
 
             float calibratedSignalPerUnit = totalRenderedLuminance > 1e-6
                 ? (float)(inputs.TotalElectrons / totalRenderedLuminance)
@@ -5348,12 +5376,13 @@ namespace ExoInstruments.Visualization
             // the supernova award apply one five-sigma rule and not two. The aperture is the disc
             // when the body is resolved and the delivered PSF when it is not, which is what the
             // source covers in either case.
-            double bodyElectrons = Math.Max(0.0, inputs.TotalElectrons);
+            double bodyElectrons = Math.Max(0.0, inputs.TargetElectrons);
             if (bodyElectrons > 0.0 && inputs.TargetAngularDiameterArcsec > 0.0)
             {
                 double discPx = inputs.TargetAngularDiameterArcsec / Math.Max(1e-9, inputs.PlateScaleArcsec);
+                // Clipped to the sensor, so the noise covers the same pixels as the in-frame signal.
                 double aperturePixels = discPx >= ResolvedBodyMinDiameterPx
-                    ? Math.Max(1.0, Math.PI * 0.25 * discPx * discPx)
+                    ? Math.Max(1.0, Math.Min(Math.PI * 0.25 * discPx * discPx, (double)TextureWidth * TextureHeight))
                     : SupernovaAperturePixels(inputs);
                 pendingBodySignalToNoise = CcdEquation.SignalToNoise(
                     bodyElectrons, aperturePixels, BackgroundAnnulusPixels(aperturePixels),
