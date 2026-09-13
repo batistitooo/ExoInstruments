@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using ExoInstruments.Core;
+using ExoInstruments.Visualization;
 
 /// <summary>
 /// What each instrument in the roster actually collects from a bright resolved solar-system target,
@@ -65,15 +66,32 @@ static class NdFilterAudit
     }
 
     /// <summary>Real optical-density transmissions, restated from SolarSystemCameraTexture.NdFilterTransmission.</summary>
-    static readonly (string name, double od)[] NdLadder =
+    static (string name, double od) NdStop(NdFilterStop stop)
     {
-        ("none",     0.0),
-        ("ND8",      0.9),
-        ("ND64",     1.8),
-        ("ND1000",   3.0),
-        ("OD3.8",    3.8),   // Baader AstroSolar PHOTO Film, added because this audit found the gap
-        ("solar",    5.0),
-    };
+        switch (stop)
+        {
+            case NdFilterStop.Nd8:       return ("ND8", 0.9);
+            case NdFilterStop.Nd64:      return ("ND64", 1.8);
+            case NdFilterStop.Nd1000:    return ("ND1000", 3.0);
+            case NdFilterStop.Nd6300:    return ("OD3.8", 3.8);   // Baader AstroSolar PHOTO Film, added because this audit found the gap
+            case NdFilterStop.Nd100000:  return ("solar", 5.0);
+            case NdFilterStop.ZimpolNd1: return ("ND1", 1.0);
+            case NdFilterStop.ZimpolNd2: return ("ND2", 2.0);
+            case NdFilterStop.ZimpolNd4: return ("ND4", 4.0);
+            default:                     return ("none", 0.0);
+        }
+    }
+
+    /// <summary>The stops this instrument carries (VisualTelescopeSpec.AvailableNdFilters), weakest first.</summary>
+    static (string name, double od)[] NdLadder(VisualTelescopeSpec spec)
+    {
+        NdFilterStop[] stops = spec.AvailableNdFilters;
+        if (stops == null || stops.Length == 0) return new[] { NdStop(NdFilterStop.None) };
+        var ladder = new (string name, double od)[stops.Length];
+        for (int i = 0; i < stops.Length; i++) ladder[i] = NdStop(stops[i]);
+        Array.Sort(ladder, (a, b) => a.od.CompareTo(b.od));
+        return ladder;
+    }
 
     /// <summary>
     /// A resolved target, reduced to the one number that decides whether it saturates a pixel.
@@ -212,6 +230,9 @@ static class NdFilterAudit
             W($"  focal length {spec.FocalLengthMeters:F3} m, pixel {spec.NativePixelSizeMeters * 1e6:F2} um, " +
               $"gain range {spec.MinGain:F1}-{spec.MaxGain:F1}");
             W($"  effective photometric width (flat SED) {response.EffectiveWidthAngstromFlat:F0} A");
+            var ladder = NdLadder(spec);
+            W("  ND stops carried: " + (spec.AvailableNdFilters == null || spec.AvailableNdFilters.Length == 0
+                ? "no ND" : string.Join(", ", Array.ConvertAll(ladder, s => s.name))));
 
             int[] binnings = { 1, 4 };
             double[] gains = { Math.Max(1.0, spec.MinGain), spec.MaxGain };
@@ -241,8 +262,8 @@ static class NdFilterAudit
                             1.0, SourceSpectra.SolarPhotosphereTemperatureK);
 
                         double tSat = rate > 0.0 ? sat / rate : double.PositiveInfinity;
-                        string ndDefault = RequiredNd(rate, sat, DefaultExposureSeconds);
-                        string ndLucky = RequiredNd(rate, sat, LuckyExposureSeconds);
+                        string ndDefault = RequiredNd(ladder, rate, sat, DefaultExposureSeconds);
+                        string ndLucky = RequiredNd(ladder, rate, sat, LuckyExposureSeconds);
 
                         W($"      {t.Name,-22} {rate,13:E3} {FormatTime(tSat),12} {ndDefault,10} {ndLucky,10}");
 
@@ -279,10 +300,11 @@ static class NdFilterAudit
         Console.WriteLine("written nd_filter_audit.txt and nd_filter_audit.csv");
     }
 
-    /// <summary>The weakest stop on the ladder that keeps the given exposure below saturation, or "over" if none does.</summary>
-    static string RequiredNd(double electronsPerSecond, double saturationElectrons, double exposureSeconds)
+    /// <summary>The weakest stop on the instrument's ladder that keeps the given exposure below saturation, or "over" if none does.</summary>
+    static string RequiredNd((string name, double od)[] ladder, double electronsPerSecond, double saturationElectrons,
+                             double exposureSeconds)
     {
-        foreach ((string name, double od) in NdLadder)
+        foreach ((string name, double od) in ladder)
         {
             double charge = electronsPerSecond * Math.Pow(10.0, -od) * exposureSeconds;
             if (charge <= saturationElectrons) return name;

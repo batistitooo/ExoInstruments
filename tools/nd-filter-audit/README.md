@@ -106,6 +106,13 @@ ladder is being asked to compensate for a 194× exposure error, and it can only 
 The honest fix, and what a real observer does, is the other way round: shorten the exposure, drop the
 gain, unbin, and reach for ND only on the Sun.
 
+## Per instrument
+
+The ladder is read per instrument from `VisualTelescopeSpec.AvailableNdFilters`, and the report prints
+`no ND` where there is none: the amateur rigs carry the photographic stops and the solar films (FORS2
+keeps them as a game concession), SPHERE carries ZIMPOL's ND1/ND2/ND4, and Hubble's cameras carry ND8,
+ND64 and ND1000, the amateur ladder about 121x weaker, also as a game concession.
+
 ## Running
 
 ```
