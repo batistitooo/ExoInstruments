@@ -2748,6 +2748,7 @@ namespace ExoInstruments.Visualization
             CelestialBody targetBody = target.Body;
             double total = target.IsBody
                 ? ComputeCollectedElectrons(targetBody, inputs.Response, bodyTransmission, exposureSeconds)
+                  * LitFractionInFrame(targetBody, projection)
                 : 0.0;
             if (FlightGlobals.Bodies == null) return total;
 
@@ -2755,12 +2756,84 @@ namespace ExoInstruments.Visualization
             {
                 if (body == null || body == targetBody) continue;
                 if (!IsResolvedByOptics(body, inputs.PlateScaleArcsec)) continue;
-                if (!TryProjectBody(body, projection, out double px, out double py)) continue;
-                if (px < 0.0 || px > projection.WidthPx || py < 0.0 || py > projection.HeightPx) continue;
+                double fraction = LitFractionInFrame(body, projection);
+                if (fraction <= 0.0) continue;
 
-                total += ComputeCollectedElectrons(body, inputs.Response, bodyTransmission, exposureSeconds);
+                total += ComputeCollectedElectrons(body, inputs.Response, bodyTransmission, exposureSeconds) * fraction;
             }
             return total;
+        }
+
+        // Share of a body's reflected light that lands on the sensor. The render is calibrated by
+        // dividing a whole-disc electron count by the in-frame luminance, so a body overfilling the
+        // field packed all of its light into the pixels that saw it: the Mun through LORRI came out
+        // some forty times too bright. Sampled over the part of the frame the disc covers, each
+        // sightline hitting the sphere adds mu0 dOmega; for a Lambert sphere the whole disc sums to
+        // (2 pi / 3) (R/d)^2 phi(alpha), the same law ApparentMagnitude uses, so a body wholly in
+        // the frame comes out at 1.
+        private double LitFractionInFrame(CelestialBody body, GnomonicProjection projection)
+        {
+            const int Samples = 128;
+
+            CelestialBody home = FlightGlobals.GetHomeBody();
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+            if (home == null || sun == null || body == null || !haveSiteBasis) return 0.0;
+
+            Vector3d observer = ObservingPlatform.WorldPosition(home);
+            Vector3d toCentre = body.position - observer;
+            double distance = toCentre.magnitude;
+            double radius = body.Radius;
+            if (!(radius > 0.0) || distance <= radius) return 0.0;
+            if (!ObservingPlatform.IsSpaceBased && Vector3d.Dot(toCentre, siteUp) <= 0.0) return 0.0;
+
+            double phase = Vector3d.Angle(sun.position - body.position, observer - body.position) * Math.PI / 180.0;
+            double wholeDisc = (2.0 * Math.PI / 3.0) * (radius / distance) * (radius / distance)
+                             * PhotonFluxModel.LambertianPhaseFunction(phase);
+            if (!(wholeDisc > 0.0)) return 0.0;
+            Vector3d sunDir = (sun.position - body.position).normalized;
+
+            double w = projection.WidthPx, h = projection.HeightPx;
+            SkyVector axis = projection.Boresight;
+            SkyVector c0 = projection.Deproject(0.5 * w, 0.5 * h), c1 = projection.Deproject(0.5 * w + 1.0, 0.5 * h);
+            double radPerPx = Math.Acos(Math.Max(-1.0, Math.Min(1.0, c0.Dot(c1))));
+            if (!(radPerPx > 0.0)) return 0.0;
+
+            // The disc's own box when its centre projects, the whole frame when it does not.
+            double x0 = 0.0, x1 = w, y0 = 0.0, y1 = h;
+            if (TryProjectBody(body, projection, out double cx, out double cy))
+            {
+                double rPx = 1.05 * Math.Asin(radius / distance) / radPerPx;
+                x0 = Math.Max(0.0, cx - rPx); x1 = Math.Min(w, cx + rPx);
+                y0 = Math.Max(0.0, cy - rPx); y1 = Math.Min(h, cy + rPx);
+                if (x1 <= x0 || y1 <= y0) return 0.0;
+            }
+
+            double stepX = (x1 - x0) / Samples, stepY = (y1 - y0) / Samples;
+            double cellSr = stepX * stepY * radPerPx * radPerPx;
+            double inFrame = 0.0;
+            for (int j = 0; j < Samples; j++)
+            {
+                double py = y0 + (j + 0.5) * stepY;
+                for (int i = 0; i < Samples; i++)
+                {
+                    SkyVector d = projection.Deproject(x0 + (i + 0.5) * stepX, py);
+                    Vector3d u = (siteNorth * d.X + siteEast * d.Y + siteUp * d.Z).normalized;
+
+                    double b = Vector3d.Dot(u, toCentre);
+                    double disc = b * b - (distance * distance - radius * radius);
+                    if (disc < 0.0) continue;
+                    double t = b - Math.Sqrt(disc);
+                    if (t <= 0.0) continue;
+
+                    Vector3d normal = (u * t - toCentre) / radius;
+                    double mu0 = Vector3d.Dot(normal, sunDir);
+                    if (mu0 <= 0.0) continue;
+
+                    double cosOff = Math.Max(0.0, d.Dot(axis));
+                    inFrame += mu0 * cellSr * cosOff * cosOff * cosOff;
+                }
+            }
+            return Math.Min(1.0, inFrame / wholeDisc);
         }
 
         /// <summary>
