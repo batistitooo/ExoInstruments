@@ -4,4 +4,9 @@
 // VisualTelescopeCatalog rather than a stand-in, which matters: these checks then verify the
 // throughput and filter figures the mod actually ships, not a second copy of them that is free to
 // drift. (tools/skyfield-tests stubs VisualTelescopeSpec instead, and so cannot check its values.)
-namespace ExoInstruments.Visualization { public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha, OIII, SII, NII, OII, OI } }
+// NdFilterStop is restated for the same reason: VisualTelescopeSpec names it too.
+namespace ExoInstruments.Visualization
+{
+    public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha, OIII, SII, NII, OII, OI, Nuv220, Nuv250, Nuv330 }
+    public enum NdFilterStop { None, Nd8, Nd64, Nd1000, Nd6300, Nd100000, ZimpolNd1, ZimpolNd2, ZimpolNd4 }
+}

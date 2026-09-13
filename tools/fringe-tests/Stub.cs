@@ -4,4 +4,9 @@
 // VisualTelescopeCatalog, which is the point: the pixel pitch, focal length, full well, read noise,
 // conversion factor, PRNU, DSNU, linearity and field stop tested below are the mod's own shipped
 // figures rather than copies of them. Same device, and same reason, as tools/frame-tests/Stub.cs.
-namespace ExoInstruments.Visualization { public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha, OIII, SII, NII, OII, OI } }
+// NdFilterStop is restated for the same reason: VisualTelescopeSpec names it too.
+namespace ExoInstruments.Visualization
+{
+    public enum CameraFilter { Luminance, Red, Green, Blue, HAlpha, OIII, SII, NII, OII, OI, Nuv220, Nuv250, Nuv330 }
+    public enum NdFilterStop { None, Nd8, Nd64, Nd1000, Nd6300, Nd100000, ZimpolNd1, ZimpolNd2, ZimpolNd4 }
+}
