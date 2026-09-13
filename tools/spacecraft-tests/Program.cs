@@ -449,15 +449,21 @@ internal static class Program
         double scaling = Earthshine.HostBodyScaling(
             Earthshine.EarthGeometricAlbedo, Earthshine.EarthRadiusMeters,
             Earthshine.EarthRadiusMeters + Earthshine.HstOrbitAltitudeMeters,
-            PhotonFluxModel.AuMeters);
+            PhotonFluxModel.AuMeters, PhotonFluxModel.AuMeters);
         Near("host scaling is unity for Earth at 1 AU from 500 km", scaling, 1.0, 1e-9, "ratio");
 
         // And falls away with distance: from geostationary the Earth subtends far less sky.
         double geo = Earthshine.HostBodyScaling(
             Earthshine.EarthGeometricAlbedo, Earthshine.EarthRadiusMeters,
-            42164000.0, PhotonFluxModel.AuMeters);
+            42164000.0, PhotonFluxModel.AuMeters, PhotonFluxModel.AuMeters);
         Check("scattered planet light is far weaker from geostationary", geo < 0.1,
               $"factor {geo:F4} of the LEO value");
+
+        // Twice the reference distance is a quarter of the light, whatever the reference is.
+        Near("host scaling falls as (reference / distance)^2",
+             Earthshine.HostBodyScaling(Earthshine.EarthGeometricAlbedo, Earthshine.EarthRadiusMeters,
+                 Earthshine.EarthRadiusMeters + Earthshine.HstOrbitAltitudeMeters, 2.0 * 13599840256.0, 13599840256.0),
+             0.25, 1e-9, "ratio");
     }
 
     // ------------------------------------------------------------------ 5

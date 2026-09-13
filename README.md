@@ -219,7 +219,7 @@ The right instrument for a target isn't the biggest one; it's whichever one actu
 |---|---|---|---|---|
 | **Mün** | ~6875″ (1.9°) | *(none)* | - | Too close for any instrument here; it overflows every field by 20×+. This is a naked-eye/map-view target, not a telescope one. |
 | **Minmus** | ~527″ (8.8′) | RC20 / CDK1000 | **Wide** (no Barlow) | Also overflows at tight zoom; frames nicely (~46% of the wide field) with the Barlow backed out. |
-| Eve | 76.7″ | CDK1000 | Tight | 46% of frame, 1926 px across. Genuinely bright (thick, reflective cloud deck); watch the live saturation readout and dial in an ND filter if it clips. |
+| Eve | 76.7″ | CDK1000 | Tight | 46% of frame, 1926 px across. Genuinely bright (thick, reflective cloud deck); watch the live saturation readout and shorten the exposure, or dial in an ND filter, if it clips. |
 | Jool | 44.9″ | CDK1000 | Tight | 27% of frame, 1127 px, best balance of framing and light. FORS2 gives more light-collecting area but a wider tight-zoom field, so it frames Jool smaller (17%). |
 | Duna | 18.5″ | CDK1000 | Tight | 11% of frame, 466 px, enough to show real surface contrast. |
 | Moho | 12.4″ | CDK1000 | Tight | 8% of frame, 311 px, small and dim; needs a real exposure, not a snapshot. |

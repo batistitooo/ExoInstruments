@@ -777,18 +777,19 @@ namespace ExoInstruments.Flight
         }
 
         // Inverse-square scaling of a panel's rated output against the distance it is rated at, which for KSP
-        // is the home body's orbit. Plain 1/r^2 rather than the panel's powerCurve, because only some parts
-        // carry one while the falloff applies to all of them.
+        // is the orbit of the home world's star-orbiting ancestor. Plain 1/r^2 rather than the panel's
+        // powerCurve, because only some parts carry one while the falloff applies to all of them.
         private static double SolarFluxMultiplier(Vessel v)
         {
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
-            CelestialBody home = FlightGlobals.GetHomeBody();
-            if (sun == null || home == null || home.orbit == null || !(home.orbit.semiMajorAxis > 0.0)) return 1.0;
+            // The orbit alone, not the photometric reference: a panel is rated at home flux, whatever that is.
+            double rated = Visualization.ObservingPlatform.HomeStarOrbitMeters();
+            if (sun == null || !(rated > 0.0)) return 1.0;
 
             double distance = (v.GetWorldPos3D() - sun.position).magnitude;
             if (!(distance > 1.0)) return 1.0;
 
-            double ratio = home.orbit.semiMajorAxis / distance;
+            double ratio = rated / distance;
             return ratio * ratio;
         }
 

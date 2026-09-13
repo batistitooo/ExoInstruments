@@ -173,13 +173,13 @@ namespace ExoInstruments.Core
         /// <summary>
         /// How this host body's scattered light compares with Earth's, as a flux ratio, so the
         /// measured Earth numbers can be carried to whatever body the telescope is actually
-        /// orbiting. Exactly 1 when the host is Earth at 1 AU, which is the case under Real
-        /// Solar System.
+        /// orbiting. Exactly 1 for Earth at the reference distance seen from 500 km, which is the
+        /// case under Real Solar System.
         ///
         /// Two factors, both geometry and both signed the obvious way:
         ///
         ///   * How brightly the limb shines: proportional to the body's albedo and to the solar
-        ///     irradiance it receives, i.e. albedo / distance_au^2, against Earth's own.
+        ///     irradiance it receives, i.e. albedo times (reference distance / distance)^2, against Earth's own.
         ///   * How much of it there is to scatter: proportional to the solid angle the body
         ///     subtends, against the solid angle Earth subtends from HST's own 500 km orbit,
         ///     which is the geometry SRW98's curve was measured in.
@@ -195,14 +195,15 @@ namespace ExoInstruments.Core
         /// </summary>
         public static double HostBodyScaling(double bodyAlbedo, double bodyRadiusMeters,
                                              double observerDistanceFromCentreMeters,
-                                             double bodyDistanceToSunMeters)
+                                             double bodyDistanceToSunMeters, double sunReferenceDistanceMeters)
         {
             if (!(bodyAlbedo > 0.0) || !(bodyRadiusMeters > 0.0)
                 || !(observerDistanceFromCentreMeters > bodyRadiusMeters)
-                || !(bodyDistanceToSunMeters > 0.0)) return 0.0;
+                || !(bodyDistanceToSunMeters > 0.0) || !(sunReferenceDistanceMeters > 0.0)) return 0.0;
 
-            double distanceAu = bodyDistanceToSunMeters / PhotonFluxModel.AuMeters;
-            double brightness = (bodyAlbedo / EarthGeometricAlbedo) / (distanceAu * distanceAu);
+            // Earth's calibration holds at 1 AU; its KSP counterpart is the reference distance.
+            double sunRatio = sunReferenceDistanceMeters / bodyDistanceToSunMeters;
+            double brightness = (bodyAlbedo / EarthGeometricAlbedo) * sunRatio * sunRatio;
 
             // Solid angle of a sphere of angular radius rho is 2 pi (1 - cos rho); the ratio of
             // two such is taken rather than the small-angle square, because from 500 km the Earth

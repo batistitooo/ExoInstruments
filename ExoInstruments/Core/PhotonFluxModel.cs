@@ -10,11 +10,52 @@ namespace ExoInstruments.Core
     /// </summary>
     public static class PhotonFluxModel
     {
-        /// <summary>Real V-band apparent magnitude of the Sun at 1 AU (standard photometric constant).</summary>
+        /// <summary>
+        /// Real V-band apparent magnitude of the Sun at the reference distance, where the star delivers the
+        /// solar constant (1 AU for the Sun). Standard photometric constant.
+        /// </summary>
         public const double SunApparentMagnitudeV = -26.74;
 
-        /// <summary>IAU-defined astronomical unit, in meters.</summary>
+        /// <summary>IAU-defined astronomical unit, in meters. The reference distance for the real sky.</summary>
         public const double AuMeters = 149597870700.0;
+
+        /// <summary>The solar constant SunApparentMagnitudeV corresponds to, W/m2 (Kopp and Lean 2011).</summary>
+        public const double SolarConstantWm2 = 1361.0;
+
+        /// <summary>
+        /// Semi-major axis of the home world's star-orbiting ancestor, metres, walked up parent as
+        /// PhysicsGlobals.CalculateValues walks it: a moon home world is lit at its planet's distance.
+        /// NaN when the chain never reaches the star.
+        /// </summary>
+        public static double HomeStarOrbitMeters<T>(T home, T star, Func<T, T> parent, Func<T, double> semiMajorAxis)
+            where T : class
+        {
+            if (home == null || star == null || ReferenceEquals(home, star)) return double.NaN;
+            T body = home;
+            for (int depth = 0; depth < 64; depth++)
+            {
+                T up = parent(body);
+                if (up == null || ReferenceEquals(up, body)) return double.NaN;
+                if (ReferenceEquals(up, star))
+                {
+                    double a = semiMajorAxis(body);
+                    return a > 0.0 ? a : double.NaN;
+                }
+                body = up;
+            }
+            return double.NaN;
+        }
+
+        /// <summary>
+        /// Where the star delivers SolarConstantWm2, metres, given the home orbit and the flux the game
+        /// delivers there (Physics.cfg solarLuminosityAtHome). The AU when the orbit is unknown.
+        /// </summary>
+        public static double SunReferenceDistanceMeters(double homeStarOrbitMeters, double solarFluxAtHomeWm2)
+        {
+            if (!(homeStarOrbitMeters > 0.0)) return AuMeters;
+            double flux = solarFluxAtHomeWm2 > 0.0 ? solarFluxAtHomeWm2 : SolarConstantWm2;
+            return homeStarOrbitMeters * Math.Sqrt(flux / SolarConstantWm2);
+        }
 
         /// <summary>
         /// Real V-band zero-magnitude photon flux density (Vega calibration), 948
@@ -47,27 +88,28 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// Real apparent magnitude of a sunlit spherical body, via the standard planetary
-        /// H-G-system flux-ratio formalism: fluxRatio = albedo * (R/d_obs)^2 / d_sun^2 *
+        /// H-G-system flux-ratio formalism: fluxRatio = albedo * (R/d_obs)^2 * (d_ref/d_sun)^2 *
         /// phi(alpha), m_body = m_sun - 2.5*log10(fluxRatio). radiusMeters/distances are the
         /// body's own real radius and its real distances to the Sun and to the observer.
+        /// sunReferenceDistanceMeters: where the star delivers the solar constant; AuMeters for the
+        /// real sky.
         /// Returns +Infinity if the body has no usable geometry (can't be a signal source).
         /// </summary>
         public static double ApparentMagnitude(
             double albedo, double radiusMeters,
             double distanceToSunMeters, double distanceToObserverMeters,
-            double phaseAngleRad)
+            double phaseAngleRad, double sunReferenceDistanceMeters)
         {
-            if (albedo <= 0.0 || radiusMeters <= 0.0 || distanceToSunMeters <= 0.0 || distanceToObserverMeters <= 0.0)
+            if (albedo <= 0.0 || radiusMeters <= 0.0 || distanceToSunMeters <= 0.0 || distanceToObserverMeters <= 0.0
+                || !(sunReferenceDistanceMeters > 0.0))
                 return double.PositiveInfinity;
 
-            double rAu = radiusMeters / AuMeters;
-            double dObsAu = distanceToObserverMeters / AuMeters;
-            double dSunAu = distanceToSunMeters / AuMeters;
-            double sizeRatio = rAu / dObsAu;
+            double sizeRatio = radiusMeters / distanceToObserverMeters;
+            double sunRatio = sunReferenceDistanceMeters / distanceToSunMeters;
             double phi = LambertianPhaseFunction(phaseAngleRad);
             if (phi <= 0.0) return double.PositiveInfinity;
 
-            double fluxRatio = albedo * sizeRatio * sizeRatio / (dSunAu * dSunAu) * phi;
+            double fluxRatio = albedo * sizeRatio * sizeRatio * sunRatio * sunRatio * phi;
             if (fluxRatio <= 0.0 || double.IsNaN(fluxRatio)) return double.PositiveInfinity;
 
             return SunApparentMagnitudeV - 2.5 * Math.Log10(fluxRatio);

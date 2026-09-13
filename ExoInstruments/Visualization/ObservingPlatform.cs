@@ -75,6 +75,27 @@ namespace ExoInstruments.Visualization
         }
 
         /// <summary>
+        /// Semi-major axis of the home world's star-orbiting ancestor, metres: where KSP delivers
+        /// solarLuminosityAtHome (PhysicsGlobals.CalculateValues). NaN outside a game.
+        /// </summary>
+        public static double HomeStarOrbitMeters()
+        {
+            CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
+            return PhotonFluxModel.HomeStarOrbitMeters(FlightGlobals.GetHomeBody(), sun, b => b.referenceBody,
+                                                       b => b.orbit != null ? b.orbit.semiMajorAxis : 0.0);
+        }
+
+        /// <summary>
+        /// Where the Sun delivers the real solar constant, metres: the home orbit, corrected for a
+        /// solarLuminosityAtHome other than 1361 W/m2. AU outside a game.
+        /// </summary>
+        public static double SunReferenceDistanceMeters()
+        {
+            double flux = PhysicsGlobals.Instance != null ? PhysicsGlobals.SolarLuminosityAtHome : 0.0;
+            return PhotonFluxModel.SunReferenceDistanceMeters(HomeStarOrbitMeters(), flux);
+        }
+
+        /// <summary>
         /// Builds the pure-Core context the orbital visibility and sky models need, from the live
         /// game. Returns false when there is no space telescope selected or the geometry cannot
         /// be resolved, in which case nothing orbital applies and the ground path stands.
@@ -100,6 +121,7 @@ namespace ExoInstruments.Visualization
             ctx.HostBodyRadiusMeters = host.Radius;
             ctx.HostBodyAlbedo = host.albedo;
             ctx.HostBodySunDistanceMeters = sunFromHost.magnitude;
+            ctx.SunReferenceDistanceMeters = SunReferenceDistanceMeters();
             ctx.SunFromHostBody = ToSky(sunFromHost);
             ctx.SunFromObserver = ToSky(sunFromObserver);
             ctx.OrbitNormal = link.OrbitNormal();

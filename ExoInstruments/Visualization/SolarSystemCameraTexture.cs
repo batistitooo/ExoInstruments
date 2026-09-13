@@ -5584,6 +5584,9 @@ namespace ExoInstruments.Visualization
             CelestialBody sun = Planetarium.fetch != null ? Planetarium.fetch.Sun : null;
             if (home == null || sun == null || targetBody == null) return 0.0;
 
+            // Kerbin's orbit, not the AU: where KSP delivers the solar constant.
+            double referenceMeters = ObservingPlatform.SunReferenceDistanceMeters();
+
             Vector3d obsPos = ObservingPlatform.WorldPosition(home);
             double distanceToObserverMeters = (targetBody.position - obsPos).magnitude;
             double distanceToSunMeters = (targetBody.position - sun.position).magnitude;
@@ -5594,7 +5597,8 @@ namespace ExoInstruments.Visualization
             double phaseAngleRad = Vector3d.Angle(toSunFromBody, toObserverFromBody) * Math.PI / 180.0;
 
             double magnitude = PhotonFluxModel.ApparentMagnitude(
-                targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad);
+                targetBody.albedo, targetBody.Radius, distanceToSunMeters, distanceToObserverMeters, phaseAngleRad,
+                referenceMeters);
 
             double width = response.EffectiveWidthAngstromForTemperature(SourceSpectra.SolarPhotosphereTemperatureK);
             double apertureAreaCm2 = RealApertureAreaCm2();

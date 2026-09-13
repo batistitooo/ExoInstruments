@@ -17,6 +17,11 @@ namespace ExoInstruments.Core
         /// <summary>Its distance from the Sun, metres, which sets how brightly its limb shines.</summary>
         public double HostBodySunDistanceMeters;
 
+        /// <summary>
+        /// Where the star delivers the solar constant, metres. PhotonFluxModel.AuMeters for the real sky.
+        /// </summary>
+        public double SunReferenceDistanceMeters;
+
         /// <summary>Direction from the host body's centre toward the Sun. Decides which limb is lit.</summary>
         public SkyVector SunFromHostBody;
 
@@ -191,7 +196,8 @@ namespace ExoInstruments.Core
 
             double observerDistance = Length(ctx.PositionFromHostBody);
             double hostScaling = Earthshine.HostBodyScaling(
-                ctx.HostBodyAlbedo, ctx.HostBodyRadiusMeters, observerDistance, ctx.HostBodySunDistanceMeters);
+                ctx.HostBodyAlbedo, ctx.HostBodyRadiusMeters, observerDistance,
+                ctx.HostBodySunDistanceMeters, ctx.SunReferenceDistanceMeters);
 
             s.EarthshineVMagPerArcsec2 = Earthshine.VMagPerArcsec2(
                 s.Host.LimbAngleDeg, s.Host.LimbIsSunlit, hostScaling);
