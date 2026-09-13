@@ -72,10 +72,10 @@ namespace ExoInstruments.Visualization
 
     /// <summary>
     /// Neutral-density filter slot, real optical-density stops used by real astrophotographers
-    /// on targets too bright for exposure/gain alone to handle (Kerbin's compressed-scale solar
-    /// system puts nearby moons in exactly that regime; Mun sits only a few magnitudes fainter
-    /// than Kerbol itself). OD/transmission values: Nd8/Nd64/Nd1000 are the standard photographic
-    /// ND stops (OD 0.9/1.8/3.0, transmission = 10^-OD); Nd100000 matches the real optical density
+    /// on targets too bright for exposure/gain alone to handle (the Sun, or a planet at an amateur
+    /// camera's longer settings); offered only where the instrument declares one. OD/transmission
+    /// values: Nd8/Nd64/Nd1000 are the standard photographic ND stops (OD 0.9/1.8/3.0,
+    /// transmission = 10^-OD); Nd100000 matches the real optical density
     /// of a Baader AstroSolar safety film / Thousand Oaks solar filter (OD ~5.0), the real
     /// accessory class used for direct imaging of the brightest object in the sky.
     ///
@@ -99,7 +99,13 @@ namespace ExoInstruments.Visualization
         Nd1000,
         /// <summary>Baader AstroSolar PHOTO Film, OD 3.8. Photographic only, never safe for visual use.</summary>
         Nd6300,
-        Nd100000
+        Nd100000,
+        /// <summary>SPHERE/ZIMPOL FW0 ND1, about 10^-1 (Schmid et al. 2018, A&amp;A 619, A9, Table 6).</summary>
+        ZimpolNd1,
+        /// <summary>ZIMPOL FW0 ND2, about 10^-2.</summary>
+        ZimpolNd2,
+        /// <summary>ZIMPOL FW0 ND4, about 10^-4.</summary>
+        ZimpolNd4
     }
 
     /// <summary>
@@ -1010,6 +1016,9 @@ namespace ExoInstruments.Visualization
                 case NdFilterStop.Nd1000: return Math.Pow(10.0, -3.0);
                 case NdFilterStop.Nd6300: return Math.Pow(10.0, -3.8);
                 case NdFilterStop.Nd100000: return Math.Pow(10.0, -5.0);
+                case NdFilterStop.ZimpolNd1: return 1e-1;
+                case NdFilterStop.ZimpolNd2: return 1e-2;
+                case NdFilterStop.ZimpolNd4: return 1e-4;
                 default: return 1.0;
             }
         }

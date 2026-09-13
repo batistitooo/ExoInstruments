@@ -859,6 +859,19 @@ namespace ExoInstruments.Core
             NdFilterStop.Nd1000, NdFilterStop.Nd6300, NdFilterStop.Nd100000,
         };
 
+        // AllNdStops about 121x (2.1 OD) weaker, now that reflected light is scaled to Kerbin's orbit rather
+        // than the AU. A game concession: none of Hubble's cameras flies an ND filter.
+        private static readonly NdFilterStop[] HubbleNdStops =
+        {
+            NdFilterStop.None, NdFilterStop.Nd8, NdFilterStop.Nd64, NdFilterStop.Nd1000,
+        };
+
+        // ZIMPOL's own FW0 neutral density filters, common to both arms (Schmid et al. 2018, Table 6).
+        private static readonly NdFilterStop[] ZimpolNdStops =
+        {
+            NdFilterStop.None, NdFilterStop.ZimpolNd1, NdFilterStop.ZimpolNd2, NdFilterStop.ZimpolNd4,
+        };
+
         private static readonly CameraFilter[] AllFilters =
             { CameraFilter.Luminance, CameraFilter.Red, CameraFilter.Green, CameraFilter.Blue, CameraFilter.HAlpha };
 
@@ -1515,6 +1528,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Fors2Vlt = new VisualTelescopeSpec
         {
+            // Game concession: FORS2 has no ND; kept so it can shoot bright planets.
             AvailableNdFilters = AllNdStops,
             Name = "ESO-VLT-U1",
             CameraName = "FORS2",
@@ -1758,7 +1772,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec Sphere = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = ZimpolNdStops,
             Name = "ESO-VLT-U3",
             CameraName = "SPHERE/ZIMPOL",
             SiteName = "Paranal Observatory",
@@ -1950,7 +1964,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfc3Uvis = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = HubbleNdStops,
             Name = "Hubble Space Telescope (OTA)",
             CameraName = "WFC3/UVIS",
             SiteName = "Low Earth orbit",
@@ -2224,7 +2238,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfc3Ir = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = HubbleNdStops,
             // A DISTINCT Name, because Name is the key ModuleExoSpaceTelescope resolves a saved
             // telescope through, and two entries sharing one would make the second unreachable.
             // The platform is the same telescope and says so; the channel is what differs.
@@ -2721,7 +2735,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleAcsWfc = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = HubbleNdStops,
             Name = "Hubble Space Telescope (OTA/ACS-WFC)",
             CameraName = "ACS/WFC",
             SiteName = "Low Earth orbit",
@@ -2847,7 +2861,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleAcsHrc = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = HubbleNdStops,
             Name = "Hubble Space Telescope (OTA/ACS-HRC)",
             CameraName = "ACS/HRC",
             SiteName = "Low Earth orbit",
@@ -2969,7 +2983,7 @@ namespace ExoInstruments.Core
         /// </summary>
         public static readonly VisualTelescopeSpec HubbleWfpc2Pc1 = new VisualTelescopeSpec
         {
-            AvailableNdFilters = AllNdStops,
+            AvailableNdFilters = HubbleNdStops,
             Name = "Hubble Space Telescope (OTA/WFPC2-PC1)",
             CameraName = "WFPC2/PC1",
             SiteName = "Low Earth orbit",

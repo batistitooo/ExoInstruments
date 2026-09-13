@@ -2823,8 +2823,7 @@ namespace ExoInstruments
             GUI.enabled = true;
             GUILayout.EndHorizontal();
 
-            // ND filter: real optical-density stops for targets too bright for exposure/gain
-            // alone; Kerbin's compressed-scale system puts nearby moons in that regime.
+            // ND filter: real optical-density stops for targets too bright for exposure/gain alone.
             //
             // Only what the instrument declares. The stops used to be the enum's own values, which
             // offered a solar filter to a nanosatellite whose published description is that it has
@@ -3615,6 +3614,9 @@ namespace ExoInstruments
                 case NdFilterStop.Nd1000: return "ND1000";
                 case NdFilterStop.Nd6300: return "OD3.8";
                 case NdFilterStop.Nd100000: return "Solar";
+                case NdFilterStop.ZimpolNd1: return "ND1";
+                case NdFilterStop.ZimpolNd2: return "ND2";
+                case NdFilterStop.ZimpolNd4: return "ND4";
                 default: return "None";
             }
         }
