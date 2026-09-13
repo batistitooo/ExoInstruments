@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>deliveredpsf</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0168;CS0219;CS0414;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DeliveredPsfTests.cs" />
+    <Compile Include="Stub.cs" />
+    <!-- All of Core less its one Unity file, as tools/infrared-tests does: the checks read the
+         SHIPPED catalogue entries, and the catalogue reaches most of Core. -->
+    <Compile Include="$(Core)/*.cs" Exclude="$(Core)/SkyChartTexture.cs" />
+  </ItemGroup>
+</Project>

@@ -497,15 +497,18 @@ internal static class Program
             }
 
             double gauss = OpticalPsf.GaussianFwhmForDelivered(
-                target, UvisPlateScaleArcsec, HstApertureMeters, HstObstruction, lambda,
-                HstVaneCount, HstVaneWidthMeters);
+                target, PsfWidthPlane.BeforePixelation, UvisPlateScaleArcsec,
+                HstApertureMeters, HstObstruction, lambda, HstVaneCount, HstVaneWidthMeters, HstPads);
 
+            // Table 6.7 is quoted before pixelation, so it is read back at a sixteenth of lambda/D,
+            // far finer than a pixel, where what the kernel carries is the optics.
+            double fine = lambda / HstApertureMeters * (180.0 * 3600.0 / Math.PI) / 16.0;
             float[] kernel = OpticalPsf.BuildKernel(
-                UvisPlateScaleArcsec, HstApertureMeters, HstObstruction, lambda,
+                fine, HstApertureMeters, HstObstruction, lambda,
                 0.0, 0.0, HstVaneCount, HstVaneWidthMeters, gauss, HstPads, out int radius);
 
-            double measured = OpticalPsf.MeasureKernelFwhmArcsec(kernel, radius, UvisPlateScaleArcsec);
-            Near($"delivered FWHM at {Table67WavelengthNm[i]:F0} nm", measured, target, 0.006, "arcsec");
+            double measured = OpticalPsf.MeasureKernelFwhmArcsec(kernel, radius, fine);
+            Near($"delivered FWHM at {Table67WavelengthNm[i]:F0} nm", measured, target, 0.0005, "arcsec");
         }
 
         // The table's shape is not monotonic, and that is physics rather than noise: it turns

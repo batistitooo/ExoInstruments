@@ -100,7 +100,7 @@ namespace ExoInstruments.Core
 
         /// <summary>
         /// The instrument's own published DELIVERED point-spread-function width against
-        /// wavelength, arcsec FWHM, before pixelation.
+        /// wavelength, arcsec FWHM, in the plane DeliveredPsfFwhmPlane names.
         ///
         /// WHY A TABLE AND NOT A CALCULATION. A perfect 2.4 m aperture at 500 nm gives a 0.044
         /// arcsec core. HST delivers 0.067. The difference is the primary's residual polishing
@@ -108,14 +108,19 @@ namespace ExoInstruments.Core
         /// no way to compute it from an aperture and an obstruction: it is a property of one
         /// individual mirror that was measured after it flew. So it is carried as the measured
         /// table it is, and OpticalPsf.GaussianFwhmForDelivered inverts it into the broadening
-        /// the kernel needs, exactly as the AO instruments' published widths are already
-        /// inverted.
+        /// the kernel needs, in that plane and never at the frame's binned pixels.
         ///
         /// Null means no such table is published, in which case the instrument is treated as
         /// diffraction-limited, which is a claim about the optics that should only be made where
         /// it is true.
         /// </summary>
         public SpectralCurve DeliveredPsfFwhmArcsec;
+
+        /// <summary>
+        /// Where DeliveredPsfFwhmArcsec was measured. A table quoted before pixelation must not
+        /// be matched through a pixel, and a width measured on images must be.
+        /// </summary>
+        public PsfWidthPlane DeliveredPsfFwhmPlane = PsfWidthPlane.BeforePixelation;
 
         // --- Aperture door ----------------------------------------------------------------
 

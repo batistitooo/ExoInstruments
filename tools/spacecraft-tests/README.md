@@ -22,7 +22,7 @@ drifted; these fail when the numbers stop matching their sources.
 | 2. Orbital visibility | The Primer's ~44 min occultation and its continuous-viewing-zone width, from geometry alone |
 | 3. Zodiacal light | WFC3 IHB Table 9.4 reproduced at its own grid points, plus its stated symmetries, bounds and "within 1 magnitude" claim |
 | 4. Earth-shine | SRW98's exponential meeting its own quoted plateau at the knee; its absolute level cross-checked against WFC3 Table 9.3 across two instruments a decade apart |
-| 5. Delivered PSF | All ten rows of WFC3 IHB Table 6.7, rebuilt through the kernel and measured back |
+| 5. Delivered PSF | All ten rows of WFC3 IHB Table 6.7, rebuilt through the kernel and measured back before pixelation |
 | 6. Pupil | The reducibility contract against the closed-form Airy pattern; pad geometry from Tiny Tim's `wfc3_uvis1.pup` |
 | 7. Pointing | The limit cycle's two regimes agreeing at their crossover; HST's published 0.008″ rms |
 | 8. Aperture sampling | Equal-area sampling really giving equal area, which the blocked-fraction count depends on |

@@ -3551,8 +3551,9 @@ namespace ExoInstruments.Visualization
         // QUADRATURE. * The instrument's own residual WAVEFRONT ERROR. This is not computed, it is inverted out
         // of the instrument's published delivered widths: at each sub-band's wavelength, look up what the
         // observatory says the telescope actually delivers, and solve for the Gaussian which, convolved with
-        // this pupil's real diffraction pattern, reproduces it (OpticalPsf.GaussianFwhmForDelivered). So the
-        // finished frame reproduces the published table by construction, and a telescope with no such table
+        // this pupil's real diffraction pattern, reproduces it in the plane it was published in
+        // (OpticalPsf.GaussianFwhmForDelivered). So the optics reproduce the table by construction, the binned
+        // pixel is integrated on top of them as a detector would, and a telescope with no such table
         // stays diffraction-limited rather than being given an invented figure. * The spacecraft's POINTING
         // excursion over the exposure, achromatic, from PointingStability. They are independent random
         // displacements of the same image, so their variances add, which for Gaussians is the quadrature sum of
@@ -3614,10 +3615,12 @@ namespace ExoInstruments.Visualization
                     double deliveredFwhm = delivered.At(lambdaM);
                     if (deliveredFwhm > 0.0)
                     {
+                        // The unbinned scale, never inputs.PlateScaleArcsec: binning is not optics.
                         wavefront = OpticalPsf.GaussianFwhmForDelivered(
-                            deliveredFwhm, inputs.PlateScaleArcsec, PupilApertureMeters,
-                            PupilObstructionFraction, lambdaM,
-                            PupilVaneCount, PupilVaneWidthMeters);
+                            deliveredFwhm, Spec.SpacePlatform.DeliveredPsfFwhmPlane,
+                            NativePlateScaleArcsecPerPixel / Math.Max(1, BinningFactor),
+                            PupilApertureMeters, PupilObstructionFraction, lambdaM,
+                            PupilVaneCount, PupilVaneWidthMeters, Spec.PrimaryMirrorPads);
                     }
                 }
 

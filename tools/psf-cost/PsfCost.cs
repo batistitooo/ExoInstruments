@@ -278,11 +278,11 @@ internal static class PsfCost
     // ------------------------------------------------------------------ the bounded solve
 
     /// <summary>
-    /// GaussianFwhmForDelivered and AtmosphericFwhmForDelivered invert a published delivered
-    /// width into the broadening term that reproduces it, by bisecting on kernels they build and
-    /// then read one row of. They now build those kernels at a bounded support. This replays the
-    /// same bisection against FULL-support kernels, through the public builder and the public
-    /// measurement, and requires the answers to agree.
+    /// AtmosphericFwhmForDelivered inverts a published delivered width into the atmospheric
+    /// residual that reproduces it, by bisecting on kernels it builds and then reads one row of,
+    /// at a bounded support. This replays the same bisection against FULL-support kernels,
+    /// through the public builder and the public measurement, and requires the answers to agree.
+    /// GaussianFwhmForDelivered no longer builds kernels at all; tools/delivered-psf-tests checks it.
     ///
     /// AGREE TO WITHIN THE BISECTION'S OWN LAST STEP, not bit for bit, and the reason is worth
     /// stating because it is the only thing the bound changes. The measurement reads a float32
@@ -308,10 +308,9 @@ internal static class PsfCost
                 for (int b = 0; b < SubBands; b++)
                 {
                     double lambda = Lambda(p, b);
-                    double shipped = OpticalPsf.GaussianFwhmForDelivered(
-                        delivered, scale, p.ApertureM, p.Obstruction, lambda, p.VaneCount, p.VaneWidthM);
-                    double full = FullSupportGaussianSolve(
-                        delivered, scale, p.ApertureM, p.Obstruction, lambda, p.VaneCount, p.VaneWidthM);
+                    double shipped = OpticalPsf.AtmosphericFwhmForDelivered(
+                        delivered, scale, p.ApertureM, p.Obstruction, lambda);
+                    double full = FullSupportAtmosphericSolve(delivered, scale, p.ApertureM, p.Obstruction, lambda);
                     double diff = Math.Abs(shipped - full);
                     worst = Math.Max(worst, diff);
                     // One bisection step on a bracket of the delivered width, with an order of
@@ -334,14 +333,12 @@ internal static class PsfCost
     }
 
     /// <summary>The solver as it was before the bound, written out against the public API.</summary>
-    private static double FullSupportGaussianSolve(double deliveredFwhm, double scale, double aperture,
-                                                   double obstruction, double lambda,
-                                                   int vaneCount, double vaneWidth)
+    private static double FullSupportAtmosphericSolve(double deliveredFwhm, double scale, double aperture,
+                                                      double obstruction, double lambda)
     {
-        Func<double, double> measured = g =>
+        Func<double, double> measured = a =>
         {
-            float[] k = OpticalPsf.BuildKernel(scale, aperture, obstruction, lambda, 0.0, 0.0,
-                                               vaneCount, vaneWidth, g, out int r);
+            float[] k = OpticalPsf.BuildKernel(scale, aperture, obstruction, lambda, a, 0.0, out int r);
             return OpticalPsf.MeasureKernelFwhmArcsec(k, r, scale);
         };
 
@@ -393,9 +390,10 @@ internal static class PsfCost
                 var gauss = new double[SubBands];
                 for (int b = 0; b < SubBands; b++)
                     gauss[b] = delivered > 0.0
-                        ? OpticalPsf.GaussianFwhmForDelivered(delivered, scale, p.ApertureM,
+                        ? OpticalPsf.GaussianFwhmForDelivered(delivered, PsfWidthPlane.BeforePixelation,
+                                                              p.NativeScaleArcsec, p.ApertureM,
                                                               p.Obstruction, Lambda(p, b),
-                                                              p.VaneCount, p.VaneWidthM)
+                                                              p.VaneCount, p.VaneWidthM, p.Pads)
                         : 0.0;
                 sw.Stop();
                 double solveMs = sw.Elapsed.TotalMilliseconds;

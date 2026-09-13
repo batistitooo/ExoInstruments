@@ -5,6 +5,19 @@ using System.Threading.Tasks;
 namespace ExoInstruments.Core
 {
     /// <summary>
+    /// Where a published PSF width was measured, which decides what GaussianFwhmForDelivered
+    /// matches it against. A width contains a pixel only if it was measured through one.
+    /// </summary>
+    public enum PsfWidthPlane
+    {
+        /// <summary>The optical profile before any pixel integrates it, as WFC3 IHB Tables 6.7 and 7.5 quote.</summary>
+        BeforePixelation,
+
+        /// <summary>Measured on images at the detector's own unbinned pixels, so one native pixel is part of the width.</summary>
+        NativePixels,
+    }
+
+    /// <summary>
     /// The instrument's real point-spread function, built from first principles instead of being
     /// stood in for by a generic blur kernel.
     ///
@@ -470,16 +483,16 @@ namespace ExoInstruments.Core
 
         // The kernel builder above, with the support it may spend explicitly bounded. Every caller that wants a
         // kernel to CONVOLVE WITH passes the full budget and gets the method documented above, unchanged. The
-        // bound exists for the two solvers below, which do not want a kernel at all: they build one only to
-        // read the half-power crossing off its central row, and then throw 66048 of its 66049 pixels away. A
+        // bound exists for AtmosphericFwhmForDelivered, which does not want a kernel at all: it builds one only
+        // to read the half-power crossing off its central row, and then throws 66048 of its 66049 pixels away. A
         // vaned pupil's diffraction term costs 144 pupil evaluations per pixel, so at the full budget that is
         // nine and a half million evaluations to answer a question about the innermost few. Bounding it is
         // exact rather than approximate, for two reasons that both have to hold: * the measurement is a RATIO,
         // cur/peak along one row, and Normalise scales the whole kernel by one number, so whatever that number
         // is it divides out; * the convolutions that follow the diffraction term reach only their own radius,
-        // so a row sample at |x| is complete as soon as the support extends to |x| plus that reach. The solvers
-        // size the bound from the width they are solving for and check that the crossing was actually found
-        // inside it (see MeasuredGaussianFwhmFor).
+        // so a row sample at |x| is complete as soon as the support extends to |x| plus that reach. The solver
+        // sizes the bound from the width it is solving for and checks that the crossing was actually found
+        // inside it (see MeasuredFwhmFor).
         private static float[] BuildKernel(
             double plateScaleArcsecPerPixel,
             double apertureMeters,
@@ -1078,66 +1091,162 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// The Gaussian FWHM which, convolved with THIS telescope's own diffraction pattern,
-        /// makes the finished PSF deliver exactly deliveredFwhmArcsec.
+        /// The Gaussian FWHM which, convolved with THIS pupil's diffraction pattern, delivers
+        /// deliveredFwhmArcsec in the plane the width was published in (see PsfWidthPlane).
         ///
-        /// The Gaussian counterpart of AtmosphericFwhmForDelivered, solved the same way and for
-        /// the same reason: an Airy pattern is not a Gaussian, so subtracting the diffraction
-        /// core in quadrature leaves a kernel measurably wider than the published figure. What
-        /// this exists for is to take an instrument's OWN tabulated delivered FWHM, which is
-        /// what an observatory publishes and what a user can check, and turn it into the one
-        /// number the kernel builder needs, so the finished frame reproduces the table.
+        /// Solved on a point-sampled profile, so binning never enters: BuildKernel integrates
+        /// over the binned pixel afterwards. Solving on that finished kernel instead counted the
+        /// binned pixel as optics, and at 4x4 it left HST with no wavefront term at all.
         ///
-        /// Returns 0 when diffraction alone already meets or exceeds the delivered figure, which
-        /// is the correct answer and not a failure: it says the published width is at or below
-        /// this aperture's own limit, and nothing should be added.
+        /// Returns 0 when diffraction alone already meets or exceeds the delivered figure.
         /// </summary>
         public static double GaussianFwhmForDelivered(
             double deliveredFwhmArcsec,
-            double plateScaleArcsecPerPixel,
+            PsfWidthPlane plane,
+            double nativePlateScaleArcsecPerPixel,
             double apertureMeters,
             double obstructionRatio,
             double wavelengthMeters,
             int vaneCount,
-            double vaneWidthMeters)
+            double vaneWidthMeters,
+            PupilPad[] pads)
         {
-            if (deliveredFwhmArcsec <= 0.0) return 0.0;
+            if (!(deliveredFwhmArcsec > 0.0) || !(apertureMeters > 0.0) || !(wavelengthMeters > 0.0)) return 0.0;
 
-            double diffractionOnly = MeasuredGaussianFwhmFor(
-                0.0, plateScaleArcsecPerPixel, apertureMeters, obstructionRatio, wavelengthMeters,
-                vaneCount, vaneWidthMeters);
-            if (diffractionOnly >= deliveredFwhmArcsec) return 0.0;
+            double pixel = plane == PsfWidthPlane.NativePixels ? Math.Max(0.0, nativePlateScaleArcsecPerPixel) : 0.0;
+            var profile = new SolveProfile(deliveredFwhmArcsec, pixel, apertureMeters, obstructionRatio,
+                                           wavelengthMeters, vaneCount, vaneWidthMeters, pads);
+            if (profile.FwhmArcsec(0.0) >= deliveredFwhmArcsec) return 0.0;
 
             double lo = 0.0, hi = deliveredFwhmArcsec;
             for (int i = 0; i < 24; i++)
             {
                 double mid = 0.5 * (lo + hi);
-                double fwhm = MeasuredGaussianFwhmFor(mid, plateScaleArcsecPerPixel, apertureMeters,
-                                                      obstructionRatio, wavelengthMeters,
-                                                      vaneCount, vaneWidthMeters);
-                if (fwhm < deliveredFwhmArcsec) lo = mid; else hi = mid;
+                if (profile.FwhmArcsec(mid) < deliveredFwhmArcsec) lo = mid; else hi = mid;
             }
             return 0.5 * (lo + hi);
         }
 
-        private static double MeasuredGaussianFwhmFor(double gaussFwhm, double plateScale, double aperture,
-                                                      double obstruction, double wavelength,
-                                                      int vaneCount, double vaneWidthMeters)
-        {
-            // This is the call the whole solve is made of, and on a vaned pupil it is the most
-            // expensive thing in a capture: the full support costs 9.5 M pupil evaluations, of
-            // which the measurement reads one row. Sized to the width being solved for instead,
-            // and verified rather than assumed - if the half-power crossing did not fall inside
-            // the bound, the full kernel is built and the answer is the one it always was.
-            int budget = SolveRadiusFor(gaussFwhm + AiryFwhmArcsec(aperture, obstruction, wavelength), plateScale);
-            float[] k = BuildKernel(plateScale, aperture, obstruction, wavelength, 0.0, 0.0,
-                                    vaneCount, vaneWidthMeters, gaussFwhm, null, budget, out int r);
-            double fwhm = MeasureKernelFwhmArcsec(k, r, plateScale, out bool crossed);
-            if (crossed || budget >= MaxKernelRadiusPx) return fwhm;
+        // Grid spacing of the solve's profile, in lambda/D. Against a 48 per lambda/D reference
+        // (tools/delivered-psf-tests) the widest miss on the roster is 0.16%; 24 gives 0.05% at 3.5x the cost.
+        private const double SolveSamplesPerLambdaOverD = 12.0;
 
-            k = BuildKernel(plateScale, aperture, obstruction, wavelength, 0.0, 0.0,
-                            vaneCount, vaneWidthMeters, gaussFwhm, out r);
-            return MeasureKernelFwhmArcsec(k, r, plateScale);
+        // How far the solve carries its Gaussian. Five sigma leaves 6e-7 of it behind.
+        private const double SolveGaussianReachInSigma = 5.0;
+
+        // Bound on the solve grid's half-width in samples, held by coarsening the step. The roster needs under 200.
+        private const int MaxSolveRadiusSteps = 512;
+
+        private const double FwhmPerSigma = 2.3548200450309493;
+
+        // The pupil's diffraction pattern at points, sampled once per solve because only the Gaussian changes
+        // between bisection steps. A step is then a separable filter (the Gaussian, and for NativePixels the
+        // pixel) collapsed onto the central row, which is the row MeasureKernelFwhmArcsec reads.
+        private sealed class SolveProfile
+        {
+            private readonly double[] grid;
+            private readonly int radius, size, boxSteps;
+            private readonly double step;
+
+            public SolveProfile(double deliveredFwhm, double pixelArcsec, double aperture, double obstruction,
+                                double wavelength, int vaneCount, double vaneWidth, PupilPad[] pads)
+            {
+                // The widest half-power crossing the solve can meet, and the filter's reach beyond it.
+                double crossing = 0.5 * (deliveredFwhm + AiryFwhmArcsec(aperture, obstruction, wavelength) + pixelArcsec);
+                double reach = SolveGaussianReachInSigma * deliveredFwhm / FwhmPerSigma + 0.5 * pixelArcsec;
+
+                // Coarsened rather than truncated if the grid would pass its bound: a cut grid reads short.
+                step = Math.Max(wavelength / aperture / ArcsecToRad / SolveSamplesPerLambdaOverD,
+                                (crossing + reach) / (MaxSolveRadiusSteps - 2));
+                if (pixelArcsec > 0.0)
+                {
+                    // An even number of steps across the pixel, so the box has a sample on each edge.
+                    boxSteps = (int)Math.Ceiling(pixelArcsec / step);
+                    if (boxSteps % 2 == 1) boxSteps++;
+                    step = pixelArcsec / boxSteps;
+                }
+                radius = (int)Math.Ceiling((crossing + reach) / step) + 2;
+                size = 2 * radius + 1;
+                grid = new double[size * size];
+
+                bool hasVanes = vaneCount > 0 && vaneWidth > 0.0;
+                bool hasPads = pads != null && pads.Length > 0;
+                PupilDiffraction pupil = hasVanes || hasPads
+                    ? new PupilDiffraction(aperture, obstruction, wavelength, hasVanes ? vaneCount : 0,
+                                           hasVanes ? vaneWidth : 0.0, 0.0, pads)
+                    : null;
+
+                // Half the plane, mirrored through the centre: |A|^2 is even (see SampleTwoDimensional).
+                for (int v = 0; v <= radius; v++)
+                {
+                    for (int u = v == 0 ? 0 : -radius; u <= radius; u++)
+                    {
+                        double value = pupil != null
+                            ? pupil.IntensityArcsec(u * step, v * step)
+                            : AiryIntensity(Math.Sqrt((double)u * u + (double)v * v) * step * ArcsecToRad,
+                                            aperture, obstruction, wavelength);
+                        grid[(v + radius) * size + u + radius] = value;
+                        grid[(radius - v) * size + radius - u] = value;
+                    }
+                }
+            }
+
+            public double FwhmArcsec(double gaussianFwhm)
+            {
+                double[] filter = Filter(gaussianFwhm);
+                int reach = filter.Length / 2;
+                int kMin = Math.Max(-reach, -radius), kMax = Math.Min(reach, radius);
+
+                var column = new double[size];
+                for (int u = -radius; u <= radius; u++)
+                {
+                    double s = 0.0;
+                    for (int k = kMin; k <= kMax; k++)
+                        s += grid[(k + radius) * size + u + radius] * filter[k + reach];
+                    column[u + radius] = s;
+                }
+
+                double peak = RowAt(column, filter, 0);
+                double prev = peak;
+                int last = radius - reach;
+                for (int x = 1; x <= last; x++)
+                {
+                    double cur = RowAt(column, filter, x);
+                    if (cur <= 0.5 * peak)
+                        return 2.0 * (x - 1 + (prev - 0.5 * peak) / Math.Max(1e-300, prev - cur)) * step;
+                    prev = cur;
+                }
+                return 2.0 * Math.Max(1, last) * step;
+            }
+
+            private double RowAt(double[] column, double[] filter, int x)
+            {
+                int reach = filter.Length / 2;
+                double s = 0.0;
+                for (int k = -reach; k <= reach; k++)
+                {
+                    int u = x - k;
+                    if (u >= -radius && u <= radius) s += column[u + radius] * filter[k + reach];
+                }
+                return s;
+            }
+
+            // Point-sampled Gaussian, convolved with the pixel by the trapezoid rule when there is one.
+            private double[] Filter(double gaussianFwhm)
+            {
+                double sigma = Math.Max(0.0, gaussianFwhm) / FwhmPerSigma / step;
+                int gr = sigma > 0.0 ? (int)Math.Ceiling(SolveGaussianReachInSigma * sigma) : 0;
+                var gauss = new double[2 * gr + 1];
+                for (int i = -gr; i <= gr; i++)
+                    gauss[i + gr] = gr == 0 ? 1.0 : Math.Exp(-0.5 * i * i / (sigma * sigma));
+                if (boxSteps == 0) return gauss;
+
+                var filter = new double[gauss.Length + boxSteps];
+                for (int i = 0; i < gauss.Length; i++)
+                    for (int j = 0; j <= boxSteps; j++)
+                        filter[i + j] += gauss[i] * (j == 0 || j == boxSteps ? 0.5 : 1.0);
+                return filter;
+            }
         }
 
         // Support a FWHM measurement needs, in pixels, for a profile of about this width. The half-power point

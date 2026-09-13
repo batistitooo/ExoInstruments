@@ -185,15 +185,17 @@ dotnet run -c Release -p:Core=../../ExoInstruments/Core
 | option | what it does |
 |---|---|
 | `--symmetry` | check every reflection the sampler folds on against the pattern itself, on every pupil |
-| `--solve` | replay each bounded FWHM solve against a full-support bisection, over the roster × 3 binnings × 12 sub-bands |
+| `--solve` | replay each bounded atmospheric FWHM solve against a full-support bisection, over the roster × 3 binnings × 12 sub-bands |
 | `--convolve` | check the transform-based kernel convolution against the direct sum it replaces |
 | `--bin N` | report one binning instead of 1, 2 and 4 (repeatable) |
 | `--pupil NAME` | restrict to one instrument, for iterating |
 
 `--symmetry`, `--solve` and `--convolve` exit non-zero on failure.
 
-`--solve` is slow on purpose: the reference side builds exactly the full-support kernels the
-shipped path now avoids. Expect several minutes.
+`--solve` builds exactly the full-support kernels the shipped path avoids. It covers
+`AtmosphericFwhmForDelivered` only: `GaussianFwhmForDelivered` no longer builds kernels, because a
+delivered width is matched in the plane it was published in and never at the frame's binned pixels.
+`tools/delivered-psf-tests` checks it.
 
 ## Two notes on what "agrees" means here
 

@@ -2184,6 +2184,9 @@ namespace ExoInstruments.Core
                 DeliveredPsfFwhmArcsec = new SpectralCurve(
                     new[] { 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0 },
                     new[] { 0.083, 0.075, 0.070, 0.067, 0.067, 0.070, 0.074, 0.078, 0.084, 0.089 }),
+                // The caption's own "pre-pixelation". Sect. 6.6.1's model already carries charge
+                // diffusion, and this entry has no separate diffusion stage to count it twice.
+                DeliveredPsfFwhmPlane = PsfWidthPlane.BeforePixelation,
 
                 HasApertureDoor = true,
 
@@ -2476,6 +2479,8 @@ namespace ExoInstruments.Core
                 DeliveredPsfFwhmArcsec = new SpectralCurve(
                     new[] { 800.0, 900.0, 1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0, 1600.0, 1700.0 },
                     new[] { 0.124, 0.126, 0.128, 0.130, 0.133, 0.137, 0.141, 0.145, 0.151, 0.156 }),
+                // Table 7.5's caption says "before pixelation", as Table 6.7's does.
+                DeliveredPsfFwhmPlane = PsfWidthPlane.BeforePixelation,
 
                 HasApertureDoor = true,
 
@@ -2839,11 +2844,13 @@ namespace ExoInstruments.Core
                 DarkLimbAvoidanceAngleDeg = 7.6,
                 MoonAvoidanceAngleDeg = 9.0,
                 PointingJitterArcsecRms = 0.008,
-                // Sect. 5.6: "The PSF FWHM in F550M, for example, can vary by 20% (0.10 to 0.13
-                // arcseconds) over the field." One filter, so the curve is flat at the midpoint,
-                // and this channel really does deliver about half WFC3/UVIS's resolution behind
-                // the same mirror. No ACS equivalent of WFC3 IHB Table 6.7 is published.
+                // Sect. 5.6.6: "The PSF FWHM in F550M, for example, can vary by 20% (0.10 to 0.13
+                // arcseconds) over the field." One filter, so the curve is flat at the midpoint.
+                // The same paragraph puts the variation down to CCD charge diffusion, so this is a
+                // width in the image, through this channel's 0.05 arcsec pixels, and it cannot be
+                // set beside WFC3 IHB Table 6.7, which is quoted before pixelation.
                 DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 350.0, 1100.0 }, new[] { 0.115, 0.115 }),
+                DeliveredPsfFwhmPlane = PsfWidthPlane.NativePixels,
                 HasApertureDoor = true,
                 DownlinkBitsPerPixel = 16,
                 FullFramePixels = 2L * 2048L * 4096L,
@@ -2962,9 +2969,12 @@ namespace ExoInstruments.Core
                 DarkLimbAvoidanceAngleDeg = 7.6,
                 MoonAvoidanceAngleDeg = 9.0,
                 PointingJitterArcsecRms = 0.008,
-                // Sect. 5.6: "The HRC FWHM is 0.060 to 0.073 arcseconds in F550M." Flat at the
-                // midpoint, one filter, same limitation as the WFC entry.
+                // Sect. 5.6.6: "The HRC FWHM is 0.060 to 0.073 arcseconds in F550M." Flat at the
+                // midpoint, one filter, same limitation as the WFC entry. An image width like the
+                // WFC's, read from the same charge-diffusion paragraph; the handbook does not say
+                // outright whether the pixel is in it.
                 DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 170.0, 1100.0 }, new[] { 0.0665, 0.0665 }),
+                DeliveredPsfFwhmPlane = PsfWidthPlane.NativePixels,
                 HasApertureDoor = true,
                 DownlinkBitsPerPixel = 16,
                 FullFramePixels = 1024L * 1024L,
@@ -3274,7 +3284,9 @@ namespace ExoInstruments.Core
                 // pixels, noting "the LORRI PSF is slightly undersampled (relative to Nyquist) in
                 // the X (row) direction". This field carries one number, so it is the geometric
                 // mean of the published pair, 2.336 px, which is 2.39 arcsec at this plate scale.
+                // A Gaussian fitted to stars in 1x1 flight frames, so the native pixel is in it.
                 DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 360.0, 910.0 }, new[] { 2.39, 2.39 }),
+                DeliveredPsfFwhmPlane = PsfWidthPlane.NativePixels,
 
                 // Table 5: the reaction control system holds the boresight "to an accuracy of
                 // +/-2 arcsec (1 sigma) for exposure times up to ~65 s", which is the whole
