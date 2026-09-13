@@ -885,13 +885,13 @@ namespace ExoInstruments.Core
         };
 
         // ACS Instrument Handbook, Table 5.2: F330W 3354/588, F250W 2696/549, F220W 2228/485
-        // (central wavelength and width, Angstroms). Peak transmission 1.0 is this file's
-        // convention for NOT PUBLISHED, not for a perfect filter.
+        // (central wavelength and width, Angstroms). Peak transmission is derived as on the
+        // HubbleAcsWfc entry, from stsynphot acs,hrc.
         private static readonly NarrowbandFilterSpec[] HrcNearUvSet =
         {
-            new NarrowbandFilterSpec { Position = CameraFilter.Nuv330, CentralWavelengthNm = 335.4, BandwidthAngstrom = 588.0, PeakTransmission = 1.0 },
-            new NarrowbandFilterSpec { Position = CameraFilter.Nuv250, CentralWavelengthNm = 269.6, BandwidthAngstrom = 549.0, PeakTransmission = 1.0 },
-            new NarrowbandFilterSpec { Position = CameraFilter.Nuv220, CentralWavelengthNm = 222.8, BandwidthAngstrom = 485.0, PeakTransmission = 1.0 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv330, CentralWavelengthNm = 335.4, BandwidthAngstrom = 588.0, PeakTransmission = 0.0976 / 0.410 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv250, CentralWavelengthNm = 269.6, BandwidthAngstrom = 549.0, PeakTransmission = 0.0609 / 0.341 },
+            new NarrowbandFilterSpec { Position = CameraFilter.Nuv220, CentralWavelengthNm = 222.8, BandwidthAngstrom = 485.0, PeakTransmission = 0.0472 / 0.320 },
         };
 
         // The amateur LRGB wheel plus the SHO narrowband set: H-alpha, [O III] and [S II], the three positions
@@ -2755,8 +2755,8 @@ namespace ExoInstruments.Core
                 new PupilPad(-0.4615, 0.7555, 0.065),
                 new PupilPad(-0.4564, -0.7606, 0.065),
             },
-            // STScI publishes throughput measured end to end, OTA included, so the reflection
-            // product would double count it. Same treatment as the WFC3 entries.
+            // STScI measures the OTA and ACS optics end to end, so that loss is carried in the
+            // per-filter factors below rather than as 0.87^N. Not in the QE: Table 3.1 is the bare detector.
             MirrorCount = 0,
 
             // "2 x 2048 x 4096 pixels", butted along the long edge, with a gap of about 50
@@ -2807,12 +2807,14 @@ namespace ExoInstruments.Core
             RedBandwidthAngstrom = 1442.0,
             HAlphaCentralWavelengthNm = 658.4,      // F658N
             HAlphaBandwidthAngstrom = 78.0,
-            // 1.0 means not applied here: the throughput curves already carry the filter.
-            LuminanceFilterPeakTransmission = 1.0,
-            BlueFilterPeakTransmission = 1.0,
-            GreenFilterPeakTransmission = 1.0,
-            RedFilterPeakTransmission = 1.0,
-            HAlphaFilterPeakTransmission = 1.0,
+            // The ACS IHB tabulates no peak throughput (Sect. 5.1 defers to STScI's tables), so each is
+            // stsynphot acs,wfc1's equivalent width over this width, over the top-hat's mean Table 3.1 QE.
+            // Peak over mean QE would overshoot: these widths exceed the rectangular width by up to 20%.
+            LuminanceFilterPeakTransmission = 0.397 / 0.781,   // F606W
+            BlueFilterPeakTransmission = 0.304 / 0.760,        // F435W
+            GreenFilterPeakTransmission = 0.344 / 0.790,       // F555W
+            RedFilterPeakTransmission = 0.399 / 0.780,         // F625W
+            HAlphaFilterPeakTransmission = 0.425 / 0.766,      // F658N
             AvailableFilters = AllFilters,
 
             SiteAltitudeMeters = 0.0,
@@ -2929,11 +2931,12 @@ namespace ExoInstruments.Core
             RedBandwidthAngstrom = 1442.0,
             HAlphaCentralWavelengthNm = 658.4,      // F658N
             HAlphaBandwidthAngstrom = 78.0,
-            LuminanceFilterPeakTransmission = 1.0,
-            BlueFilterPeakTransmission = 1.0,
-            GreenFilterPeakTransmission = 1.0,
-            RedFilterPeakTransmission = 1.0,
-            HAlphaFilterPeakTransmission = 1.0,
+            // Derived as on the WFC entry, from stsynphot acs,hrc.
+            LuminanceFilterPeakTransmission = 0.247 / 0.634,   // F606W
+            BlueFilterPeakTransmission = 0.182 / 0.510,        // F435W
+            GreenFilterPeakTransmission = 0.226 / 0.621,       // F555W
+            RedFilterPeakTransmission = 0.244 / 0.654,         // F625W
+            HAlphaFilterPeakTransmission = 0.252 / 0.643,      // F658N
             AvailableFilters = HrcFilters,
             NarrowbandFilters = HrcNearUvSet,
 
