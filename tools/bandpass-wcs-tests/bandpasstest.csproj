@@ -34,6 +34,8 @@
          longer compiles the catalogue without the two types they reference. -->
     <Compile Include="$(Core)/Coronagraph.cs" />
     <Compile Include="$(Core)/InfraredArray.cs" />
+    <Compile Include="$(Core)/ChargeDiffusion.cs" />
+    <Compile Include="$(Core)/PixelKernel.cs" />
     <!-- InstrumentSpec gained a PhotometricDetector field with the CCD-equation work; without this
          the harness stopped building, which is how it was found. -->
     <Compile Include="$(Core)/PhotometricDetector.cs" />

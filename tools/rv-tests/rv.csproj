@@ -61,6 +61,8 @@
     <Compile Include="$(Core)/Healpix.cs" />
     <Compile Include="$(Core)/HorizontalToGalactic.cs" />
     <Compile Include="$(Core)/InfraredArray.cs" />
+    <Compile Include="$(Core)/ChargeDiffusion.cs" />
+    <Compile Include="$(Core)/PixelKernel.cs" />
     <Compile Include="$(Core)/InterstellarExtinction.cs" />
     <Compile Include="$(Core)/NebularLineRatios.cs" />
     <Compile Include="$(Core)/NoiseSampler.cs" />

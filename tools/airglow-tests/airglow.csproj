@@ -37,5 +37,7 @@
     <Compile Include="$(Core)/StarTarget.cs" />
     <Compile Include="$(Core)/Coronagraph.cs" />
     <Compile Include="$(Core)/InfraredArray.cs" />
+    <Compile Include="$(Core)/ChargeDiffusion.cs" />
+    <Compile Include="$(Core)/PixelKernel.cs" />
   </ItemGroup>
 </Project>
