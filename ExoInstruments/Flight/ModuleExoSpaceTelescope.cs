@@ -348,6 +348,7 @@ namespace ExoInstruments.Flight
         public void OnDestroy()
         {
             SpaceTelescopeRegistry.Unregister(this);
+            ReleaseDampingOverride();
         }
 
         // Builds the boresight from the model's two position markers, when it carries them. Parented to
@@ -421,6 +422,7 @@ namespace ExoInstruments.Flight
             }
 
             if (pointingHoldEnabled) DrivePointing();
+            else ReleaseDampingOverride();
 
             statusLine = BuildStatusLine();
         }
@@ -856,8 +858,15 @@ namespace ExoInstruments.Flight
             // still is one past the manoeuvre. While the waypoint is advancing it would only
             // quantise it into steps, and LockRotation is a single field store, so there is nothing
             // to save by holding them back.
+            // KSP'S DAMPING WOULD OTHERWISE THROW THE COMMAND AWAY. VesselSAS.CheckDamping overwrites
+            // lockedRotation with the current attitude whenever the body rate passes
+            // overrideMinimumMagnitude (0.1 rad/s), so an overshoot left SAS holding wherever the
+            // vehicle stopped. The threshold is raised while the hold runs, and the lock is compared
+            // against what SAS actually holds rather than against our own copy.
+            HoldDampingOverride(vessel.Autopilot.SAS);
             if (!slewing && hasCommandedRotation
-                && Quaternion.Angle(commandedRotation, commanded) < 0.01f) return;
+                && Quaternion.Angle(commandedRotation, commanded) < 0.01f
+                && Quaternion.Angle(vessel.Autopilot.SAS.lockedRotation, commanded) < 0.01f) return;
 
             commandedRotation = commanded;
             hasCommandedRotation = true;
@@ -880,6 +889,25 @@ namespace ExoInstruments.Flight
 
         private Quaternion commandedRotation = Quaternion.identity;
         private bool hasCommandedRotation;
+
+        private VesselAutopilot.VesselSAS dampingOverrideSas;
+        private float dampingOverrideOriginal;
+
+        private void HoldDampingOverride(VesselAutopilot.VesselSAS sas)
+        {
+            if (sas == dampingOverrideSas) return;
+            ReleaseDampingOverride();
+            dampingOverrideSas = sas;
+            dampingOverrideOriginal = sas.overrideMinimumMagnitude;
+            sas.overrideMinimumMagnitude = float.MaxValue;
+        }
+
+        private void ReleaseDampingOverride()
+        {
+            if (dampingOverrideSas == null) return;
+            dampingOverrideSas.overrideMinimumMagnitude = dampingOverrideOriginal;
+            dampingOverrideSas = null;
+        }
 
         private Quaternion rollReference = Quaternion.identity;
         private bool hasRollReference;
