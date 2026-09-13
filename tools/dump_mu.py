@@ -23,7 +23,11 @@ def walk(obj, depth=0):
         m = obj.shared_mesh
         bits.append(f"mesh({len(m.verts)}v,{len(m.submeshes)}sm)")
     if getattr(obj, "renderer", None) is not None:
-        bits.append("renderer")
+        n = len(obj.renderer.materials)
+        bits.append(f"renderer({n} mat)")
+        # Unity redraws the last submesh in each extra material, so per-face materials are lost.
+        if getattr(obj, "shared_mesh", None) is not None and n > len(obj.shared_mesh.submeshes):
+            bits.append("MORE MATERIALS THAN SUBMESHES")
     if getattr(obj, "collider", None) is not None:
         bits.append("collider")
     anim = getattr(obj, "animation", None)
