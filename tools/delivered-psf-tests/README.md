@@ -88,10 +88,9 @@ narrower than the row.
 
 ## What is not checked
 
-- **WFPC2/PC1.** Its 0.088″ is Casertano et al. (2000) Sect. 4.2's Gaussian fit to stars in the
-  drizzled HDF-South mosaics (PIXFRAC 0.8, 0.0399″ output pixels). That is neither plane: it contains a
-  drizzle kernel this pipeline does not have, and the entry also carries a charge-diffusion kernel
-  applied at readout, which a width measured on images already contains.
+- **WFPC2/PC1.** Its widths are the optics before pixelation, fitted to the Cycle 12 handbook's
+  Table 5.3, and its Tiny Tim charge diffusion kernel acts on the expected electrons before the
+  shot-noise draw. tools/diffusion-tests section G checks them.
 - **Pointing.** The camera adds the pointing excursion in quadrature after the solve. A width measured
   on flight frames already holds whatever jitter those frames had.
 - **WFC3/IR's coupling.** Table 7.5's model includes interpixel capacitance, and the entry applies its

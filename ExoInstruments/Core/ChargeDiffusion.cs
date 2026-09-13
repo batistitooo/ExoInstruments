@@ -39,6 +39,5 @@ namespace ExoInstruments.Core
         /// </summary>
         public static void Apply(float[] electrons, int width, int height, double[,] kernel)
             => InfraredArray.ApplyCoupling(electrons, width, height, kernel);
-
     }
 }
