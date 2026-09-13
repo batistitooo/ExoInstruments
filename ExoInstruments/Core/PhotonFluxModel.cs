@@ -93,6 +93,8 @@ namespace ExoInstruments.Core
         /// body's own real radius and its real distances to the Sun and to the observer.
         /// sunReferenceDistanceMeters: where the star delivers the solar constant; AuMeters for the
         /// real sky.
+        /// The albedo is used as the geometric albedo, unconverted. KSP's thermal code treats it as Bond,
+        /// but measured phase integrals (0.44 to 1.35) sit below the Lambert 1.5, so p = 2A/3 fits worse.
         /// Returns +Infinity if the body has no usable geometry (can't be a signal source).
         /// </summary>
         public static double ApparentMagnitude(

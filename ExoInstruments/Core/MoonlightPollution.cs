@@ -18,7 +18,7 @@ namespace ExoInstruments.Core
         public double LanPlusArgPeDeg;         // LAN + argument of periapsis
         public double SemiMajorAxisMeters;     // from the home body's center
         public double BodyRadiusMeters;
-        public double Albedo;                  // geometric/Bond-ish; KSP's CelestialBody.albedo
+        public double Albedo;                  // KSP's CelestialBody.albedo, used as geometric albedo
     }
 
     /// <summary>
