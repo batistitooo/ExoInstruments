@@ -105,6 +105,50 @@ namespace ExoInstruments.Core
         public static long SphericalDegreesToNested(int nside, double longitudeDeg, double latitudeDeg)
             => AngleToNested(nside, (90.0 - latitudeDeg) * Math.PI / 180.0, longitudeDeg * Math.PI / 180.0);
 
+        // SphericalDegreesToRing in two halves, for a caller probing many longitudes at one latitude:
+        // z once per latitude, then RingPixelAtZ per longitude. The same arithmetic, so the same pixel.
+        internal static double RingZOfLatitudeDegrees(double latitudeDeg)
+            => Math.Cos(Clamp((90.0 - latitudeDeg) * Math.PI / 180.0, 0.0, Math.PI));
+
+        // The caller has checked nside.
+        internal static long RingPixelAtZ(int nside, double z, double longitudeDeg)
+            => ZPhiToRing(nside, z, longitudeDeg * Math.PI / 180.0);
+
+        // RingPixelAtZ for longitudeDeg + offsets[from + i], i in [0, count), into pixels[0..count).
+        // In the equatorial belt the z term is computed once per call and each Mod is skipped when
+        // its operand is already in range, where it would return the operand unchanged; the rest
+        // is ZPhiToRing's own arithmetic, the same values in the same order. The caller has checked nside.
+        internal static void RingPixelsAtZ(int nside, double z, double longitudeDeg, double[] offsets,
+                                           int from, int count, long[] pixels)
+        {
+            if (!(Math.Abs(z) <= 2.0 / 3.0))
+            {
+                for (int i = 0; i < count; i++)
+                    pixels[i] = ZPhiToRing(nside, z, (longitudeDeg + offsets[from + i]) * Math.PI / 180.0);
+                return;
+            }
+
+            double temp2 = nside * z * 0.75;
+            double nsideD = nside;
+            long ringPixels = 4L * nside;
+            long beltStart = 2L * nside * (nside - 1);
+            for (int i = 0; i < count; i++)
+            {
+                double phi = (longitudeDeg + offsets[from + i]) * Math.PI / 180.0;
+                double quarter = phi * (2.0 / Math.PI);
+                double tt = quarter >= 0.0 && quarter < 4.0 ? quarter : Mod(quarter, 4.0);
+                double temp1 = nsideD * (0.5 + tt);
+                long jp = (long)(temp1 - temp2);
+                long jm = (long)(temp1 + temp2);
+                long ir = nside + 1 + jp - jm;
+                long kshift = 1 - (ir & 1);
+                long twice = jp + jm - nside + kshift + 1;
+                long ip = twice >= 0 ? twice >> 1 : twice / 2;        // a shift truncates as / does, when non-negative
+                if (ip < 0 || ip >= ringPixels) ip = Mod(ip, ringPixels);
+                pixels[i] = beltStart + (ir - 1) * ringPixels + ip;
+            }
+        }
+
         // ------------------------------------------------------------------ Interpolation
 
         /// <summary>

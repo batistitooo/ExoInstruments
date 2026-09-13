@@ -430,86 +430,101 @@ namespace ExoInstruments.Core
             RejectedCells = 0;
             if (patches == null) return;
 
-            // ONE PATCH PER WORKER. Every buffer below is that patch's own, and a patch's cells are
-            // written by nobody else, so the repaired map does not depend on how the patches were
-            // divided between threads. Only the rejected-cell tally is shared, and it is a sum of
-            // integers, which is order-independent too. This matters at nside 8192: the northern
-            // patches carry four times the cells they used to, and serially the repair cost 19.5 s
-            // of load on its own.
+            // ONE PATCH AT A TIME, ITS CELLS SPLIT ACROSS THE WORKERS. A cell writes only its own slots
+            // and the tally is a sum of integers, so the result does not depend on the split. One patch
+            // per worker left the two 414k-cell patches running alone at the end. A failing patch does
+            // not stop the others; the failures come out together, as they did from Parallel.For.
             var rejectedPerPatch = new int[patches.Length];
-            System.Threading.Tasks.Parallel.For(0, patches.Length, ParallelWork.Options, pi =>
+            var scratch = new RejectionScratch(patches);
+            var failures = new List<Exception>();
+            for (int pi = 0; pi < patches.Length; pi++)
             {
-                Patch patch = patches[pi];
-                if (patch.Values == null || patch.RunStart.Length == 0) return;
-                int cells = patch.Values.Length;
-
-                // A dense pixel -> index table over the patch's own range, so a neighbourhood
-                // lookup is an array read rather than a binary search.
-                int first = patch.RunStart[0];
-                int last = patch.RunStart[patch.RunStart.Length - 1]
-                         + patch.RunLength[patch.RunLength.Length - 1];
-                long span = (long)last - first;
-                if (span <= 0 || span > 40_000_000) return;
-
-                var index = new int[span];
-                for (long i = 0; i < span; i++) index[i] = -1;
-                for (int r = 0; r < patch.RunStart.Length; r++)
-                    for (int k = 0; k < patch.RunLength[r]; k++)
-                        index[patch.RunStart[r] + k - first] = patch.RunOffset[r] + k;
-
-                // THE GEOMETRY IS BUILT ONCE. Each cell's neighbourhood does not change between
-                // rounds -- only the values in it do -- and rebuilding it every round meant 1.6e8
-                // spherical-to-pixel conversions and 37 seconds of load. Flattened into one array
-                // with a start index per cell rather than an array of arrays, so 44 thousand cells
-                // cost one allocation instead of forty-four thousand.
-                double step = Healpix.PixelResolutionDeg(patch.Nside);
-                var start = new int[cells + 1];
-                var neighbours = BuildNeighbourhoods(patch, index, first, span, step, start);
-
-                var values = new double[cells];
-                for (int i = 0; i < cells; i++) values[i] = Float16.ToDouble(patch.Values[i]);
-
-                int windowSize = 0;
-                for (int i = 0; i < cells; i++) windowSize = Math.Max(windowSize, start[i + 1] - start[i]);
-                var window = new double[Math.Max(1, windowSize)];
-                var deviations = new double[Math.Max(1, windowSize)];
-                var replacement = new double[cells];
-                var mark = new bool[cells];
-
-                for (int round = 0; round < RejectionRounds; round++)
+                try
                 {
-                    int marked = 0;
-                    for (int i = 0; i < cells; i++)
-                    {
-                        int count = 0;
-                        for (int j = start[i]; j < start[i + 1]; j++)
-                        {
-                            double v = values[neighbours[j]];
-                            if (v > 0.0) window[count++] = v;
-                        }
-                        if (count < 8) continue;
-
-                        double median = MedianOf(window, count);
-                        double spread = Math.Max(MedianAbsoluteDeviation(window, count, median, deviations),
-                                                 FloorFraction * Math.Abs(median));
-                        double self = values[i];
-                        if (!(self > 0.0) || Math.Abs(self - median) > RejectionSigma * spread)
-                        {
-                            mark[i] = true;
-                            replacement[i] = median;
-                            marked++;
-                        }
-                    }
-                    if (marked == 0) break;
-                    for (int i = 0; i < cells; i++)
-                        if (mark[i]) { values[i] = replacement[i]; mark[i] = false; }
-                    rejectedPerPatch[pi] += marked;
+                    rejectedPerPatch[pi] = HasPlainRuns(patches[pi])
+                        ? RejectOutliersPlain(patches[pi], scratch)
+                        : RejectOutliersGeneral(patches[pi]);
                 }
-
-                for (int i = 0; i < cells; i++) patch.Values[i] = Float16.FromDouble(values[i]);
-            });
+                catch (AggregateException e) { failures.AddRange(e.InnerExceptions); }
+                catch (Exception e) { failures.Add(e); }
+            }
+            if (failures.Count > 0) throw new AggregateException(failures);
 
             for (int i = 0; i < rejectedPerPatch.Length; i++) RejectedCells += rejectedPerPatch[i];
+        }
+
+        // The original repair of one patch, for any run table.
+        private int RejectOutliersGeneral(Patch patch)
+        {
+            int rejected = 0;
+            if (patch.Values == null || patch.RunStart.Length == 0) return rejected;
+            int cells = patch.Values.Length;
+
+            // A dense pixel -> index table over the patch's own range, so a neighbourhood
+            // lookup is an array read rather than a binary search.
+            int first = patch.RunStart[0];
+            int last = patch.RunStart[patch.RunStart.Length - 1]
+                     + patch.RunLength[patch.RunLength.Length - 1];
+            long span = (long)last - first;
+            if (span <= 0 || span > 40_000_000) return rejected;
+
+            var index = new int[span];
+            for (long i = 0; i < span; i++) index[i] = -1;
+            for (int r = 0; r < patch.RunStart.Length; r++)
+                for (int k = 0; k < patch.RunLength[r]; k++)
+                    index[patch.RunStart[r] + k - first] = patch.RunOffset[r] + k;
+
+            // THE GEOMETRY IS BUILT ONCE. Each cell's neighbourhood does not change between
+            // rounds -- only the values in it do -- and rebuilding it every round meant 1.6e8
+            // spherical-to-pixel conversions and 37 seconds of load. Flattened into one array
+            // with a start index per cell rather than an array of arrays, so 44 thousand cells
+            // cost one allocation instead of forty-four thousand.
+            double step = Healpix.PixelResolutionDeg(patch.Nside);
+            var start = new int[cells + 1];
+            var neighbours = BuildNeighbourhoods(patch, index, first, span, step, start);
+
+            var values = new double[cells];
+            for (int i = 0; i < cells; i++) values[i] = Float16.ToDouble(patch.Values[i]);
+
+            int windowSize = 0;
+            for (int i = 0; i < cells; i++) windowSize = Math.Max(windowSize, start[i + 1] - start[i]);
+            var window = new double[Math.Max(1, windowSize)];
+            var deviations = new double[Math.Max(1, windowSize)];
+            var replacement = new double[cells];
+            var mark = new bool[cells];
+
+            for (int round = 0; round < RejectionRounds; round++)
+            {
+                int marked = 0;
+                for (int i = 0; i < cells; i++)
+                {
+                    int count = 0;
+                    for (int j = start[i]; j < start[i + 1]; j++)
+                    {
+                        double v = values[neighbours[j]];
+                        if (v > 0.0) window[count++] = v;
+                    }
+                    if (count < 8) continue;
+
+                    double median = MedianOf(window, count);
+                    double spread = Math.Max(MedianAbsoluteDeviation(window, count, median, deviations),
+                                             FloorFraction * Math.Abs(median));
+                    double self = values[i];
+                    if (!(self > 0.0) || Math.Abs(self - median) > RejectionSigma * spread)
+                    {
+                        mark[i] = true;
+                        replacement[i] = median;
+                        marked++;
+                    }
+                }
+                if (marked == 0) break;
+                for (int i = 0; i < cells; i++)
+                    if (mark[i]) { values[i] = replacement[i]; mark[i] = false; }
+                rejected += marked;
+            }
+
+            for (int i = 0; i < cells; i++) patch.Values[i] = Float16.FromDouble(values[i]);
+            return rejected;
         }
 
         // Flattened neighbourhood lists: neighbours[start[i]..start[i+1]) are the cells within
@@ -548,6 +563,416 @@ namespace ExoInstruments.Core
             // The runs are written in index order, so start[] is already monotone; a cell the loop
             // never reached would leave a stale zero, which the assert below would catch.
             return flat.ToArray();
+        }
+
+        // Sorted, disjoint runs within int range, packed into Values in order with nothing left
+        // over, on a valid nside, as the packer writes them. The fast paths below are exact for
+        // this shape; anything else takes the general ones.
+        private static bool HasPlainRuns(Patch patch)
+        {
+            if (patch == null || patch.Values == null || patch.RunStart == null || patch.RunLength == null
+                || patch.RunOffset == null || !Healpix.IsValidNside(patch.Nside)) return false;
+            int runs = patch.RunStart.Length;
+            if (runs == 0 || patch.RunLength.Length != runs || patch.RunOffset.Length != runs) return false;
+            long end = 0, total = 0;
+            for (int r = 0; r < runs; r++)
+            {
+                long start = patch.RunStart[r], length = patch.RunLength[r];
+                if (start < end || length <= 0 || patch.RunOffset[r] != total) return false;
+                end = start + length;
+                if (end > int.MaxValue) return false;
+                total += length;
+            }
+            return total == patch.Values.Length;
+        }
+
+        // RejectOutliersGeneral's span test, for plain runs: a patch outside it is left alone.
+        private static bool HasRepairableSpan(Patch patch)
+        {
+            int runs = patch.RunStart.Length;
+            long span = (long)patch.RunStart[runs - 1] + patch.RunLength[runs - 1] - patch.RunStart[0];
+            return span > 0 && span <= 40_000_000;
+        }
+
+        // Buffers RejectOutliersPlain reuses from patch to patch, allocated on first use for the largest
+        // patch it will repair so the heap holds one set. If that fails, each patch gets its own size.
+        private sealed class RejectionScratch
+        {
+            internal int[] Neighbours, NeighbourEnd, NeighbourLow, NeighbourHigh, ChangedBefore;
+            internal double[] Values, Replacement;
+            internal bool[] Mark, Changed;
+            private int capacity = -1, largest;
+
+            internal RejectionScratch(Patch[] patches)
+            {
+                foreach (Patch patch in patches)
+                    if (HasPlainRuns(patch) && HasRepairableSpan(patch))
+                        largest = Math.Max(largest, patch.Values.Length);
+            }
+
+            internal void Reserve(int cells)
+            {
+                if (cells <= capacity) return;
+                if (largest > cells)
+                {
+                    try { Allocate(largest); return; }
+                    catch (OutOfMemoryException) { largest = 0; }
+                }
+                Allocate(cells);
+            }
+
+            private void Allocate(int cells)
+            {
+                capacity = -1;
+                Neighbours = NeighbourEnd = NeighbourLow = NeighbourHigh = ChangedBefore = null;
+                Values = Replacement = null;
+                Mark = Changed = null;
+                Neighbours = new int[cells * RejectionTaps];
+                NeighbourEnd = new int[cells];
+                NeighbourLow = new int[cells];
+                NeighbourHigh = new int[cells];
+                ChangedBefore = new int[cells + 1];
+                Values = new double[cells];
+                Replacement = new double[cells];
+                Mark = new bool[cells];
+                Changed = new bool[cells];
+                capacity = cells;
+            }
+        }
+
+        // RejectOutliersGeneral for plain runs, to the bit, done differently: neighbourhoods from a run
+        // lookup rather than a table over the whole span, with the latitude terms computed once per ring;
+        // medians by selection, skipped when the floor alone keeps the cell; and after the first round,
+        // only cells whose own value or a neighbour's changed are judged again.
+        private static int RejectOutliersPlain(Patch patch, RejectionScratch scratch)
+        {
+            if (!HasRepairableSpan(patch)) return 0;
+            int cells = patch.Values.Length;
+            scratch.Reserve(cells);
+
+            int[] neighbours = scratch.Neighbours, neighbourEnd = scratch.NeighbourEnd;
+            int[] neighbourLow = scratch.NeighbourLow, neighbourHigh = scratch.NeighbourHigh;
+            int[] changedBefore = scratch.ChangedBefore;
+            double[] values = scratch.Values, replacement = scratch.Replacement;
+            bool[] mark = scratch.Mark, changed = scratch.Changed;
+            Array.Clear(mark, 0, cells);    // a patch that failed part way can leave marks behind
+
+            int[] pieces = SplitRuns(patch);
+            int pieceCount = pieces.Length - 1;
+            var lookup = new RunLookup(patch);
+            double step = Healpix.PixelResolutionDeg(patch.Nside);
+            System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options,
+                c => BuildNeighbourTable(patch, lookup, step, pieces[c], pieces[c + 1], neighbours, neighbourEnd,
+                                         neighbourLow, neighbourHigh));
+
+            System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options, c =>
+            {
+                for (int i = PieceStart(patch, pieces, c), to = PieceStart(patch, pieces, c + 1); i < to; i++)
+                    values[i] = Float16.ToDouble(patch.Values[i]);
+            });
+
+            var windows = new double[pieceCount][];
+            var deviations = new double[pieceCount][];
+            for (int c = 0; c < pieceCount; c++)
+            {
+                windows[c] = new double[RejectionTaps];
+                deviations[c] = new double[RejectionTaps];
+            }
+            var markedPerPiece = new int[pieceCount];
+
+            int rejected = 0;
+            for (int round = 0; round < RejectionRounds; round++)
+            {
+                bool screen = round > 0;
+                System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options, c =>
+                {
+                    markedPerPiece[c] = JudgeCells(PieceStart(patch, pieces, c), PieceStart(patch, pieces, c + 1),
+                                                   values, neighbours, neighbourEnd, neighbourLow, neighbourHigh,
+                                                   screen ? changed : null, changedBefore,
+                                                   mark, replacement, windows[c], deviations[c]);
+                });
+                int marked = 0;
+                for (int c = 0; c < pieceCount; c++) marked += markedPerPiece[c];
+                if (marked == 0) break;
+                int changes = 0;
+                for (int i = 0; i < cells; i++)
+                {
+                    changedBefore[i] = changes;
+                    changed[i] = mark[i];
+                    if (mark[i]) { values[i] = replacement[i]; mark[i] = false; changes++; }
+                }
+                changedBefore[cells] = changes;
+                rejected += marked;
+            }
+
+            System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options, c =>
+            {
+                for (int i = PieceStart(patch, pieces, c), to = PieceStart(patch, pieces, c + 1); i < to; i++)
+                    patch.Values[i] = Float16.FromDouble(values[i]);
+            });
+            return rejected;
+        }
+
+        // Run indices where each piece of work starts, then the run count: pieces of about equal
+        // cell count, a few per worker so one slow stretch of sky does not hold the rest.
+        private static int[] SplitRuns(Patch patch)
+        {
+            int runs = patch.RunStart.Length;
+            int wanted = (int)Math.Min(runs, Math.Max(1L, ParallelWork.MaxWorkers * 4L));
+            long cells = patch.Values.Length;
+            var bounds = new List<int>(wanted + 1) { 0 };
+            for (int r = 1; r < runs; r++)
+                if (patch.RunOffset[r] * (long)wanted >= cells * bounds.Count) bounds.Add(r);
+            bounds.Add(runs);
+            return bounds.ToArray();
+        }
+
+        // First cell of piece c; piece pieces.Length - 1 starts at the end.
+        private static int PieceStart(Patch patch, int[] pieces, int c)
+            => pieces[c] < patch.RunStart.Length ? patch.RunOffset[pieces[c]] : patch.Values.Length;
+
+        // Which cell holds a pixel, for plain runs. Each bucket of 2^shift pixels names the first
+        // run ending past its start, so a lookup scans a run or two instead of a table the size
+        // of the span. The answer is the dense table's: the cell, or nothing for no run.
+        private sealed class RunLookup
+        {
+            private readonly int first, last, shift;
+            private readonly int[] bucketRun, starts, ends, offsets;
+
+            internal RunLookup(Patch patch)
+            {
+                int runs = patch.RunStart.Length;
+                starts = patch.RunStart;
+                offsets = patch.RunOffset;
+                ends = new int[runs];
+                for (int r = 0; r < runs; r++) ends[r] = patch.RunStart[r] + patch.RunLength[r];
+                first = starts[0];
+                last = ends[runs - 1];
+                long span = (long)last - first;
+                while ((span >> shift) > 4L * runs) shift++;
+                bucketRun = new int[(int)((span - 1) >> shift) + 1];
+                int run = 0;
+                for (int b = 0; b < bucketRun.Length; b++)
+                {
+                    long lowest = first + ((long)b << shift);
+                    while (ends[run] <= lowest) run++;
+                    bucketRun[b] = run;
+                }
+            }
+
+            // Appends the cell holding each of pixels[0..count) that has one, from cells[n]; returns the new n.
+            internal int Append(long[] pixels, int count, int[] cells, int n)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    long pixel = pixels[i];
+                    if (pixel < first || pixel >= last) continue;
+                    int r = bucketRun[(int)((pixel - first) >> shift)];
+                    while (ends[r] <= pixel) r++;
+                    if (pixel >= starts[r]) cells[n++] = offsets[r] + (int)(pixel - starts[r]);
+                }
+                return n;
+            }
+        }
+
+        // Neighbourhoods of the cells in runs [runFrom, runTo): the cells BuildNeighbourhoods lists,
+        // in its order, at neighbours[cell * RejectionTaps .. neighbourEnd[cell]), and the lowest and
+        // highest cell index among them and the cell itself.
+        private static void BuildNeighbourTable(Patch patch, RunLookup lookup, double step, int runFrom, int runTo,
+                                                int[] neighbours, int[] neighbourEnd,
+                                                int[] neighbourLow, int[] neighbourHigh)
+        {
+            int nside = patch.Nside;
+            int radius = RejectionRadiusCells, width = 2 * radius + 1;
+            var lOffset = new double[width];
+            var rowZ = new double[width];
+            var rowUsed = new bool[width];
+            var rowPixels = new long[width];
+            long ringBits = 0;
+            bool haveRing = false;
+
+            // The disc's dx for each dy is the run -reach..reach, which keeps BuildNeighbourhoods' tap order.
+            var rowReach = new int[width];
+            for (int dy = -radius; dy <= radius; dy++)
+                for (int dx = -radius; dx <= radius; dx++)
+                    if (dx * dx + dy * dy <= radius * radius) rowReach[dy + radius] = Math.Max(rowReach[dy + radius], dx);
+
+            for (int r = runFrom; r < runTo; r++)
+            {
+                int pixel0 = patch.RunStart[r], length = patch.RunLength[r], offset = patch.RunOffset[r];
+                for (int k = 0; k < length; k++)
+                {
+                    int self = offset + k;
+                    Healpix.RingPixelCentreDegrees(nside, pixel0 + k, out double l, out double b);
+
+                    // Everything here but l is a function of b, which a whole ring shares.
+                    long bits = BitConverter.DoubleToInt64Bits(b);
+                    if (!haveRing || bits != ringBits)
+                    {
+                        double cosB = Math.Cos(b * Math.PI / 180.0);
+                        for (int dx = -radius; dx <= radius; dx++)
+                            lOffset[dx + radius] = Math.Abs(cosB) > 1e-6 ? dx * step / cosB : 0.0;
+                        for (int dy = -radius; dy <= radius; dy++)
+                        {
+                            double nb = b + dy * step;
+                            bool used = !(nb > 90.0 || nb < -90.0);
+                            rowUsed[dy + radius] = used;
+                            rowZ[dy + radius] = used ? Healpix.RingZOfLatitudeDegrees(nb) : 0.0;
+                        }
+                        ringBits = bits;
+                        haveRing = true;
+                    }
+
+                    int n = self * RejectionTaps;
+                    for (int dy = -radius; dy <= radius; dy++)
+                    {
+                        if (!rowUsed[dy + radius]) continue;
+                        int reach = rowReach[dy + radius];
+                        Healpix.RingPixelsAtZ(nside, rowZ[dy + radius], l, lOffset, radius - reach, 2 * reach + 1, rowPixels);
+                        n = lookup.Append(rowPixels, 2 * reach + 1, neighbours, n);
+                    }
+                    neighbourEnd[self] = n;
+                    int low = self, high = self;
+                    for (int j = self * RejectionTaps; j < n; j++)
+                    {
+                        if (neighbours[j] < low) low = neighbours[j];
+                        if (neighbours[j] > high) high = neighbours[j];
+                    }
+                    neighbourLow[self] = low;
+                    neighbourHigh[self] = high;
+                }
+            }
+        }
+
+        // One round's verdicts on cells [from, to), as RejectOutliersGeneral reaches them. With
+        // changed set, a cell is judged only if it or a neighbour changed last round: none did when
+        // no change falls in the cell's index range, which changedBefore counts in one subtraction,
+        // and otherwise the neighbours are checked one by one.
+        private static int JudgeCells(int from, int to, double[] values, int[] neighbours, int[] neighbourEnd,
+                                      int[] neighbourLow, int[] neighbourHigh, bool[] changed, int[] changedBefore,
+                                      bool[] mark, double[] replacement, double[] window, double[] deviations)
+        {
+            int marked = 0;
+            for (int i = from; i < to; i++)
+            {
+                int begin = i * RejectionTaps, end = neighbourEnd[i];
+                if (changed != null && !changed[i])
+                {
+                    if (changedBefore[neighbourHigh[i] + 1] == changedBefore[neighbourLow[i]]) continue;
+                    int j = begin;
+                    while (j < end && !changed[neighbours[j]]) j++;
+                    if (j == end) continue;
+                }
+
+                // A band [lo, hi] around self in which any median keeps the cell on the floor
+                // alone: |self - m| <= RejectionSigma * floor(m) holds at lo and, measured against
+                // floor(self), at hi, and both sides are monotone under rounding. Empty when that
+                // cannot be shown.
+                double self = values[i];
+                double lo = 0.0, hi = -1.0;
+                if (self > 0.0 && self <= double.MaxValue)
+                {
+                    double below = self * 0.87, above = self * 1.149;
+                    if (below <= self && Math.Abs(self - below) <= RejectionSigma * (FloorFraction * Math.Abs(below))
+                        && above >= self && Math.Abs(self - above) <= RejectionSigma * (FloorFraction * Math.Abs(self)))
+                    {
+                        lo = below;
+                        hi = above;
+                    }
+                }
+
+                int count = 0, under = 0, over = 0;
+                for (int j = begin; j < end; j++)
+                {
+                    double v = values[neighbours[j]];
+                    if (!(v > 0.0)) continue;
+                    window[count++] = v;
+                    if (v < lo) under++;
+                    else if (v > hi) over++;
+                }
+                if (count < 8) continue;
+
+                // Both middle order statistics inside the band puts the median there too.
+                int half = (count - 1) / 2;
+                if (under <= half && over <= half) continue;
+
+                double median = MedianInPlace(window, count);
+                bool reject = !(self > 0.0);
+                if (!reject)
+                {
+                    // The spread is never below the floor, so an offset inside the floor band keeps
+                    // the cell whatever the spread, as a NaN offset does. Past the band the median
+                    // is finite.
+                    double floor = FloorFraction * Math.Abs(median);
+                    double off = Math.Abs(self - median);
+                    reject = off > RejectionSigma * floor
+                             && off > RejectionSigma * Math.Max(MadInPlace(window, count, median, deviations), floor);
+                }
+                if (reject)
+                {
+                    mark[i] = true;
+                    replacement[i] = median;
+                    marked++;
+                }
+            }
+            return marked;
+        }
+
+        // MedianOf without the sort. The values are positive, never NaN, so their order is plain <
+        // and each order statistic has one value whatever the algorithm.
+        private static double MedianInPlace(double[] buffer, int count)
+        {
+            int k = count / 2;
+            double upper = SelectInPlace(buffer, count, k);
+            if (count % 2 == 1) return upper;
+            double lower = buffer[0];
+            for (int i = 1; i < k; i++) if (buffer[i] > lower) lower = buffer[i];
+            return 0.5 * (lower + upper);
+        }
+
+        // MedianAbsoluteDeviation without the sort. Only called with a finite median, so no
+        // deviation is NaN and plain < orders them as the sort did.
+        private static double MadInPlace(double[] buffer, int count, double median, double[] deviations)
+        {
+            for (int i = 0; i < count; i++) deviations[i] = Math.Abs(buffer[i] - median);
+            int k = count / 2;
+            double upper = SelectInPlace(deviations, count, k);
+            double mad = upper;
+            if (count % 2 == 0)
+            {
+                double lower = deviations[0];
+                for (int i = 1; i < k; i++) if (deviations[i] > lower) lower = deviations[i];
+                mad = 0.5 * (lower + upper);
+            }
+            return mad * 1.4826;
+        }
+
+        // The k-th smallest of buffer[0..count), by Hoare's FIND as Wirth writes it, leaving the
+        // smaller values in buffer[0..k). NaN-free input only.
+        private static double SelectInPlace(double[] buffer, int count, int k)
+        {
+            int lo = 0, hi = count - 1;
+            while (lo < hi)
+            {
+                double pivot = buffer[k];
+                int i = lo, j = hi;
+                do
+                {
+                    while (buffer[i] < pivot) i++;
+                    while (pivot < buffer[j]) j--;
+                    if (i <= j)
+                    {
+                        double t = buffer[i];
+                        buffer[i] = buffer[j];
+                        buffer[j] = t;
+                        i++;
+                        j--;
+                    }
+                } while (i <= j);
+                if (j < k) lo = i;
+                if (k < i) hi = j;
+            }
+            return buffer[k];
         }
 
         /// <summary>
@@ -618,6 +1043,17 @@ namespace ExoInstruments.Core
         // Radius of the neighbourhood a cell is judged against, in cells. Four is 3.4 arcmin at nside 4096,
         // above the scale of a stellar residual and below anything diffuse.
         private const int RejectionRadiusCells = 4;
+        // Cells in that disc, the most a neighbourhood can list.
+        private static readonly int RejectionTaps = DiscCells(RejectionRadiusCells);
+
+        private static int DiscCells(int radius)
+        {
+            int n = 0;
+            for (int dy = -radius; dy <= radius; dy++)
+                for (int dx = -radius; dx <= radius; dx++)
+                    if (dx * dx + dy * dy <= radius * radius) n++;
+            return n;
+        }
 
 
         // Clipping threshold in robust sigma.
@@ -711,124 +1147,487 @@ namespace ExoInstruments.Core
 
             CalibratedCells = 0;
 
-            // One patch per worker, as in RejectOutliers: every buffer is that patch's own and no
-            // patch writes another's cells, so the result does not depend on the division. The
-            // beam-limited smoothing costs a 31x31 cell window per composite cell, which serially
-            // is seconds of load.
+            // One patch at a time with its cells split across the workers, and failures gathered, as in
+            // RejectOutliers. The beam-limited smoothing costs a 31x31 cell window per composite cell,
+            // which serially is seconds of load.
             var calibratedPerPatch = new int[patches.Length];
-            System.Threading.Tasks.Parallel.For(0, patches.Length, ParallelWork.Options, pIndex =>
+            var scratch = new CalibrationScratch(patches, composite.Nside);
+            var failures = new List<Exception>();
+            for (int pIndex = 0; pIndex < patches.Length; pIndex++)
             {
                 Patch patch = patches[pIndex];
-                var gainPixels = new long[Healpix.CubicTaps];
-                var gainWeights = new double[Healpix.CubicTaps];
-                if (patch.Values == null) return;
-
-                // The contract is now judged per patch, because they no longer share a resolution:
-                // a patch whose cells do not subdivide the composite's wholly has no group whose
-                // mean the composite can fix, and is left alone rather than taking the set down.
-                if (patch.Nside % composite.Nside != 0) return;
-
-                // Group the patch's cells by the composite cell that contains them. A child's
-                // centre lies inside its parent, so the containing-cell lookup IS the parent.
-                var sum = new Dictionary<long, double>();
-                var count = new Dictionary<long, int>();
-                var parents = new long[patch.Values.Length];
-                var cellL = new double[patch.Values.Length];
-                var cellB = new double[patch.Values.Length];
-
-                for (int r = 0; r < patch.RunStart.Length; r++)
+                try
                 {
-                    for (int k = 0; k < patch.RunLength[r]; k++)
-                    {
-                        int index = patch.RunOffset[r] + k;
-                        Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k,
-                                                       out double l, out double b);
-                        long parent = Healpix.SphericalDegreesToRing(composite.Nside, l, b);
-                        parents[index] = parent;
-                        cellL[index] = l;
-                        cellB[index] = b;
-
-                        double v = Float16.ToDouble(patch.Values[index]);
-                        if (!(v > 0.0)) continue;
-                        sum[parent] = (sum.TryGetValue(parent, out double s) ? s : 0.0) + v;
-                        count[parent] = (count.TryGetValue(parent, out int c) ? c : 0) + 1;
-                    }
+                    calibratedPerPatch[pIndex] = HasPlainRuns(patch) && patch.Nside % composite.Nside == 0
+                        ? CalibratePlain(patch, composite, scratch)
+                        : CalibrateGeneral(patch, composite);
                 }
-
-                // THE GAIN PER COMPOSITE CELL, then smoothed to the composite's OWN BEAM before it
-                // is applied to anything. This is the whole correctness of the step. The composite
-                // is Finkbeiner's 6 arcmin beam tabulated on 3.44 arcmin cells, so two neighbouring
-                // cells are not independent measurements: they are the same beam oversampled. A
-                // gain fitted per cell therefore chases the composite's sampling noise, and applied
-                // as written, cell by cell, it is a piecewise-constant field with a step at every
-                // 206 arcsec boundary.
-                //
-                // Measured on the shipped file, that is not a small effect: the gain differed from
-                // unity by more than 10% over 58% of a Veil frame and by more than 30% over 32%,
-                // with a 95th percentile of 3.8 and a maximum of 444. Stamped in 206 arcsec blocks
-                // onto a map rendered at 15 arcsec per pixel, it was the mottling that made every
-                // H-alpha frame look worse than the [O III] one beside it -- and only H-alpha,
-                // because this step touches Values and never ExtraValues.
-                //
-                // What the composite can legitimately fix is the calibration at scales it resolves.
-                // Below 6 arcmin it has no information and NSNS is the only measurement there.
-                // RATIO OF SMOOTHED FIELDS, NOT A SMOOTHED RATIO. Both terms are brought to the
-                // composite's beam FIRST and divided afterwards. Dividing per cell and smoothing
-                // the result is a different operation and an unstable one: the ratio blows up
-                // wherever the denominator approaches the noise floor, and no amount of subsequent
-                // smoothing brings it back.
-                //
-                // Measured on the shipped file, the per-cell ratio was not merely noisy, it was
-                // systematically wrong: median gain 4.14 where the patch reads under 5 R and 0.59
-                // where it reads over 60 R. That is not a calibration correction, it is NSNS's
-                // contrast being flattened onto Finkbeiner's, whose northern sky is WHAM at a one
-                // degree beam. It brightened the faint sky fourfold and dimmed the filaments by
-                // 40%, which is the whole reason the patch exists, undone at load.
-                var patchMean = new Dictionary<long, double>(sum.Count);
-                var compCell = new Dictionary<long, double>(sum.Count);
-                foreach (var entry in sum)
-                {
-                    int c = count[entry.Key];
-                    double target = composite.RawCellValue(entry.Key);
-                    if (c <= 0 || !(target > 0.0)) continue;
-                    patchMean[entry.Key] = entry.Value / c;
-                    compCell[entry.Key] = target;
-                }
-
-                var patchSmooth = SmoothOverBeam(patchMean, composite.Nside, CompositeBeamArcmin);
-                var compSmooth = SmoothOverBeam(compCell, composite.Nside, CompositeBeamArcmin);
-                var smoothed = new Dictionary<long, double>(patchSmooth.Count);
-                foreach (var entry in patchSmooth)
-                    if (entry.Value > 0.0 && compSmooth.TryGetValue(entry.Key, out double t) && t > 0.0)
-                        smoothed[entry.Key] = t / entry.Value;
-
-                for (int index = 0; index < patch.Values.Length; index++)
-                {
-                    long parent = parents[index];
-                    double target = composite.RawCellValue(parent);
-                    if (!(target > 0.0)) continue;
-
-                    double v = Float16.ToDouble(patch.Values[index]);
-                    if (!(v > 0.0) || !count.TryGetValue(parent, out int c) || c == 0)
-                    {
-                        // No measurement here: the composite's own value.
-                        patch.Values[index] = Float16.FromDouble(target);
-                        calibratedPerPatch[pIndex]++;
-                        continue;
-                    }
-
-                    // The gain INTERPOLATED at this cell's own direction, not the containing
-                    // composite cell's step value, so the correction is continuous across every
-                    // boundary the composite grid has.
-                    double g = InterpolateCellField(smoothed, composite.Nside,
-                                                    cellL[index], cellB[index], gainPixels, gainWeights);
-                    if (!(g > 0.0)) continue;
-                    patch.Values[index] = Float16.FromDouble(v * g);
-                    calibratedPerPatch[pIndex]++;
-                }
-            });
+                catch (AggregateException e) { failures.AddRange(e.InnerExceptions); }
+                catch (Exception e) { failures.Add(e); }
+            }
+            if (failures.Count > 0) throw new AggregateException(failures);
 
             for (int i = 0; i < calibratedPerPatch.Length; i++) CalibratedCells += calibratedPerPatch[i];
+        }
+
+        // The original calibration of one patch, for any run table.
+        private static int CalibrateGeneral(Patch patch, EmissionMap composite)
+        {
+            int calibrated = 0;
+            var gainPixels = new long[Healpix.CubicTaps];
+            var gainWeights = new double[Healpix.CubicTaps];
+            if (patch.Values == null) return calibrated;
+
+            // The contract is now judged per patch, because they no longer share a resolution:
+            // a patch whose cells do not subdivide the composite's wholly has no group whose
+            // mean the composite can fix, and is left alone rather than taking the set down.
+            if (patch.Nside % composite.Nside != 0) return calibrated;
+
+            // Group the patch's cells by the composite cell that contains them. A child's
+            // centre lies inside its parent, so the containing-cell lookup IS the parent.
+            var sum = new Dictionary<long, double>();
+            var count = new Dictionary<long, int>();
+            var parents = new long[patch.Values.Length];
+            var cellL = new double[patch.Values.Length];
+            var cellB = new double[patch.Values.Length];
+
+            for (int r = 0; r < patch.RunStart.Length; r++)
+            {
+                for (int k = 0; k < patch.RunLength[r]; k++)
+                {
+                    int index = patch.RunOffset[r] + k;
+                    Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k,
+                                                   out double l, out double b);
+                    long parent = Healpix.SphericalDegreesToRing(composite.Nside, l, b);
+                    parents[index] = parent;
+                    cellL[index] = l;
+                    cellB[index] = b;
+
+                    double v = Float16.ToDouble(patch.Values[index]);
+                    if (!(v > 0.0)) continue;
+                    sum[parent] = (sum.TryGetValue(parent, out double s) ? s : 0.0) + v;
+                    count[parent] = (count.TryGetValue(parent, out int c) ? c : 0) + 1;
+                }
+            }
+
+            // THE GAIN PER COMPOSITE CELL, then smoothed to the composite's OWN BEAM before it
+            // is applied to anything. This is the whole correctness of the step. The composite
+            // is Finkbeiner's 6 arcmin beam tabulated on 3.44 arcmin cells, so two neighbouring
+            // cells are not independent measurements: they are the same beam oversampled. A
+            // gain fitted per cell therefore chases the composite's sampling noise, and applied
+            // as written, cell by cell, it is a piecewise-constant field with a step at every
+            // 206 arcsec boundary.
+            //
+            // Measured on the shipped file, that is not a small effect: the gain differed from
+            // unity by more than 10% over 58% of a Veil frame and by more than 30% over 32%,
+            // with a 95th percentile of 3.8 and a maximum of 444. Stamped in 206 arcsec blocks
+            // onto a map rendered at 15 arcsec per pixel, it was the mottling that made every
+            // H-alpha frame look worse than the [O III] one beside it -- and only H-alpha,
+            // because this step touches Values and never ExtraValues.
+            //
+            // What the composite can legitimately fix is the calibration at scales it resolves.
+            // Below 6 arcmin it has no information and NSNS is the only measurement there.
+            // RATIO OF SMOOTHED FIELDS, NOT A SMOOTHED RATIO. Both terms are brought to the
+            // composite's beam FIRST and divided afterwards. Dividing per cell and smoothing
+            // the result is a different operation and an unstable one: the ratio blows up
+            // wherever the denominator approaches the noise floor, and no amount of subsequent
+            // smoothing brings it back.
+            //
+            // Measured on the shipped file, the per-cell ratio was not merely noisy, it was
+            // systematically wrong: median gain 4.14 where the patch reads under 5 R and 0.59
+            // where it reads over 60 R. That is not a calibration correction, it is NSNS's
+            // contrast being flattened onto Finkbeiner's, whose northern sky is WHAM at a one
+            // degree beam. It brightened the faint sky fourfold and dimmed the filaments by
+            // 40%, which is the whole reason the patch exists, undone at load.
+            var patchMean = new Dictionary<long, double>(sum.Count);
+            var compCell = new Dictionary<long, double>(sum.Count);
+            foreach (var entry in sum)
+            {
+                int c = count[entry.Key];
+                double target = composite.RawCellValue(entry.Key);
+                if (c <= 0 || !(target > 0.0)) continue;
+                patchMean[entry.Key] = entry.Value / c;
+                compCell[entry.Key] = target;
+            }
+
+            var patchSmooth = SmoothOverBeam(patchMean, composite.Nside, CompositeBeamArcmin);
+            var compSmooth = SmoothOverBeam(compCell, composite.Nside, CompositeBeamArcmin);
+            var smoothed = new Dictionary<long, double>(patchSmooth.Count);
+            foreach (var entry in patchSmooth)
+                if (entry.Value > 0.0 && compSmooth.TryGetValue(entry.Key, out double t) && t > 0.0)
+                    smoothed[entry.Key] = t / entry.Value;
+
+            for (int index = 0; index < patch.Values.Length; index++)
+            {
+                long parent = parents[index];
+                double target = composite.RawCellValue(parent);
+                if (!(target > 0.0)) continue;
+
+                double v = Float16.ToDouble(patch.Values[index]);
+                if (!(v > 0.0) || !count.TryGetValue(parent, out int c) || c == 0)
+                {
+                    // No measurement here: the composite's own value.
+                    patch.Values[index] = Float16.FromDouble(target);
+                    calibrated++;
+                    continue;
+                }
+
+                // The gain INTERPOLATED at this cell's own direction, not the containing
+                // composite cell's step value, so the correction is continuous across every
+                // boundary the composite grid has.
+                double g = InterpolateCellField(smoothed, composite.Nside,
+                                                cellL[index], cellB[index], gainPixels, gainWeights);
+                if (!(g > 0.0)) continue;
+                patch.Values[index] = Float16.FromDouble(v * g);
+                calibrated++;
+            }
+            return calibrated;
+        }
+
+        // CalibrateGeneral for a patch with plain runs, to the bit. Composite cells are numbered
+        // slots rather than dictionary keys; the two smoothings share one pass over the beam, since
+        // their fields hold the same keys and so meet the same taps, hits and weights; and the
+        // per-cell loops run in pieces across the workers.
+        private static int CalibratePlain(Patch patch, EmissionMap composite, CalibrationScratch scratch)
+        {
+            int cells = patch.Values.Length;
+            int runs = patch.RunStart.Length;
+            int compositeNside = composite.Nside;
+            int[] pieces = SplitRuns(patch);
+            int pieceCount = pieces.Length - 1;
+
+            scratch.Reserve(cells);
+            long[] parents = scratch.Parents;
+            double[] cellL = scratch.CellL, cellB = scratch.CellB;
+            System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options,
+                c => LocateCells(patch, compositeNside, pieces[c], pieces[c + 1], parents, cellL, cellB));
+
+            // Slots in order of first appearance; the sums accumulate in cell order, as before.
+            var slots = new PixelSlots();
+            int[] slotOfCell = scratch.SlotOfCell;
+            int lastSlot = -1;
+            long lastParent = 0;
+            for (int index = 0; index < cells; index++)
+            {
+                if (lastSlot < 0 || parents[index] != lastParent)
+                {
+                    lastParent = parents[index];
+                    lastSlot = slots.GetOrAdd(lastParent);
+                }
+                slotOfCell[index] = lastSlot;
+            }
+
+            int groups = slots.Count;
+            var sum = new double[groups];
+            var count = new int[groups];
+            for (int index = 0; index < cells; index++)
+            {
+                double v = Float16.ToDouble(patch.Values[index]);
+                if (!(v > 0.0)) continue;
+                int s = slotOfCell[index];
+                sum[s] = sum[s] + v;
+                count[s]++;
+            }
+
+            var target = new double[groups];
+            var patchMean = new double[groups];
+            var compCell = new double[groups];
+            var inField = new bool[groups];
+            var field = new List<int>(groups);
+            for (int s = 0; s < groups; s++)
+            {
+                target[s] = composite.RawCellValue(slots.KeyAt(s));
+                if (count[s] <= 0 || !(target[s] > 0.0)) continue;
+                patchMean[s] = sum[s] / count[s];
+                compCell[s] = target[s];
+                inField[s] = true;
+                field.Add(s);
+            }
+
+            var patchSmooth = new double[groups];
+            var compSmooth = new double[groups];
+            var beam = new BeamTaps(compositeNside, CompositeBeamArcmin);
+            int[] keys = field.ToArray();
+            int keyPieces = (int)Math.Min(keys.Length, Math.Max(1L, ParallelWork.MaxWorkers * 4L));
+            System.Threading.Tasks.Parallel.For(0, keyPieces, ParallelWork.Options,
+                c => SmoothPair(slots, keys, (int)((long)keys.Length * c / keyPieces),
+                                (int)((long)keys.Length * (c + 1) / keyPieces), compositeNside, beam,
+                                inField, patchMean, compCell, patchSmooth, compSmooth));
+
+            var gain = new double[groups];
+            var hasGain = new bool[groups];
+            foreach (int s in keys)
+            {
+                if (patchSmooth[s] > 0.0 && compSmooth[s] > 0.0)
+                {
+                    gain[s] = compSmooth[s] / patchSmooth[s];
+                    hasGain[s] = true;
+                }
+            }
+
+            var calibratedPerPiece = new int[pieceCount];
+            System.Threading.Tasks.Parallel.For(0, pieceCount, ParallelWork.Options, c =>
+            {
+                int from = patch.RunOffset[pieces[c]];
+                int to = pieces[c + 1] < runs ? patch.RunOffset[pieces[c + 1]] : cells;
+                calibratedPerPiece[c] = ApplyGains(patch, from, to, compositeNside, slots, slotOfCell, target,
+                                                   count, cellL, cellB, hasGain, gain);
+            });
+            int calibrated = 0;
+            for (int c = 0; c < pieceCount; c++) calibrated += calibratedPerPiece[c];
+            return calibrated;
+        }
+
+        // Per-cell buffers CalibratePlain reuses from patch to patch, reserved as RejectionScratch's are.
+        private sealed class CalibrationScratch
+        {
+            internal long[] Parents;
+            internal double[] CellL, CellB;
+            internal int[] SlotOfCell;
+            private int capacity = -1, largest;
+
+            internal CalibrationScratch(Patch[] patches, int compositeNside)
+            {
+                foreach (Patch patch in patches)
+                    if (HasPlainRuns(patch) && patch.Nside % compositeNside == 0)
+                        largest = Math.Max(largest, patch.Values.Length);
+            }
+
+            internal void Reserve(int cells)
+            {
+                if (cells <= capacity) return;
+                if (largest > cells)
+                {
+                    try { Allocate(largest); return; }
+                    catch (OutOfMemoryException) { largest = 0; }
+                }
+                Allocate(cells);
+            }
+
+            private void Allocate(int cells)
+            {
+                capacity = -1;
+                Parents = null;
+                CellL = CellB = null;
+                SlotOfCell = null;
+                Parents = new long[cells];
+                CellL = new double[cells];
+                CellB = new double[cells];
+                SlotOfCell = new int[cells];
+                capacity = cells;
+            }
+        }
+
+        // Each cell's direction and containing composite cell, for the cells of runs [runFrom, runTo).
+        private static void LocateCells(Patch patch, int compositeNside, int runFrom, int runTo,
+                                        long[] parents, double[] cellL, double[] cellB)
+        {
+            long ringBits = 0;
+            bool haveRing = false;
+            double z = 0.0;
+            for (int r = runFrom; r < runTo; r++)
+            {
+                for (int k = 0; k < patch.RunLength[r]; k++)
+                {
+                    int index = patch.RunOffset[r] + k;
+                    Healpix.RingPixelCentreDegrees(patch.Nside, patch.RunStart[r] + k, out double l, out double b);
+                    long bits = BitConverter.DoubleToInt64Bits(b);
+                    if (!haveRing || bits != ringBits)
+                    {
+                        z = Healpix.RingZOfLatitudeDegrees(b);
+                        ringBits = bits;
+                        haveRing = true;
+                    }
+                    parents[index] = Healpix.RingPixelAtZ(compositeNside, z, l);
+                    cellL[index] = l;
+                    cellB[index] = b;
+                }
+            }
+        }
+
+        // SmoothOverBeam's window and weights, which depend only on the grid and the beam.
+        private sealed class BeamTaps
+        {
+            internal readonly double StepDeg;
+            internal readonly int Radius;
+            internal readonly double[] Weight;      // [(dy + Radius) * (2 * Radius + 1) + dx + Radius]
+
+            internal BeamTaps(int nside, double beamArcmin)
+            {
+                double stepDeg = Healpix.PixelResolutionDeg(nside);
+                double sigmaDeg = beamArcmin / 60.0 / 2.3548;          // FWHM to sigma
+                int radius = Math.Max(1, (int)Math.Ceiling(2.0 * sigmaDeg / stepDeg));
+                int width = 2 * radius + 1;
+                Weight = new double[width * width];
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    for (int dx = -radius; dx <= radius; dx++)
+                    {
+                        double rr = (dx * dx + dy * dy) * stepDeg * stepDeg;
+                        Weight[(dy + radius) * width + dx + radius] = Math.Exp(-0.5 * rr / (sigmaDeg * sigmaDeg));
+                    }
+                }
+                StepDeg = stepDeg;
+                Radius = radius;
+            }
+        }
+
+        // SmoothOverBeam on both fields at once, for keys[from..to). Each accumulator adds the same
+        // terms in the same order as its own call would; the weight sum is common to both.
+        private static void SmoothPair(PixelSlots slots, int[] keys, int from, int to, int nside, BeamTaps beam,
+                                       bool[] inField, double[] patchMean, double[] compCell,
+                                       double[] patchSmooth, double[] compSmooth)
+        {
+            int radius = beam.Radius, width = 2 * radius + 1;
+            double stepDeg = beam.StepDeg;
+            double[] tapWeight = beam.Weight;
+            var lOffset = new double[width];
+            var rowZ = new double[width];
+            var rowUsed = new bool[width];
+            var rowPixels = new long[width];
+            long ringBits = 0;
+            bool haveRing = false;
+
+            for (int q = from; q < to; q++)
+            {
+                int s = keys[q];
+                Healpix.RingPixelCentreDegrees(nside, slots.KeyAt(s), out double l, out double b);
+                long bits = BitConverter.DoubleToInt64Bits(b);
+                if (!haveRing || bits != ringBits)
+                {
+                    double cosB = Math.Cos(b * Math.PI / 180.0);
+                    for (int dx = -radius; dx <= radius; dx++)
+                        lOffset[dx + radius] = Math.Abs(cosB) > 1e-6 ? dx * stepDeg / cosB : 0.0;
+                    for (int dy = -radius; dy <= radius; dy++)
+                    {
+                        double nb = b + dy * stepDeg;
+                        bool used = !(nb > 90.0 || nb < -90.0);
+                        rowUsed[dy + radius] = used;
+                        rowZ[dy + radius] = used ? Healpix.RingZOfLatitudeDegrees(nb) : 0.0;
+                    }
+                    ringBits = bits;
+                    haveRing = true;
+                }
+
+                double accPatch = 0.0, accComp = 0.0, weight = 0.0;
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    if (!rowUsed[dy + radius]) continue;
+                    Healpix.RingPixelsAtZ(nside, rowZ[dy + radius], l, lOffset, 0, width, rowPixels);
+                    int row = (dy + radius) * width;
+                    for (int dx = 0; dx < width; dx++)
+                    {
+                        int t = slots.Find(rowPixels[dx]);
+                        if (t < 0 || !inField[t]) continue;
+                        double w = tapWeight[row + dx];
+                        accPatch += w * patchMean[t];
+                        accComp += w * compCell[t];
+                        weight += w;
+                    }
+                }
+                patchSmooth[s] = weight > 0.0 ? accPatch / weight : patchMean[s];
+                compSmooth[s] = weight > 0.0 ? accComp / weight : compCell[s];
+            }
+        }
+
+        // The final loop of CalibrateGeneral on cells [from, to), with InterpolateCellField read
+        // through slots.
+        private static int ApplyGains(Patch patch, int from, int to, int nside, PixelSlots slots, int[] slotOfCell,
+                                      double[] target, int[] count, double[] cellL, double[] cellB,
+                                      bool[] hasGain, double[] gain)
+        {
+            var pixels = new long[Healpix.CubicTaps];
+            var weights = new double[Healpix.CubicTaps];
+            int calibrated = 0;
+            for (int index = from; index < to; index++)
+            {
+                int s = slotOfCell[index];
+                double t = target[s];
+                if (!(t > 0.0)) continue;
+
+                double v = Float16.ToDouble(patch.Values[index]);
+                if (!(v > 0.0) || count[s] == 0)
+                {
+                    patch.Values[index] = Float16.FromDouble(t);
+                    calibrated++;
+                    continue;
+                }
+
+                Healpix.InterpolationWeightsDegrees(nside, cellL[index], cellB[index], pixels, weights);
+                double acc = 0.0, weight = 0.0;
+                for (int i = 0; i < 4; i++)
+                {
+                    int g = slots.Find(pixels[i]);
+                    if (g < 0 || !hasGain[g]) continue;
+                    acc += weights[i] * gain[g];
+                    weight += weights[i];
+                }
+                double gv = weight > 0.0 ? acc / weight : double.NaN;
+                if (!(gv > 0.0)) continue;
+                patch.Values[index] = Float16.FromDouble(v * gv);
+                calibrated++;
+            }
+            return calibrated;
+        }
+
+        // Composite pixels numbered 0, 1, 2... in the order first added. Open addressing, so a
+        // lookup is a multiply and a probe or two rather than a Dictionary call.
+        private sealed class PixelSlots
+        {
+            private long[] keys = new long[64];
+            private int[] slotAt = NewTable(64);
+            private long[] keyOfSlot = new long[32];
+            internal int Count;
+
+            internal long KeyAt(int slot) => keyOfSlot[slot];
+
+            internal int Find(long key)
+            {
+                int mask = slotAt.Length - 1;
+                for (int h = Hash(key) & mask; ; h = (h + 1) & mask)
+                {
+                    int s = slotAt[h];
+                    if (s < 0 || keys[h] == key) return s;
+                }
+            }
+
+            internal int GetOrAdd(long key)
+            {
+                int mask = slotAt.Length - 1;
+                int h = Hash(key) & mask;
+                for (; slotAt[h] >= 0; h = (h + 1) & mask)
+                    if (keys[h] == key) return slotAt[h];
+                if (Count == keyOfSlot.Length) Array.Resize(ref keyOfSlot, Count * 2);
+                keyOfSlot[Count] = key;
+                keys[h] = key;
+                slotAt[h] = Count;
+                if (++Count * 2 > slotAt.Length) Rehash(slotAt.Length * 2);
+                return Count - 1;
+            }
+
+            private void Rehash(int size)
+            {
+                keys = new long[size];
+                slotAt = NewTable(size);
+                int mask = size - 1;
+                for (int s = 0; s < Count; s++)
+                {
+                    int h = Hash(keyOfSlot[s]) & mask;
+                    while (slotAt[h] >= 0) h = (h + 1) & mask;
+                    keys[h] = keyOfSlot[s];
+                    slotAt[h] = s;
+                }
+            }
+
+            private static int[] NewTable(int size)
+            {
+                var table = new int[size];
+                for (int i = 0; i < size; i++) table[i] = -1;
+                return table;
+            }
+
+            // Fibonacci hashing: the high half of the key times 2^64 / phi.
+            private static int Hash(long key) => (int)((ulong)(key * -7046029254386353131L) >> 32);
         }
 
         // The scale above which the composite may correct a patch, and it is the beam of the composite's
