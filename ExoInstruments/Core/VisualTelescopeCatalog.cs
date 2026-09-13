@@ -546,6 +546,13 @@ namespace ExoInstruments.Core
         public double[,] InterpixelCapacitanceKernel;
 
         /// <summary>
+        /// The CCD's charge-diffusion kernel at native pixels, or null where none is published.
+        /// Applied to the expected photoelectrons before the shot-noise draw, because diffusion moves
+        /// real charge (Core.ChargeDiffusion). Not the readout-side IPC kernel above.
+        /// </summary>
+        public double[,] ChargeDiffusionKernel;
+
+        /// <summary>
         /// Count-rate non-linearity: the fractional loss of measured flux per decade of true flux
         /// below the level the photometric zero point was anchored at, and that anchor in electrons
         /// per second. NaN where unmeasured, which is every detector here but WFC3/IR.
@@ -3077,20 +3084,10 @@ namespace ExoInstruments.Core
             CosmicRayEventsPerMinutePerCm2 = 75.0,
             CosmicRayElectronsPerEvent = 1000.0,
 
-            // Sect. 5.4, charge diffusion: "even when a pinhole was centered over a pixel only
-            // about 70% of the light was detected in that pixel", equivalent to "18 mas" RMS
-            // jitter in the PC. The two published forms agree to 2 per cent: 2.3548 x 18 mas is
-            // 42.4 mas, and this kernel's equivalent Gaussian FWHM is 0.912 px, or 41.5 mas.
-            //
-            // The field is named for interpixel capacitance and documented for an HgCdTe array.
-            // On a CCD this position in the chain carries charge diffusion instead. The placement
-            // is right, both act on pixel-scale resolution after binning; the name is not.
-            InterpixelCapacitanceKernel = new double[,]
-            {
-                { 0.0125, 0.050, 0.0125 },
-                { 0.0500, 0.750, 0.0500 },
-                { 0.0125, 0.050, 0.0125 },
-            },
+            // Tiny Tim 7.5 wfpc2pc1.pup, "WFPC2 CCD Pixel Scattering Function (estimates charge
+            // diffusion)". IHB Sect. 5.4 prints a heavier kernel for the same effect, centre 0.635
+            // against 0.75 here, and pairs it with its "18 mas"; Tiny Tim's guide says 14 for this one.
+            ChargeDiffusionKernel = ChargeDiffusion.Wfpc2TinyTimKernel,
 
             // NOT PUBLISHED as a value. Sect. 1.1.4 gives a BOUND, "<2% pixel-to-pixel
             // non-uniformity", and a bound written into a value field is an invented floor.
@@ -3142,15 +3139,14 @@ namespace ExoInstruments.Core
                 MoonAvoidanceAngleDeg = 9.0,
                 PointingJitterArcsecRms = 0.008,
 
-                // CONFIRM THIS ONE AGAINST THE PDF. The WFPC2 IHB Chapter 5 gives the PC's PSF as
-                // 0.088 arcsec, and Sect. 5.1 otherwise says only that the FWHM is "approximately
-                // proportional to wavelength". The figure is the handbook's own text, but it was
-                // read through a search index rather than fetched: the documents.stsci.edu mirror
-                // no longer resolves and the Cycle 17 PDF exceeds the fetch limit. It is written
-                // rather than left null because null in this field means DIFFRACTION LIMITED, and
-                // a 2.4 m at 550 nm gives 0.058 arcsec, which would make this camera a third
-                // sharper than it is.
-                DeliveredPsfFwhmArcsec = new SpectralCurve(new[] { 121.6, 1100.0 }, new[] { 0.088, 0.088 }),
+                // Optics alone, before pixelation, fitted to the Cycle 12 IHB Table 5.3: with Sect. 5.4's
+                // kernel each width gives a centred star the model PSF's peak share relative to diffraction
+                // limited. Held flat outside 200 to 800 nm; tools/diffusion-tests checks it. Casertano et
+                // al.'s (2000) 0.088 arcsec was measured on drizzled images, so it already held the jitter
+                // and diffusion this chain adds.
+                DeliveredPsfFwhmArcsec = new SpectralCurve(
+                    new[] { 200.0, 400.0, 600.0, 800.0 },
+                    new[] { 0.059, 0.049, 0.054, 0.070 }),
 
                 HasApertureDoor = true,
                 // A real WFPC2 exposure always reads all four CCDs through the pyramid mirror, so

@@ -4769,6 +4769,16 @@ namespace ExoInstruments.Visualization
             EnsureOffsetFpnMap();
             EnsureFringeMap();
 
+            // CHARGE DIFFUSION, on the expected photoelectrons and ahead of the Poisson draw:
+            // electrons that diffuse independently stay Poisson about the diffused mean. The sky is
+            // smooth, so diffusion leaves it as it is. Binned, because it happens at native pixels.
+            if (signal != null && Spec.ChargeDiffusionKernel != null)
+            {
+                ChargeDiffusion.Apply(signal, TextureWidth, TextureHeight,
+                                      ChargeDiffusion.ForBinning(Spec.ChargeDiffusionKernel, BinningFactor));
+                DumpStage("diffusion", signal);
+            }
+
             // Charge collection. Poisson, not a Gaussian of matching width: photon arrival IS a
             // counting process, and the two only agree once the count is large. At the few
             // electrons per pixel a faint sky or a short dark reaches, a Gaussian goes negative
