@@ -29,8 +29,9 @@ namespace ExoInstruments
         internal void BindInstance() => Instance = this;
         internal void UnbindInstance() { if (Instance == this) Instance = null; }
 
-        // Vessel id of the telescope currently selected, so the choice survives the list being rebuilt.
-        private Guid selectedTelescopeId = Guid.Empty;
+        // Vessel id of the telescope chosen under each orbital row, keyed by the row's catalogue name, so the
+        // choice survives the list being rebuilt and a trip to another row and back.
+        private readonly Dictionary<string, Guid> selectedTelescopeIds = new Dictionary<string, Guid>();
 
         // Rebuilt on a timer rather than per frame: it walks every vessel in the save.
         private List<SpaceTelescopeLink> cachedTelescopes;
@@ -56,17 +57,13 @@ namespace ExoInstruments
             }
         }
 
-        // The telescope the player has selected, or null.
-        private SpaceTelescopeLink SelectedTelescope
+        // The telescope chosen under spec's row, among the ones carrying it, or null.
+        private SpaceTelescopeLink SelectedTelescopeFor(VisualTelescopeSpec spec, List<SpaceTelescopeLink> carrying)
         {
-            get
-            {
-                if (selectedTelescopeId == Guid.Empty) return null;
-                List<SpaceTelescopeLink> all = AvailableTelescopes;
-                for (int i = 0; i < all.Count; i++)
-                    if (all[i].Vessel != null && all[i].Vessel.id == selectedTelescopeId) return all[i];
-                return null;
-            }
+            if (spec == null || !selectedTelescopeIds.TryGetValue(spec.Name, out Guid id)) return null;
+            for (int i = 0; i < carrying.Count; i++)
+                if (carrying[i].Vessel != null && carrying[i].Vessel.id == id) return carrying[i];
+            return null;
         }
 
         // True when the player owns at least one telescope in orbit. This, and not a Funds price, is what
@@ -79,18 +76,19 @@ namespace ExoInstruments
         // owns both detectors and can be switched between them without a new launch.
         private bool HasOrbitalTelescopeCarrying(VisualTelescopeSpec spec)
         {
-            if (spec == null) return false;
-
             List<SpaceTelescopeLink> all = AvailableTelescopes;
             for (int i = 0; i < all.Count; i++)
-            {
-                SpaceTelescopeLink link = all[i];
-                if (link.Instrument == spec) return true;
-                if (!string.IsNullOrEmpty(link.AlternateInstrumentName)
-                    && string.Equals(link.AlternateInstrumentName, spec.Name, StringComparison.Ordinal))
-                    return true;
-            }
+                if (Carries(all[i], spec)) return true;
             return false;
+        }
+
+        // Whether this telescope images through spec, on its current channel or on the one its part can switch to.
+        private static bool Carries(SpaceTelescopeLink link, VisualTelescopeSpec spec)
+        {
+            if (link == null || spec == null) return false;
+            if (link.Instrument == spec) return true;
+            return !string.IsNullOrEmpty(link.AlternateInstrumentName)
+                && string.Equals(link.AlternateInstrumentName, spec.Name, StringComparison.Ordinal);
         }
 
         // Per-instrument ordinal for the spacecraft list, so several telescopes carrying the same
@@ -161,39 +159,48 @@ namespace ExoInstruments
         }
 
         // The spacecraft picker, drawn under the observatory selector whenever the selected instrument is an
-        // orbital one.
+        // orbital one. It lists only the spacecraft carrying that instrument: the spacecraft decides what
+        // images (see ApplySelectedTelescope), so a LORRI probe picked under the Hubble row shot through LORRI.
         private void DrawSpacecraftSelector()
         {
+            VisualTelescopeSpec spec = SelectedInstrument.VisualTelescope;
+            if (spec == null) return;
+
             List<SpaceTelescopeLink> all = AvailableTelescopes;
+            var carrying = new List<SpaceTelescopeLink>();
+            for (int i = 0; i < all.Count; i++)
+                if (all[i].Vessel != null && Carries(all[i], spec)) carrying.Add(all[i]);
 
             GUILayout.Space(4);
             GUILayout.Label("Spacecraft:");
 
-            if (all.Count == 0)
+            if (carrying.Count == 0)
             {
-                GUILayout.Label("No telescope in orbit. Build one with a space telescope part and launch it.");
+                string partTitle = string.IsNullOrEmpty(spec.PartTitle) ? "its telescope part" : spec.PartTitle;
+                GUILayout.Label("No spacecraft carries this instrument. Build one with " + partTitle + " and launch it.");
                 ApplySelectedTelescope(null);
                 return;
             }
 
             // Default to the first usable one rather than to the first one: on a save with a
             // dead telescope still in orbit, defaulting to the wreck is not helpful.
-            if (SelectedTelescope == null)
+            SpaceTelescopeLink selected = SelectedTelescopeFor(spec, carrying);
+            if (selected == null)
             {
-                SpaceTelescopeLink best = null;
-                for (int i = 0; i < all.Count; i++)
-                    if (all[i].Operational) { best = all[i]; break; }
-                selectedTelescopeId = (best ?? all[0]).Vessel.id;
+                for (int i = 0; i < carrying.Count; i++)
+                    if (carrying[i].Operational) { selected = carrying[i]; break; }
+                if (selected == null) selected = carrying[0];
+                selectedTelescopeIds[spec.Name] = selected.Vessel.id;
             }
 
+            // Numbered across every telescope in the save, so a spacecraft keeps its number whichever row lists it.
             Dictionary<Guid, int> ordinals = BuildTelescopeOrdinals(all);
 
-            for (int i = 0; i < all.Count; i++)
+            for (int i = 0; i < carrying.Count; i++)
             {
-                SpaceTelescopeLink link = all[i];
-                if (link.Vessel == null) continue;
+                SpaceTelescopeLink link = carrying[i];
 
-                bool isCurrent = link.Vessel.id == selectedTelescopeId;
+                bool isCurrent = link.Vessel.id == selected.Vessel.id;
                 CanCommand(link, out string reason);
 
                 GUILayout.BeginHorizontal();
@@ -207,15 +214,16 @@ namespace ExoInstruments
                 string label = (isCurrent ? "> " : "  ") + detector + ordinal + "   " + link.VesselName;
                 if (GUILayout.Button(label, GUILayout.Height(22)))
                 {
-                    selectedTelescopeId = link.Vessel.id;
+                    selectedTelescopeIds[spec.Name] = link.Vessel.id;
+                    selected = link;
                 }
                 GUILayout.FlexibleSpace();
                 GUILayout.Label(reason ?? "ready");
                 GUILayout.EndHorizontal();
             }
 
-            ApplySelectedTelescope(SelectedTelescope);
-            DrawOrbitalStatusPanel(SelectedTelescope);
+            ApplySelectedTelescope(selected);
+            DrawOrbitalStatusPanel(selected);
         }
 
         // Points the imaging pipeline at the chosen spacecraft. Idempotent, so it is safe to call from the draw
