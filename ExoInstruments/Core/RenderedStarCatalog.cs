@@ -57,17 +57,11 @@ namespace ExoInstruments.Core
     /// thousands of stars per square degree, so a real and correctly-placed star field lands in
     /// every frame. Nothing here touches the detection pipeline.
     ///
-    /// NOTHING SHIPS. The catalogue is user-supplied, because the useful depths cannot be
-    /// distributed: Gaia's own counts put G &lt; 14 at 236 MB and G &lt; 16 at 1.1 GB in this
-    /// format, and every source in DR3 at 25.3 GB. A Tycho-2 file used to ship and was the worst
-    /// of both worlds, 29.3 MB carried to deliver about four stars per RC20 frame. With no file
-    /// installed the sky behind a photographed body is simply empty, which is honest rather than
-    /// misleadingly sparse.
+    /// The zip carries no catalogue: tools/get_sky_data_compact.py or get_sky_data_complete.py downloads one.
+    /// Without it the sky behind a photographed body is empty.
     ///
-    /// The file is memory mapped rather than read, so its size is paid in disk, not in memory: only
-    /// the band index stays resident, and the operating system pages in the bands a search touches.
-    /// A search reads every record inside the field whatever its magnitude cut, which for a wide
-    /// field on the all-sky file is a great many; TieredStarCatalog is what bounds that.
+    /// Memory mapped, so only the band index stays in memory. A search reads every record in its field
+    /// whatever the magnitude cut; TieredStarCatalog bounds that.
     ///
     /// Pure C# apart from the file access, with no Unity or KSP types, so a search can run on the
     /// background imaging thread.
@@ -265,10 +259,7 @@ namespace ExoInstruments.Core
             }
         }
 
-        /// <summary>
-        /// Records a search of this cone reads, whatever its magnitude cut: its cost, found by the binary
-        /// searches alone.
-        /// </summary>
+        /// <summary>Records a search of this cone reads whatever its magnitude cut.</summary>
         public long CountCandidates(double centreRaDeg, double centreDecDeg, double radiusDeg)
         {
             if (!IsLoaded || radiusDeg <= 0.0) return 0;

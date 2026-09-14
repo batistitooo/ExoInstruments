@@ -4212,11 +4212,8 @@ namespace ExoInstruments.Visualization
             return found;
         }
 
-        // Where the catalogue is cone-searched for everything that could land on the sensor, and how deep. The
-        // search is cut at the magnitude whose signal equals the frame's noise floor, so a short exposure reads
-        // only the bright stars while a long one pulls in everything the catalogue holds, the same way a real
-        // frame's star count grows with exposure time. The search itself waits for the background pass: on the
-        // all-sky catalogue a wide field reads millions of records, which would stall the game here.
+        // Where to cone-search the catalogue, and how deep: to the magnitude whose signal equals the frame's noise
+        // floor. The search itself runs on the background pass, since a wide all-sky field reads millions of records.
         private void PlanStarSearch(ref FrameComputeInputs inputs, GnomonicProjection projection,
                                     double meridianRaDeg, double latitudeDeg)
         {
@@ -4240,10 +4237,8 @@ namespace ExoInstruments.Visualization
         // inconsistency between the rendered and catalogue frames.
         private const double StarSearchMarginDeg = 0.05;
 
-        // Catalogue records a tracked frame's star search may read, divided by StarFieldRenderer.RelativeDepositCost
-        // for a trailed one. Past it the field comes from the deepest magnitude tier that fits, uniformly shallower.
-        // Under Mono a tracked star costs about half a microsecond, so this holds the heaviest frames to seconds;
-        // see TieredStarCatalog and tools/starcat-tests.
+        // Records a tracked frame's star search may read, divided by StarFieldRenderer.RelativeDepositCost when
+        // trailed. Past it the field comes uniformly from a shallower tier; see tools/starcat-tests.
         private const long MaxStarCandidatesPerFrame = 10000000;
 
         // The apparent magnitude whose collected signal equals the frame's noise floor, which is the faintest

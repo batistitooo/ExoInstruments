@@ -87,10 +87,7 @@ namespace ExoInstruments.Core
         // thousands of stars.
         private const int MaxTrailSamples = 512;
 
-        /// <summary>
-        /// What laying down one star with a trail this many pixels long costs, against a tracked star, so a
-        /// caller can hold a trailed frame to the same time as a tracked one.
-        /// </summary>
+        /// <summary>Cost of depositing one star trailed over this many pixels, relative to a tracked star.</summary>
         public static double RelativeDepositCost(double trailLengthPx)
             => 1.0 + Math.Min(Math.Max(0.0, trailLengthPx), MaxTrailSamples) / TrailSamplesPerTrackedStar;
 
@@ -151,10 +148,7 @@ namespace ExoInstruments.Core
             return drawn;
         }
 
-        /// <summary>
-        /// One star of DepositStars, for a caller streaming stars straight out of the catalogue rather than
-        /// holding them in a list. True when the star landed on the sensor.
-        /// </summary>
+        /// <summary>DepositStars for a single streamed star. True when it landed on the sensor.</summary>
         public static bool DepositStar(
             float[] plane, int width, int height,
             RenderedStar star,
@@ -187,12 +181,8 @@ namespace ExoInstruments.Core
                 }
             }
 
-            // Cheap reject for a source whose whole trail is off the sensor. The margin is
-            // what keeps a star that TRAILS onto the sensor from being thrown away before
-            // its streak is drawn; Deposit clips per sample, so only the part that actually
-            // lands on the sensor is recorded. A star wholly outside the frame contributes
-            // nothing, which drops the far PSF wing it would really cast onto the edge; that
-            // is negligible, since the atmospheric profile falls as theta^(-11/3) out there.
+            // Skip a star whose whole trail is off the sensor; the margin keeps one that trails onto it. The far
+            // PSF wing of a star outside the frame is dropped, which is negligible at theta^(-11/3).
             if (Math.Max(sx, ex) < -OffSensorMarginPx || Math.Min(sx, ex) > width + OffSensorMarginPx) return false;
             if (Math.Max(sy, ey) < -OffSensorMarginPx || Math.Min(sy, ey) > height + OffSensorMarginPx) return false;
 

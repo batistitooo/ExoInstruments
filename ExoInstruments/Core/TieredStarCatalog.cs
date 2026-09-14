@@ -14,10 +14,7 @@ namespace ExoInstruments.Core
         /// <summary>Faintest V asked for.</summary>
         public double RequestedVMag;
 
-        /// <summary>
-        /// Faintest V searched: the limit asked for, the catalogue's depth when it ends before that, or a tier's
-        /// cut when the budget stopped short of it.
-        /// </summary>
+        /// <summary>Faintest V searched: the limit asked for, or a shallower catalogue depth or tier cut.</summary>
         public double LimitVMag;
 
         /// <summary>True when the limit asked for would have read more records than the budget allows.</summary>
@@ -39,16 +36,9 @@ namespace ExoInstruments.Core
     }
 
     /// <summary>
-    /// A rendered star catalogue together with the magnitude tiers cut from it, so a search reads about as
-    /// many records as it returns instead of every record in the field.
-    ///
-    /// A tier NAME.V17.starcat, written beside NAME.starcat by tools/tier_star_catalog.py, holds exactly the
-    /// main file's stars at V 17.000 or brighter, in the same order. Searching the shallowest tier that
-    /// reaches the depth asked for returns the same stars as the main file. On the all-sky Gaia file that
-    /// is 15 million records read instead of 456 million for a BRITE field toward the Galactic centre at V 17.
-    ///
-    /// With no tiers installed this is the main catalogue alone. With no main file the deepest tier the others
-    /// agree with stands in for it, and its cut is as deep as any search goes.
+    /// A star catalogue with the magnitude tiers tools/tier_star_catalog.py cuts from it. NAME.V17.starcat holds
+    /// exactly the main file's stars at V 17 or brighter, in the same order, so the shallowest tier deep enough
+    /// returns the same stars from far fewer records. Without the main file the deepest consistent tier is the base.
     /// </summary>
     public sealed class TieredStarCatalog : IDisposable
     {
@@ -94,9 +84,8 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Maps the catalogue at path and every valid tier beside it. Without the main file a tier is the base
-        /// (see LoadTiersOnly), and FileNotFoundException means there is no tier either, with any reason in Report.
-        /// Throws when the base is malformed; a bad tier is only refused, with the reason in Report.
+        /// Maps the catalogue at path and every valid tier beside it; refused files go to Report. Without the main
+        /// file a tier is the base, and FileNotFoundException means there is none. Throws on a malformed base.
         /// </summary>
         public void Load(string path)
         {
@@ -286,10 +275,8 @@ namespace ExoInstruments.Core
         }
 
         /// <summary>
-        /// Which file serves a search, and how deep. The shallowest file complete to limitVMag is exact. When
-        /// that one reads more than maxCandidates records, the deepest shallower tier that fits is searched
-        /// whole instead: the field stays uniform and only gets shallower. Past the cut of a base tier nothing
-        /// is complete, so the base serves down to its cut and the plan says the catalogue stopped it.
+        /// Picks the file for a search: the shallowest complete to limitVMag or, when that reads more than
+        /// maxCandidates, the deepest shallower tier that fits, so the whole field gets shallower.
         /// </summary>
         public StarFieldPlan Plan(double centreRaDeg, double centreDecDeg, double radiusDeg,
                                   double limitVMag, long maxCandidates)

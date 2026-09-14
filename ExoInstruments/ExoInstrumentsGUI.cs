@@ -366,19 +366,12 @@ namespace ExoInstruments
             return MergeWithBackgroundStars(exoplanetTargets);
         }
 
-        // Loads the Gaia catalogue that gets DRAWN into photographs, with any magnitude tiers cut from it. Entirely
-        // separate from the Bright Star Catalogue loaded below, which stays exactly as it is: the exoplanet
-        // instruments deliberately search a small, sparse list so that finding a transit remains a tractable game.
-        // This one exists only so that a photograph has a real star field behind its subject, and nothing in the
-        // detection pipeline ever reads it. A missing or unreadable file simply means no star field.
+        // Loads the Gaia catalogue drawn into photographs, with its magnitude tiers. Separate from the Bright Star
+        // Catalogue below, which the exoplanet instruments search. A missing or unreadable file means no star field.
         private void LoadRenderedStarCatalog()
         {
-            // The star catalogue is USER-SUPPLIED and nothing ships. A Tycho-2 file used to,
-            // and it was the worst of both worlds: 29.3 MB carried to deliver about four stars
-            // per RC20 frame, where a real 30 s sub holds hundreds. Gaia can deliver the real
-            // thing but cannot ship either, at 236 MB for G < 14 and 25.3 GB for every source in
-            // DR3. So the zip carries none: tools/setup_data.py installs a small default set, and
-            // tools/get_sky_data_compact.py the tiers to V 19, which stand in for the main file.
+            // The zip carries no star catalogue: get_sky_data_compact.py installs tiers to V 19, which stand in
+            // for the main file, and setup_data.py a small default set.
             string path = KSPUtil.ApplicationRootPath
                         + "GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat";
             try

@@ -79,11 +79,8 @@ static class Program
         return null;
     }
 
-    // ------------------------------------------------------------------ 1. The reader against the file
-    //
-    // The reference reads every record of the bands a cone overlaps straight off the disk, with no RA
-    // bracketing and no mapping, and applies the same membership test. Agreement to the last bit on every
-    // star is the check.
+    // 1. The reader against the file: every record of the overlapped bands, read straight off the disk with
+    // the same membership test, must agree to the last bit.
 
     static void TestAgainstReference(string title, string path, bool fixture)
     {
@@ -242,7 +239,7 @@ static class Program
         }
     }
 
-    // ------------------------------------------------------------------ 2. Magnitude tiers
+    // 2. Magnitude tiers
 
     static void TestTiers(string path)
     {
@@ -328,11 +325,8 @@ static class Program
         Console.WriteLine();
     }
 
-    // ------------------------------------------------------------------ 3. Tiers without the main file
-    //
-    // The compact download installs the tiers and no main file: the deepest tier is then the base and caps
-    // every frame. A synthetic all-sky catalogue checks that anywhere; links to the installed tiers check it
-    // at full scale.
+    // 3. Tiers without the main file, as the compact download installs them: on a synthetic all-sky
+    // catalogue, and at full scale through links to the installed tiers.
 
     const int SyntheticBands = 180;
     const float SyntheticBandWidth = 1.0f;
@@ -848,7 +842,7 @@ static class Program
         }
     }
 
-    // ------------------------------------------------------------------ 4. What a frame costs
+    // 4. What a frame costs
 
     static void TestCost(string path)
     {
