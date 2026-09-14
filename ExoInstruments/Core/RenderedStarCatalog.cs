@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace ExoInstruments.Core
 {
@@ -55,18 +58,21 @@ namespace ExoInstruments.Core
     /// every frame. Nothing here touches the detection pipeline.
     ///
     /// NOTHING SHIPS. The catalogue is user-supplied, because the useful depths cannot be
-    /// distributed: Gaia's own counts put G &lt; 14 at 443 MB and G &lt; 16 at 1.9 GB in this
-    /// format. A Tycho-2 file used to ship and was the worst of both worlds, 29.3 MB carried to
-    /// deliver about four stars per RC20 frame. With no file installed the sky behind a
-    /// photographed body is simply empty, which is honest rather than misleadingly sparse.
+    /// distributed: Gaia's own counts put G &lt; 14 at 236 MB and G &lt; 16 at 1.1 GB in this
+    /// format, and every source in DR3 at 25.3 GB. A Tycho-2 file used to ship and was the worst
+    /// of both worlds, 29.3 MB carried to deliver about four stars per RC20 frame. With no file
+    /// installed the sky behind a photographed body is simply empty, which is honest rather than
+    /// misleadingly sparse.
     ///
-    /// Loaded once and held; a cone search reads only the declination bands the field of view
-    /// actually overlaps, so search cost tracks the field rather than the catalogue.
+    /// The file is memory mapped rather than read, so its size is paid in disk, not in memory: only
+    /// the band index stays resident, and the operating system pages in the bands a search touches.
+    /// A search reads every record inside the field whatever its magnitude cut, which for a wide
+    /// field on the all-sky file is a great many; TieredStarCatalog is what bounds that.
     ///
-    /// Pure C# apart from the file read, with no Unity or KSP types, so a search can run on the
+    /// Pure C# apart from the file access, with no Unity or KSP types, so a search can run on the
     /// background imaging thread.
     /// </summary>
-    public sealed class RenderedStarCatalog
+    public sealed class RenderedStarCatalog : IDisposable
     {
         private static readonly byte[] Magic = { (byte)'E', (byte)'X', (byte)'O', (byte)'S', (byte)'T', (byte)'A', (byte)'R', (byte)'1' };
 
@@ -89,27 +95,49 @@ namespace ExoInstruments.Core
         private const double RaDegPerUnit = 360.0 / 4294967296.0;
         private const double DecDegPerUnit = 180.0 / 4294967296.0;
 
-        private uint[] raFixed;
-        private int[] decFixed;
-        private ushort[] vMagMilli;
-        private short[] bvMilli;
-        private ushort[] ebvMilli;
+        // Records copied out of the mapping per block while scanning. Reading field by field through the
+        // accessor was ten to twenty times slower under Mono, which is what KSP runs.
+        private const int BlockRecords = 65536;
+
+        private MemoryMappedFile mapping;
+        private MemoryMappedViewAccessor view;
+        private long recordsOffset;
+        private int recordBytes;
+        private bool hasReddening;
+        private int count;
         private uint[] bandStart;
         private int bandCount;
         private double bandWidthDeg;
 
         /// <summary>Number of stars held. Zero when no catalogue file was loaded.</summary>
-        public int Count => raFixed != null ? raFixed.Length : 0;
+        public int Count => count;
 
         /// <summary>True once a catalogue has been loaded successfully.</summary>
-        public bool IsLoaded => Count > 0;
+        public bool IsLoaded => count > 0 && view != null;
+
+        /// <summary>Number of declination bands in the index.</summary>
+        public int BandCount => bandCount;
+
+        /// <summary>Width of one declination band, as the file stores it.</summary>
+        public double BandWidthDeg => bandWidthDeg;
+
+        /// <summary>Stars filed under one declination band.</summary>
+        public int StarsInBand(int band) => (int)(bandStart[band + 1] - bandStart[band]);
 
         /// <summary>
-        /// Reads the packed catalogue. Throws on a malformed file so the caller can log it and
-        /// carry on without a star field, rather than rendering from half-read data.
+        /// Maps the packed catalogue. Throws on a malformed file so the caller can log it and carry on
+        /// without a star field, rather than rendering from half-read data.
         /// </summary>
         public void Load(string path)
         {
+            // Records are decoded in the byte order they were written; a big-endian host would read the
+            // binary search's keys reversed.
+            if (!BitConverter.IsLittleEndian)
+                throw new InvalidDataException("packed star catalogues are little-endian and this is a big-endian machine");
+
+            Dispose();
+
+            long fileLength;
             using (var stream = File.OpenRead(path))
             using (var reader = new BinaryReader(stream))
             {
@@ -123,36 +151,78 @@ namespace ExoInstruments.Core
                 int version = reader.ReadInt32();
                 if (version < OldestSupportedVersion || version > FormatVersion)
                     throw new InvalidDataException("unsupported catalogue version " + version);
-                bool hasReddening = version >= 3;
+                bool reddening = version >= 3;
 
-                int count = reader.ReadInt32();
-                bandCount = reader.ReadInt32();
-                bandWidthDeg = reader.ReadSingle();
-                if (count < 0 || bandCount <= 0 || bandWidthDeg <= 0.0)
+                int stars = reader.ReadInt32();
+                int bands = reader.ReadInt32();
+                double width = reader.ReadSingle();
+                if (stars < 0 || bands <= 0 || width <= 0.0)
                     throw new InvalidDataException("catalogue header is out of range");
 
-                bandStart = new uint[bandCount + 1];
-                for (int i = 0; i <= bandCount; i++) bandStart[i] = reader.ReadUInt32();
+                var starts = new uint[bands + 1];
+                for (int i = 0; i <= bands; i++) starts[i] = reader.ReadUInt32();
 
-                raFixed = new uint[count];
-                decFixed = new int[count];
-                vMagMilli = new ushort[count];
-                bvMilli = new short[count];
-                ebvMilli = new ushort[count];
-                for (int i = 0; i < count; i++)
+                // Reading the records used to catch both faults for free; decoding by computed offset does not.
+                int bytesPerRecord = reddening ? 14 : 12;
+                long need = stream.Position + (long)stars * bytesPerRecord;
+                if (stream.Length < need)
+                    throw new InvalidDataException(
+                        $"catalogue is truncated: {stars:N0} stars need {need:N0} bytes and the file is {stream.Length:N0}");
+                for (int i = 0; i < bands; i++)
                 {
-                    raFixed[i] = reader.ReadUInt32();
-                    decFixed[i] = reader.ReadInt32();
-                    vMagMilli[i] = reader.ReadUInt16();
-                    bvMilli[i] = reader.ReadInt16();
-                    ebvMilli[i] = hasReddening ? reader.ReadUInt16() : EbvUnknown;
+                    if (starts[i] > starts[i + 1])
+                        throw new InvalidDataException("catalogue band index is not monotonic");
                 }
+                if (starts[bands] > (uint)stars)
+                    throw new InvalidDataException("catalogue band index runs past the last star");
+
+                recordsOffset = stream.Position;
+                fileLength = stream.Length;
+                recordBytes = bytesPerRecord;
+                hasReddening = reddening;
+                bandStart = starts;
+                bandCount = bands;
+                bandWidthDeg = width;
+                count = stars;
             }
+
+            if (count == 0) return;
+            try
+            {
+                mapping = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+                view = mapping.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>Releases the mapping. Safe to call twice, and on a catalogue never loaded.</summary>
+        public void Dispose()
+        {
+            view?.Dispose();
+            mapping?.Dispose();
+            view = null;
+            mapping = null;
+            count = 0;
         }
 
         /// <summary>
         /// Every star within radiusDeg of the given direction and brighter than
         /// faintestVMag, appended to results.
+        /// </summary>
+        public void Search(double centreRaDeg, double centreDecDeg, double radiusDeg,
+                           double faintestVMag, List<RenderedStar> results)
+        {
+            if (results == null) return;
+            Search(centreRaDeg, centreDecDeg, radiusDeg, faintestVMag, results.Add);
+        }
+
+        /// <summary>
+        /// Every star within radiusDeg of the given direction and brighter than faintestVMag, handed to
+        /// visit one at a time, so a field of tens of millions of stars never has to be held at once.
         ///
         /// Scans only the declination bands the cone touches. The RA half-width of the cone
         /// grows as 1/cos(dec), since a cone of fixed angular radius spans more hours of RA the
@@ -160,9 +230,59 @@ namespace ExoInstruments.Core
         /// whole band is taken instead of trying to bracket an RA range that wraps.
         /// </summary>
         public void Search(double centreRaDeg, double centreDecDeg, double radiusDeg,
-                           double faintestVMag, List<RenderedStar> results)
+                           double faintestVMag, Action<RenderedStar> visit)
         {
-            if (!IsLoaded || results == null || radiusDeg <= 0.0) return;
+            if (!IsLoaded || visit == null || radiusDeg <= 0.0) return;
+
+            List<int> ranges = CandidateRanges(centreRaDeg, centreDecDeg, radiusDeg);
+            int longest = 0;
+            for (int i = 0; i < ranges.Count; i += 2) longest = Math.Max(longest, ranges[i + 1] - ranges[i]);
+            if (longest == 0) return;
+            byte[] block = new byte[Math.Min(longest, BlockRecords) * recordBytes];
+
+            double cosRadius = Math.Cos(radiusDeg * Math.PI / 180.0);
+            double centreDecRad = centreDecDeg * Math.PI / 180.0;
+            double sinCentreDec = Math.Sin(centreDecRad);
+            double cosCentreDec = Math.Cos(centreDecRad);
+            ushort faintestMilli = ToMagMilli(faintestVMag);
+
+            // Held for the whole scan, so a Dispose on another thread cannot unmap the pages under it.
+            SafeMemoryMappedViewHandle handle = view.SafeMemoryMappedViewHandle;
+            bool referenced = false;
+            try
+            {
+                handle.DangerousAddRef(ref referenced);
+                long firstRecord = handle.DangerousGetHandle().ToInt64() + view.PointerOffset + recordsOffset;
+                for (int i = 0; i < ranges.Count; i += 2)
+                {
+                    ScanRange(firstRecord, ranges[i], ranges[i + 1], block,
+                              sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, visit);
+                }
+            }
+            finally
+            {
+                if (referenced) handle.DangerousRelease();
+            }
+        }
+
+        /// <summary>
+        /// Records a search of this cone reads, whatever its magnitude cut: its cost, found by the binary
+        /// searches alone.
+        /// </summary>
+        public long CountCandidates(double centreRaDeg, double centreDecDeg, double radiusDeg)
+        {
+            if (!IsLoaded || radiusDeg <= 0.0) return 0;
+            List<int> ranges = CandidateRanges(centreRaDeg, centreDecDeg, radiusDeg);
+            long total = 0;
+            for (int i = 0; i < ranges.Count; i += 2) total += ranges[i + 1] - ranges[i];
+            return total;
+        }
+
+        // Record ranges [lo, hi) that can hold a star inside the cone, as consecutive pairs. The RA and
+        // declination bracketing only narrows the candidates; ScanRange decides membership.
+        private List<int> CandidateRanges(double centreRaDeg, double centreDecDeg, double radiusDeg)
+        {
+            var ranges = new List<int>();
 
             int firstBand = BandOf(centreDecDeg - radiusDeg);
             int lastBand = BandOf(centreDecDeg + radiusDeg);
@@ -171,7 +291,6 @@ namespace ExoInstruments.Core
             double centreDecRad = centreDecDeg * Math.PI / 180.0;
             double sinCentreDec = Math.Sin(centreDecRad);
             double cosCentreDec = Math.Cos(centreDecRad);
-            ushort faintestMilli = ToMagMilli(faintestVMag);
 
             for (int band = firstBand; band <= lastBand; band++)
             {
@@ -195,7 +314,7 @@ namespace ExoInstruments.Core
 
                 if (raHalfWidthDeg >= 180.0)
                 {
-                    ScanRange(lo, hi, sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                    AddRange(ranges, lo, hi);
                     continue;
                 }
 
@@ -205,52 +324,74 @@ namespace ExoInstruments.Core
                 {
                     // The RA window straddles 0h, so it is two ranges in a catalogue sorted on
                     // [0, 360). Both are found by the same binary search on the wrapped bounds.
-                    ScanRange(lo, UpperBound(lo, hi, ToRaFixed(raHi)), sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
-                    ScanRange(LowerBound(lo, hi, ToRaFixed(raLo)), hi, sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                    AddRange(ranges, lo, UpperBound(lo, hi, ToRaFixed(raHi)));
+                    AddRange(ranges, LowerBound(lo, hi, ToRaFixed(raLo)), hi);
                 }
                 else
                 {
-                    ScanRange(LowerBound(lo, hi, ToRaFixed(raLo)), UpperBound(lo, hi, ToRaFixed(raHi)),
-                              sinCentreDec, cosCentreDec, centreRaDeg, cosRadius, faintestMilli, results);
+                    AddRange(ranges, LowerBound(lo, hi, ToRaFixed(raLo)), UpperBound(lo, hi, ToRaFixed(raHi)));
+                }
+            }
+            return ranges;
+        }
+
+        private static void AddRange(List<int> ranges, int lo, int hi)
+        {
+            if (hi <= lo) return;
+            ranges.Add(lo);
+            ranges.Add(hi);
+        }
+
+        // Exact angular test on a bracketed range. Records are copied out a block at a time and decoded
+        // little-endian by hand, which is what the file is.
+        private void ScanRange(long firstRecord, int lo, int hi, byte[] block,
+                               double sinCentreDec, double cosCentreDec,
+                               double centreRaDeg, double cosRadius, ushort faintestMilli,
+                               Action<RenderedStar> visit)
+        {
+            int perBlock = block.Length / recordBytes;
+            for (int first = lo; first < hi; first += perBlock)
+            {
+                int n = Math.Min(perBlock, hi - first);
+                Marshal.Copy(new IntPtr(firstRecord + (long)first * recordBytes), block, 0, n * recordBytes);
+
+                for (int o = 0, end = n * recordBytes; o < end; o += recordBytes)
+                {
+                    ushort vMagMilli = (ushort)(block[o + 8] | block[o + 9] << 8);
+                    if (vMagMilli > faintestMilli) continue;
+
+                    double starRaDeg = (uint)(block[o] | block[o + 1] << 8 | block[o + 2] << 16 | block[o + 3] << 24) * RaDegPerUnit;
+                    double starDecDeg = (block[o + 4] | block[o + 5] << 8 | block[o + 6] << 16 | block[o + 7] << 24) * DecDegPerUnit;
+                    double decRad = starDecDeg * Math.PI / 180.0;
+                    double deltaRa = (starRaDeg - centreRaDeg) * Math.PI / 180.0;
+                    double cosSeparation = sinCentreDec * Math.Sin(decRad)
+                                         + cosCentreDec * Math.Cos(decRad) * Math.Cos(deltaRa);
+                    if (cosSeparation < cosRadius) continue;
+
+                    short bvMilli = (short)(block[o + 10] | block[o + 11] << 8);
+                    ushort ebvMilli = hasReddening ? (ushort)(block[o + 12] | block[o + 13] << 8) : EbvUnknown;
+
+                    visit(new RenderedStar
+                    {
+                        RaDeg = starRaDeg,
+                        DecDeg = starDecDeg,
+                        VMag = vMagMilli / 1000.0 - VMagOffset,
+                        ColorIndexBV = bvMilli == BvUnknown ? double.NaN : bvMilli / 1000.0,
+                        ReddeningEBv = ebvMilli == EbvUnknown ? double.NaN : ebvMilli / 1000.0,
+                    });
                 }
             }
         }
 
-        // Exact angular test on a bracketed range; the RA/declination bracketing above only narrows the
-        // candidates, it doesn't decide membership.
-        private void ScanRange(int lo, int hi, double sinCentreDec, double cosCentreDec,
-                               double centreRaDeg, double cosRadius, ushort faintestMilli,
-                               List<RenderedStar> results)
-        {
-            for (int i = lo; i < hi; i++)
-            {
-                if (vMagMilli[i] > faintestMilli) continue;
-
-                double starRaDeg = raFixed[i] * RaDegPerUnit;
-                double starDecDeg = decFixed[i] * DecDegPerUnit;
-                double decRad = starDecDeg * Math.PI / 180.0;
-                double deltaRa = (starRaDeg - centreRaDeg) * Math.PI / 180.0;
-                double cosSeparation = sinCentreDec * Math.Sin(decRad)
-                                     + cosCentreDec * Math.Cos(decRad) * Math.Cos(deltaRa);
-                if (cosSeparation < cosRadius) continue;
-
-                results.Add(new RenderedStar
-                {
-                    RaDeg = starRaDeg,
-                    DecDeg = starDecDeg,
-                    VMag = vMagMilli[i] / 1000.0 - VMagOffset,
-                    ColorIndexBV = bvMilli[i] == BvUnknown ? double.NaN : bvMilli[i] / 1000.0,
-                    ReddeningEBv = ebvMilli[i] == EbvUnknown ? double.NaN : ebvMilli[i] / 1000.0,
-                });
-            }
-        }
+        // RA of one record, read in place: the binary search wants nothing else.
+        private uint RaFixedAt(int i) => view.ReadUInt32(recordsOffset + (long)i * recordBytes);
 
         private int LowerBound(int lo, int hi, uint ra)
         {
             while (lo < hi)
             {
                 int mid = lo + ((hi - lo) >> 1);
-                if (raFixed[mid] < ra) lo = mid + 1; else hi = mid;
+                if (RaFixedAt(mid) < ra) lo = mid + 1; else hi = mid;
             }
             return lo;
         }
@@ -260,7 +401,7 @@ namespace ExoInstruments.Core
             while (lo < hi)
             {
                 int mid = lo + ((hi - lo) >> 1);
-                if (raFixed[mid] <= ra) lo = mid + 1; else hi = mid;
+                if (RaFixedAt(mid) <= ra) lo = mid + 1; else hi = mid;
             }
             return lo;
         }
@@ -300,7 +441,8 @@ namespace ExoInstruments.Core
             return centreDecDeg < low ? low : (centreDecDeg > high ? high : centreDecDeg);
         }
 
-        private static ushort ToMagMilli(double vMag)
+        /// <summary>A V magnitude in the file's stored units, as the magnitude cut compares them.</summary>
+        public static ushort ToMagMilli(double vMag)
         {
             double milli = (vMag + VMagOffset) * 1000.0;
             if (milli <= 0.0) return 0;

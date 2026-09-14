@@ -82,18 +82,28 @@ namespace ExoInstruments.Core
             double binnedEbv = reddeningBin * ReddeningBinMag;
             if (!tables.TryGetValue(reddeningBin, out double[] table))
             {
-                table = new double[entryCount];
+                table = new double[entryCount + 1];
                 for (int i = 0; i < entryCount; i++)
                 {
                     double teff = Math.Pow(10.0, logMin + (logMax - logMin) * i / (entryCount - 1));
                     table[i] = response.EffectiveWidthAngstromForReddenedStar(teff, binnedEbv);
                 }
+                table[entryCount] = double.NaN;
                 Evaluations += entryCount;
                 tables[reddeningBin] = table;
             }
 
+            // A star of unknown temperature depends on the bin alone, so its width is integrated once and kept in
+            // the last slot. Integrated per star, it was nine tenths of a bulge frame's time under Mono.
             if (!(intrinsicTeffK > 0.0))
-                return response.EffectiveWidthAngstromForReddenedStar(0.0, binnedEbv);
+            {
+                if (double.IsNaN(table[entryCount]))
+                {
+                    table[entryCount] = response.EffectiveWidthAngstromForReddenedStar(0.0, binnedEbv);
+                    Evaluations++;
+                }
+                return table[entryCount];
+            }
 
             double position = (Math.Log10(intrinsicTeffK) - logMin) / (logMax - logMin) * (entryCount - 1);
             if (position <= 0.0) return table[0];

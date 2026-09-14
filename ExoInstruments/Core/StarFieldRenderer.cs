@@ -87,6 +87,16 @@ namespace ExoInstruments.Core
         // thousands of stars.
         private const int MaxTrailSamples = 512;
 
+        /// <summary>
+        /// What laying down one star with a trail this many pixels long costs, against a tracked star, so a
+        /// caller can hold a trailed frame to the same time as a tracked one.
+        /// </summary>
+        public static double RelativeDepositCost(double trailLengthPx)
+            => 1.0 + Math.Min(Math.Max(0.0, trailLengthPx), MaxTrailSamples) / TrailSamplesPerTrackedStar;
+
+        // Measured under Mono: a tracked star, photometry and projection included, costs about twenty trail samples.
+        private const double TrailSamplesPerTrackedStar = 20.0;
+
         // Bilinear deposit at a continuous position. Pixel i spans [i, i+1) and is centred at i+0.5, so the
         // weights are taken about the centres.
         private static void Splat(float[] plane, int width, int height, double px, double py, double amount)
@@ -134,49 +144,67 @@ namespace ExoInstruments.Core
             int drawn = 0;
             for (int i = 0; i < stars.Count; i++)
             {
-                RenderedStar star = stars[i];
-
-                double signal = star.FixedElectrons > 0.0 ? star.FixedElectrons : electronsFor(star);
-                if (signal <= signalCutoffElectrons) continue;
-
-                HorizontalCoordinates startAltAz = SkyCoordinates.EquatorialToHorizontal(
-                    star.RaDeg, star.DecDeg, startMeridianRaDeg, observerLatitudeDeg);
-                if (!projection.TryProject(SkyVector.FromHorizontal(startAltAz.AltitudeDeg, startAltAz.AzimuthDeg),
-                                           out double sx, out double sy))
-                    continue;
-
-                double ex = sx, ey = sy;
-                if (endMeridianRaDeg != startMeridianRaDeg)
-                {
-                    HorizontalCoordinates endAltAz = SkyCoordinates.EquatorialToHorizontal(
-                        star.RaDeg, star.DecDeg, endMeridianRaDeg, observerLatitudeDeg);
-                    if (!projection.TryProject(SkyVector.FromHorizontal(endAltAz.AltitudeDeg, endAltAz.AzimuthDeg),
-                                               out ex, out ey))
-                    {
-                        ex = sx; ey = sy;
-                    }
-                }
-
-                // Cheap reject for a source whose whole trail is off the sensor. The margin is
-                // what keeps a star that TRAILS onto the sensor from being thrown away before
-                // its streak is drawn; Deposit clips per sample, so only the part that actually
-                // lands on the sensor is recorded. A star wholly outside the frame contributes
-                // nothing, which drops the far PSF wing it would really cast onto the edge; that
-                // is negligible, since the atmospheric profile falls as theta^(-11/3) out there.
-                if (Math.Max(sx, ex) < -OffSensorMarginPx || Math.Min(sx, ex) > width + OffSensorMarginPx) continue;
-                if (Math.Max(sy, ey) < -OffSensorMarginPx || Math.Min(sy, ey) > height + OffSensorMarginPx) continue;
-
-                Deposit(plane, width, height, new PointSource
-                {
-                    SignalElectrons = signal,
-                    StartPixelX = sx,
-                    StartPixelY = sy,
-                    EndPixelX = ex,
-                    EndPixelY = ey,
-                });
-                drawn++;
+                if (DepositStar(plane, width, height, stars[i], projection, startMeridianRaDeg, endMeridianRaDeg,
+                                observerLatitudeDeg, signalCutoffElectrons, electronsFor))
+                    drawn++;
             }
             return drawn;
+        }
+
+        /// <summary>
+        /// One star of DepositStars, for a caller streaming stars straight out of the catalogue rather than
+        /// holding them in a list. True when the star landed on the sensor.
+        /// </summary>
+        public static bool DepositStar(
+            float[] plane, int width, int height,
+            RenderedStar star,
+            GnomonicProjection projection,
+            double startMeridianRaDeg, double endMeridianRaDeg,
+            double observerLatitudeDeg,
+            double signalCutoffElectrons,
+            Func<RenderedStar, double> electronsFor)
+        {
+            if (plane == null) return false;
+
+            double signal = star.FixedElectrons > 0.0 ? star.FixedElectrons : electronsFor(star);
+            if (signal <= signalCutoffElectrons) return false;
+
+            HorizontalCoordinates startAltAz = SkyCoordinates.EquatorialToHorizontal(
+                star.RaDeg, star.DecDeg, startMeridianRaDeg, observerLatitudeDeg);
+            if (!projection.TryProject(SkyVector.FromHorizontal(startAltAz.AltitudeDeg, startAltAz.AzimuthDeg),
+                                       out double sx, out double sy))
+                return false;
+
+            double ex = sx, ey = sy;
+            if (endMeridianRaDeg != startMeridianRaDeg)
+            {
+                HorizontalCoordinates endAltAz = SkyCoordinates.EquatorialToHorizontal(
+                    star.RaDeg, star.DecDeg, endMeridianRaDeg, observerLatitudeDeg);
+                if (!projection.TryProject(SkyVector.FromHorizontal(endAltAz.AltitudeDeg, endAltAz.AzimuthDeg),
+                                           out ex, out ey))
+                {
+                    ex = sx; ey = sy;
+                }
+            }
+
+            // Cheap reject for a source whose whole trail is off the sensor. The margin is
+            // what keeps a star that TRAILS onto the sensor from being thrown away before
+            // its streak is drawn; Deposit clips per sample, so only the part that actually
+            // lands on the sensor is recorded. A star wholly outside the frame contributes
+            // nothing, which drops the far PSF wing it would really cast onto the edge; that
+            // is negligible, since the atmospheric profile falls as theta^(-11/3) out there.
+            if (Math.Max(sx, ex) < -OffSensorMarginPx || Math.Min(sx, ex) > width + OffSensorMarginPx) return false;
+            if (Math.Max(sy, ey) < -OffSensorMarginPx || Math.Min(sy, ey) > height + OffSensorMarginPx) return false;
+
+            Deposit(plane, width, height, new PointSource
+            {
+                SignalElectrons = signal,
+                StartPixelX = sx,
+                StartPixelY = sy,
+                EndPixelX = ex,
+                EndPixelY = ey,
+            });
+            return true;
         }
 
         // How far outside the sensor a source is still deposited, so its PSF wings can spill inward. Matches

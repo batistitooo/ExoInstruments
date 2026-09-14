@@ -1593,6 +1593,25 @@ namespace ExoInstruments.Visualization
                         + $"{Core.ParallelWork.MaxWorkers} worker(s): {LastStageTimings}");
             }
 
+            // Only the budget warns per capture. A catalogue installed without its main file states its
+            // depth once, in the load line, and the capture readout shows it.
+            StarFieldPlan starPlan = lastStarFieldPlan;
+            if (starPlan != null && starPlan.LimitedByBudget)
+            {
+                string shortOf = starPlan.LimitedByCatalogue
+                    ? "the installed catalogue's own depth"
+                    : $"this exposure's V {starPlan.RequestedVMag:F1}";
+                Debug.LogWarning($"[ExoInstruments] Star field drawn to V {starPlan.LimitVMag:F1} from {starPlan.Source}, "
+                               + $"short of {shortOf}: reaching it would read more "
+                               + $"than the {starPlan.Budget:N0} catalogue records this frame may read.");
+            }
+            else if (starPlan != null && starPlan.OverBudget)
+            {
+                Debug.LogWarning($"[ExoInstruments] This field's star search read {starPlan.Candidates:N0} records "
+                               + $"from {starPlan.Source}, past the {starPlan.Budget:N0} this frame may read. Magnitude "
+                               + "tiers cut with tools/tier_star_catalog.py would read a fraction of that.");
+            }
+
             // The snapshot is taken from the LINEAR pipeline output, before any display transfer
             // function; it is what the FITS export and AstroImageStack consume, and stretching
             // it would corrupt every downstream measurement.
@@ -2194,8 +2213,12 @@ namespace ExoInstruments.Visualization
             // --- Sky field ------------------------------------------------------------
             /// <summary>Where each direction on the sky lands on the sensor, built from the camera's own axes (see BuildFieldGeometry).</summary>
             public GnomonicProjection Projection;
-            /// <summary>Catalogue stars whose light reaches the sensor this exposure, already cone-searched on the main thread.</summary>
-            public List<RenderedStar> Stars;
+            /// <summary>Centre and radius of the star field's cone, degrees. Searched on the background pass, not here.</summary>
+            public double StarSearchRaDeg;
+            public double StarSearchDecDeg;
+            public double StarSearchRadiusDeg;
+            /// <summary>Faintest V this exposure can show, which is where the star search stops.</summary>
+            public double StarLimitingVMag;
             /// <summary>Galaxies whose own extent reaches the sensor, already cone-searched on the main thread.</summary>
             public List<Galaxy> Galaxies;
             /// <summary>
@@ -2763,7 +2786,7 @@ namespace ExoInstruments.Visualization
 
             inputs.FieldReddeningEBv = LastFieldReddeningEBv;
             GatherDispersionGeometry(ref inputs, projection, meridianRaDeg, latitudeDeg, target);
-            inputs.Stars = SearchStarCatalog(inputs, projection, meridianRaDeg, latitudeDeg);
+            PlanStarSearch(ref inputs, projection, meridianRaDeg, latitudeDeg);
             inputs.Galaxies = SearchGalaxyCatalog(inputs, latitudeDeg);
             inputs.Supernovae = GatherSupernovae(inputs);
             // The target goes in exactly once: as a rendered disc, or as a point beside the stars.
@@ -2964,7 +2987,7 @@ namespace ExoInstruments.Visualization
         /// is small on purpose, so that hunting for a transit stays a tractable game, and nothing
         /// here touches it. See RenderedStarCatalog for why one catalogue cannot do both jobs.
         /// </summary>
-        public static RenderedStarCatalog StarCatalog { get; set; }
+        public static TieredStarCatalog StarCatalog { get; set; }
 
         /// <summary>
         /// Optional all-sky reddening map, set by the GUI at load time. Null simply means no
@@ -3094,6 +3117,10 @@ namespace ExoInstruments.Visualization
 
         /// <summary>Limiting V magnitude of the last capture: the faintest star that rose above its noise floor.</summary>
         public double LastLimitingVMag { get; private set; }
+
+        /// <summary>Which catalogue file the last capture's stars came from and how deep; null with none installed.</summary>
+        public StarFieldPlan LastStarFieldPlan => lastStarFieldPlan;
+        private StarFieldPlan lastStarFieldPlan;
 
         // Builds the frame's sky geometry from the camera's OWN axes. The chain is: the telescope's aim is a
         // real direction in the game's world; the observatory's local north/east/up turn that into an altitude
@@ -4185,39 +4212,39 @@ namespace ExoInstruments.Visualization
             return found;
         }
 
-        // Cone-searches the catalogue for everything that could land on the sensor. The search is cut at the
-        // magnitude whose signal equals the frame's noise floor, so a short exposure reads only the bright
-        // stars while a long one pulls in everything the catalogue holds, the same way a real frame's star
-        // count grows with exposure time.
-        private List<RenderedStar> SearchStarCatalog(FrameComputeInputs inputs, GnomonicProjection projection,
-                                                     double meridianRaDeg, double latitudeDeg)
+        // Where the catalogue is cone-searched for everything that could land on the sensor, and how deep. The
+        // search is cut at the magnitude whose signal equals the frame's noise floor, so a short exposure reads
+        // only the bright stars while a long one pulls in everything the catalogue holds, the same way a real
+        // frame's star count grows with exposure time. The search itself waits for the background pass: on the
+        // all-sky catalogue a wide field reads millions of records, which would stall the game here.
+        private void PlanStarSearch(ref FrameComputeInputs inputs, GnomonicProjection projection,
+                                    double meridianRaDeg, double latitudeDeg)
         {
-            RenderedStarCatalog catalog = StarCatalog;
-            if (catalog == null || !catalog.IsLoaded) return null;
-
             SkyVector boresight = projection.Boresight;
             double altDeg = Math.Asin(Math.Max(-1.0, Math.Min(1.0, boresight.Z))) * 180.0 / Math.PI;
             double azDeg = Math.Atan2(boresight.Y, boresight.X) * 180.0 / Math.PI;
 
             SkyCoordinates.HorizontalToEquatorial(altDeg, azDeg, meridianRaDeg, latitudeDeg,
-                                                  out double centreRaDeg, out double centreDecDeg);
+                                                  out inputs.StarSearchRaDeg, out inputs.StarSearchDecDeg);
 
             // The search cone must cover where the field will have TURNED to by the end of the
             // exposure as well as where it starts, or a star that trails into frame is missed.
             double trailDeg = Math.Abs(inputs.EndMeridianRaDeg - inputs.StartMeridianRaDeg);
-            double radiusDeg = projection.SearchRadiusDeg(trailDeg + StarSearchMarginDeg);
+            inputs.StarSearchRadiusDeg = projection.SearchRadiusDeg(trailDeg + StarSearchMarginDeg);
 
-            double limitingVMag = LimitingVMagFor(inputs);
-            LastLimitingVMag = limitingVMag;
-
-            var stars = new List<RenderedStar>(256);
-            catalog.Search(centreRaDeg, centreDecDeg, radiusDeg, limitingVMag, stars);
-            return stars;
+            inputs.StarLimitingVMag = LimitingVMagFor(inputs);
+            LastLimitingVMag = inputs.StarLimitingVMag;
         }
 
         // Extra cone-search radius, covering the PSF wings of a star just outside the sensor and any small
         // inconsistency between the rendered and catalogue frames.
         private const double StarSearchMarginDeg = 0.05;
+
+        // Catalogue records a tracked frame's star search may read, divided by StarFieldRenderer.RelativeDepositCost
+        // for a trailed one. Past it the field comes from the deepest magnitude tier that fits, uniformly shallower.
+        // Under Mono a tracked star costs about half a microsecond, so this holds the heaviest frames to seconds;
+        // see TieredStarCatalog and tools/starcat-tests.
+        private const long MaxStarCandidatesPerFrame = 10000000;
 
         // The apparent magnitude whose collected signal equals the frame's noise floor, which is the faintest
         // star this exposure can show. Inverts PhotonFluxModel's own flux relation rather than approximating
@@ -4657,6 +4684,7 @@ namespace ExoInstruments.Visualization
             // Then everything unresolved. Stars are point sources, so they carry the point-source
             // scintillation rather than the resolved disk's much quieter figure.
             lastStarsDrawnInternal = 0;
+            lastStarFieldPlan = null;
             if (inputs.HaveFieldGeometry)
             {
                 float starScint = ScintillationMultiplier(rngScint, inputs.PointSourceScintSigma);
@@ -5341,22 +5369,40 @@ namespace ExoInstruments.Visualization
             double exposure = inputs.ExposureSeconds;
             double transmission = inputs.StarNonAtmosphericTransmission * scintillation;
 
-            if (inputs.Stars != null && inputs.Stars.Count > 0)
+            TieredStarCatalog catalog = StarCatalog;
+            if (catalog != null && catalog.IsLoaded)
             {
                 // One cache per frame, built here rather than alongside the response: it runs
                 // quadratures, this is the background thread, and a frame is one sight line so its
                 // stars share nearly all of them. See ReddenedResponseCache.
                 var reddening = new ReddenedResponseCache(response);
+                Func<RenderedStar, double> electronsFor = star => StellarPhotometry.CollectedElectrons(
+                    star.VMag, star.ColorIndexBV, star.ReddeningEBv,
+                    response, reddening, area, exposure, transmission);
 
-                drawn = StarFieldRenderer.DepositStars(
-                    signal, TextureWidth, TextureHeight,
-                    inputs.Stars, inputs.Projection,
-                    inputs.StartMeridianRaDeg, inputs.EndMeridianRaDeg,
-                    inputs.ObserverLatitudeDeg,
-                    inputs.SignalCutoffElectrons,
-                    star => StellarPhotometry.CollectedElectrons(
-                        star.VMag, star.ColorIndexBV, star.ReddeningEBv,
-                        response, reddening, area, exposure, transmission));
+                // Streamed from the catalogue straight into the plane, never listed: a deep wide field is
+                // tens of millions of stars.
+                GnomonicProjection projection = inputs.Projection;
+                double startMeridianRaDeg = inputs.StartMeridianRaDeg;
+                double endMeridianRaDeg = inputs.EndMeridianRaDeg;
+                double latitudeDeg = inputs.ObserverLatitudeDeg;
+                double cutoffElectrons = inputs.SignalCutoffElectrons;
+                int width = TextureWidth, height = TextureHeight;
+                // A trailed star costs more to lay down, so a trailed frame reads fewer records in the same time.
+                double trailPx = Math.Sqrt(inputs.DriftPixelX * inputs.DriftPixelX + inputs.DriftPixelY * inputs.DriftPixelY);
+                long budget = (long)(MaxStarCandidatesPerFrame / StarFieldRenderer.RelativeDepositCost(trailPx));
+                int landed = 0;
+                lastStarFieldPlan = catalog.Search(
+                    inputs.StarSearchRaDeg, inputs.StarSearchDecDeg, inputs.StarSearchRadiusDeg,
+                    inputs.StarLimitingVMag, budget,
+                    star =>
+                    {
+                        if (StarFieldRenderer.DepositStar(signal, width, height, star, projection,
+                                                          startMeridianRaDeg, endMeridianRaDeg, latitudeDeg,
+                                                          cutoffElectrons, electronsFor))
+                            landed++;
+                    });
+                drawn = landed;
 
                 lastReddeningQuadratures = reddening.Evaluations;
             }

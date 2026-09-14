@@ -366,35 +366,69 @@ namespace ExoInstruments
             return MergeWithBackgroundStars(exoplanetTargets);
         }
 
-        // Loads the Tycho-2 catalogue that gets DRAWN into photographs. Entirely separate from the Bright Star
-        // Catalogue loaded below, which stays exactly as it is: the exoplanet instruments deliberately search a
-        // small, sparse list so that finding a transit remains a tractable game. This one exists only so that a
-        // photograph has a real star field behind its subject, and nothing in the detection pipeline ever reads
-        // it. A missing or unreadable file simply means no star field.
+        // Loads the Gaia catalogue that gets DRAWN into photographs, with any magnitude tiers cut from it. Entirely
+        // separate from the Bright Star Catalogue loaded below, which stays exactly as it is: the exoplanet
+        // instruments deliberately search a small, sparse list so that finding a transit remains a tractable game.
+        // This one exists only so that a photograph has a real star field behind its subject, and nothing in the
+        // detection pipeline ever reads it. A missing or unreadable file simply means no star field.
         private void LoadRenderedStarCatalog()
         {
             // The star catalogue is USER-SUPPLIED and nothing ships. A Tycho-2 file used to,
             // and it was the worst of both worlds: 29.3 MB carried to deliver about four stars
             // per RC20 frame, where a real 30 s sub holds hundreds. Gaia can deliver the real
-            // thing but cannot ship either, at 443 MB for G < 14 and 1.9 GB for G < 16 in this
-            // format. So the choice is a real star field or an honestly empty one, and building
-            // it is one command: see tools/pack_gaia_catalog.py and the README.
+            // thing but cannot ship either, at 236 MB for G < 14 and 25.3 GB for every source in
+            // DR3. So the zip carries none: tools/setup_data.py installs a small default set, and
+            // tools/get_sky_data_compact.py the tiers to V 19, which stand in for the main file.
             string path = KSPUtil.ApplicationRootPath
                         + "GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat";
             try
             {
-                if (!System.IO.File.Exists(path))
+                var catalog = new TieredStarCatalog();
+                try
                 {
+                    catalog.Load(path);
+                }
+                catch (System.IO.FileNotFoundException)
+                {
+                    // Neither the main file nor a magnitude tier beside it. Report says why a file there was passed over.
+                    foreach (string skipped in catalog.Report)
+                        Debug.LogWarning("[ExoInstruments] Star catalogue: " + skipped);
                     Debug.Log("[ExoInstruments] No star catalogue installed, so photographs will "
                             + "have an empty sky behind their subject. To render a real star "
-                            + "field, build one with tools/pack_gaia_catalog.py and place it at "
-                            + path + "; see the README for depths and their memory cost.");
+                            + "field, run tools/get_sky_data_compact.py for stars to V 19, or "
+                            + "tools/setup_data.py for a small default set; see the README "
+                            + "for depths and their disk cost.");
                     return;
                 }
-                var catalog = new RenderedStarCatalog();
-                catalog.Load(path);
+                foreach (string refused in catalog.Report)
+                    Debug.LogWarning("[ExoInstruments] Star catalogue: " + refused);
                 SolarSystemCameraTexture.StarCatalog = catalog;
-                Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Gaia DR3 stars loaded.");
+
+                var invariant = System.Globalization.CultureInfo.InvariantCulture;
+                List<double> cuts = catalog.TierCuts;
+                string tierList = cuts.Count > 0
+                    ? ", with magnitude tiers at V " + string.Join(", ", cuts.ConvertAll(c => c.ToString(invariant)))
+                    : "";
+                if (catalog.IsDepthLimited)
+                {
+                    Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Gaia DR3 stars to V "
+                            + catalog.DepthVMag.ToString(invariant)
+                            + $" ({catalog.BaseName}, no main file){tierList}.");
+                }
+                else
+                {
+                    Debug.Log($"[ExoInstruments] Rendered star field: {catalog.Count} Gaia DR3 stars loaded{tierList}.");
+                }
+
+                // Deep enough that a wide field without tiers reads for minutes. Only a main file can be cut:
+                // a tier's own tiers would be named NAME.V19.V17.starcat, which nothing reads.
+                const int deepCatalogueStars = 100000000;
+                if (!catalog.IsDepthLimited && cuts.Count == 0 && catalog.Count > deepCatalogueStars)
+                {
+                    Debug.LogWarning("[ExoInstruments] This star catalogue has no magnitude tiers, so a wide "
+                                   + "field reads every star inside it, which is minutes per frame on BRITE. "
+                                   + "Cut them once with tools/tier_star_catalog.py.");
+                }
             }
             catch (Exception e)
             {
@@ -2601,9 +2635,13 @@ namespace ExoInstruments
                 string sky = double.IsPositiveInfinity(skyMag) ? "-" : $"{skyMag:F2} mag/arcsec²";
                 double airglowR = solarSystemCamera.LastAirglowRayleighsInBand;
                 double ebv = solarSystemCamera.LastFieldReddeningEBv;
+                // Read once: the background pass replaces it between frames.
+                StarFieldPlan starPlan = solarSystemCamera.LastStarFieldPlan;
                 GUILayout.Label(
                     $"Sky {sky}  |  limit V {solarSystemCamera.LastLimitingVMag:F1}"
                     + $"  |  {solarSystemCamera.LastStarsDrawn} stars"
+                    + (starPlan != null && (starPlan.LimitedByBudget || starPlan.LimitedByCatalogue)
+                        ? $" to V {starPlan.LimitVMag:F1}" : "")
                     + (airglowR > 0.0
                         ? $"  |  airglow {airglowR:F0} R, {solarSystemCamera.LastAirglowLineShare * 100.0:F0}% lines"
                         : "")

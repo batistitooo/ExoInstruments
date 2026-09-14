@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- net472 builds an exe Mono runs, which is what KSP runs; net10.0 is the quick path. The Core list is
+       bandpass-wcs-tests' own, since the photometry drags in the instrument catalogue. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net10.0;net472</TargetFrameworks>
+    <Nullable>disable</Nullable>
+    <AssemblyName>starcat</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <NoWarn>CS0168;CS0219;CS0618</NoWarn>
+    <Core Condition="'$(Core)' == ''">../../ExoInstruments/Core</Core>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../bandpass-wcs-tests/Stub.cs" />
+    <Compile Include="$(Core)/SpectralCurve.cs" />
+    <Compile Include="$(Core)/SystemBandpass.cs" />
+    <Compile Include="$(Core)/PhotonFluxModel.cs" />
+    <Compile Include="$(Core)/StellarPhotometry.cs" />
+    <Compile Include="$(Core)/ReddenedResponseCache.cs" />
+    <Compile Include="$(Core)/ReddenedStarSpectrum.cs" />
+    <Compile Include="$(Core)/InterstellarExtinction.cs" />
+    <Compile Include="$(Core)/Fitzpatrick99Table.cs" />
+    <Compile Include="$(Core)/StellarColor.cs" />
+    <Compile Include="$(Core)/Colorimetry.cs" />
+    <Compile Include="$(Core)/CieColourMatchingTable.cs" />
+    <Compile Include="$(Core)/SkyBrightnessModel.cs" />
+    <Compile Include="$(Core)/AtmosphericImagingNoise.cs" />
+    <Compile Include="$(Core)/AtmosphericNoise.cs" />
+    <Compile Include="$(Core)/FitsWcs.cs" />
+    <Compile Include="$(Core)/GnomonicProjection.cs" />
+    <Compile Include="$(Core)/SkyCoordinates.cs" />
+    <Compile Include="$(Core)/StarTarget.cs" />
+    <Compile Include="$(Core)/InstrumentSpec.cs" />
+    <Compile Include="$(Core)/Coronagraph.cs" />
+    <Compile Include="$(Core)/InfraredArray.cs" />
+    <Compile Include="$(Core)/ChargeDiffusion.cs" />
+    <Compile Include="$(Core)/PixelKernel.cs" />
+    <Compile Include="$(Core)/PhotometricDetector.cs" />
+    <Compile Include="$(Core)/DetectionResult.cs" />
+    <Compile Include="$(Core)/FluxSample.cs" />
+    <Compile Include="$(Core)/VisualTelescopeCatalog.cs" />
+    <Compile Include="$(Core)/SpacePlatformSpec.cs" />
+    <Compile Include="$(Core)/ParallelWork.cs" />
+    <Compile Include="$(Core)/OpticalPsf.cs" />
+    <Compile Include="$(Core)/FourierConvolution.cs" />
+    <Compile Include="$(Core)/AtmosphericRefraction.cs" />
+    <Compile Include="$(Core)/RadialPsfProfile.cs" />
+    <Compile Include="$(Core)/DirectImagingSimulator.cs" />
+    <Compile Include="$(Core)/DirectImagingResult.cs" />
+    <Compile Include="$(Core)/PupilDiffraction.cs" />
+    <Compile Include="$(Core)/FilterCurves.cs" />
+    <Compile Include="$(Core)/GaiaPhotometry.cs" />
+    <Compile Include="$(Core)/RenderedStarCatalog.cs" />
+    <Compile Include="$(Core)/TieredStarCatalog.cs" />
+    <Compile Include="$(Core)/StarFieldRenderer.cs" />
+  </ItemGroup>
+</Project>

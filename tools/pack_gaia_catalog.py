@@ -34,17 +34,18 @@ which is at least honestly empty rather than misleadingly sparse.
 
 CHOOSING A DEPTH
 ----------------
-The whole file is held in RAM as five parallel arrays (RA, dec, V, B-V, E(B-V)) totalling
-the same 14 bytes/star, so the table above is also the memory cost. Some guidance rather
-than a recommendation, since it depends on the machine:
+The reader memory maps the file, so the table above is disk, not memory: only the
+declination index stays resident, and a frame pages in the bands its field touches.
 
   * G < 13 (103 MB) is a safe first try and already ~3x Tycho-2's density.
-  * G < 14 (236 MB) is the deepest most machines will want alongside KSP itself.
-  * G < 15 and beyond are for people who know what their RAM is doing.
+  * G < 15 (517 MB) and deeper cost disk and nothing else while playing.
+  * Every source in DR3 is 25.3 GB, built from the bulk release by ExoInstruments Studio's
+    tools/build_allsky_catalog.py. Cut magnitude tiers from it with tier_star_catalog.py.
 
-Search cost does NOT scale with catalogue size: the format is banded by declination and
-binary-searched in RA, so a cone search touches only the stars near the field. What DOES
-scale is the number of stars rendered per frame, which is the point of doing this.
+A cone search reads only the declination bands the field overlaps, binary-searched in RA,
+but inside the field it reads every star whatever the magnitude cut, since the file is not
+sorted by brightness. Harmless at G < 15; on the all-sky file a wide field reads hundreds
+of millions of records, which is what the tiers remove.
 
 PHOTOMETRY
 ----------
