@@ -1092,9 +1092,10 @@ namespace ExoInstruments
 
             if (!anyStarSessionActive && !photographySessionActive)
             {
-                // One shared chart. Clicking a body or a star points the telescope at it; a star
-                // additionally stays selected for the detection instruments, which need a
-                // catalogue entry rather than a direction.
+                // One shared chart. Clicking a body or a star selects it, which turns a ground
+                // telescope onto it but not a spacecraft (see DrawPointButton); a star additionally
+                // stays selected for the detection instruments, which need a catalogue entry rather
+                // than a direction.
                 DrawStarSelection();
                 DrawManualPointingEntry();
 
@@ -1127,7 +1128,7 @@ namespace ExoInstruments
             }
             else if (photographySessionActive)
             {
-                GUILayout.Label("Currently pointing at:");
+                GUILayout.Label(ObservingPlatform.IsSpaceBased ? "Selected target:" : "Currently pointing at:");
                 GUILayout.Space(6);
                 DrawPhotographyTargetInfoCard(selectedPhotographyTarget);
                 GUILayout.Space(10);
@@ -2103,7 +2104,17 @@ namespace ExoInstruments
             PointingReadout pointing = GroundStation.Readout(link);
             if (!pointing.HasCommand)
             {
-                reason = "not pointed at anything yet";
+                reason = pointing.AttitudeHeldBy != null
+                    ? "not pointed: " + pointing.AttitudeHeldBy + " holds the attitude, so point this camera first"
+                    : "not pointed at anything yet: press Point at target";
+                return false;
+            }
+
+            // Selecting no longer turns the spacecraft, so the command can be for another target. Refused
+            // rather than shot: the frame would show the commanded target under the selected one's name.
+            if (!SelectedIsCommanded(link))
+            {
+                reason = "pointed at another target: press Point at target";
                 return false;
             }
 
@@ -2193,6 +2204,12 @@ namespace ExoInstruments
 
             // Observability strip: always visible.
             DrawPhotographyObservability();
+
+            // The spacecraft's pointing and its Point at target button here as well, beside Capture: an
+            // observation can be started before the spacecraft was pointed, and stopping it to point loses
+            // nothing worth the detour.
+            if (photographySessionActive && ObservingPlatform.IsSpaceBased)
+                DrawPointingReadout(ObservingPlatform.ActiveSpaceTelescope);
 
             // Known supernovae the last frame caught, named; unknown ones stay unannounced until
             // the player notices the new star and its frame discovers it.
@@ -3764,7 +3781,7 @@ namespace ExoInstruments
             GUILayout.Label(ObservingPlatform.IsSpaceBased && ObservingPlatform.ActiveSpaceTelescope.Vessel != null
                 ? $"Observing from {ObservingPlatform.ActiveSpaceTelescope.Vessel.vesselName}, in orbit of {ObservingPlatform.HostBody.bodyName}"
                 : $"Observing from {ObservatorySite.Describe()}", smallCaptionStyle);
-            GUILayout.Label("Click anything on the chart to point at it, or search for it by name on the right.");
+            GUILayout.Label("Click anything on the chart to select it, or search for it by name on the right.");
 
             GUILayout.Space(6);
             Rect chartRect = GUILayoutUtility.GetRect(SkyChartWidth, SkyChartHeight,
@@ -3863,6 +3880,10 @@ namespace ExoInstruments
                     SelectPhotographyTarget(
                         SkyTarget.FromEquatorial(hitSn.RaDeg, hitSn.DecDeg, hitSn.Designation),
                         clearStarSelection: true);
+                    // Consumed like a body hit: falling through started a drag whose release selected
+                    // whatever raw position was under the cursor instead of the supernova.
+                    e.Use();
+                    return;
                 }
                 else if (TryHitBodyMarker(chartRect, e.mousePosition, out CelestialBody hitBody))
                 {
@@ -3987,8 +4008,6 @@ namespace ExoInstruments
                 ExoObservatoryTelescopeTracker.TrackedAltDeg = null;
                 ExoObservatoryTelescopeTracker.TrackedAzDeg = null;
             }
-
-            ApplySpaceTelescopePointing();
         }
 
         /// <summary>
@@ -4003,10 +4022,13 @@ namespace ExoInstruments
         ///
         /// A body is handed over as a body rather than as the direction it happens to lie in right
         /// now, so the module can re-resolve it as the vehicle moves; see TryResolvePointingDirection.
+        ///
+        /// CALLED ONLY FROM THE POINT AT TARGET BUTTON. Selecting a target used to slew at once, so a
+        /// click on the chart sent the spacecraft off before the player had looked. force re-issues
+        /// a command already in progress, the retry for a stalled one.
         /// </summary>
-        void ApplySpaceTelescopePointing()
+        void ApplySpaceTelescopePointing(SpaceTelescopeLink link, bool force)
         {
-            SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
             if (link == null || link.Vessel == null) return;
             if (!selectedPhotographyTarget.HasTarget) return;
 
@@ -4015,7 +4037,7 @@ namespace ExoInstruments
             // command into the protovessel instead, and refuses it when there is no radio link.
             if (selectedPhotographyTarget.IsBody)
             {
-                if (AlreadyCommanded(link, selectedPhotographyTarget.Body, Vector3d.zero)) return;
+                if (!force && AlreadyCommanded(link, selectedPhotographyTarget.Body, Vector3d.zero)) return;
                 GroundStation.CommandBody(link, selectedPhotographyTarget.Body, out spaceCommandMessage);
                 return;
             }
@@ -4024,7 +4046,7 @@ namespace ExoInstruments
             // right now: see GroundStation.CommandEquatorial for the drift that caused.
             if (selectedPhotographyTarget.IsEquatorial)
             {
-                if (AlreadyCommandedEquatorial(link, selectedPhotographyTarget.RaDeg,
+                if (!force && AlreadyCommandedEquatorial(link, selectedPhotographyTarget.RaDeg,
                                                selectedPhotographyTarget.DecDeg)) return;
                 GroundStation.CommandEquatorial(link, selectedPhotographyTarget.RaDeg,
                                                 selectedPhotographyTarget.DecDeg, out spaceCommandMessage);
@@ -4033,7 +4055,7 @@ namespace ExoInstruments
 
             if (solarSystemCamera == null) return;
             if (!solarSystemCamera.TryResolveWorldDirection(selectedPhotographyTarget, out Vector3d direction)) return;
-            if (AlreadyCommanded(link, null, direction)) return;
+            if (!force && AlreadyCommanded(link, null, direction)) return;
             GroundStation.CommandDirection(link, direction, out spaceCommandMessage);
         }
 
@@ -4041,7 +4063,8 @@ namespace ExoInstruments
         bool AlreadyCommandedEquatorial(SpaceTelescopeLink link, double raDeg, double decDeg)
         {
             TelescopeCommandState state = TelescopeCommandState.Read(link);
-            if (!state.HasCommand || double.IsNaN(state.TargetRaDeg) || double.IsNaN(state.TargetDecDeg)) return false;
+            if (!GroundStation.HoldsAttitude(link)
+                || double.IsNaN(state.TargetRaDeg) || double.IsNaN(state.TargetDecDeg)) return false;
 
             // Compared as an angle on the sky rather than as two coordinate differences: a degree
             // of RA is not a degree of arc anywhere but the equator, and near the pole comparing
@@ -4052,15 +4075,14 @@ namespace ExoInstruments
         }
 
         /// <summary>
-        /// Whether this exact repoint is already the one in progress. Not covered by
-        /// SelectPhotographyTarget ignoring an unchanged target: Awake re-applies whatever survived
-        /// the last scene, so leaving the observatory and returning would re-issue the same command
-        /// and restart its clock.
+        /// Whether this exact repoint is already the one the vessel is flying, so pressing Point at
+        /// target again does not restart its clock. A telescope whose target another one aboard took
+        /// over is not: the vehicle has turned away, and it has to be allowed to take it back.
         /// </summary>
         bool AlreadyCommanded(SpaceTelescopeLink link, CelestialBody body, Vector3d direction)
         {
             TelescopeCommandState state = TelescopeCommandState.Read(link);
-            if (!state.HasCommand) return false;
+            if (!GroundStation.HoldsAttitude(link)) return false;
 
             if (body != null) return state.TargetBodyName == body.bodyName;
             if (!string.IsNullOrEmpty(state.TargetBodyName)) return false;
@@ -4069,6 +4091,17 @@ namespace ExoInstruments
             // Inside the field of view is the same pointing: the target is already on the detector
             // and no real observatory would spend a manoeuvre to centre it better.
             return Vector3d.Angle(state.CommandedDirection, direction) < GroundStation.OnTargetToleranceDeg(link);
+        }
+
+        /// <summary>Whether the selected target is what this telescope's vessel is flying, to within the field of view.</summary>
+        bool SelectedIsCommanded(SpaceTelescopeLink link)
+        {
+            if (link == null || link.Vessel == null) return false;
+            if (selectedPhotographyTarget.IsBody)
+                return AlreadyCommanded(link, selectedPhotographyTarget.Body, Vector3d.zero);
+            if (selectedPhotographyTarget.IsEquatorial)
+                return AlreadyCommandedEquatorial(link, selectedPhotographyTarget.RaDeg, selectedPhotographyTarget.DecDeg);
+            return false;
         }
 
         /// <summary>Why the last ground command was refused, or null. Shown under the capture controls.</summary>
@@ -4423,7 +4456,7 @@ namespace ExoInstruments
         {
             GUILayout.Space(8);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Point at RA/Dec", GUILayout.Width(100));
+            GUILayout.Label("Target RA/Dec", GUILayout.Width(100));
             manualRaText = GUILayout.TextField(manualRaText ?? "", GUILayout.Width(110));
             manualDecText = GUILayout.TextField(manualDecText ?? "", GUILayout.Width(110));
             if (GUILayout.Button("Go", GUILayout.Width(40)))
@@ -4454,7 +4487,11 @@ namespace ExoInstruments
             }
             if (ObservingPlatform.IsSpaceBased)
             {
-                GUILayout.Label($"Telescope pointed at {selectedPhotographyTarget.DisplayName}", smallCaptionStyle);
+                // Selecting no longer turns a spacecraft, so it is only called pointed when it is.
+                GUILayout.Label(SelectedIsCommanded(ObservingPlatform.ActiveSpaceTelescope)
+                    ? $"Spacecraft pointed at {selectedPhotographyTarget.DisplayName}"
+                    : $"Selected {selectedPhotographyTarget.DisplayName}. The spacecraft turns only when you press Point at target.",
+                    smallCaptionStyle);
                 return;
             }
             TryComputeTargetAltAz(selectedPhotographyTarget, out double alt, out double az);

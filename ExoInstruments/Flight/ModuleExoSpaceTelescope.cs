@@ -191,6 +191,10 @@ namespace ExoInstruments.Flight
         [KSPField(isPersistant = true)]
         public string lastBoresightDirection = "";
 
+        /// <summary>Universal time lastBoresightDirection refers to: when it was measured, or when a manoeuvre flown through another telescope aboard re-based it.</summary>
+        [KSPField(isPersistant = true)]
+        public double lastBoresightUt;
+
         /// <summary>Universal time the manoeuvre was commanded at.</summary>
         [KSPField(isPersistant = true)]
         public double slewStartUt;
@@ -421,8 +425,19 @@ namespace ExoInstruments.Flight
                 CacheAttitudeAuthority();
             }
 
-            if (pointingHoldEnabled) DrivePointing();
-            else ReleaseDampingOverride();
+            // ONE ATTITUDE PER VESSEL. With two telescopes aboard only the one whose command the
+            // vehicle is flying drives SAS; two holds would overwrite each other's lock every frame.
+            ModuleExoSpaceTelescope owner = SpaceTelescopeRegistry.LoadedAttitudeOwner(vessel);
+            if (pointingHoldEnabled && owner == this) DrivePointing();
+            else
+            {
+                // A hold outranked by another aboard, from docking two held vessels or an old save, is dropped
+                // rather than left armed: it would swing the vehicle back the moment the other one let go.
+                if (pointingHoldEnabled && owner != null) pointingHoldEnabled = false;
+                ReleaseDampingOverride();
+                hasRollReference = false;   // relatch from wherever the vehicle is when this one holds again
+            }
+            Events["ReleasePointing"].active = owner != null;
 
             statusLine = BuildStatusLine();
         }
@@ -459,6 +474,7 @@ namespace ExoInstruments.Flight
                 Vector3d u = bore.normalized;
                 lastBoresightDirection = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                                                        "{0:R},{1:R},{2:R}", u.x, u.y, u.z);
+                lastBoresightUt = powerLedgerUt;
             }
         }
 
@@ -902,6 +918,12 @@ namespace ExoInstruments.Flight
             if (pointingLink == null) pointingLink = new SpaceTelescopeLink();
             pointingLink.Vessel = vessel;
             pointingLink.Module = this;
+            if (string.IsNullOrEmpty(pointingLink.Key))
+            {
+                pointingLink.PartPersistentId = part != null ? part.persistentId : 0u;
+                pointingLink.ModuleOrdinal = SpaceTelescopeRegistry.OrdinalOf(this);
+                pointingLink.Key = SpaceTelescopeRegistry.KeyOf(this);
+            }
             pointingLink.Instrument = Instrument;
             pointingLink.ControlMode = controlMode;
             pointingLink.ControlTorqueNm = controlTorqueCached;
@@ -913,21 +935,47 @@ namespace ExoInstruments.Flight
         private bool hasCommandedRotation;
 
         private VesselAutopilot.VesselSAS dampingOverrideSas;
-        private float dampingOverrideOriginal;
+
+        // ONE RECORD PER SAS, not per module. Two telescopes aboard each saving and restoring the
+        // threshold would save the other's float.MaxValue as the original and leave SAS damping
+        // off for the rest of the session. The holder changes hands; only the last holder restores.
+        private sealed class DampingOverride
+        {
+            public ModuleExoSpaceTelescope Holder;
+            public float Original;
+        }
+        private static readonly Dictionary<VesselAutopilot.VesselSAS, DampingOverride> dampingOverrides =
+            new Dictionary<VesselAutopilot.VesselSAS, DampingOverride>();
+
+        // VesselSAS's own constructor default, for a threshold found already raised.
+        private const float StockOverrideMinimumMagnitude = 0.1f;
 
         private void HoldDampingOverride(VesselAutopilot.VesselSAS sas)
         {
-            if (sas == dampingOverrideSas) return;
-            ReleaseDampingOverride();
+            if (sas != dampingOverrideSas) ReleaseDampingOverride();
+
+            if (!dampingOverrides.TryGetValue(sas, out DampingOverride record))
+            {
+                float original = sas.overrideMinimumMagnitude;
+                record = new DampingOverride
+                {
+                    Original = original == float.MaxValue ? StockOverrideMinimumMagnitude : original,
+                };
+                dampingOverrides[sas] = record;
+            }
+            record.Holder = this;
             dampingOverrideSas = sas;
-            dampingOverrideOriginal = sas.overrideMinimumMagnitude;
             sas.overrideMinimumMagnitude = float.MaxValue;
         }
 
         private void ReleaseDampingOverride()
         {
             if (dampingOverrideSas == null) return;
-            dampingOverrideSas.overrideMinimumMagnitude = dampingOverrideOriginal;
+            if (dampingOverrides.TryGetValue(dampingOverrideSas, out DampingOverride record) && record.Holder == this)
+            {
+                dampingOverrideSas.overrideMinimumMagnitude = record.Original;
+                dampingOverrides.Remove(dampingOverrideSas);
+            }
             dampingOverrideSas = null;
         }
 
@@ -1050,6 +1098,12 @@ namespace ExoInstruments.Flight
         [KSPEvent(guiActive = true, guiName = "Release pointing hold", active = true)]
         public void ReleasePointing()
         {
+            // The hold belongs to the vehicle, so releasing it from any telescope aboard releases it.
+            List<ModuleExoSpaceTelescope> aboard = vessel != null
+                ? vessel.FindPartModulesImplementing<ModuleExoSpaceTelescope>() : null;
+            if (aboard != null)
+                for (int i = 0; i < aboard.Count; i++)
+                    if (aboard[i] != null) aboard[i].pointingHoldEnabled = false;
             pointingHoldEnabled = false;
         }
 

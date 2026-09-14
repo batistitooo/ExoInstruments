@@ -149,12 +149,13 @@ namespace ExoInstruments.Flight
 
             Vector3d target = worldDirection.normalized;
             TelescopeCommandState state = TelescopeCommandState.Read(link);
+            AttitudeHolder holder = FindHolder(link, in state);
 
             // Where the boresight is NOW is where the slew starts from, and mid-slew that is
             // somewhere between the last two targets rather than at either of them. Retargeting
             // half way through a manoeuvre is a thing operators really do and it has to charge for
             // the angle actually left to cover, not for the one from the abandoned destination.
-            Vector3d from = CurrentDirection(link, in state);
+            Vector3d from = CurrentDirection(link, in state, in holder);
             double angleDeg = from.sqrMagnitude > 1e-12 ? Vector3d.Angle(from, target) : 0.0;
 
             SlewProfile profile = Plan(link, angleDeg);
@@ -167,20 +168,25 @@ namespace ExoInstruments.Flight
             // Can it FINISH the manoeuvre, not can it pay up front: a repoint is minutes of
             // sunlight as well as minutes of wheels. The charge is taken by the ledger as the slew
             // runs (see Advance), not here.
+            double busDraw = VesselIdleDrawPerSecond(link);
             double endurance = OrbitalPowerBudget.EnduranceSeconds(
                 link.ElectricCharge, ReserveChargeUnits(link),
                 ElectricChargeGenerationPerSecond(link.Vessel), SunlitOrbitFraction(link),
-                SlewDrawPerSecond(link) + IdleDrawPerSecond(link));
+                SlewDrawPerSecond(link) + busDraw);
 
             if (endurance < profile.ManoeuvreSeconds)
             {
                 message = string.Format(
                     "not enough charge: the {0:F0} min slew draws {1:F2} EC/s and the battery runs out after {2:F0} min",
                     profile.ManoeuvreSeconds / 60.0,
-                    SlewDrawPerSecond(link) + IdleDrawPerSecond(link),
+                    SlewDrawPerSecond(link) + busDraw,
                     endurance / 60.0);
                 return GroundCommandResult.InsufficientCharge;
             }
+
+            // THE ATTITUDE CHANGES HANDS. The vehicle is one rigid body, so every other telescope aboard
+            // stops holding its own target and turns with this manoeuvre instead (see CurrentDirection).
+            ReleaseSiblings(link);
 
             state.HasCommand = true;
             state.TargetBodyName = body != null ? body.bodyName : "";
@@ -216,7 +222,7 @@ namespace ExoInstruments.Flight
                 angleDeg,
                 link != null ? link.ControlTorqueNm : 0.0,
                 link != null ? link.InertiaKgM2 : 0.0,
-                platform != null ? platform.MaxSlewRateDegPerSecond * scale : 0.0,
+                VesselSlewRateCapDegPerSecond(link) * scale,
                 platform != null ? platform.GuideStarAcquisitionSeconds / scale : 0.0);
         }
 
@@ -262,6 +268,39 @@ namespace ExoInstruments.Flight
             return platform != null ? platform.IdleElectricChargePerSecond : 0.0;
         }
 
+        /// <summary>
+        /// The whole vessel's standing load, units per second: every telescope aboard is powered, whichever one
+        /// is observing. What the battery really sees, so what the ledger, the slew gate and the reserve use.
+        /// </summary>
+        public static double VesselIdleDrawPerSecond(SpaceTelescopeLink link)
+        {
+            if (link == null) return 0.0;
+            List<SpaceTelescopeLink> aboard = link.Vessel != null ? SpaceTelescopeRegistry.OnVessel(link.Vessel) : null;
+            if (aboard == null || aboard.Count == 0) return IdleDrawPerSecond(link);
+
+            double sum = 0.0;
+            for (int i = 0; i < aboard.Count; i++) sum += IdleDrawPerSecond(aboard[i]);
+            return sum;
+        }
+
+        // The tightest published slew limit among the telescopes aboard, zero for none. The vehicle turns as
+        // one, so commanding it through an instrument without a limit must not turn it faster.
+        private static double VesselSlewRateCapDegPerSecond(SpaceTelescopeLink link)
+        {
+            SpacePlatformSpec own = link != null && link.Instrument != null ? link.Instrument.SpacePlatform : null;
+            double cap = own != null ? own.MaxSlewRateDegPerSecond : 0.0;
+            if (link == null || link.Vessel == null) return cap;
+
+            List<SpaceTelescopeLink> aboard = SpaceTelescopeRegistry.OnVessel(link.Vessel);
+            for (int i = 0; i < aboard.Count; i++)
+            {
+                SpacePlatformSpec p = aboard[i].Instrument != null ? aboard[i].Instrument.SpacePlatform : null;
+                double c = p != null ? p.MaxSlewRateDegPerSecond : 0.0;
+                if (c > 0.0 && (!(cap > 0.0) || c < cap)) cap = c;
+            }
+            return cap;
+        }
+
         /// <summary>Propellant a thruster-controlled manoeuvre spends, kg. Zero under wheel control.</summary>
         public static double SlewPropellantKg(SpaceTelescopeLink link, in SlewProfile profile)
         {
@@ -277,13 +316,13 @@ namespace ExoInstruments.Flight
         /// Charge that has to survive a manoeuvre: enough to keep the bus alive through the
         /// acquisition after it. Not padding. A spacecraft that spends its last charge slewing
         /// arrives pointed perfectly at a target it has no power left to photograph. Derived from
-        /// the instrument's own idle draw over its own acquisition time, not a flat margin.
+        /// the whole vessel's idle draw over this instrument's acquisition time, not a flat margin.
         /// </summary>
         public static double ReserveChargeUnits(SpaceTelescopeLink link)
         {
             SpacePlatformSpec platform = link != null && link.Instrument != null ? link.Instrument.SpacePlatform : null;
             if (platform == null) return 0.0;
-            return platform.IdleElectricChargePerSecond * Math.Max(0.0, platform.GuideStarAcquisitionSeconds);
+            return VesselIdleDrawPerSecond(link) * Math.Max(0.0, platform.GuideStarAcquisitionSeconds);
         }
 
         /// <summary>
@@ -314,6 +353,11 @@ namespace ExoInstruments.Flight
             if (link == null || link.Vessel == null) return false;
 
             Advance(link);
+
+            // Read again rather than trusting the link's copy: another telescope aboard may have spent
+            // charge since the list was rebuilt, and Advance leaves a loaded vessel's figure alone.
+            TotalElectricCharge(link.Vessel, out double onBoard, out double _);
+            link.ElectricCharge = onBoard;
 
             double cost = ExposureChargeUnits(link, exposureSeconds);
             if (!(cost > 0.0)) return true;
@@ -393,11 +437,24 @@ namespace ExoInstruments.Flight
             if (link == null || link.Vessel == null) return r;
 
             TelescopeCommandState state = TelescopeCommandState.Read(link);
-            r.HasCommand = state.HasCommand;
-            if (!state.HasCommand) return r;
+            AttitudeHolder holder = FindHolder(link, in state);
+            r.HasCommand = holder.HeldByThis;
+
+            // Not flying its own command, which with two telescopes aboard includes one whose target was
+            // taken over by the other: there is nothing to report but where the vehicle has carried it.
+            if (!holder.HeldByThis)
+            {
+                r.CurrentDirection = CurrentDirection(link, in state, in holder);
+                if (holder.Owner != null)
+                {
+                    r.AttitudeHeldBy = CameraName(holder.Owner.Instrument);
+                    if (link.Module == null) r.SlewRateDegPerSecond = ManoeuvreRateDegPerSecond(holder.Owner, in holder.OwnerState);
+                }
+                return r;
+            }
 
             r.CommandedDirection = ResolveCommandedDirection(link, in state);
-            r.CurrentDirection = CurrentDirection(link, in state);
+            r.CurrentDirection = CurrentDirection(link, in state, in holder);
             r.ProfileDirection = ProfileDirection(link, in state);
             r.StartDirection = state.FromDirection.sqrMagnitude > 1e-12 ? state.FromDirection.normalized : Vector3d.zero;
             r.CommandedRaDeg = state.TargetRaDeg;
@@ -457,7 +514,8 @@ namespace ExoInstruments.Flight
         }
 
         // The direction the boresight is on right now, measured when possible and interpolated when not.
-        private static Vector3d CurrentDirection(SpaceTelescopeLink link, in TelescopeCommandState state)
+        private static Vector3d CurrentDirection(SpaceTelescopeLink link, in TelescopeCommandState state,
+                                                 in AttitudeHolder holder)
         {
             if (link.Module != null)
             {
@@ -465,13 +523,37 @@ namespace ExoInstruments.Flight
                 if (bore.sqrMagnitude > 1e-12) return bore.normalized;
             }
 
+            if (holder.HeldByThis) return ProfileDirection(link, in state);
+
             // Not commanded is not unknown: it is pointing wherever the player left it, which is
             // the angle a first repoint has to be priced on. Without this the first command after
             // launch was a zero-degree slew however far it asked to go.
-            if (!state.HasCommand)
-                return state.LastBoresight.sqrMagnitude > 1e-12 ? state.LastBoresight.normalized : Vector3d.zero;
+            Vector3d last = state.LastBoresight.sqrMagnitude > 1e-12 ? state.LastBoresight.normalized : Vector3d.zero;
+            if (holder.Owner == null || last.sqrMagnitude < 1e-12) return last;
 
-            return ProfileDirection(link, in state);
+            // CARRIED BY ANOTHER TELESCOPE'S MANOEUVRE. The rigid vehicle turns this boresight by the same
+            // shortest-arc rotation that takes the holder's from where it was when this one was last known
+            // to where it is now.
+            Vector3d then;
+            if (state.LastBoresightUt == holder.OwnerState.LastBoresightUt
+                && holder.OwnerState.LastBoresight.sqrMagnitude > 1e-12)
+            {
+                // Both measured in the same loaded frame, which is also the only case of a save written before
+                // the stamp existed (both zero). The holder's own measurement is exact, including for a body
+                // it has kept tracking since, which its profile cannot give for a past instant.
+                then = holder.OwnerState.LastBoresight.normalized;
+            }
+            else if (state.LastBoresightUt > 0.0)
+            {
+                // Re-based when the holder was commanded, or measured during its manoeuvre.
+                then = ProfileDirectionAt(holder.Owner, in holder.OwnerState,
+                                          Math.Max(state.LastBoresightUt, holder.OwnerState.SlewStartUt));
+            }
+            else return last;   // when this was measured is unknown; turning it by a guess is worse
+
+            Vector3d now = ProfileDirection(holder.Owner, in holder.OwnerState);
+            if (then.sqrMagnitude < 1e-12 || now.sqrMagnitude < 1e-12) return last;
+            return RotateAlongArc(then, now, last);
         }
 
         // Where along the manoeuvre the boresight is supposed to be at this instant, measured or not.
@@ -481,6 +563,9 @@ namespace ExoInstruments.Flight
         // rate and arrives in seconds, so the vehicle never turns at the rate the ledger charged
         // for. Chasing this is that manoeuvre, flown rather than asserted.
         private static Vector3d ProfileDirection(SpaceTelescopeLink link, in TelescopeCommandState state)
+            => ProfileDirectionAt(link, in state, Planetarium.GetUniversalTime());
+
+        private static Vector3d ProfileDirectionAt(SpaceTelescopeLink link, in TelescopeCommandState state, double ut)
         {
             if (!state.HasCommand) return Vector3d.zero;
 
@@ -491,7 +576,7 @@ namespace ExoInstruments.Flight
             if (!(state.ManoeuvreSeconds > 0.0)) return to;
 
             SlewProfile profile = RebuildProfile(link, in state);
-            double elapsed = Planetarium.GetUniversalTime() - state.SlewStartUt;
+            double elapsed = ut - state.SlewStartUt;
             return Slerp(from, to, SlewDynamics.FractionOfAngleCovered(in profile, elapsed));
         }
 
@@ -591,6 +676,206 @@ namespace ExoInstruments.Flight
             return v.sqrMagnitude > 1e-12 ? v.normalized : to;
         }
 
+        // ---------------------------------------------------------------- one attitude per vessel
+
+        /// <summary>
+        /// Whether one command outranks another for a vessel's single attitude. The later one wins; a tie, from
+        /// two commands in one instant or two holds joined by docking, goes to the lower part id, so every
+        /// caller picks the same holder.
+        /// </summary>
+        public static bool OutranksForAttitude(double slewStartUt, uint partPersistentId, int moduleOrdinal,
+                                               double otherSlewStartUt, uint otherPartPersistentId, int otherModuleOrdinal)
+        {
+            if (slewStartUt != otherSlewStartUt) return slewStartUt > otherSlewStartUt;
+            if (partPersistentId != otherPartPersistentId) return partPersistentId < otherPartPersistentId;
+            return moduleOrdinal < otherModuleOrdinal;
+        }
+
+        /// <summary>
+        /// Whether the vessel is flying this telescope's command. ONE RIGID BODY HAS ONE ATTITUDE: of two
+        /// telescopes aboard only one boresight can be put on an arbitrary target, so the vehicle flies one
+        /// command, and Command hands it over explicitly.
+        /// </summary>
+        public static bool HoldsAttitude(SpaceTelescopeLink link)
+        {
+            if (link == null || link.Vessel == null) return false;
+            TelescopeCommandState state = TelescopeCommandState.Read(link);
+            return FindHolder(link, in state).HeldByThis;
+        }
+
+        // Who holds a vessel's attitude, seen from one telescope aboard.
+        private struct AttitudeHolder
+        {
+            public bool HeldByThis;
+            public SpaceTelescopeLink Owner;          // another telescope aboard holding it; null otherwise
+            public TelescopeCommandState OwnerState;
+        }
+
+        private static AttitudeHolder FindHolder(SpaceTelescopeLink link, in TelescopeCommandState state)
+        {
+            var holder = new AttitudeHolder();
+
+            // Loaded: the live modules, without allocating, because the autopilot asks every frame.
+            if (link.Module != null)
+            {
+                ModuleExoSpaceTelescope owner = SpaceTelescopeRegistry.LoadedAttitudeOwner(link.Vessel);
+                holder.HeldByThis = state.HasCommand && owner == link.Module;
+                if (owner != null && owner != link.Module)
+                {
+                    holder.Owner = new SpaceTelescopeLink
+                    {
+                        Vessel = link.Vessel,
+                        VesselName = link.VesselName,
+                        Module = owner,
+                        Instrument = owner.Instrument,
+                        ControlMode = owner.ControlMode,
+                        ControlTorqueNm = owner.controlTorqueCached,
+                        InertiaKgM2 = owner.inertiaCached,
+                    };
+                    holder.OwnerState = TelescopeCommandState.Read(holder.Owner);
+                }
+                return holder;
+            }
+
+            List<SpaceTelescopeLink> aboard = SpaceTelescopeRegistry.OnVessel(link.Vessel);
+            if (aboard.Count <= 1)
+            {
+                holder.HeldByThis = state.HasCommand;
+                return holder;
+            }
+
+            TelescopeCommandState[] states = ReadAll(aboard);
+            int best = -1;
+            for (int i = 0; i < aboard.Count; i++)
+            {
+                if (!states[i].HasCommand) continue;
+                if (best < 0 || OutranksForAttitude(states[i].SlewStartUt, aboard[i].PartPersistentId, aboard[i].ModuleOrdinal,
+                                                    states[best].SlewStartUt, aboard[best].PartPersistentId, aboard[best].ModuleOrdinal))
+                    best = i;
+            }
+            if (best < 0) return holder;
+
+            if (aboard[best].Key == link.Key) holder.HeldByThis = state.HasCommand;
+            else
+            {
+                holder.Owner = aboard[best];
+                holder.OwnerState = states[best];
+            }
+            return holder;
+        }
+
+        private static TelescopeCommandState[] ReadAll(List<SpaceTelescopeLink> aboard)
+        {
+            var states = new TelescopeCommandState[aboard.Count];
+            for (int i = 0; i < aboard.Count; i++) states[i] = TelescopeCommandState.Read(aboard[i]);
+            return states;
+        }
+
+        // Every other telescope aboard lets go of its target, its boresight recorded where the vehicle has
+        // carried it so far, from which it follows the new manoeuvre. All are measured before any is written,
+        // because each write changes who holds the attitude.
+        private static void ReleaseSiblings(SpaceTelescopeLink link)
+        {
+            List<SpaceTelescopeLink> aboard = SpaceTelescopeRegistry.OnVessel(link.Vessel);
+            if (aboard.Count <= 1) return;
+
+            double now = Planetarium.GetUniversalTime();
+            TelescopeCommandState[] states = ReadAll(aboard);
+            var carried = new Vector3d[aboard.Count];
+            for (int i = 0; i < aboard.Count; i++)
+            {
+                if (aboard[i].Key == link.Key) continue;
+                AttitudeHolder h = FindHolder(aboard[i], in states[i]);
+                carried[i] = CurrentDirection(aboard[i], in states[i], in h);
+            }
+
+            for (int i = 0; i < aboard.Count; i++)
+            {
+                if (aboard[i].Key == link.Key) continue;
+                states[i].HasCommand = false;
+                if (carried[i].sqrMagnitude > 1e-12)
+                {
+                    states[i].LastBoresight = carried[i];
+                    states[i].LastBoresightUt = now;
+                }
+                states[i].Write(aboard[i]);
+            }
+        }
+
+        // v turned by the shortest rotation that takes from onto to: the rotation SwingRollReference gives the
+        // loaded vehicle. Rodrigues' formula, in double.
+        private static Vector3d RotateAlongArc(Vector3d from, Vector3d to, Vector3d v)
+        {
+            Vector3d a = from.normalized;
+            Vector3d b = to.normalized;
+            Vector3d axis = Vector3d.Cross(a, b);
+            double sin = axis.magnitude;
+            double cos = Vector3d.Dot(a, b);
+
+            Vector3d k;
+            if (sin < 1e-12)
+            {
+                if (cos > 0.0) return v;
+                // Half a turn has no preferred axis; any one perpendicular to the boresight will do.
+                k = Vector3d.Cross(a, Math.Abs(a.x) < 0.9 ? new Vector3d(1.0, 0.0, 0.0) : new Vector3d(0.0, 1.0, 0.0)).normalized;
+                sin = 0.0;
+                cos = -1.0;
+            }
+            else k = axis / sin;
+
+            Vector3d r = v * cos + Vector3d.Cross(k, v) * sin + k * (Vector3d.Dot(k, v) * (1.0 - cos));
+            return r.sqrMagnitude > 1e-12 ? r.normalized : v;
+        }
+
+        // How fast a holder's manoeuvre is turning the vehicle now, deg/s, zero outside it.
+        private static double ManoeuvreRateDegPerSecond(SpaceTelescopeLink owner, in TelescopeCommandState ownerState)
+        {
+            double elapsed = Planetarium.GetUniversalTime() - ownerState.SlewStartUt;
+            if (!ownerState.HasCommand || !(elapsed >= 0.0) || !(elapsed < ownerState.ManoeuvreSeconds)) return 0.0;
+            SlewProfile running = RebuildProfile(owner, in ownerState);
+            return SlewDynamics.RateDegPerSecondAt(in running, elapsed);
+        }
+
+        private static string CameraName(VisualTelescopeSpec spec)
+        {
+            if (spec == null) return "another telescope";
+            return !string.IsNullOrEmpty(spec.CameraName) ? spec.CameraName : spec.Name;
+        }
+
+        // Seconds of [start, end] during which at least one commanded manoeuvre aboard was running. The vehicle
+        // turns once however many telescopes' records describe the turn.
+        private static double ManoeuvreSecondsWithin(TelescopeCommandState[] states, double start, double end)
+        {
+            var spans = new List<KeyValuePair<double, double>>();
+            for (int i = 0; i < states.Length; i++)
+            {
+                double m = states[i].ManoeuvreSeconds;
+                if (!states[i].HasCommand || !(m > 0.0) || double.IsInfinity(m)) continue;
+                double a = Math.Max(start, states[i].SlewStartUt);
+                double b = Math.Min(end, states[i].SlewStartUt + m);
+                if (b > a) spans.Add(new KeyValuePair<double, double>(a, b));
+            }
+            spans.Sort((x, y) => x.Key.CompareTo(y.Key));
+
+            double total = 0.0;
+            bool open = false;
+            double spanStart = 0.0, spanEnd = 0.0;
+            for (int i = 0; i < spans.Count; i++)
+            {
+                if (open && spans[i].Key <= spanEnd)
+                {
+                    if (spans[i].Value > spanEnd) spanEnd = spans[i].Value;
+                    continue;
+                }
+                if (open) total += spanEnd - spanStart;
+                spanStart = spans[i].Key;
+                spanEnd = spans[i].Value;
+                open = true;
+            }
+            if (open) total += spanEnd - spanStart;
+            return total;
+        }
+
         // ---------------------------------------------------------------- power ledger
 
         /// <summary>
@@ -607,37 +892,52 @@ namespace ExoInstruments.Flight
         {
             if (link == null || link.Vessel == null) return;
 
-            TelescopeCommandState state = TelescopeCommandState.Read(link);
+            // ONE BATTERY PER VESSEL, however many telescopes are aboard. Advanced once per telescope, the
+            // panels were credited once per telescope over the same hours.
+            List<SpaceTelescopeLink> aboard = SpaceTelescopeRegistry.OnVessel(link.Vessel);
+            if (aboard.Count == 0) aboard.Add(link);
+            TelescopeCommandState[] states = ReadAll(aboard);
             double now = Planetarium.GetUniversalTime();
 
-            if (double.IsNaN(state.PowerLedgerUt) || state.PowerLedgerUt <= 0.0 || state.PowerLedgerUt > now)
+            // The latest valid stamp is the vessel's. Before telescopes were told apart only the first one
+            // found was ever advanced, so another's stamp can date from the last time the vessel was loaded.
+            double ledgerUt = double.NaN;
+            for (int i = 0; i < states.Length; i++)
             {
-                state.PowerLedgerUt = now;
-                state.Write(link);
+                double t = states[i].PowerLedgerUt;
+                if (double.IsNaN(t) || t <= 0.0 || t > now) continue;
+                if (double.IsNaN(ledgerUt) || t > ledgerUt) ledgerUt = t;
+            }
+
+            for (int i = 0; i < states.Length; i++)
+            {
+                states[i].PowerLedgerUt = now;
+                states[i].Write(aboard[i]);
+            }
+
+            double elapsed = double.IsNaN(ledgerUt) ? 0.0 : now - ledgerUt;
+            if (link.Vessel.loaded) return;
+            if (!(elapsed > 0.0))
+            {
+                // Nothing to bill, often because another telescope aboard was just advanced over this interval:
+                // take its result rather than keep the figure from before it.
+                TotalElectricCharge(link.Vessel, out double current, out double currentCapacity);
+                link.ElectricCharge = current;
+                link.ElectricChargeCapacity = currentCapacity;
                 return;
             }
 
-            double elapsed = now - state.PowerLedgerUt;
-            state.PowerLedgerUt = now;
-            state.Write(link);
-
-            if (link.Vessel.loaded || !(elapsed > 0.0)) return;
-
             double generation = ElectricChargeGenerationPerSecond(link.Vessel);
             double sunlit = SunlitOrbitFraction(link);
-            double idle = IdleDrawPerSecond(link);
+            double idle = 0.0;
+            for (int i = 0; i < aboard.Count; i++) idle += IdleDrawPerSecond(aboard[i]);
 
             TotalElectricCharge(link.Vessel, out double charge, out double capacity);
 
             // The slew is spent here, not at the command: billing it the instant it was ordered
             // would ignore the sunlight the spacecraft flies through while performing it. The
             // wheels' draw covers the seconds of this interval overlapping the manoeuvre.
-            double slewStart = state.SlewStartUt;
-            double manoeuvre = state.ManoeuvreSeconds;
-            double slewEnd = state.HasCommand && manoeuvre > 0.0 && !double.IsInfinity(manoeuvre)
-                ? slewStart + manoeuvre : slewStart;
-            double overlap = Math.Max(0.0, Math.Min(now, slewEnd) - Math.Max(now - elapsed, slewStart));
-            if (overlap > elapsed) overlap = elapsed;
+            double overlap = Math.Min(elapsed, ManoeuvreSecondsWithin(states, now - elapsed, now));
 
             // The slewing part first, then the rest. The order only matters at the clamps, and
             // this is the order it happened in for the ordinary case of a command just issued.
@@ -1089,6 +1389,9 @@ namespace ExoInstruments.Flight
     {
         public bool HasCommand;
 
+        /// <summary>Camera of the other telescope aboard whose command the vehicle is flying, when this one is not holding the attitude. Null otherwise.</summary>
+        public string AttitudeHeldBy;
+
         /// <summary>Unit world direction the boresight is on now: measured on a loaded vessel, interpolated along the slew profile otherwise.</summary>
         public Vector3d CurrentDirection;
 
@@ -1168,6 +1471,9 @@ namespace ExoInstruments.Flight
         /// <summary>Where the boresight really was, last time the vessel was loaded. The origin a first repoint is measured from.</summary>
         public Vector3d LastBoresight;
 
+        /// <summary>When LastBoresight was true: measured, or re-based by a manoeuvre another telescope aboard took over.</summary>
+        public double LastBoresightUt;
+
         public static TelescopeCommandState Read(SpaceTelescopeLink link)
         {
             var s = new TelescopeCommandState
@@ -1194,6 +1500,7 @@ namespace ExoInstruments.Flight
                 s.AcquisitionSeconds = m.slewAcquisitionSeconds;
                 s.PowerLedgerUt = m.powerLedgerUt;
                 s.LastBoresight = ParseDirection(m.lastBoresightDirection);
+                s.LastBoresightUt = m.lastBoresightUt;
                 return s;
             }
 
@@ -1213,6 +1520,7 @@ namespace ExoInstruments.Flight
             s.AcquisitionSeconds = ReadDouble(node, "slewAcquisitionSeconds");
             s.PowerLedgerUt = ReadDouble(node, "powerLedgerUt");
             s.LastBoresight = ParseDirection(node.GetValue("lastBoresightDirection"));
+            s.LastBoresightUt = ReadDouble(node, "lastBoresightUt");
             return s;
         }
 
@@ -1258,6 +1566,7 @@ namespace ExoInstruments.Flight
             // loaded the module is measuring it every physics frame and is the authority; writing
             // a remembered value over a measured one is the one way this field can go wrong.
             Set(node, "lastBoresightDirection", FormatDirection(LastBoresight));
+            Set(node, "lastBoresightUt", LastBoresightUt.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private static void Set(ConfigNode node, string key, string value)

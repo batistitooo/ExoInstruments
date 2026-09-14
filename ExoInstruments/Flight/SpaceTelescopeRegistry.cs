@@ -17,6 +17,19 @@ namespace ExoInstruments.Flight
         public Vessel Vessel;
         public string VesselName;
 
+        /// <summary>Part.persistentId of the part carrying this telescope. Unlike Vessel.id it tells two telescopes on one vessel apart, and it survives load, unload, save and docking.</summary>
+        public uint PartPersistentId;
+
+        /// <summary>Index among the telescope modules on that part; 0 on every shipped part.</summary>
+        public int ModuleOrdinal;
+
+        /// <summary>This telescope's identity, built from the two above by MakeKey.</summary>
+        public string Key = "";
+
+        public static string MakeKey(uint partPersistentId, int moduleOrdinal) =>
+            partPersistentId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":"
+            + moduleOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         /// <summary>The catalogue instrument this telescope carries.</summary>
         public VisualTelescopeSpec Instrument;
 
@@ -185,6 +198,46 @@ namespace ExoInstruments.Flight
         }
 
         /// <summary>
+        /// The loaded telescope whose command this vessel is flying, or null. The rule is
+        /// GroundStation.OutranksForAttitude's; this applies it to the live modules without allocating,
+        /// for callers that run every frame.
+        /// </summary>
+        internal static ModuleExoSpaceTelescope LoadedAttitudeOwner(Vessel v)
+        {
+            ModuleExoSpaceTelescope best = null;
+            for (int i = 0; i < loaded.Count; i++)
+            {
+                ModuleExoSpaceTelescope m = loaded[i];
+                if (m == null || m.vessel != v || !m.pointingHoldEnabled) continue;
+                if (best == null || GroundStation.OutranksForAttitude(
+                        m.slewStartUt, PartIdOf(m), OrdinalOf(m),
+                        best.slewStartUt, PartIdOf(best), OrdinalOf(best)))
+                    best = m;
+            }
+            return best;
+        }
+
+        private static uint PartIdOf(ModuleExoSpaceTelescope module) =>
+            module != null && module.part != null ? module.part.persistentId : 0u;
+
+        // Index of this module among the telescope modules on its part, in the order KSP saves them.
+        internal static int OrdinalOf(ModuleExoSpaceTelescope module)
+        {
+            if (module == null || module.part == null || module.part.Modules == null) return 0;
+            int n = 0;
+            for (int i = 0; i < module.part.Modules.Count; i++)
+            {
+                PartModule m = module.part.Modules[i];
+                if (m == module) return n;
+                if (m is ModuleExoSpaceTelescope) n++;
+            }
+            return 0;
+        }
+
+        internal static string KeyOf(ModuleExoSpaceTelescope module) =>
+            SpaceTelescopeLink.MakeKey(PartIdOf(module), OrdinalOf(module));
+
+        /// <summary>
         /// Every telescope in the save worth listing, in orbit or standing on a surface.
         ///
         /// Landed vessels used to be dropped here on the grounds that a telescope on the ground is
@@ -201,66 +254,87 @@ namespace ExoInstruments.Flight
             {
                 Vessel v = FlightGlobals.Vessels[i];
                 if (v == null || v.state == Vessel.State.DEAD) continue;
-
-                SpaceTelescopeLink link = v.loaded ? FromLoaded(v) : FromProto(v);
-                if (link != null) links.Add(link);
+                AddTelescopes(v, links, true);
             }
             return links;
         }
 
-        private static SpaceTelescopeLink FromLoaded(Vessel v)
+        /// <summary>
+        /// Every telescope aboard one vessel, without the power and radio state FindAll fills in. What the
+        /// ground station needs to treat a vessel as the one body it is: one attitude and one battery,
+        /// however many telescopes it carries.
+        /// </summary>
+        public static List<SpaceTelescopeLink> OnVessel(Vessel v)
         {
-            ModuleExoSpaceTelescope module = null;
-            for (int i = 0; i < loaded.Count; i++)
-            {
-                if (loaded[i] == null || loaded[i].vessel != v) continue;
-                module = loaded[i];
-                break;
-            }
-            if (module == null)
-            {
-                List<ModuleExoSpaceTelescope> found = v.FindPartModulesImplementing<ModuleExoSpaceTelescope>();
-                if (found == null || found.Count == 0) return null;
-                module = found[0];
-            }
-            if (module.Instrument == null) return null;
-
-            var link = new SpaceTelescopeLink
-            {
-                Vessel = v,
-                VesselName = v.vesselName,
-                IsLanded = v.LandedOrSplashed,
-                SurfaceBodyHasAtmosphere = v.mainBody != null && v.mainBody.atmosphere,
-                SurfaceBodyName = v.mainBody != null ? v.mainBody.bodyName : "",
-                Instrument = module.Instrument,
-                AlternateInstrumentName = module.alternateInstrumentName ?? "",
-                Module = module,
-                ApertureDoorOpen = module.apertureDoorOpen,
-                BlockedApertureFraction = module.BlockedApertureFraction,
-                BlockingPartTitle = module.BlockingPartTitle,
-                ControlMode = module.ControlMode,
-                ControlTorqueNm = module.controlTorqueCached,
-                InertiaKgM2 = module.inertiaCached,
-            };
-            FillVesselState(link, v);
-            return link;
+            var links = new List<SpaceTelescopeLink>();
+            if (v != null && v.state != Vessel.State.DEAD) AddTelescopes(v, links, false);
+            return links;
         }
 
-        // The unloaded path: walk the protovessel's parts for our module and read its persistent fields out of
-        // the saved ConfigNode.
-        private static SpaceTelescopeLink FromProto(Vessel v)
+        // ONE LINK PER TELESCOPE MODULE, not per vessel. Stopping at the first one found hid every other
+        // telescope aboard: a craft carrying WFPC2 and LORRI could only ever use whichever came first.
+        private static void AddTelescopes(Vessel v, List<SpaceTelescopeLink> links, bool withVesselState)
         {
-            if (v.protoVessel == null || v.protoVessel.protoPartSnapshots == null) return null;
+            int first = links.Count;
+            if (v.loaded) AddLoaded(v, links);
+            else AddProto(v, links);
+            if (withVesselState && links.Count > first) FillVesselState(links, first, v);
+        }
+
+        private static void AddLoaded(Vessel v, List<SpaceTelescopeLink> links)
+        {
+            List<ModuleExoSpaceTelescope> found = v.FindPartModulesImplementing<ModuleExoSpaceTelescope>();
+            if (found == null) return;
+
+            for (int k = 0; k < found.Count; k++)
+            {
+                ModuleExoSpaceTelescope module = found[k];
+                if (module == null || module.Instrument == null) continue;
+
+                uint partId = PartIdOf(module);
+                int ordinal = OrdinalOf(module);
+                links.Add(new SpaceTelescopeLink
+                {
+                    Vessel = v,
+                    VesselName = v.vesselName,
+                    PartPersistentId = partId,
+                    ModuleOrdinal = ordinal,
+                    Key = SpaceTelescopeLink.MakeKey(partId, ordinal),
+                    IsLanded = v.LandedOrSplashed,
+                    SurfaceBodyHasAtmosphere = v.mainBody != null && v.mainBody.atmosphere,
+                    SurfaceBodyName = v.mainBody != null ? v.mainBody.bodyName : "",
+                    Instrument = module.Instrument,
+                    AlternateInstrumentName = module.alternateInstrumentName ?? "",
+                    Module = module,
+                    ApertureDoorOpen = module.apertureDoorOpen,
+                    BlockedApertureFraction = module.BlockedApertureFraction,
+                    BlockingPartTitle = module.BlockingPartTitle,
+                    ControlMode = module.ControlMode,
+                    ControlTorqueNm = module.controlTorqueCached,
+                    InertiaKgM2 = module.inertiaCached,
+                });
+            }
+        }
+
+        // The unloaded path: walk the protovessel's parts for our modules and read their persistent fields out of
+        // the saved ConfigNodes.
+        private static void AddProto(Vessel v, List<SpaceTelescopeLink> links)
+        {
+            if (v.protoVessel == null || v.protoVessel.protoPartSnapshots == null) return;
 
             for (int i = 0; i < v.protoVessel.protoPartSnapshots.Count; i++)
             {
                 ProtoPartSnapshot part = v.protoVessel.protoPartSnapshots[i];
                 if (part == null || part.modules == null) continue;
 
+                // Counted the way OrdinalOf counts the live modules: KSP builds a snapshot's module list by
+                // walking Part.Modules, so the two orders agree.
+                int nextOrdinal = 0;
                 for (int j = 0; j < part.modules.Count; j++)
                 {
                     ProtoPartModuleSnapshot m = part.modules[j];
                     if (m == null || m.moduleName != ModuleName) continue;
+                    int ordinal = nextOrdinal++;
 
                     ConfigNode node = m.moduleValues;
                     if (node == null) continue;
@@ -271,18 +345,21 @@ namespace ExoInstruments.Flight
                     // module node carries the measured state and not the instrument's name. The
                     // prefab always has it, because that is where the part config was read.
                     string instrumentName = node.GetValue("instrumentName");
-                    if (string.IsNullOrEmpty(instrumentName)) instrumentName = PrefabInstrumentName(part);
+                    if (string.IsNullOrEmpty(instrumentName)) instrumentName = PrefabInstrumentName(part, ordinal);
 
                     VisualTelescopeSpec spec = FindInstrument(instrumentName);
                     if (spec == null || spec.SpacePlatform == null) continue;
 
                     string alternateName = node.GetValue("alternateInstrumentName");
-                    if (string.IsNullOrEmpty(alternateName)) alternateName = PrefabAlternateName(part);
+                    if (string.IsNullOrEmpty(alternateName)) alternateName = PrefabAlternateName(part, ordinal);
 
-                    var link = new SpaceTelescopeLink
+                    links.Add(new SpaceTelescopeLink
                     {
                         Vessel = v,
                         VesselName = v.vesselName,
+                        PartPersistentId = part.persistentId,
+                        ModuleOrdinal = ordinal,
+                        Key = SpaceTelescopeLink.MakeKey(part.persistentId, ordinal),
                         IsLanded = v.LandedOrSplashed,
                         SurfaceBodyHasAtmosphere = v.mainBody != null && v.mainBody.atmosphere,
                         SurfaceBodyName = v.mainBody != null ? v.mainBody.bodyName : "",
@@ -296,51 +373,55 @@ namespace ExoInstruments.Flight
                         ControlMode = ReadControlMode(node),
                         ControlTorqueNm = ReadDouble(node, "controlTorqueCached", 0.0),
                         InertiaKgM2 = ReadDouble(node, "inertiaCached", 0.0),
-                    };
-                    FillVesselState(link, v);
-                    return link;
+                    });
                 }
             }
-            return null;
         }
 
         // The instrument name off the part's prefab module, which is the part config as loaded. Null when the
         // prefab is unavailable, which is a part whose config failed to load and which cannot be observed
         // through anyway.
-        private static string PrefabInstrumentName(ProtoPartSnapshot part)
+        private static string PrefabInstrumentName(ProtoPartSnapshot part, int ordinal)
         {
-            ModuleExoSpaceTelescope prefab = PrefabModule(part);
+            ModuleExoSpaceTelescope prefab = PrefabModule(part, ordinal);
             return prefab != null ? prefab.instrumentName : null;
         }
 
-        private static string PrefabAlternateName(ProtoPartSnapshot part)
+        private static string PrefabAlternateName(ProtoPartSnapshot part, int ordinal)
         {
-            ModuleExoSpaceTelescope prefab = PrefabModule(part);
+            ModuleExoSpaceTelescope prefab = PrefabModule(part, ordinal);
             return prefab != null ? prefab.alternateInstrumentName : null;
         }
 
-        private static ModuleExoSpaceTelescope PrefabModule(ProtoPartSnapshot part)
+        private static ModuleExoSpaceTelescope PrefabModule(ProtoPartSnapshot part, int ordinal)
         {
             if (part == null || part.partInfo == null || part.partInfo.partPrefab == null) return null;
             List<ModuleExoSpaceTelescope> prefabs =
                 part.partInfo.partPrefab.FindModulesImplementing<ModuleExoSpaceTelescope>();
-            return prefabs != null && prefabs.Count > 0 ? prefabs[0] : null;
+            return prefabs != null && ordinal >= 0 && ordinal < prefabs.Count ? prefabs[ordinal] : null;
         }
 
         // The parts of the state that come from the vessel rather than from the module: its power and its radio
         // link. Both work on an unloaded vessel, which is why they are not cached in the module the way the
-        // geometry is.
-        private static void FillVesselState(SpaceTelescopeLink link, Vessel v)
+        // geometry is. Measured once and shared by every telescope aboard, which draw on the same battery.
+        private static void FillVesselState(List<SpaceTelescopeLink> links, int first, Vessel v)
         {
             GroundStation.TotalElectricCharge(v, out double charge, out double capacity);
-            link.ElectricCharge = charge;
-            link.ElectricChargeCapacity = capacity;
 
-            if (v.Connection != null)
+            bool hasConnection = v.Connection != null;
+            bool connected = hasConnection && v.Connection.IsConnected;
+            double signal = hasConnection ? v.Connection.SignalStrength : 0.0;
+            double bps = hasConnection ? AntennaBitsPerSecond(v) : 0.0;
+
+            for (int i = first; i < links.Count; i++)
             {
-                link.HasCommLink = v.Connection.IsConnected;
-                link.SignalStrength = v.Connection.SignalStrength;
-                link.DownlinkBitsPerSecond = AntennaBitsPerSecond(v);
+                SpaceTelescopeLink link = links[i];
+                link.ElectricCharge = charge;
+                link.ElectricChargeCapacity = capacity;
+                if (!hasConnection) continue;
+                link.HasCommLink = connected;
+                link.SignalStrength = signal;
+                link.DownlinkBitsPerSecond = bps;
             }
         }
 

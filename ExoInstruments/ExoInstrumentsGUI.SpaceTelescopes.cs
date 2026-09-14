@@ -29,9 +29,10 @@ namespace ExoInstruments
         internal void BindInstance() => Instance = this;
         internal void UnbindInstance() { if (Instance == this) Instance = null; }
 
-        // Vessel id of the telescope chosen under each orbital row, keyed by the row's catalogue name, so the
-        // choice survives the list being rebuilt and a trip to another row and back.
-        private readonly Dictionary<string, Guid> selectedTelescopeIds = new Dictionary<string, Guid>();
+        // Key of the telescope chosen under each orbital row, keyed by the row's catalogue name, so the choice
+        // survives the list being rebuilt and a trip to another row and back. The telescope's key, not its
+        // vessel's id: one vessel can carry two.
+        private readonly Dictionary<string, string> selectedTelescopeIds = new Dictionary<string, string>();
 
         // Rebuilt on a timer rather than per frame: it walks every vessel in the save.
         private List<SpaceTelescopeLink> cachedTelescopes;
@@ -60,9 +61,9 @@ namespace ExoInstruments
         // The telescope chosen under spec's row, among the ones carrying it, or null.
         private SpaceTelescopeLink SelectedTelescopeFor(VisualTelescopeSpec spec, List<SpaceTelescopeLink> carrying)
         {
-            if (spec == null || !selectedTelescopeIds.TryGetValue(spec.Name, out Guid id)) return null;
+            if (spec == null || !selectedTelescopeIds.TryGetValue(spec.Name, out string key)) return null;
             for (int i = 0; i < carrying.Count; i++)
-                if (carrying[i].Vessel != null && carrying[i].Vessel.id == id) return carrying[i];
+                if (carrying[i].Vessel != null && carrying[i].Key == key) return carrying[i];
             return null;
         }
 
@@ -98,7 +99,7 @@ namespace ExoInstruments
         // order is KSP's and is not promised to survive a reload, and a number that changed between
         // sessions would be worse than none. Losing a telescope renumbers the ones launched after it,
         // which is the same thing the player would do counting the ones they still have.
-        private Dictionary<Guid, int> BuildTelescopeOrdinals(List<SpaceTelescopeLink> all)
+        private Dictionary<string, int> BuildTelescopeOrdinals(List<SpaceTelescopeLink> all)
         {
             var ordered = new List<SpaceTelescopeLink>(all);
             ordered.Sort((a, b) =>
@@ -110,11 +111,15 @@ namespace ExoInstruments
                 // Same launch time is possible on a save edited by hand; the id is arbitrary but stable.
                 Guid ga = a.Vessel != null ? a.Vessel.id : Guid.Empty;
                 Guid gb = b.Vessel != null ? b.Vessel.id : Guid.Empty;
-                return ga.CompareTo(gb);
+                int byVessel = ga.CompareTo(gb);
+                if (byVessel != 0) return byVessel;
+                // Two telescopes on one vessel share both of the above.
+                int byPart = a.PartPersistentId.CompareTo(b.PartPersistentId);
+                return byPart != 0 ? byPart : a.ModuleOrdinal.CompareTo(b.ModuleOrdinal);
             });
 
             var counts = new Dictionary<string, int>();
-            var ordinals = new Dictionary<Guid, int>();
+            var ordinals = new Dictionary<string, int>();
             for (int i = 0; i < ordered.Count; i++)
             {
                 SpaceTelescopeLink link = ordered[i];
@@ -123,7 +128,7 @@ namespace ExoInstruments
                 string key = link.Instrument != null ? link.Instrument.Name : "";
                 counts.TryGetValue(key, out int n);
                 counts[key] = ++n;
-                ordinals[link.Vessel.id] = n;
+                ordinals[link.Key] = n;
             }
             return ordinals;
         }
@@ -190,17 +195,17 @@ namespace ExoInstruments
                 for (int i = 0; i < carrying.Count; i++)
                     if (carrying[i].Operational) { selected = carrying[i]; break; }
                 if (selected == null) selected = carrying[0];
-                selectedTelescopeIds[spec.Name] = selected.Vessel.id;
+                selectedTelescopeIds[spec.Name] = selected.Key;
             }
 
             // Numbered across every telescope in the save, so a spacecraft keeps its number whichever row lists it.
-            Dictionary<Guid, int> ordinals = BuildTelescopeOrdinals(all);
+            Dictionary<string, int> ordinals = BuildTelescopeOrdinals(all);
 
             for (int i = 0; i < carrying.Count; i++)
             {
                 SpaceTelescopeLink link = carrying[i];
 
-                bool isCurrent = link.Vessel.id == selected.Vessel.id;
+                bool isCurrent = link.Key == selected.Key;
                 CanCommand(link, out string reason);
 
                 GUILayout.BeginHorizontal();
@@ -210,11 +215,11 @@ namespace ExoInstruments
                 string detector = link.Instrument == null ? "unknown instrument"
                                 : !string.IsNullOrEmpty(link.Instrument.CameraName) ? link.Instrument.CameraName
                                 : link.Instrument.Name;
-                string ordinal = ordinals.TryGetValue(link.Vessel.id, out int n) ? $" #{n}" : "";
+                string ordinal = ordinals.TryGetValue(link.Key, out int n) ? $" #{n}" : "";
                 string label = (isCurrent ? "> " : "  ") + detector + ordinal + "   " + link.VesselName;
                 if (GUILayout.Button(label, GUILayout.Height(22)))
                 {
-                    selectedTelescopeIds[spec.Name] = link.Vessel.id;
+                    selectedTelescopeIds[spec.Name] = link.Key;
                     selected = link;
                 }
                 GUILayout.FlexibleSpace();
@@ -232,12 +237,13 @@ namespace ExoInstruments
         {
             SpaceTelescopeLink current = ObservingPlatform.ActiveSpaceTelescope;
 
-            // COMPARED BY VESSEL, NOT BY REFERENCE. The list is rebuilt from the save every couple
-            // of seconds, so the same telescope arrives as a fresh object each rescan; comparing
+            // COMPARED BY TELESCOPE KEY, NOT BY REFERENCE. The list is rebuilt from the save every
+            // couple of seconds, so the same telescope arrives as a fresh object each rescan; comparing
             // references would see a change every time and throw away the player's photograph and
-            // their whole stack twice a minute. What matters is whether the SPACECRAFT changed.
-            Guid currentId = current != null && current.Vessel != null ? current.Vessel.id : Guid.Empty;
-            Guid newId = link != null && link.Vessel != null ? link.Vessel.id : Guid.Empty;
+            // their whole stack twice a minute. What matters is whether the TELESCOPE changed, and two
+            // aboard one spacecraft are two telescopes.
+            string currentId = current != null && current.Vessel != null ? current.Key : null;
+            string newId = link != null && link.Vessel != null ? link.Key : null;
 
             // The INSTRUMENT is compared too: a channel switch keeps the vessel and changes the
             // detector, and a UVIS frame or stack must not survive into the IR camera.
@@ -274,12 +280,8 @@ namespace ExoInstruments
             if (link != null && link.Instrument != null)
                 solarSystemCamera.SetActiveTelescope(link.Instrument);
 
-            // Selecting a target commands whichever telescope was active then; switching leaves
-            // the new one pointed wherever it was last sent. Guarded on the vessel actually
-            // changing because this runs from the draw loop, and AlreadyCommanded makes it
-            // idempotent anyway.
-            if (currentId != newId && link != null && selectedPhotographyTarget.HasTarget)
-                ApplySpaceTelescopePointing();
+            // Switching telescope turns nothing: the new one stays pointed wherever it was, and the Point
+            // at target button beside its readout is what slews it.
         }
 
         // What the sky and the spacecraft are doing right now, for the selected telescope: the orbital analogue
@@ -341,10 +343,10 @@ namespace ExoInstruments
                 // Root-finding 192 samples along the orbit is not per-OnGUI-pass work: the
                 // change time is a physical instant, so it is computed once and counted down.
                 double nowUt = Planetarium.GetUniversalTime();
-                Guid vesselId = link.Vessel != null ? link.Vessel.id : Guid.Empty;
+                string telescopeKey = link.Key ?? "";
                 bool stale = double.IsNaN(visibilityChangeUt)
                     || visibilityChangeTarget != selectedPhotographyTarget
-                    || visibilityChangeVesselId != vesselId
+                    || visibilityChangeTelescopeKey != telescopeKey
                     || visibilityChangeWasObservable != c.Observable
                     || nowUt >= visibilityChangeUt
                     || nowUt < visibilityChangeComputedUt;
@@ -355,7 +357,7 @@ namespace ExoInstruments
                         ? nowUt + secondsUntilChange : double.NaN;
                     visibilityChangeComputedUt = nowUt;
                     visibilityChangeTarget = selectedPhotographyTarget;
-                    visibilityChangeVesselId = vesselId;
+                    visibilityChangeTelescopeKey = telescopeKey;
                     visibilityChangeWasObservable = c.Observable;
                 }
                 if (!double.IsNaN(visibilityChangeUt))
@@ -437,11 +439,18 @@ namespace ExoInstruments
         private void DrawPointingReadout(SpaceTelescopeLink link)
         {
             PointingReadout r = GroundStation.Readout(link);
+            bool onSelected = r.HasCommand && SelectedIsCommanded(link);
+
             if (!r.HasCommand)
             {
-                GUILayout.Label("Boresight: nothing commanded. Click a target to slew the spacecraft onto it.");
-                if (!string.IsNullOrEmpty(spaceCommandMessage))
-                    GUILayout.Label("Last command refused: " + spaceCommandMessage, smallCaptionStyle);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(r.AttitudeHeldBy != null
+                    ? "Boresight: not commanded. " + r.AttitudeHeldBy + " holds this spacecraft's attitude, "
+                      + "and pointing this camera turns it off its target."
+                    : "Boresight: nothing commanded.", wrappedLabelStyle);
+                DrawPointButton(link, r, onSelected);
+                GUILayout.EndHorizontal();
+                DrawRefusedCommand();
                 return;
             }
 
@@ -484,10 +493,20 @@ namespace ExoInstruments
                     break;
             }
 
+            GUILayout.BeginHorizontal();
             GUILayout.Label(double.IsNaN(r.ErrorDeg)
                 ? phase
                 : string.Format("{0}  Off by {1}, field half-width {2}.",
-                                phase, FormatAngle(r.ErrorDeg), FormatAngle(r.ToleranceDeg)));
+                                phase, FormatAngle(r.ErrorDeg), FormatAngle(r.ToleranceDeg)), wrappedLabelStyle);
+            DrawPointButton(link, r, onSelected);
+            GUILayout.EndHorizontal();
+
+            // Choosing a target does not turn the vehicle, so everything above can be about a target that is
+            // no longer the selected one. Said outright, because "On target and guiding" reads as a yes.
+            if (!onSelected && selectedPhotographyTarget.HasTarget)
+                GUILayout.Label("That is the commanded target, not the selected one: press Point at target to slew onto "
+                              + selectedPhotographyTarget.DisplayName + ".", smallCaptionStyle);
+            DrawRefusedCommand();
 
             // The shutter is not locked during a repoint, so say what a frame taken now comes out
             // as. The streak is exposure times rate, the same product the pipeline convolves with.
@@ -504,6 +523,31 @@ namespace ExoInstruments
                 GUILayout.Label("No SAS: needs a pilot or a probe core. Steer it by hand.", smallCaptionStyle);
 
             if (r.Phase != GroundPointingPhase.OnTarget) DrawProgressBar(r.SlewProgress);
+        }
+
+        // THE ONLY THING THAT TURNS THE SPACECRAFT. Selecting a target on the chart does not, so a click
+        // can no longer send the vehicle off before the player has looked. Live whenever the selected target
+        // is not already the commanded one, and as a retry once a commanded slew has stalled.
+        private void DrawPointButton(SpaceTelescopeLink link, PointingReadout r, bool onSelected)
+        {
+            bool retry = onSelected && r.Stalled;
+            bool live = selectedPhotographyTarget.HasTarget && (!onSelected || retry);
+
+            bool wasEnabled = GUI.enabled;
+            GUI.enabled = wasEnabled && live;
+            if (GUILayout.Button(retry ? "Retry pointing" : "Point at target", GUILayout.Width(130), GUILayout.Height(22))
+                && live)
+            {
+                ApplySpaceTelescopePointing(link, retry);
+                telescopeScanTime = -999f;   // republish every telescope aboard now, not in two seconds
+            }
+            GUI.enabled = wasEnabled;
+        }
+
+        private void DrawRefusedCommand()
+        {
+            if (!string.IsNullOrEmpty(spaceCommandMessage))
+                GUILayout.Label("Last command refused: " + spaceCommandMessage, smallCaptionStyle);
         }
 
         // Why a telescope that was commanded is not turning, in one phrase, or null when nothing on
@@ -538,7 +582,7 @@ namespace ExoInstruments
 
             double generation = GroundStation.ElectricChargeGenerationPerSecond(link.Vessel);
             double sunlit = GroundStation.SunlitOrbitFraction(link);
-            double idle = GroundStation.IdleDrawPerSecond(link);
+            double idle = GroundStation.VesselIdleDrawPerSecond(link);
             double slewDraw = GroundStation.SlewDrawPerSecond(link);
             double net = generation * sunlit - idle;
 
@@ -594,13 +638,25 @@ namespace ExoInstruments
 
             SpaceTelescopeLink link = ObservingPlatform.ActiveSpaceTelescope;
             PointingReadout r = GroundStation.Readout(link);
-            if (!r.HasCommand) return;
+            if (!r.HasCommand && r.CurrentDirection.sqrMagnitude < 1e-12) return;
 
             if (!ObservingPlatform.TryGetEquatorialFrame(Planetarium.GetUniversalTime(),
                     out ObservingPlatform.EquatorialFrameSnapshot frame)) return;
 
             var view = new SkyChartView { Zoom = skyChartZoom, Pan = skyChartPan };
             Color previous = GUI.color;
+
+            // Nothing commanded, or carried along by another telescope aboard: only where it looks, in grey.
+            if (!r.HasCommand)
+            {
+                if (TryChartPoint(frame, view, chartRect, r.CurrentDirection, out Vector2 idle))
+                {
+                    GUI.color = new Color(0.8f, 0.8f, 0.8f, 0.8f);
+                    DrawCrosshair(idle, 7f);
+                }
+                GUI.color = previous;
+                return;
+            }
 
             // The arc first, so the markers sit on top of it.
             if (r.Phase != GroundPointingPhase.OnTarget && r.CurrentDirection.sqrMagnitude > 1e-12)
@@ -758,7 +814,7 @@ namespace ExoInstruments
         private double visibilityChangeUt = double.NaN;
         private double visibilityChangeComputedUt = double.NaN;
         private SkyTarget visibilityChangeTarget;
-        private Guid visibilityChangeVesselId;
+        private string visibilityChangeTelescopeKey;
         private bool visibilityChangeWasObservable;
 
         // Seconds until the target's orbital visibility flips, found on the exact geometry: the observer
