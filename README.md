@@ -19,16 +19,30 @@ stock KSP's silent 100,000x warp cap so scheduled observations do not crawl, and
 whose clouds are read live by the imaging weather model. Both are detected at runtime by
 reflection; with neither installed, everything falls back to stock behaviour untouched.
 
-**Then, optionally, the sky surveys.** The real star field, dust map, Hα map and galaxy catalogues
-are not in the download, for the reasons in [Data files](#data-files-one-command) below. They are
-one command:
+**Then, optionally, the sky surveys.** The real star field, dust map, H-alpha map and galaxy
+catalogues are not in the mod's download, because they are gigabytes of other people's survey data.
+With KSP closed, one command installs them, where `<KSP>` is the folder that contains `GameData`:
 
 ```bash
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py"
+# macOS and Linux
+python3 "<KSP>/GameData/ExoInstruments/tools/get_sky_data_compact.py"
 ```
 
-The mod is fully playable without ever running it, and says in the log which surveys it did not
-find rather than failing.
+```bat
+REM Windows, in Command Prompt or PowerShell
+py "<KSP>\GameData\ExoInstruments\tools\get_sky_data_compact.py"
+```
+
+| Script | Stars | Download | Also |
+|---|---|---|---|
+| `get_sky_data_compact.py` | Gaia DR3 to V 19, 427 million stars | **8.56 GB** | Installs the dust map, galaxy catalogue and galaxy images, and builds the H-alpha map and nebula patches on your computer |
+| `get_sky_data_complete.py` | Every Gaia DR3 star, 1.81 billion | **33.85 GB** | The same |
+
+- **Interrupted?** Run the same command again: it resumes where it stopped.
+- **Changed your mind?** Run the other script: it keeps what the two share and removes what its own set does not use.
+- **Not now?** The mod is fully playable without any of it, and says in the log which surveys it did not find rather than failing.
+
+Python, disk space, a manual download and the credits are in [Data files](#data-files-download-them).
 
 ## Overview
 
@@ -82,7 +96,7 @@ find rather than failing.
   - **VLT FORS2**: the real Very Large Telescope, Unit Telescope 1 "Antu", 8.2m, carrying FORS2's real imager: a mosaic of two MIT/Lincoln-Lab CCID20 CCDs at their own real published plate scale, full well, gain, and read noise; always autoguided, since a real 8.2m research telescope has no unguided operating mode.
   - **VLT SPHERE**: the same VLT, Unit Telescope 3 "Melipal", carrying the real SPHERE/ZIMPOL extreme-adaptive-optics imaging polarimeter. Where FORS2 is limited by ordinary atmospheric seeing no matter the mirror size, SPHERE's SAXO adaptive-optics system corrects that turbulence in real time, reaching a real, published resolution around 25 milliarcseconds, tens of times finer. The tradeoff is real too: ZIMPOL's actual field of view is barely 3.6 arcseconds wide, and it has no blue filter at all.
 
-- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied, instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from a **Gaia DR3** catalogue you build yourself (see below; nothing ships, and without one the sky is simply empty), placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails, along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
+- **A real star field behind every photograph.** A photograph's sky is no longer empty. The frame is built the way professional image simulators build one (GalSim, SkyMaker, ESA's Pyxel): as a sum of sources, each carrying its own independently computed flux, summed on one plane before the telescope's optics and the sensor's noise are applied, instead of one rendered image scaled to the target's brightness, under which nothing but the target could ever have had a correct brightness. Stars come from a **Gaia DR3** catalogue you install with one command (see below; it is a separate download, and without one the sky is simply empty), placed by a real gnomonic tangent-plane projection (the TAN projection of the FITS standard) built from the telescope's own pointing, so they land where they actually are relative to the planet you are photographing. Each one's colour is real: its catalogue B-V gives its temperature, and its brightness is carried into whichever filter is fitted across that temperature's own spectrum, so a hot blue star and a cool orange one photograph differently through an LRGB set. Moons and planets too small for the optics to resolve are drawn through the same path from their own real apparent magnitude, which is how a giant planet's moons appear as points of light beside it. Without an autoguider the sky rotates under the instrument during the exposure and everything trails, along the true direction for your observatory's latitude, curving, with stars near the frame edge trailing further than those at its centre, because the sky's own rotation is applied rather than the image being smeared sideways.
 
   *Note: the exoplanet detection pipeline is untouched. It keeps searching the small Bright Star Catalogue on purpose, so finding a transit stays a tractable hunt; the rendered star catalogue exists only to fill in what a camera sees.*
 
@@ -274,26 +288,57 @@ A capture is monochrome; one value per pixel, but the pipeline currently stores 
 
 **2×2 is the practical default** on any instrument: it keeps memory well under a gigabyte even on FORS2 while still resolving several hundred pixels across a well-framed target, more than the seeing/diffraction limit can usually deliver anyway. Reach for 1×1 only when you specifically need the extra pixels and have the headroom for it.
 
-## Data files: one command
+## Data files: download them
 
-**Nothing but the plugin ships.** Every sky survey this mod reads is someone else's published data,
-often hundreds of megabytes, and vendoring it would be both a licensing question and a download
-nobody asked for. Each one is optional and independent: with none of them installed the instruments
-work and photograph the solar system, and each file you add turns on one more thing.
-
-So they are built on your machine instead, by one script that came with the mod.
+Every sky survey this mod reads is someone else's published data, and the star catalogue alone runs
+to gigabytes, so none of it is in the mod's zip, which is also what CKAN installs. The files are
+published instead as the assets of a data release on GitHub, `sky-data-1`, and two scripts that come
+with the mod install them. Each file is optional and independent: with none of them installed the
+instruments work and photograph the solar system, and each file you add turns on one more thing.
 
 ### Before you start
 
-1. **Python 3.9 or newer.** The script needs it; KSP does not. Windows: install it from
-   <https://www.python.org/downloads/> and tick **"Add python.exe to PATH"** in the installer.
-   macOS and Linux already have it.
-2. **A free ESA archive account**, only if you want the star field. Register at
-   <https://cosmos.esa.int/web/gaia-users/register> and **click the link in the confirmation
-   mail**, because an unactivated account fails to log in. Skip this and everything else still
-   builds.
-3. **Disk space**: about 150 MB for the defaults, plus a few GB of scratch that you can delete
-   afterwards. The script tells you where.
+1. **Python 3.9 or newer.** The scripts need it; KSP does not. macOS and Linux already have it. On
+   Windows, install it from <https://www.python.org/downloads/>, which also installs the `py`
+   launcher the commands below use (typing `python3` there can open the Microsoft Store instead).
+   On Debian and Ubuntu, also install the `python3-venv` package, which the H-alpha builds need.
+2. **ExoInstruments 0.5.0 or newer.** Older versions draw no stars from these files. The script reads
+   the installed version and stops, changing nothing, if it is older.
+3. **Disk space** on the drive that holds KSP: 8.56 GB for the compact set or 33.85 GB for the
+   complete one, plus about 1 GB beside `GameData` for the H-alpha builds, which download about
+   600 MB of survey data the first time. The script compares its own download with the free space
+   before it changes anything. The drive must hold files over 4 GB, so it cannot be FAT32.
+4. **KSP closed**, and ExoInstruments Studio if you use it. Both map the star files while they run,
+   and Windows will not replace or delete a file that is in use.
+5. **On macOS, with Python from python.org:** that Python comes without the certificates it needs to
+   reach GitHub. If the script says it could not check GitHub's certificate, run
+   `Install Certificates.command` from the Python folder in Applications once, then rerun.
+
+### Which one
+
+| File | Size | Compact | Complete | What it turns on |
+|---|---|---|---|---|
+| `GaiaStarCatalog.V13.starcat`, `.V15`, `.V17` and `.V19` | 8.08 GB | yes | yes | The star field in every photograph, to V 19 |
+| `GaiaStarCatalog.starcat` | 25.29 GB | | yes | The stars fainter than V 19: every source in Gaia DR3 |
+| `DustMap.dustmap` | 25 MB | yes | yes | Interstellar reddening, and the extinction readout |
+| `GalaxyCatalog.galcat` | 0.96 MB | yes | yes | Galaxies to B 15, drawn from their measured shape |
+| `GalaxyImages.galimg` | 452 MB | yes | yes | Real imagery for galaxies to B 11, instead of a smooth Sérsic ellipse |
+| `HalphaMap.emission` | 25 MB | built | built | Diffuse Hα, [N II] and [S II] in narrowband |
+| `HalphaPatches.patchset` | 14.6 MB | built | built | High-resolution Hα, plus [O III] 5007 and [S II] 6716 where NSNS covers the sky |
+
+"Built" means made on your computer after the downloads, for the reason given
+[below](#why-two-files-are-built-on-your-computer).
+
+**Start with compact.** The two sets differ only in the stars fainter than V 19. A frame whose own
+limit is V 19 or brighter gets the same stars from either; a deeper one draws its stars to V 19 on
+the compact set and says so after its star count in the capture readout, `N stars to V 19.0`. The
+readout's `limit V` shows how deep your own frames reach. The complete set adds the fainter stars for
+25.29 GB more, and running it after the compact one downloads only that one file.
+
+**A smaller sky.** `setup_data.py` with no arguments installs `GaiaStarCatalog.V13.starcat` alone
+from the same release (78 MB, stars to V 13) and builds the dust map, H-alpha map and galaxy
+catalogue from their sources; see [Building the data from its sources](#building-the-data-from-its-sources).
+On Windows add `--skip dust`: the dust map's packer needs healpy, which cannot be installed there.
 
 ### Run it
 
@@ -302,95 +347,224 @@ usually `C:\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program`; on
 `~/Library/Application Support/Steam/steamapps/common/Kerbal Space Program`.
 
 ```bash
-# macOS and Linux
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py"
+# macOS and Linux: stars to V 19, 8.56 GB
+python3 "<KSP>/GameData/ExoInstruments/tools/get_sky_data_compact.py"
+
+# or every star, 33.85 GB
+python3 "<KSP>/GameData/ExoInstruments/tools/get_sky_data_complete.py"
 ```
 
 ```bat
-REM Windows, in Command Prompt or PowerShell
-py "<KSP>\GameData\ExoInstruments\tools\setup_data.py"
+REM Windows, in Command Prompt or PowerShell: stars to V 19, 8.56 GB
+py "<KSP>\GameData\ExoInstruments\tools\get_sky_data_compact.py"
+
+REM or every star, 33.85 GB
+py "<KSP>\GameData\ExoInstruments\tools\get_sky_data_complete.py"
 ```
 
-That is the whole install, and it takes no arguments: it finds KSP from its own location, builds
-its own virtualenv, downloads what has to be downloaded, runs each packer, checks each result and
-copies it into `PluginData/`. It is safe to interrupt and rerun, since anything already installed
-is skipped and every packer resumes from its own cache.
+It takes no arguments: it finds KSP from its own location. It starts by printing its plan, the files
+it keeps, the files it downloads with their sizes and the files it removes with the reason for each,
+and asks a question only when that plan would delete or replace a file it did not install itself, or
+remove a link. Then it downloads, checks and installs each file, the star tiers shallowest first, and
+names the star depth you now have:
 
-It asks you two things and nothing else: your ESA username (blank to skip the star field) and
-your ESA password, which is never echoed and never passed on the command line. Both are asked
-**at the start**, so a run you walk away from is not found blocked on a prompt an hour later.
+```
+Stars: to V 19, from GaiaStarCatalog.V19.starcat.
+```
 
-| Product | File | Size | Source | What it turns on |
-|---|---|---|---|---|
-| `stars` | `GaiaStarCatalog.starcat` | 103 MB at G < 13, 236 MB at G < 14 | Gaia DR3, via the ESA archive | The star field in every photograph |
-| `dust` | `DustMap.dustmap` | 24 MB | SFD98 via `dustmaps` | Interstellar reddening, and the extinction readout |
-| `halpha` | `HalphaMap.emission` | 24 MB | Finkbeiner (2003) via NASA LAMBDA | Diffuse Hα, [N II] and [S II] in narrowband |
-| `galaxies` | `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | Galaxies, drawn from their measured shape |
-| `patches` | `HalphaPatches.patchset` | 14.6 MB | SHASSA in the south, NSNS in the north | High-resolution Hα, plus [O III] 5007 and [S II] 6716 where NSNS covers the sky |
-| `images` | `GalaxyImages.galimg` | 452 MB at B ≤ 11 | Legacy DR10, Pan-STARRS, SDSS9, DES DR2 cutouts | Real imagery instead of a smooth Sérsic ellipse |
+or, for the complete set, `Stars: GaiaStarCatalog.starcat, with no depth limit.` Last, it builds on
+your computer whichever of the H-alpha map and patches is not installed yet, saying so as it starts.
 
-**The first four are built by default**, the star field at `--gmax 13`, which is 7.4 M stars and
-103 MB. `patches` and `images` are opt-in, not because they are worth less but because they cost a
-different order of magnitude: `patches` downloads about 2.3 GB of SHASSA fields, and `images`
-fetches a cutout per galaxy and runs for hours.
+| Option | What it does |
+|---|---|
+| `--dry-run` | Prints the plan and the disk space it needs, checks that every release file it would download is there at the expected size, and lists the H-alpha builds it would run. Changes nothing. |
+| `--yes` | Answers yes to its questions, for a run you leave unattended. With no terminal to ask in and no `--yes`, it stops before any such change and says so. |
+| `--ksp <folder>` | The KSP folder to install into, instead of the one the script sits in. `$KSP` works too. |
+
+Then start KSP and check `KSP.log`. Every file that loaded says so, with its own provenance:
+
+```
+[ExoInstruments] Rendered star field: 426885317 Gaia DR3 stars to V 19 (GaiaStarCatalog.V19.starcat, no main file), with magnitude tiers at V 13, 15, 17.
+[ExoInstruments] Dust map: nside 1024 (3.4 arcmin), SFD98 (Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525) x0.86 ...
+[ExoInstruments] Emission map: H-alpha at nside 1024 (3.4 arcmin), Finkbeiner (2003, ApJS 146, 407) WHAM/VTSS/SHASSA composite
+[ExoInstruments] Emission patches: 27 regions at 26 to 52 arcsec, SHASSA (Gaustad et al. 2001, PASP 113, 1326) south and NSNS DR0.2 ... north, ...
+[ExoInstruments] Galaxy catalogue: 15730 galaxies, HyperLEDA (Makarov et al. 2014, A&A 570, A13) ...
+```
+
+With the complete set the first line reads `Rendered star field: 1806254432 Gaia DR3 stars loaded,
+with magnitude tiers at V 13, 15, 17, 19.` A file that is missing says that instead, and names a
+script that makes it. Nothing fails silently, and nothing is required.
+
+### What the script guarantees
+
+- **Every byte is checked.** Each mod build pins the sha256 of the release's manifest, and the
+  manifest carries the sha256 of every file and of every part of a split one. A part that does not
+  match is downloaded again; a file that does not match is never installed.
+- **The game never reads half a file.** Downloads go into `PluginData/.sky-data/`, each straight into
+  one file at its parts' places, so there are no parts to join and a download takes no more disk than
+  the file itself. A file takes its final name, in one rename, only once it is whole and checked.
+- **It resumes.** After Ctrl-C, a dropped connection or a reboot, run the same command again: it
+  carries on from the bytes already on disk and never fetches a part it has already checked. A
+  connection that drops, or a download link that expires, is retried on its own for a few minutes
+  before the script gives up.
+- **A rerun does not hash 33 GB again.** `PluginData/sky-data-receipt.json` records the size,
+  modification time and sha256 of every file the script installed or checked, so it only reads a
+  file again when that file changed or is new to it, such as one you copied in by hand.
+- **Disk space comes first.** Before it changes anything it compares what is left to download, plus a
+  margin, with the free space and what its own removals will free, and stops with both numbers if
+  that falls short.
+- **Only its own files.** It touches the star catalogue names (`GaiaStarCatalog.starcat` and
+  `GaiaStarCatalog.V*.starcat`), the other files of the release, the two H-alpha files it builds,
+  `.sky-data/` and the receipt. Everything else in `PluginData` is left alone, and data files the
+  game does not read, such as a `.backup`, are listed as left alone.
+- **Links are never written through.** At a name the set installs, a link to a file identical to the
+  release's is kept, checked by reading through it, and any other link is removed after asking. The
+  compact set removes a link at `GaiaStarCatalog.starcat` either way, also after asking. The file a
+  link points to is never touched.
+- **It asks before** deleting a file it did not install, removing a link, or replacing a file that
+  does not match the release. Files it installed itself, and the leftovers of its own downloads, go
+  without a question.
+
+Switching between the sets, and what each run cleans up:
+
+| Installed now | You run | It downloads | It removes |
+|---|---|---|---|
+| Nothing | compact | 8.56 GB | Nothing |
+| Nothing | complete | 33.85 GB | Nothing |
+| The compact set | complete | `GaiaStarCatalog.starcat`, 25.29 GB | Nothing |
+| The complete set | compact | Nothing | `GaiaStarCatalog.starcat`, freeing 25.29 GB |
+| `setup_data.py`'s V13 tier | either | The rest; the V13 tier is kept | Nothing |
+| A complete run that was interrupted | compact | What the compact set still lacks | The partial `GaiaStarCatalog.starcat` in `.sky-data/` |
+| A `GaiaStarCatalog.starcat` of your own, such as an ESA build | compact | 8.56 GB | That file, after asking |
+| A `GaiaStarCatalog.starcat` of your own | complete | 33.85 GB | That file, after asking, before any tier arrives |
+| A link to a file identical to the release's `GaiaStarCatalog.starcat` | complete | The rest, and nothing for that file | Nothing: the link is kept |
+
+A dust map, galaxy catalogue or galaxy images file that differs from the release's, such as one you
+built yourself, is replaced after asking. On the compact set any other `GaiaStarCatalog.V*.starcat`
+is removed as well, after asking unless the script installed it: without a main file the deepest
+tier sets the star depth, and a tier the release does not have would set it wrong. The complete set
+leaves such a tier alone, and the game checks it against the main file. A partial download left by
+an earlier data release is removed too.
+
+### Going back
+
+- **From complete to compact:** run the compact script. It removes `GaiaStarCatalog.starcat` and
+  downloads nothing.
+- **To a shallower sky:** with no `GaiaStarCatalog.starcat` installed, delete the deepest tiers from
+  `PluginData` by hand. The deepest one left sets the depth, so `GaiaStarCatalog.V13.starcat` alone
+  is a sky to V 13. Running either script again brings the others back.
+- **To none of it:** close KSP and delete, from `<KSP>/GameData/ExoInstruments/PluginData/`, the
+  files in the table under [Which one](#which-one), `sky-data-receipt.json` and any `.sky-data`
+  folder left behind; then the `ExoInstruments-data-build` folder beside `GameData`, where the H-alpha
+  builds keep their Python packages and downloads. Leave the files that came with the mod
+  (`BrightStarCatalog.tsv`, `ExoplanetCatalog.csv`, `SupernovaTemplates.sntpl`). The sky is then
+  honestly empty and everything else still works.
+
+### Manual download
+
+Everything the scripts download is on the release page,
+<https://github.com/batistitooo/ExoInstruments/releases/tag/sky-data-1>, beside `SHA256SUMS` and
+`NOTICE-sky-data.md`. Each file is one asset under its own name, except the two over 1900 MiB
+(1.99 GB), which come in numbered parts: `GaiaStarCatalog.V19.starcat.001` to `.003` and
+`GaiaStarCatalog.starcat.001` to `.013`. Join each file's parts in order, then check what you have:
+
+```bash
+# macOS and Linux
+cat GaiaStarCatalog.V19.starcat.[0-9][0-9][0-9] > GaiaStarCatalog.V19.starcat
+cat GaiaStarCatalog.starcat.[0-9][0-9][0-9] > GaiaStarCatalog.starcat
+shasum -a 256 -c SHA256SUMS                  # macOS
+sha256sum -c --ignore-missing SHA256SUMS     # Linux
+```
+
+```bat
+REM Windows, in Command Prompt (copy /b does not work in PowerShell)
+copy /b GaiaStarCatalog.V19.starcat.001+GaiaStarCatalog.V19.starcat.002+GaiaStarCatalog.V19.starcat.003 GaiaStarCatalog.V19.starcat
+certutil -hashfile GaiaStarCatalog.V19.starcat SHA256
+```
+
+On Windows, join the main file the same way, naming all thirteen parts in order, and compare what
+`certutil` prints with that file's line in `SHA256SUMS`. `SHA256SUMS` lists every asset, so on macOS
+the ones you did not download are reported missing; only the files you have need to say `OK`.
+
+Move the joined files, not their parts, into `<KSP>/GameData/ExoInstruments/PluginData/`. Any set of
+tiers works on its own, the deepest one setting the depth; take `GaiaStarCatalog.starcat` together
+with the four tiers, since without them a wide field reads for minutes. The H-alpha map and patches
+are not on the release page: build them with
+`python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only halpha,patches`. A later run of
+either download script reads each file you copied in once, and keeps it if it matches the release.
+
+### Credits and licences
+
+These files are not the mod's own work, and its licence does not apply to them. Each stays under its
+source's terms, for non-commercial use, with the credit it asks for:
+
+| File | From | Terms |
+|---|---|---|
+| `GaiaStarCatalog*.starcat` | Gaia DR3. Credit: ESA, Gaia DPAC | CC BY-NC 3.0 IGO |
+| `DustMap.dustmap` | SFD 1998 Map of Galactic Dust, Finkbeiner, Schlegel & Davis, Harvard Dataverse | CC0 1.0 |
+| `GalaxyCatalog.galcat` | HyperLEDA (Makarov et al. 2014) | Non-commercial use |
+| `GalaxyImages.galimg` | DESI Legacy Imaging Surveys DR10, Pan-STARRS1 DR1, SDSS DR9 and DES DR2, through CDS hips2fits and STScI | CC BY 4.0 for the Legacy Surveys, each other survey's own terms, and ODbL 1.0 for the CDS HiPS |
+
+The full credits, the acknowledgement each survey asks for and what was changed in each file are in
+[NOTICE-sky-data.md](./NOTICE-sky-data.md), which ships with the mod and with every data release. No
+data provider endorses ExoInstruments.
+
+### Why two files are built on your computer
+
+`HalphaMap.emission` is packed from the Finkbeiner (2003) H-alpha composite, and
+`HalphaPatches.patchset` from SHASSA and NSNS on that composite's calibration. The terms of SHASSA
+and VTSS, two of the surveys inside the composite, do not allow them to be redistributed, so neither
+file is in the release. The scripts build them after the downloads instead, by running
+`setup_data.py` for whichever of the two is still missing, and build nothing when both are there.
+`setup_data.py` keeps its Python packages in a virtualenv in the `ExoInstruments-data-build` folder
+beside `GameData`, the same one its own runs use, and these builds install only numpy, scipy,
+astropy, astropy-healpix and requests into it. The first time, they download about 600 MB of survey
+data (the 50 MB composite from NASA LAMBDA, checked against its sha256, and 550 MB of cutouts
+around 27 nebulae) and take up to an hour, most of it fetching the patch cutouts. If a build fails, the downloads stay installed and a rerun
+builds what is still missing. `--dry-run` lists the builds it would run without running them.
+
+## The star field: Gaia DR3
+
+Without a star catalogue the sky behind a photographed body is empty. With one, every frame has a
+real, correctly placed, correctly coloured star field behind its subject, as deep as the files
+installed.
 
 ### How deep a star field
 
-The faint limit is yours to pick, and it is also the RAM the catalogue occupies while you play.
-These are counts measured against the Gaia archive, not estimates:
+| Installed by | Star files | Stars | Depth | Disk |
+|---|---|---|---|---|
+| `setup_data.py` | `GaiaStarCatalog.V13.starcat` | 5.57 M | V 13 | 78 MB |
+| `get_sky_data_compact.py` | the V13, V15, V17 and V19 tiers | 426.9 M | V 19 | 8.08 GB |
+| `get_sky_data_complete.py` | those four and `GaiaStarCatalog.starcat` | 1806.3 M | every source in DR3 | 33.37 GB |
 
-| `--gmax` | Stars | File and RAM |
-|---|---|---|
-| none | no star field at all, honestly empty | 0 |
-| 12 | 3.09 M | 43 MB |
-| **13** (default) | **7.37 M** | **103 MB** |
-| 14 | 16.8 M | 236 MB |
-| 15 | 36.9 M | 517 MB |
+**The file names declare the depth.** `GaiaStarCatalog.starcat` is the main catalogue. A tier such as
+`GaiaStarCatalog.V17.starcat` holds exactly the main catalogue's stars at V 17 or brighter, in the
+same order. With no main file installed the deepest tier stands in for it, and its cut is as deep as
+any frame goes, so a set of tiers never passes for more than it holds, and a download interrupted
+after its first tiers still leaves a valid install at their depth. The game checks the shallower
+tiers against the one standing in and refuses any that disagrees.
 
-```bash
-# everything, including the two expensive ones
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --with all
-
-# everything EXCEPT the star field, if you do not want an ESA account
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --skip stars
-
-# just one product
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only dust
-
-# a deeper star field. --force is only needed to REPLACE a catalogue you already have;
-# on a fresh install you can leave it off.
-python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only stars --gmax 14 --force
-```
-
-Each packer prints named sanity checks as it runs (M31 must come out 3.2° across at B_T 4.4, Sgr A*
-must land at Galactic (0, 0)), so a units error or a wrong file fails loudly instead of producing a
-plausible sky. On top of that, `setup_data.py` refuses to install a file that does not start with
-its format's magic number, so a truncated download is caught before it reaches the game.
-
-The sections further down explain what each product is, where every pixel came from, and how to run
-its packer by hand. None of that is needed to install them; it is there because a survey you cannot
-trace is a survey you cannot trust.
-
-
-Then start KSP and check the log. Every file that loaded says so, with its own provenance:
+**A frame deeper than the catalogue says so.** When an exposure's own limit is fainter than the
+installed depth, its stars are drawn to that depth and the capture readout shows `N stars to V 19.0`
+where it would otherwise show `N stars`. The depth is stated once, when KSP loads the catalogue,
+rather than warned about at every capture:
 
 ```
-[ExoInstruments] Rendered star field: 7369627 Gaia DR3 stars loaded.
-[ExoInstruments] Dust map: nside 1024 (3.4 arcmin), SFD98 ... x0.86 ...
-[ExoInstruments] Emission map: H-alpha at nside 1024 (3.4 arcmin), Finkbeiner ...
-[ExoInstruments] Galaxy catalogue: 4812 galaxies, HyperLEDA (Makarov et al. 2014, A&A 570, A13)
+[ExoInstruments] Rendered star field: 5572882 Gaia DR3 stars to V 13 (GaiaStarCatalog.V13.starcat, no main file).
+[ExoInstruments] Rendered star field: 426885317 Gaia DR3 stars to V 19 (GaiaStarCatalog.V19.starcat, no main file), with magnitude tiers at V 13, 15, 17.
+[ExoInstruments] Rendered star field: 1806254432 Gaia DR3 stars loaded, with magnitude tiers at V 13, 15, 17, 19.
 ```
 
-A file that is missing says that instead, and names the script that builds it. Nothing fails
-silently, and nothing is required.
+The same readout note appears on any set when the per-frame budget holds a wide field in a dense part
+of the sky shallower ([Every star Gaia has](#every-star-gaia-has)), and a capture warning then names
+the tier it used.
 
-## The star field is user-supplied: build it from Gaia DR3
+A `GaiaStarCatalog.starcat` of your own, such as a build from the ESA archive, is a main file with no
+declared depth. The game checks every tier beside a main file against it, so the release's deeper
+tiers are refused beside a `G < 13` build, and the download scripts ask before removing or replacing
+it.
 
-**No star catalogue ships with the mod.** Without one, the sky behind a photographed body is empty.
-Building one is a single command and gives you a real, correctly-placed, correctly-coloured star
-field in every frame.
-
-### Why nothing ships
+### Why it is not in the mod zip
 
 The mod used to ship **Tycho-2**: 29.3 MB for 2.5 million stars complete to about V = 11.5. That is
 61.9 stars/deg², so an RC20 frame held roughly **four** stars where a real 30-second sub holds
@@ -399,84 +573,99 @@ hundreds. It was the worst of both worlds, 29.3 MB carried to deliver a sky that
 A real star field means Gaia, and Gaia's own counts say what that weighs at the 14 bytes/star
 this format uses:
 
-| Faint limit | Stars | File, and RAM while playing |
+| Faint limit | Stars | File |
 |---|---|---|
 | G < 13 | 7.4 M | **103 MB** |
 | G < 14 | 16.8 M | **236 MB** |
 | G < 15 | 36.9 M | **517 MB** |
 | G < 16 | 78.0 M | **1.1 GB** |
 | G < 18 | 304.9 M | **4.3 GB** |
+| every source in DR3 | 1806.3 M | **25.3 GB** |
 
 Counts are `SELECT COUNT(*) FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < N`, asked of the
 archive rather than estimated. An earlier version of this table was shifted by one magnitude and
 its `G < 18` row was nearly double the real count.
 
-Memory is exactly 14 bytes/star. That was 12 before the reddening column landed (format version 3),
+Disk is exactly 14 bytes/star. That was 12 before the reddening column landed (format version 3),
 so a catalogue costs a sixth more than it used to.
 
-None of that belongs in a mod download. On your own disk it is fine. So the choice is a real star
-field or an honestly empty one, rather than a heavy download that delivers neither.
-
-### Building it
-
-```
-python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
-```
-
-**Try a cone first.** One command, under a minute, and it tells you the whole chain works before you
-commit to a run measured in hours:
-
-```
-python3 tools/pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
-```
-
-That is a 1° cone on the Orion Nebula. It should report a few hundred stars, a handful without a
-colour index, and roughly half without a reddening estimate, toward Orion the archive has
-`ag_gspphot` for 57% of sources brighter than G = 13, and the packer neither invents the rest nor
-drops them.
-
-**Register a free ESA archive account first** (<https://cosmos.esa.int/web/gaia-users/register>) and
-pass it with `--user`. This is not optional in practice. Anonymous access is the archive's degraded
-mode, and it hits a wall that retrying cannot get past: measured on Gaia DR3, one source_id range
-whose row count answers in 5 seconds fails its data fetch at 116 s on every single attempt, while
-the range next to it, of almost the same size, returns in 7 s. The query planner picks a scan for
-some ranges and the job is killed before it finishes.
-
-The password is never taken on the command line, which would put it in your shell history: the tool
-prompts for it without echo, or reads `GAIA_PASSWORD` if you prefer to set it yourself.
-
-No packages to install: the ESA archive speaks plain HTTP, so this runs on the Python 3 that
-already ships with macOS and most Linux distributions.
-
-**It is still not instant.** The tool counts each range before fetching it, splits any that is too
-big, retries a refused one with backoff, and caches every completed range to `<out>.cache` so a run
-that dies resumes instead of starting over. Leave it going and come back to it.
-
-Then copy the result to:
-
-```
-<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat
-```
-
-The `.starcat` extension matters: Kopernicus reads every `*.bin` in GameData as a scaled-space
-mesh, and would try that on a 100-500 MB catalogue at every startup. That is the only star
-catalogue the renderer looks for. The log line on startup tells you whether
-it found one. To go back to an empty sky, delete or rename the file.
+None of that belongs in a mod download, and on a disk it is fine. So the zip carries no stars: they
+are a separate download from the data release, and without them the sky is honestly empty rather
+than thinly and wrongly populated.
 
 ### Choosing a depth
 
-The whole catalogue is held in memory, so the table above is also the RAM cost, **on top of KSP
-itself**. `G < 13` is a safe first try and already about three times the star count of the Tycho-2
-file this replaces, at a far deeper limit; `G < 15` is as deep as most machines will want. Beyond
-that, know what your RAM is doing.
+The catalogue is memory mapped, not read: KSP keeps only each file's declination index in memory
+(7 kB) and the operating system pages in the bands a frame looks at, so depth costs disk and nothing
+else while you play. The V 13 tier alone already holds more than twice the stars of the Tycho-2 file
+this replaces, at a far deeper limit. The compact set is the one to start with, and the complete set
+is for frames that reach past V 19.
 
-Search cost does *not* grow with catalogue size (the format is banded in declination and
-binary-searched in right ascension, so a frame only ever touches the stars near it). What does grow
-is how many stars get drawn per frame, which is the entire point, and that has been measured too:
-the worst realistic case in the whole roster is the RedCat 51's 13.2 deg² field at `G < 15` toward
-the Galactic plane, 43 000 stars in one unguided frame with 54-pixel trails, which deposits in
-**8 ms**. The instrument's PSF convolution over the same frame costs 552 ms, so the star field is
-not the expensive part and never becomes it.
+A frame only ever touches the stars near it (the format is banded in declination and binary-searched
+in right ascension), but inside its field it reads every star whatever the exposure's own limit,
+because the file is sorted by position and not by brightness. At `G < 15` that costs nothing. On the
+all-sky file it is the whole cost, which is what the magnitude tiers below remove.
+
+What grows with depth is how many stars get drawn per frame, which is the entire point. At `G < 15`
+the worst realistic case in the roster is the RedCat 51's 13.2 deg² field toward the Galactic plane,
+43 000 stars in one unguided frame with 54-pixel trails, which deposits in **8 ms** against 552 ms
+for the instrument's PSF convolution over the same frame.
+
+### Every star Gaia has
+
+The complete set adds `GaiaStarCatalog.starcat`: all 1.81 billion sources of Gaia DR3, **25.3 GB** in
+this format, far too much for any archive query to return and not too much for a disk. It was packed
+from ESA's bulk release by this mod's own packer (see
+[Building the data from its sources](#building-the-data-from-its-sources)) and is published in
+thirteen parts, which the script writes straight into one file as it downloads them.
+
+**The magnitude tiers are what make it usable.** The file is sorted by position, not brightness, so
+a search reads every star inside its field whatever the exposure's limit. A BRITE field toward the
+Galactic centre holds 456 million of them, and reading them all to keep the 15 million brighter than
+V = 17 took 16 s and 6 GB of reads. A tier holds exactly the main file's stars down to its cut, in
+the same order, so a search reads about what it keeps. Both sets carry the same four tiers, byte for
+byte, which is why switching between them only adds or removes the main file:
+
+| Tier | Stars | File |
+|---|---|---|
+| `GaiaStarCatalog.V13.starcat` | 5.57 M | 78 MB |
+| `GaiaStarCatalog.V15.starcat` | 27.7 M | 388 MB |
+| `GaiaStarCatalog.V17.starcat` | 117.2 M | 1.64 GB |
+| `GaiaStarCatalog.V19.starcat` | 426.9 M | 5.98 GB |
+
+Each frame is served by the shallowest file that reaches its own limit and gets exactly the stars
+the main file would have given it, which `tools/starcat-tests` checks star for star. With the main
+file installed, the log names the tiers it found:
+
+```
+[ExoInstruments] Rendered star field: 1806254432 Gaia DR3 stars loaded, with magnitude tiers at V 13, 15, 17, 19.
+```
+
+**One tracked frame reads at most 10 million catalogue records**, and a trailed one fewer, in
+proportion to what its trails cost to draw. Past that the field comes from the deepest tier that
+fits, whole and uniformly shallower, and says so: the capture readout shows `N stars to V 15.0`, and
+the log names the tier and the depth the exposure could have reached. Only wide fields toward the
+Galactic plane get there. Measured under Mono, which is what KSP runs:
+
+| Field | Limit | Served from | Records read | Search |
+|---|---|---|---|---|
+| RC20, Galactic centre | V 22 | main file | 32 383 | 2 ms |
+| RedCat 51, Galactic centre | V 13 | V13 tier | 12 691, against 19.2 M without tiers | 1 ms |
+| RedCat 51, Galactic centre | V 22 | V19 tier, by the budget | 3.49 M | 0.2 s |
+| RedCat 51, M51 | V 22 | main file | 99 000 | 51 ms |
+| BRITE, Galactic centre | V 22 | V15 tier, by the budget | 2.24 M | 0.7 s |
+| BRITE, M51 | V 22 | main file | 3.03 M | 0.45 s |
+
+On the compact set the rows served here from the main file come from the V19 tier instead, and stop
+at V 19; the budget works the same way on both sets.
+
+Drawing those stars, photometry and projection of each one included, is the larger cost: 3.3 s for
+BRITE toward the Galactic centre, 3.8 s for a guided 300 s RedCat 51 frame there, and 5.9 s for an
+unguided 60 s one, whose 200-pixel trails hold it to the V17 tier.
+
+The search runs on the background pass with the rest of the frame, so pressing Capture never stalls
+the game, and stars go from the catalogue straight into the image without being collected first, so
+a deep field costs time and not memory.
 
 ### What you actually get
 
@@ -521,7 +710,8 @@ fetched without the `ag_gspphot` column.
 
 ## Optional: the interstellar dust map
 
-Total Galactic reddening along the line of sight, reported with every frame. **Nothing ships.**
+Total Galactic reddening along the line of sight, reported with every frame. Both download scripts
+install it ([Data files](#data-files-download-them)); to build it from its source instead:
 
 ```
 cd tools
@@ -795,7 +985,8 @@ Against the fourteen patches this project ships positions for:
 
 ## Optional: the galaxy catalogue
 
-**Nothing ships.** Galaxies are rendered from their own measured shape, so the catalogue supplies
+Both download scripts install it ([Data files](#data-files-download-them)). Galaxies are rendered
+from their own measured shape, so the catalogue supplies
 four quantities per object: total B magnitude, the diameter of the 25 B-mag/arcsec² isophote (D25),
 the axis ratio of that isophote, and its position angle.
 
@@ -948,13 +1139,182 @@ real reason ground-based [O I] imaging is hopeless), and pushed through the Bess
 mod's own zero point, the dark sky comes out **V = 21.78** against Patat's measured 21.7 +/- 0.2, a
 number that never entered the model.
 
+## Building the data from its sources
+
+None of this is needed to play. It is how every file in the data release was made, and how to make
+one the release does not offer: a star catalogue cut at a Gaia G limit of your own, a deeper galaxy
+catalogue, or any file at all when GitHub is out of reach. Each product's own chapter above explains
+what its packer does; this one covers the tools around them.
+
+### setup_data.py
+
+```bash
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py"
+```
+
+With no arguments it installs `GaiaStarCatalog.V13.starcat` from the data release (78 MB, stars to
+V 13, checked against its sha256, no account needed) and builds the dust map, H-alpha map and galaxy
+catalogue from their sources. It finds KSP from its own location, builds a private virtualenv,
+downloads what has to be downloaded, runs each packer, checks each result and installs it into
+`PluginData/` through a staging file, so a link already there is replaced rather than written
+through. Run from inside `GameData` it works in `<KSP>/ExoInstruments-data-build`, which can be
+deleted afterwards. It is safe to interrupt and rerun: anything already installed is skipped and
+every packer resumes from its own cache.
+
+| Product | File | Size | Source | Built |
+|---|---|---|---|---|
+| `stars` | `GaiaStarCatalog.V13.starcat` | 78 MB | The data release | By default |
+| `stars`, with `--stars esa` | `GaiaStarCatalog.starcat` | 103 MB at G < 13, 236 MB at G < 14 | Gaia DR3, via the ESA archive | Instead of the above |
+| `dust` | `DustMap.dustmap` | 25 MB | SFD98 via `dustmaps` | By default |
+| `halpha` | `HalphaMap.emission` | 25 MB | Finkbeiner (2003) via NASA LAMBDA | By default |
+| `galaxies` | `GalaxyCatalog.galcat` | 0.9 MB at B ≤ 15 | HyperLEDA | By default |
+| `patches` | `HalphaPatches.patchset` | 14.6 MB | SHASSA in the south, NSNS in the north | With `--with patches` |
+| `images` | `GalaxyImages.galimg` | 452 MB at B ≤ 11 | Legacy DR10, Pan-STARRS, SDSS9, DES DR2 cutouts | With `--with images` |
+
+`patches` and `images` are opt-in, not because they are worth less but because they cost more to
+build: both fetch survey cutouts object by object, and `images` runs for hours.
+
+```bash
+# everything, including the two opt-in products
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --with all
+
+# just the products you name
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only halpha,patches
+
+# a star catalogue from the ESA archive. --force is only needed to REPLACE a
+# GaiaStarCatalog.starcat you already have; on a fresh install you can leave it off.
+python3 "<KSP>/GameData/ExoInstruments/tools/setup_data.py" --only stars --stars esa --gmax 14 --force
+```
+
+`--gmax` sets the Gaia faint limit of an ESA build. These are counts measured against the Gaia
+archive, not estimates:
+
+| `--gmax` | Stars | File |
+|---|---|---|
+| 12 | 3.09 M | 43 MB |
+| **13** (default) | **7.37 M** | **103 MB** |
+| 14 | 16.8 M | 236 MB |
+| 15 | 36.9 M | 517 MB |
+
+`--bmax` and `--image-bmax` set the depth in B of the galaxy catalogue and of the galaxy images.
+Each packer prints named sanity checks as it runs (M31 must come out 3.2° across at B_T 4.4, Sgr A*
+must land at Galactic (0, 0)), so a units error or a wrong file fails loudly instead of producing a
+plausible sky. On top of that, `setup_data.py` refuses to install a file that does not start with
+its format's magic number, so a truncated download is caught before it reaches the game.
+
+### A star catalogue from the ESA archive
+
+`setup_data.py --stars esa` runs this packer for you and asks for the account below at the start. By
+hand:
+
+```
+python3 tools/pack_gaia_catalog.py --gmax 13 --out GaiaStarCatalog.starcat --user YOUR_ESA_USERNAME
+```
+
+**Try a cone first.** One command, under a minute, and it tells you the whole chain works before you
+commit to a run measured in hours:
+
+```
+python3 tools/pack_gaia_catalog.py --gmax 13 --cone 83.822 -5.391 1.0 --out /tmp/test.starcat
+```
+
+That is a 1° cone on the Orion Nebula. It should report a few hundred stars, a handful without a
+colour index, and roughly half without a reddening estimate, toward Orion the archive has
+`ag_gspphot` for 57% of sources brighter than G = 13, and the packer neither invents the rest nor
+drops them.
+
+**Register a free ESA archive account first** (<https://cosmos.esa.int/web/gaia-users/register>),
+which only a build from the archive needs, and pass it with `--user`. This is not optional in
+practice. Anonymous access is the archive's degraded mode, and it hits a wall that retrying cannot
+get past: measured on Gaia DR3, one source_id range
+whose row count answers in 5 seconds fails its data fetch at 116 s on every single attempt, while
+the range next to it, of almost the same size, returns in 7 s. The query planner picks a scan for
+some ranges and the job is killed before it finishes.
+
+The password is never taken on the command line, which would put it in your shell history: the tool
+prompts for it without echo, or reads `GAIA_PASSWORD` if you prefer to set it yourself.
+
+No packages to install: the ESA archive speaks plain HTTP, so this runs on the Python 3 that
+already ships with macOS and most Linux distributions.
+
+**It is still not instant.** The tool counts each range before fetching it, splits any that is too
+big, retries a refused one with backoff, and caches every completed range to `<out>.cache` so a run
+that dies resumes instead of starting over. Leave it going and come back to it.
+
+Then copy the result to:
+
+```
+<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat
+```
+
+The `.starcat` extension matters: Kopernicus reads every `*.bin` in GameData as a scaled-space
+mesh, and would try that on a 100-500 MB catalogue at every startup. That is the only star
+catalogue the renderer looks for, along with any magnitude tiers cut beside it (see
+[Every star Gaia has](#every-star-gaia-has)). The log line on startup tells you whether it found
+one. To stop using it, delete or rename the file; any tiers left beside it then set the depth.
+
+### Every star, from ESA's bulk release
+
+[ExoInstruments Studio](https://github.com/batistitooo/ExoInstrumentsStudio) builds the all-sky file
+from ESA's bulk release with its `tools/build_allsky_catalog.py`, which streams the 753 GB release
+rather than storing it and packs every row through this mod's own `pack_gaia_catalog.py`, so the
+result is this format with this photometry. The data release publishes that file. Put it where the
+renderer looks, linked or copied:
+
+```bash
+ln -s /path/to/GaiaAllSky.starcat "<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat"
+```
+
+A download script accepts the link while the file it points to is identical to the release's:
+`get_sky_data_complete.py` checks it once through the link, keeps it and downloads nothing for it,
+and `get_sky_data_compact.py` asks before removing the link, never the file.
+
+### Magnitude tiers
+
+```bash
+python3 "<KSP>/GameData/ExoInstruments/tools/tier_star_catalog.py" "<KSP>/GameData/ExoInstruments/PluginData/GaiaStarCatalog.starcat"
+```
+
+It writes the V13, V15, V17 and V19 tiers beside a main catalogue in one pass, 33 s over the all-sky
+file. It needs numpy, checks every tier against the main file before keeping it, takes other cuts
+with `--cuts 13,15,17` and rebuilds existing tiers with `--force`. Cut tiers from a main file only:
+a tier's own tiers would be named `GaiaStarCatalog.V19.V17.starcat`, which nothing reads. A main file
+of over 100 million stars installed without tiers logs a warning naming this tool. Tiers cut from
+any main file other than the release's are not the release's bytes, so a download script asks before
+replacing them.
+
+### Publishing a data release
+
+Maintainers only: `tools/publish_sky_data.py` is not in the mod zip. It needs the GitHub CLI, `gh`,
+logged in with write access to the repository.
+
+```bash
+# check, hash and write the release metadata
+python3 tools/publish_sky_data.py --exclude halpha,patches
+# the same, plus what an upload would do
+python3 tools/publish_sky_data.py --exclude halpha,patches --upload --dry-run
+# create the release and upload whatever is not there yet
+python3 tools/publish_sky_data.py --exclude halpha,patches --upload
+```
+
+It reads the files from the KSP install's `PluginData`, links included, and only ever reads them.
+Each is checked field by field the way the mod reads it, and every tier against the deepest star
+file. Each is then hashed whole and per part in one pass, and `sky-data-manifest.json`, `SHA256SUMS`
+and `NOTICE-sky-data.md` (this repository's, followed by a table of the release's files) are written
+to `--out`. A file over 1900 MiB goes up as numbered parts, one at a time, so the extra disk used is
+one part, and an interrupted upload resumes when the same command runs again. `halpha` and `patches`
+stay excluded: their licence entries are placeholders, which an upload refuses. It ends by printing
+the `MANIFEST_SHA256` to pin in `tools/sky_data_release.py`, since a mod build only accepts the
+release it pins. Once a mod release pins a tag, that tag's assets never change: new or corrected data
+is a new `sky-data-N` tag and a mod release that pins it.
+
 ## Future Roadmap
 
 Not yet implemented in the current build:
 
 - **Autoguiding as a paid career upgrade** for the RC20, rather than a free toggle.
 - **Further real astrograph features** surveyed but not built: plate-solving, flat-frame calibration, meridian flip, dithering.
-- **A faint population without the download.** Building a Gaia catalogue solves depth for anyone willing to spend the disk and the RAM, but a player who installs nothing still gets an empty sky. Generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) would give a plausible field at zero download, the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
+- **A faint population without the download.** Downloading the Gaia sky data solves depth for anyone willing to spend the disk, but a player who installs nothing still gets an empty sky. Generating a statistical faint population from a Galactic star-count model (Bahcall & Soneira; Besançon; TRILEGAL) would give a plausible field at zero download, the same approach UFig uses, and the natural step before **observing galaxies**, which the same sum-of-sources architecture supports by adding Sérsic profiles as another source type.
 - **Naming rights & a discovery archive.** Player-named planets on confirmation, plus an auto-generated logbook entry (light curve, date, instrument) per detection.
 - **Weather in the generic instrument forecast.** EVE cloud cover is already hooked into the RC20's solar-system forecast; extending it to the exoplanet-instrument heatmap (SPECULOOS, ELT, and the other ground-based facilities) is still open.
 - **Two additional KSC observatory buildings**, each a different real telescope type, planned as further additions alongside the current one.

@@ -15,28 +15,34 @@ and six copies.
 WHAT IT BUILDS, and in what order. The order is not cosmetic: two of the products are built from
 another product rather than from an archive, so the dependency is real.
 
-    stars      GaiaStarCatalog.starcat   Gaia DR3, via the ESA archive
-    dust       DustMap.dustmap           SFD98, via the dustmaps package
-    halpha     HalphaMap.emission        Finkbeiner (2003), via NASA LAMBDA
-    galaxies   GalaxyCatalog.galcat      HyperLEDA
-    patches    HalphaPatches.patchset    SHASSA, calibrated against halpha
-    images     GalaxyImages.galimg       survey cutouts, driven by galaxies
+    stars      GaiaStarCatalog.V13.starcat  Gaia DR3 to V 13, from the sky data release
+    dust       DustMap.dustmap              SFD98, via the dustmaps package
+    halpha     HalphaMap.emission           Finkbeiner (2003), via NASA LAMBDA
+    galaxies   GalaxyCatalog.galcat         HyperLEDA
+    patches    HalphaPatches.patchset       SHASSA, calibrated against halpha
+    images     GalaxyImages.galimg          survey cutouts, driven by galaxies
 
 WHAT IS OFF BY DEFAULT. `patches` and `images` are opt-in (--with patches,images or --with all).
 Not because they are worth less, but because they cost a different order of magnitude: patches
-downloads about 2.3 GB of SHASSA fields, and images fetches survey cutouts for every galaxy in the
-catalogue and runs for hours. The other four are a coffee break, except the star field, which is a
-long download that resumes if interrupted.
+downloads about 550 MB of survey cutouts, and images fetches survey cutouts for every galaxy in the
+catalogue and runs for hours. The other four are a coffee break.
 
 IDEMPOTENT ON PURPOSE. Anything already installed is left alone, so rerunning after an interruption
 picks up where it stopped rather than redoing hours of work. --force rebuilds regardless, and
 --only <keys> restricts the run to the products you name.
 
-THE ESA ACCOUNT. The star field is the one step that needs a login, because anonymous access to the
-Gaia archive hits a job wall that no amount of retrying gets past. Registration is free at
-https://cosmos.esa.int/web/gaia-users/register. Pass --gaia-user, set GAIA_USER, or answer the
-prompt; the password is prompted for or read from GAIA_PASSWORD and is never taken on the command
-line. With no username at all the star field is skipped and everything else still runs.
+THE STAR FIELD. By default it is GaiaStarCatalog.V13.starcat (78 MB, stars to V 13), downloaded
+from the ExoInstruments sky data release and checked against its sha256, with no account needed.
+It is skipped when a GaiaStarCatalog.starcat or a release tier is already installed. For deeper
+fields run get_sky_data_compact.py (to V 19) or get_sky_data_complete.py (every star); both then
+run this script for halpha and patches, which the release cannot carry.
+
+THE ESA ACCOUNT. --stars esa builds GaiaStarCatalog.starcat from the ESA archive to --gmax instead,
+and that needs a login, because anonymous access to the Gaia archive hits a job wall that no amount
+of retrying gets past. Registration is free at https://cosmos.esa.int/web/gaia-users/register.
+Pass --gaia-user, set GAIA_USER, or answer the prompt; the password is prompted for or read from
+GAIA_PASSWORD and is never taken on the command line. With no username at all the star field is
+skipped and everything else still runs.
 
 EVERY PRODUCT IS CHECKED BEFORE IT IS INSTALLED. Each packer prints its own named sanity checks as
 it runs (M31 must come out 3.2 degrees across at B_T 4.4, and so on), and on top of that this
@@ -47,9 +53,9 @@ to have. A truncated download or a half-written file is caught here rather than 
 import argparse
 import getpass
 import hashlib
+import http.client
 import os
 import platform
-import shutil
 import subprocess
 import sys
 import urllib.request
@@ -57,10 +63,11 @@ from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
 
-# Whether this is the copy shipped inside the installed mod rather than one in a clone of the
-# repository. It decides both where KSP is (no guessing needed) and where the build work goes.
-SHIPPED_IN_GAMEDATA = (TOOLS.parent.name == "ExoInstruments"
-                       and TOOLS.parent.parent.name == "GameData")
+# KSP discovery lives in sky_data_release.py, so this script and the player scripts find KSP the
+# same way. SHIPPED_IN_GAMEDATA also decides where the build work goes.
+import sky_data_release
+from sky_data_release import (DEFAULT_NAME, SHIPPED_IN_GAMEDATA, SkyDataError, install_local_file,
+                              install_variant, plugin_data_dir, stars_installed)
 
 # The one source file no archive will hand over programmatically on stable terms. LAMBDA's URLs
 # have moved before, and the nside 512 map sitting next to it in the same directory is a
@@ -68,11 +75,6 @@ SHIPPED_IN_GAMEDATA = (TOOLS.parent.name == "ExoInstruments"
 # See pack_halpha_map.py for why the 1024 map specifically.
 HALPHA_URL = "https://lambda.gsfc.nasa.gov/data/foregrounds/fink_halpha/Halpha_fwhm06_1024.fits"
 HALPHA_SHA256 = "8daaf304acc1c320096a0c41667bc8a5ae272b4208d64e003b7d2c1ba9512936"
-
-# Union of what the packers import. astropy-healpix is NOT healpy: pack_halpha_map.py and
-# pack_shassa_patches.py import astropy_healpix while pack_dust_map.py imports healpy, and both
-# have to be here. Installing only healpy is how the H-alpha step used to die on an ImportError.
-PIP_PACKAGES = ["numpy", "scipy", "astropy", "astropy-healpix", "healpy", "requests", "dustmaps"]
 
 
 def log(msg):
@@ -84,116 +86,16 @@ def die(msg):
     sys.exit(1)
 
 
+def resolve_ksp(explicit, log=log):
+    """The engine's KSP discovery, ending with an error line rather than a traceback."""
+    try:
+        return sky_data_release.resolve_ksp(explicit, log)
+    except SkyDataError as error:
+        die(str(error))
+
+
 # ---------------------------------------------------------------------------
-# Finding KSP, and choosing where to work
-
-
-def candidate_ksp_dirs():
-    """Where to look for KSP, most likely first.
-
-    The first candidate is not a guess at all: this script ships inside
-    GameData/ExoInstruments/tools/, so when a player runs the copy that came with the mod, the KSP
-    directory is three levels up and no platform heuristic is involved. The Steam defaults below
-    are the fallback for running it out of a clone of the repository.
-    """
-    if SHIPPED_IN_GAMEDATA:
-        yield TOOLS.parent.parent.parent
-    for library in steam_libraries():
-        yield library / "steamapps" / "common" / "Kerbal Space Program"
-    # Non-Steam installs, and the store builds that do not register a Steam library at all.
-    home = Path.home()
-    if platform.system() == "Windows":
-        for root in (Path("C:/"), Path("D:/"), Path("E:/")):
-            yield root / "Games" / "Kerbal Space Program"
-            yield root / "Kerbal Space Program"
-    else:
-        yield home / "Kerbal Space Program"
-
-
-def steam_roots():
-    """Where Steam itself is installed, per platform."""
-    home = Path.home()
-    system = platform.system()
-    if system == "Darwin":
-        yield home / "Library" / "Application Support" / "Steam"
-    elif system == "Windows":
-        # The registry is the authoritative answer and costs nothing to ask for; winreg exists
-        # only on Windows, hence the local import.
-        try:
-            import winreg
-            for hive, key in ((winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
-                              (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam")):
-                try:
-                    with winreg.OpenKey(hive, key) as handle:
-                        value = winreg.QueryValueEx(handle, "SteamPath")[0]
-                        if value:
-                            yield Path(value)
-                except OSError:
-                    continue
-        except ImportError:
-            pass
-        yield Path("C:/Program Files (x86)/Steam")
-    else:
-        yield home / ".steam" / "steam"
-        yield home / ".local" / "share" / "Steam"
-
-
-def steam_libraries():
-    """Every Steam library folder, read from Steam's own libraryfolders.vdf.
-
-    Hardcoding drive letters was the previous approach and it is wrong in the common case: on
-    Windows a second drive holding the games is normal, and on any platform a player can put a
-    library anywhere. Steam already keeps the list, so it is asked rather than guessed.
-
-    The file is Valve's KeyValues format. Only the "path" entries are wanted, and they are the
-    one thing in it whose shape has survived every version of the format, so a regex over the
-    quoted values is both sufficient and immune to the nesting changing again.
-    """
-    import re
-    seen = set()
-    for root in steam_roots():
-        if root in seen or not root.is_dir():
-            continue
-        seen.add(root)
-        yield root
-        # Steam has kept this file in both places across versions, so both are tried.
-        for vdf in (root / "steamapps" / "libraryfolders.vdf",
-                    root / "config" / "libraryfolders.vdf"):
-            if not vdf.is_file():
-                continue
-            try:
-                text = vdf.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for match in re.finditer(r'"path"\s*"([^"]+)"', text):
-                path = Path(match.group(1).replace("\\\\", "\\"))
-                if path not in seen:
-                    seen.add(path)
-                    yield path
-
-
-def looks_like_ksp(path):
-    """A GameData directory is the thing that actually matters, so that is what is checked."""
-    return (path / "GameData").is_dir()
-
-
-def resolve_ksp(explicit):
-    if explicit:
-        path = Path(explicit).expanduser()
-        if not looks_like_ksp(path):
-            die(f"{path} does not contain a GameData directory, so it is not a KSP install.")
-        return path
-    env = os.environ.get("KSP")
-    if env:
-        path = Path(env).expanduser()
-        if not looks_like_ksp(path):
-            die(f"$KSP points at {path}, which has no GameData directory.")
-        return path
-    for path in candidate_ksp_dirs():
-        if looks_like_ksp(path):
-            log(f"Found KSP at {path}")
-            return path
-    die("Could not find a KSP install. Pass --ksp /path/to/Kerbal Space Program, or set $KSP.")
+# Choosing where to work
 
 
 def resolve_work_dir(ksp):
@@ -209,23 +111,32 @@ def resolve_work_dir(ksp):
     return (ksp / "ExoInstruments-data-build") if SHIPPED_IN_GAMEDATA else TOOLS
 
 
-def plugin_data_dir(ksp):
-    """Where every finished product lands."""
-    mod = ksp / "GameData" / "ExoInstruments"
-    if not mod.is_dir():
-        die(f"ExoInstruments is not installed at {mod}. Install the mod first (CKAN, or unzip "
-            "the release over the KSP folder), then rerun this.")
-    target = mod / "PluginData"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
-
-
 # ---------------------------------------------------------------------------
 # The virtualenv
 
 
-def ensure_venv(work):
-    """Builds the virtualenv once and installs the union of every packer's requirements into it.
+def pip_packages(products):
+    """What the packers of `products` import, each package once, in build order."""
+    packages = []
+    for product in products:
+        packages += [p for p in product.packages if p not in packages]
+    return packages
+
+
+def venv_ready(python):
+    """Whether the virtualenv's interpreter runs pip. An interrupted creation, or a Python without
+    ensurepip, leaves an interpreter with no pip, which installing packages can never repair."""
+    if not python.exists():
+        return False
+    try:
+        return subprocess.call([str(python), "-m", "pip", "--version"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    except OSError:
+        return False
+
+
+def ensure_venv(work, packages):
+    """Builds the virtualenv once and installs `packages` into it, the ones this run's packers need.
 
     Deliberately a virtualenv rather than a --user install or the ambient interpreter: healpy and
     astropy pin versions against each other, and a player's system Python is not ours to touch.
@@ -235,16 +146,20 @@ def ensure_venv(work):
     # Installing into that one would rewrite tracked files.
     venv = work / "setup_env"
     python = venv / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python")
-    if not python.exists():
-        log(f"Creating virtualenv at {venv}")
+    if not venv_ready(python):
+        if venv.exists():
+            log(f"Recreating virtualenv at {venv}, which has no working pip")
+        else:
+            log(f"Creating virtualenv at {venv}")
         venv.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.check_call([sys.executable, "-m", "venv", str(venv)])
+        # --clear, so what an interrupted attempt left behind is replaced rather than reused.
+        subprocess.check_call([sys.executable, "-m", "venv", "--clear", str(venv)])
         # Only in a virtualenv we just created, never in one that already existed. An older
         # interpreter bundles a pip too old to resolve current wheels, but upgrading somebody
         # else's environment is not this script's business.
         subprocess.check_call([str(python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"])
-    log("Installing Python packages (first run only, a few minutes)")
-    subprocess.check_call([str(python), "-m", "pip", "install", "--quiet", *PIP_PACKAGES])
+    log(f"Installing Python packages: {', '.join(packages)} (a few minutes the first time)")
+    subprocess.check_call([str(python), "-m", "pip", "install", "--quiet", *packages])
     return python
 
 
@@ -369,8 +284,8 @@ def gaia_band_fault(path):
 
 
 class Product:
-    def __init__(self, key, filename, magic, summary, builder, default, needs=(), needs_venv=True,
-                 min_version=None, validate=None):
+    def __init__(self, key, filename, magic, summary, builder, default, needs=(), packages=(),
+                 min_version=None, validate=None, download_bytes=0):
         self.key = key
         self.filename = filename
         self.magic = magic
@@ -379,32 +294,41 @@ class Product:
         self.builder = builder
         self.default = default
         self.needs = needs
-        self.needs_venv = needs_venv
+        # The pip packages its packer imports; none means it runs on the ambient interpreter.
+        self.packages = packages
+        # Roughly what a first build fetches, for the player scripts to announce; 0 when unmeasured.
+        self.download_bytes = download_bytes
         # Optional deeper check, run on a freshly built file before it is installed and on an
         # already-installed one before it is skipped. Returns a sentence, or None when sound.
         self.validate = validate
 
 
+# Per packer, so a run installs only what it builds: healpy has no Windows wheel and only dust
+# needs it. astropy-healpix is NOT healpy, and the H-alpha packers need that one.
 PRODUCTS = [
     Product("stars", "GaiaStarCatalog.starcat", b"EXOSTAR1",
             "the star field behind every photograph, from Gaia DR3",
-            build_gaia, default=True, needs_venv=False, validate=gaia_band_fault),
+            build_gaia, default=True, validate=gaia_band_fault),
     Product("dust", "DustMap.dustmap", b"EXODUST1",
             "interstellar reddening and the extinction readout, from SFD98",
-            build_dust, default=True),
+            build_dust, default=True, packages=("numpy", "astropy", "healpy", "dustmaps")),
     Product("halpha", "HalphaMap.emission", b"EXOEMIS1",
             "diffuse H-alpha, [N II] and [S II] in narrowband, from Finkbeiner (2003)",
-            build_halpha, default=True),
+            build_halpha, default=True, packages=("numpy", "astropy", "astropy-healpix"),
+            download_bytes=50_342_400),
     Product("galaxies", "GalaxyCatalog.galcat", b"EXOGALX1",
             "galaxies drawn from their measured shape and distance, from HyperLEDA",
-            build_galaxies, default=True, min_version=2),
+            build_galaxies, default=True, min_version=2, packages=("requests",)),
     Product("patches", "HalphaPatches.patchset", b"EXOPTCH3",
             "high-resolution H-alpha, [O III] and [S II] patches, from SHASSA in the south and "
-            "NSNS in the north (about 2.3 GB downloaded)",
-            build_patches, default=False, needs=("halpha",)),
+            "NSNS in the north (about 550 MB downloaded)",
+            build_patches, default=False, needs=("halpha",),
+            packages=("numpy", "scipy", "astropy", "astropy-healpix", "requests"),
+            download_bytes=550_149_120),
     Product("images", "GalaxyImages.galimg", b"EXOGIMG1",
             "real survey imagery for the brightest galaxies (hours, gigabytes fetched)",
-            build_images, default=False, needs=("galaxies",)),
+            build_images, default=False, needs=("galaxies",),
+            packages=("numpy", "scipy", "astropy", "requests")),
 ]
 
 BY_KEY = {p.key: p for p in PRODUCTS}
@@ -425,7 +349,15 @@ def install(product, ctx):
         if fault:
             die(f"{product.key}: {fault} It is not being installed.")
     target = ctx.plugin_data / product.filename
-    shutil.copy2(built, target)
+    # A linked catalogue, such as an all-sky file kept outside the install, is replaced as a link: copying onto
+    # the link would overwrite the file it points at.
+    if target.is_symlink():
+        log(f"{target} is a link to {os.readlink(target)}; replacing the link, not the file it points at.")
+    # Copied into staging and renamed over the target, so the game never reads half a file.
+    try:
+        install_local_file(built, ctx.plugin_data, product.filename)
+    except SkyDataError as error:
+        die(f"{product.key}: {error}")
     log(f"Installed {target} ({target.stat().st_size / 1e6:.1f} MB)")
 
 
@@ -462,7 +394,8 @@ def parse_selection(args):
     return [p for p in PRODUCTS if p.key in chosen]
 
 
-def main():
+def main(argv=None):
+    """Runs the build. argv defaults to sys.argv[1:]. Returns 0; every failure raises SystemExit."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ksp", help="KSP install directory (default: autodetected, or $KSP)")
@@ -473,12 +406,17 @@ def main():
     parser.add_argument("--only", help="build exactly these products, comma separated")
     parser.add_argument("--force", action="store_true",
                         help="rebuild even where the file is already installed")
+    parser.add_argument("--stars", choices=("release", "esa"), default="release",
+                        help="where the star field comes from: release downloads "
+                             f"{DEFAULT_NAME} (78 MB, stars to V 13); esa builds "
+                             "GaiaStarCatalog.starcat from the ESA archive to --gmax, with a free "
+                             "ESA account (default: %(default)s)")
     parser.add_argument("--gaia-user", default=os.environ.get("GAIA_USER"),
-                        help="ESA archive username (free: "
+                        help="ESA archive username for --stars esa (free: "
                              "https://cosmos.esa.int/web/gaia-users/register)")
     parser.add_argument("--gmax", type=float, default=13.0,
-                        help="Gaia faint limit. Measured counts, which are also the RAM cost "
-                             "while playing: 12 is 3.1 M stars and 43 MB, 13 is 7.4 M and "
+                        help="Gaia faint limit for --stars esa. Measured counts and file sizes, which cost disk "
+                             "rather than memory: 12 is 3.1 M stars and 43 MB, 13 is 7.4 M and "
                              "103 MB, 14 is 16.8 M and 236 MB, 15 is 36.9 M and 517 MB "
                              "(default: %(default)s)")
     parser.add_argument("--bmax", type=float, default=15.0,
@@ -487,16 +425,20 @@ def main():
                         help="galaxy imagery depth in B; each step fainter is many more cutouts "
                              "to fetch (default: %(default)s)")
     parser.add_argument("--yes", action="store_true",
-                        help="never prompt; skip the star field if no ESA username was supplied")
-    args = parser.parse_args()
+                        help="never prompt: replace star files without asking, and with --stars esa "
+                             "skip the star field if no ESA username was supplied")
+    args = parser.parse_args(argv)
 
     selected = parse_selection(args)
     if not selected:
         die("Nothing selected.")
 
     ctx = Context()
-    ksp = resolve_ksp(args.ksp)
-    ctx.plugin_data = plugin_data_dir(ksp)
+    try:
+        ksp = resolve_ksp(args.ksp, log)
+        ctx.plugin_data = plugin_data_dir(ksp)
+    except SkyDataError as error:
+        die(str(error))
     ctx.work = resolve_work_dir(ksp)
     ctx.gmax = args.gmax
     ctx.bmax = args.bmax
@@ -507,6 +449,17 @@ def main():
     # printed below is the plan that actually runs.
     todo = []
     for product in selected:
+        if product.key == "stars" and args.stars == "release":
+            # A main file or a release tier already gives a sky, and needs no network to tell.
+            installed = None if args.force else stars_installed(ctx.plugin_data)
+            if not installed:
+                todo.append(product)
+                continue
+            fault = product.validate(ctx.plugin_data / installed)
+            if fault:
+                log(f"{installed}: {fault}")
+            log(f"Already installed, skipping: stars ({installed}).")
+            continue
         target = ctx.plugin_data / product.filename
         if target.exists() and not args.force:
             # A file can be present, valid and still OUTDATED: the v1 galaxy catalogue predates
@@ -538,7 +491,7 @@ def main():
 
     if not todo:
         log("Everything selected is already installed. Nothing to do.")
-        return
+        return 0
 
     # A product built from another product needs that other one present, whether it was just built
     # or was already installed by a previous run.
@@ -549,9 +502,14 @@ def main():
                 die(f"{product.key} is built from {need}, which is neither installed nor "
                     f"selected. Add it: --with {need}")
 
-    log("Will build: " + ", ".join(f"{p.key} ({p.filename})" for p in todo))
+    def release_stars(product):
+        return product.key == "stars" and args.stars == "release"
 
-    if any(p.key == "stars" for p in todo) and not ctx.gaia_user:
+    log("Will build: " + ", ".join(
+        f"{p.key} ({DEFAULT_NAME} from the sky data release)" if release_stars(p)
+        else f"{p.key} ({p.filename})" for p in todo))
+
+    if args.stars == "esa" and any(p.key == "stars" for p in todo) and not ctx.gaia_user:
         if args.yes or not sys.stdin.isatty():
             log("No ESA username given, so the star field is skipped. Register free at "
                 "https://cosmos.esa.int/web/gaia-users/register and rerun with --gaia-user.")
@@ -575,7 +533,7 @@ def main():
     # walked away from is not found hours later still blocked on a password prompt. Held in memory
     # for the one child that needs it, never written anywhere.
     ctx.gaia_password = os.environ.get("GAIA_PASSWORD")
-    if ctx.gaia_user and not ctx.gaia_password and sys.stdin.isatty():
+    if args.stars == "esa" and ctx.gaia_user and not ctx.gaia_password and sys.stdin.isatty():
         try:
             ctx.gaia_password = getpass.getpass(
                 f"ESA archive password for {ctx.gaia_user} (not echoed): ")
@@ -586,14 +544,37 @@ def main():
 
     if not todo:
         log("Nothing left to build.")
-        return
+        return 0
 
-    ctx.python = ensure_venv(ctx.work) if any(p.needs_venv for p in todo) else None
+    # Only what this run's packers import, so building halpha and patches never needs healpy.
+    packages = pip_packages(todo)
+    ctx.python = None
+    if packages:
+        try:
+            ctx.python = ensure_venv(ctx.work, packages)
+        except subprocess.CalledProcessError as error:
+            die(f"Could not install the Python packages ({', '.join(packages)}): exit "
+                f"{error.returncode}, for the reason printed above. Rerun once that is fixed.")
     log(f"Working in {ctx.work}")
 
     built, failed = [], []
     for product in todo:
         log(f"=== {product.key}: {product.summary}")
+        if release_stars(product):
+            # The release's V13 tier, checked against the pinned manifest; no ESA account.
+            try:
+                code = install_variant("default", ctx.plugin_data, assume_yes=args.yes, log=log)
+            except KeyboardInterrupt:
+                # Ctrl-C stops the whole run, not just the download.
+                print()
+                log("Stopped. Rerun to resume.")
+                sys.exit(1)
+            if code == 0:
+                built.append(product.key)
+            else:
+                log("FAILED: stars. Rerun to resume, or build them with --stars esa.")
+                failed.append(product.key)
+            continue
         try:
             product.builder(ctx)
             install(product, ctx)
@@ -602,6 +583,10 @@ def main():
             # One product failing must not cost the others. A packer that dies halfway leaves its
             # own resumable cache behind, so rerunning picks that product up where it stopped.
             log(f"FAILED: {product.key} (exit {error.returncode}). Continuing with the rest.")
+            failed.append(product.key)
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            # An archive that cannot be reached, or cuts a download short, costs its own product only.
+            log(f"FAILED: {product.key} ({error}). Continuing with the rest.")
             failed.append(product.key)
 
     print()
@@ -617,7 +602,14 @@ def main():
     log("Start KSP and check the log: every file that loaded says so, with its provenance.")
     if failed:
         sys.exit(1)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # main lets Ctrl-C through so an in-process caller stops too.
+        print()
+        log("Stopped. Rerun to resume.")
+        sys.exit(1)

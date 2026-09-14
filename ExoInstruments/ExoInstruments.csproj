@@ -17,7 +17,7 @@
         the ksp_version fields CKAN indexes. Bump ModVersion here and nowhere else.
     -->
     <PropertyGroup>
-        <ModVersion>0.4.1</ModVersion>
+        <ModVersion>0.5.0</ModVersion>
         <KspVersionMin>1.8.0</KspVersionMin>
         <KspVersionMax>1.12.5</KspVersionMax>
         <Version>$(ModVersion)</Version>
@@ -142,10 +142,9 @@
         runtime) to GameData/ExoInstruments/PluginData/ on every build. Without this the
         mod builds and loads but has zero targets to observe.
 
-        Only the two catalogues the repo carries move here. The packed sky products -
-        GaiaStarCatalog.starcat, DustMap.dustmap, HalphaMap.emission, GalaxyCatalog.galcat -
-        are built by tools/ straight into the install and are not in the repo, so this
-        never has an opinion about them and never removes them.
+        Only the catalogues the repo carries move here. The packed sky products are
+        downloaded or built by tools/ straight into the install and are not in the repo, so
+        this never has an opinion about them and never removes them.
     -->
     <Target Name="CopyPluginData" AfterTargets="Build" DependsOnTargets="_ResolveModInstallDir"
             Condition="Exists('$(OutputPath)')">
@@ -248,11 +247,12 @@
         Staged from the repo and from $(TargetPath), never from the local install, so a
         developer's half-finished export or hand-copied file cannot leak into a release.
 
-        What deliberately does NOT ship: the four packed sky products. They are 138 MB of
-        someone else's published survey data, every one of them optional, and README.md -
-        included in the zip for this reason - has the script and the command for each. The
-        mod loads and photographs the solar system without them and says in the log which
-        ones it did not find.
+        What deliberately does NOT ship: the packed sky products. They are someone else's
+        published survey data, from under a megabyte to 25 GB a file, every one of them optional.
+        tools/get_sky_data_compact.py and tools/get_sky_data_complete.py download them from
+        the sky-data GitHub release, and README.md, included in the zip for this reason, says
+        which to run. The mod loads and photographs the solar system without them and says in
+        the log which ones it did not find.
 
         The staging directory is deleted first so a file dropped from the repo cannot
         survive in the zip from a previous run.
@@ -280,7 +280,7 @@
                         Exclude="$(ProjectDir)Parts\**\@thumbs\**\*.*;$(RepoJunk)" />
             <_ShipTextures Include="$(ProjectDir)Textures\**\*.*" Exclude="$(RepoJunk)" />
             <_ShipPluginData Include="$(ProjectDir)PluginData\**\*.*" Exclude="$(RepoJunk)" />
-            <_ShipDocs Include="$(ProjectDir)..\LICENSE;$(ProjectDir)..\README.md;$(ProjectDir)..\ExoInstruments-Getting-Started.pdf" />
+            <_ShipDocs Include="$(ProjectDir)..\LICENSE;$(ProjectDir)..\NOTICE-sky-data.md;$(ProjectDir)..\README.md;$(ProjectDir)..\ExoInstruments-Getting-Started.pdf" />
             <!--
                 The data-file scripts have to be IN the installed mod, not just in the repository.
                 CKAN installs exactly GameData/ExoInstruments/ and nothing else, so a player who
@@ -293,11 +293,13 @@
                 KSP's GameData scan only picks up .cfg, .dll and asset files, so .py files sitting
                 here are inert as far as the game is concerned.
 
-                Only the packers and the one entry point ship. The test harnesses, the checked-in
-                virtualenvs and the download caches in tools/ are development apparatus and would
-                multiply the download for no player-visible gain.
+                Only the packers, the tier cutter the README sends all-sky users to, the one entry
+                point, and the two sky-data download scripts with the engine they share ship. The test
+                harnesses, the release publisher, the checked-in virtualenvs and the download caches in
+                tools/ are development apparatus and would multiply the download for no player-visible
+                gain.
             -->
-            <_ShipTools Include="$(ProjectDir)..\tools\setup_data.py;$(ProjectDir)..\tools\pack_*.py" />
+            <_ShipTools Include="$(ProjectDir)..\tools\setup_data.py;$(ProjectDir)..\tools\pack_*.py;$(ProjectDir)..\tools\tier_star_catalog.py;$(ProjectDir)..\tools\get_sky_data_compact.py;$(ProjectDir)..\tools\get_sky_data_complete.py;$(ProjectDir)..\tools\sky_data_release.py" />
         </ItemGroup>
 
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PackageModDir)Plugins\" />

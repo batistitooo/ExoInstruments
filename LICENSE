@@ -10,12 +10,18 @@ THIRD-PARTY MATERIAL
 The paragraph above covers the work of the copyright holder and nothing else.
 This repository also carries third-party material that is not his and is not
 licensed by him: the vendored Python environments under env/ and tools/env/
-(NumPy, SciPy, Astropy, dustmaps and their dependencies), and the astronomical
+(NumPy, SciPy, Astropy, dustmaps and their dependencies), the astronomical
 survey data cached under tools/ and at the repository root (Gaia catalogue
-extracts, the SFD dust maps, the H-alpha maps). Each remains under its own
-licence and its own terms, held by its own authors. None of it is redistributed
-in the release archive, which ships the plugin, the parts and the documentation
-only; it is present here so the data pipeline can be rebuilt from source.
+extracts, the SFD dust maps, the H-alpha maps), and the catalogues shipped in
+ExoInstruments/PluginData (the Yale Bright Star Catalogue from VizieR, the
+exoplanet.eu catalogue and the Nugent supernova templates). Each remains under
+its own licence and its own terms, held by its own authors.
+
+The sky data files published as GitHub release assets under the sky-data tags
+(Gaia DR3 star catalogues, the SFD dust map, the HyperLEDA galaxy catalogue and
+the galaxy images) are derived from third-party surveys. They are distributed
+under the licences and credits listed in NOTICE-sky-data.md, and this license
+does not apply to them.
 
 PERMITTED USE
 
