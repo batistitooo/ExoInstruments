@@ -2590,10 +2590,10 @@ namespace ExoInstruments.Visualization
             double airmass = targetAltDeg > 0.0 ? ImagingObservingConditions.AirmassAt(targetAltDeg) : double.PositiveInfinity;
             double transmission = AtmosphericImagingNoise.ExtinctionTransmissionAt(airmass, wavelength, Spec.SiteAltitudeMeters);
 
-            // The sky is summed in two groups, because its terms do not share a spectrum. Three of
-            // the four are sunlight scattered off something (the zodiacal dust cloud, the Moon,
-            // and the daytime atmosphere itself), so they genuinely carry the solar spectral
-            // shape. Airglow does not: it is atmospheric LINE emission, and it is no longer
+            // The sky is integrated term by term, because its terms do not share a spectrum.
+            // Zodiacal light is sunlight reflected by dust and keeps the solar shape; moonlight and
+            // twilight are sunlight the air has recoloured (see SkyBrightnessModel's shapes).
+            // Airglow is different again: it is atmospheric LINE emission, and it is no longer
             // integrated flat. ESO's measured sky model supplies its real spectrum (the [O I]
             // lines, sodium, the OH Meinel forest and the residual continuum), so a narrowband
             // filter now sees the sky IT sees: an H-alpha filter sits in a window between OH
@@ -2614,33 +2614,44 @@ namespace ExoInstruments.Visualization
             // toward the ecliptic shortly after sunset genuinely sits on a brighter sky than one
             // taken at the pole, and the flat constant said otherwise by up to two magnitudes.
             double zodiacalVMag = ComputeZodiacalVMagPerArcsec2(inputs.LineOfSight, inputs.HasLineOfSight);
-            double fluxSolar = Math.Pow(10.0, -0.4 * zodiacalVMag) * transmission;
+            double fluxZodiacal = Math.Pow(10.0, -0.4 * zodiacalVMag) * transmission;
             LastZodiacalVMagPerArcsec2 = zodiacalVMag;
 
             // Moonlight and twilight are both sunlight scattered WITHIN the atmosphere, so the
             // extinction along the line of sight is already part of the measured surface
             // brightness the model is calibrated against and is not applied again.
-            fluxSolar = SkyBrightnessModel.AddMagnitude(fluxSolar, SkyBrightnessModel.MoonlightVMagPerArcsec2(inputs.MoonSkyExcess));
-            if (haveSunAlt) fluxSolar = SkyBrightnessModel.AddMagnitude(fluxSolar, SkyBrightnessModel.TwilightVMagPerArcsec2(sunAltDeg));
+            double fluxMoon = SkyBrightnessModel.AddMagnitude(0.0, SkyBrightnessModel.MoonlightVMagPerArcsec2(inputs.MoonSkyExcess));
+            double fluxTwilight = haveSunAlt
+                ? SkyBrightnessModel.AddMagnitude(0.0, SkyBrightnessModel.TwilightVMagPerArcsec2(sunAltDeg)) : 0.0;
 
             // Cloud veiling: cloud scatters ground and sky light back down, which is why an
             // overcast night sky is brighter than a clear one rather than darker. Modelled as a
             // multiplier on the sky that is already there, since that light is its source; so it
-            // applies to both groups alike.
+            // applies to every term alike.
             double veiling = 1.0 + cloudCoverage * CloudVeilingSkyGain;
-            fluxSolar *= veiling;
+            fluxZodiacal *= veiling;
+            fluxMoon *= veiling;
+            fluxTwilight *= veiling;
 
             // The response is used without extinction here and the transmission above is applied
             // per term instead, since each of the four is attenuated differently.
             double area = RealApertureAreaCm2();
             double nd = NdFilterTransmission(NdFilter);
+            double sun = SourceSpectra.SolarPhotosphereTemperatureK;
             double airglowPerSecond = Airglow.ElectronsPerPixelPerSecond(
                 inputs.Response, inputs.PlateScaleArcsec, area, zenithAngleDeg) * nd * veiling;
             double perSecond = airglowPerSecond
               + SkyBrightnessModel.ElectronsPerPixelPerSecond(
-                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxSolar),
-                    inputs.PlateScaleArcsec, inputs.Response, area, nd,
-                    SourceSpectra.SolarPhotosphereTemperatureK);
+                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxZodiacal),
+                    inputs.PlateScaleArcsec, inputs.Response, area, nd, sun)
+              + SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxMoon),
+                    inputs.PlateScaleArcsec, inputs.Response, area, nd, sun,
+                    SkyBrightnessModel.MoonlitSkyShape(Spec.SiteAltitudeMeters))
+              + SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                    SkyBrightnessModel.FluxToMagPerArcsec2(fluxTwilight),
+                    inputs.PlateScaleArcsec, inputs.Response, area, nd, sun,
+                    SkyBrightnessModel.TwilightSkyShape);
 
             inputs.SkyElectronsPerPixel = perSecond * inputs.ExposureSeconds;
 
@@ -2652,7 +2663,8 @@ namespace ExoInstruments.Visualization
             // For the reported V surface brightness the airglow's own V-band equivalent stands in
             // for the retired flat term; the harness checks it reproduces the classical 21.7.
             double fluxFlat = Math.Pow(10.0, -0.4 * Airglow.VBandMagPerArcsec2(zenithAngleDeg)) * veiling;
-            LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat + fluxSolar);
+            LastSkyBrightnessVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(
+                fluxFlat + fluxZodiacal + fluxMoon + fluxTwilight);
         }
 
         // How much brighter cloud makes the sky, at full coverage. Cloud is lit from below by the same

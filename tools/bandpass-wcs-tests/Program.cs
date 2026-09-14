@@ -55,6 +55,7 @@ class Program
         TestPupilDiffraction();
         TestSpiderKernels();
         TestFilterCurves();
+        TestScatteredSkyColour();
         TestGaiaPhotometry();
         TestGaiaCatalogueFormat();
         TestInstalledGaiaCatalogue();
@@ -925,6 +926,64 @@ class Program
         Check("the detector suppresses the filter's near-infrared red leak",
               leakThroughQe < 0.5 * leakInFilter,
               $"integrated 900-1200 nm leak drops {(1 - leakThroughQe / Math.Max(leakInFilter, 1e-30)) * 100:F1}% once the CCD's QE curve is applied");
+
+        Console.WriteLine();
+    }
+
+    // ------------------------------------------------------------------ Scattered sky colour
+    //
+    // Moonlight and twilight are sunlight the air has scattered, so neither keeps the solar shape. Both shapes are 1
+    // at V: the published V surface brightness still sets the level and only the colour moves.
+
+    static void TestScatteredSkyColour()
+    {
+        Console.WriteLine("Scattered sky colour (moonlight, twilight)");
+
+        const double Sun = SourceSpectra.SolarPhotosphereTemperatureK;
+        var spec = VisualTelescopeCatalog.Fors2Vlt;
+        var moon = SkyBrightnessModel.MoonlitSkyShape(spec.SiteAltitudeMeters);
+        double v = StellarPhotometry.JohnsonVWavelengthMeters;
+        Check("both shapes are exactly 1 at V, so the V anchor is untouched",
+              Math.Abs(moon(v) - 1.0) < 1e-12 && Math.Abs(SkyBrightnessModel.TwilightSkyShape(v) - 1.0) < 1e-12,
+              $"moon {moon(v):F12}, twilight {SkyBrightnessModel.TwilightSkyShape(v):F12}");
+
+        // Electrons against a solar-shaped sky of the same V brightness, through FORS2's measured B, V, R and a
+        // Bessell-width I top-hat.
+        var responses = new[] {
+            ("B", new SystemResponse(spec.BlueCentralWavelengthNm * 1e-9, spec.BlueBandwidthAngstrom, spec.OpticsTransmission,
+                                     FilterCurves.Fors2B, spec.QuantumEfficiencyCurve, spec.QuantumEfficiency, 1.0, spec.SiteAltitudeMeters)),
+            ("V", new SystemResponse(spec.GreenCentralWavelengthNm * 1e-9, spec.GreenBandwidthAngstrom, spec.OpticsTransmission,
+                                     FilterCurves.Fors2V, spec.QuantumEfficiencyCurve, spec.QuantumEfficiency, 1.0, spec.SiteAltitudeMeters)),
+            ("R", new SystemResponse(spec.RedCentralWavelengthNm * 1e-9, spec.RedBandwidthAngstrom, spec.OpticsTransmission,
+                                     FilterCurves.Fors2R, spec.QuantumEfficiencyCurve, spec.QuantumEfficiency, 1.0, spec.SiteAltitudeMeters)),
+            ("I", GreyResponse(798e-9, 1500.0, 1.0, 1.0)),
+        };
+        var moonRatio = new double[responses.Length];
+        var twilightRatio = new double[responses.Length];
+        Console.WriteLine("         band   moonlit / solar   twilight / solar");
+        for (int i = 0; i < responses.Length; i++)
+        {
+            SystemResponse r = responses[i].Item2;
+            double solar = r.EffectiveWidthAngstromForTemperatureNoExtinction(Sun);
+            moonRatio[i] = r.EffectiveWidthAngstromForTemperatureNoExtinction(Sun, moon) / solar;
+            twilightRatio[i] = r.EffectiveWidthAngstromForTemperatureNoExtinction(Sun, SkyBrightnessModel.TwilightSkyShape) / solar;
+            Console.WriteLine($"         {responses[i].Item1,-4}{moonRatio[i],14:F3}{twilightRatio[i],19:F3}");
+        }
+
+        Check("moonlight is bluer than the sunlight it scatters",
+              moonRatio[0] > 1.2 && moonRatio[2] < 0.9 && moonRatio[3] < moonRatio[2],
+              $"B x{moonRatio[0]:F2}, R x{moonRatio[2]:F2}, I x{moonRatio[3]:F2}");
+
+        // Patat et al. (2006) Table 1 at zeta = 100 deg: B 17.870, V 18.005, I 16.730; their Sun has B-V 0.65, V-I 0.81.
+        double patatBv = (11.84 + 1.411 * 5 - 0.041 * 25) - (11.84 + 1.518 * 5 - 0.057 * 25) - 0.65;
+        double patatVi = (11.84 + 1.518 * 5 - 0.057 * 25) - (10.93 + 1.470 * 5 - 0.062 * 25) - 0.81;
+        double modelBv = -2.5 * Math.Log10(twilightRatio[0] / twilightRatio[1]);
+        double modelVi = -2.5 * Math.Log10(twilightRatio[1] / twilightRatio[3]);
+        // Broad passbands average the offsets between band nodes, so integrated colours come back somewhat weaker.
+        Check("twilight B-V through FORS2's real curves lands on Patat et al.'s measured change",
+              Math.Abs(modelBv - patatBv) < 0.1, $"{modelBv:+0.00;-0.00} vs {patatBv:+0.00;-0.00} mag against sunlight");
+        Check("twilight is redder than sunlight in V-I, as measured, which no scattering law alone gives",
+              modelVi > 0.2 && Math.Abs(modelVi - patatVi) < 0.2, $"{modelVi:+0.00;-0.00} vs {patatVi:+0.00;-0.00} mag");
 
         Console.WriteLine();
     }

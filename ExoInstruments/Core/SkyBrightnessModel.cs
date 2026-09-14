@@ -118,6 +118,68 @@ namespace ExoInstruments.Core
             return FullMoonVMagPerArcsec2 - 2.5 * Math.Log10(moonSkyExcess);
         }
 
+        /// <summary>
+        /// Colour of the moonlit sky relative to the moonlight it scatters, as a factor equal to 1
+        /// at Johnson V. In the thin single-scattering limit the scattered light follows the
+        /// scattering optical depth (Jones et al. 2013, A&amp;A 560, A91, section 2.4), so the
+        /// site's own extinction curve, Rayleigh plus aerosol, is the shape. Left out: the
+        /// reddening of moonlight on its way in, and the different phase functions of the two.
+        /// </summary>
+        public static Func<double, double> MoonlitSkyShape(double siteAltitudeMeters)
+        {
+            double atV = AtmosphericImagingNoise.ExtinctionMagPerAirmassAt(
+                StellarPhotometry.JohnsonVWavelengthMeters, siteAltitudeMeters);
+            if (!(atV > 0.0)) return null;
+            return wavelengthMeters =>
+                AtmosphericImagingNoise.ExtinctionMagPerAirmassAt(wavelengthMeters, siteAltitudeMeters) / atV;
+        }
+
+        /// <summary>
+        /// Sun zenith distance the twilight colours are read at: the deepest point of Patat et
+        /// al.'s fits where the night sky still adds only a few percent.
+        /// </summary>
+        public const double TwilightColourSunZenithDistanceDeg = 100.0;
+
+        // Patat et al. (2006) Table 1, zenith twilight a0 + a1 x + a2 x^2 mag/arcsec^2 with x = zeta - 95 deg: U, B, V, R, I.
+        private static readonly double[,] TwilightFit =
+        {
+            { 11.78, 1.376, -0.039 },
+            { 11.84, 1.411, -0.041 },
+            { 11.84, 1.518, -0.057 },
+            { 11.40, 1.567, -0.064 },
+            { 10.93, 1.470, -0.062 },
+        };
+
+        // The Sun as the same paper quotes it (U-B 0.13, B-V 0.65, V-R 0.52, V-I 0.81), as each band minus V.
+        private static readonly double[] SunMinusV = { 0.78, 0.65, 0.0, -0.52, -0.81 };
+
+        // Bessell (2005) effective wavelengths, with V on the pipeline's own 5556 A anchor so the shape is 1 there.
+        private static readonly double[] TwilightBandNm = { 366.0, 438.0, 555.6, 641.0, 798.0 };
+
+        private static readonly SpectralCurve TwilightMinusSunMag = BuildTwilightMinusSun();
+
+        private static SpectralCurve BuildTwilightMinusSun()
+        {
+            double x = TwilightColourSunZenithDistanceDeg - 95.0;
+            var mag = new double[TwilightBandNm.Length];
+            for (int i = 0; i < mag.Length; i++)
+                mag[i] = TwilightFit[i, 0] + TwilightFit[i, 1] * x + TwilightFit[i, 2] * x * x;
+
+            var offsets = new double[mag.Length];
+            for (int i = 0; i < mag.Length; i++) offsets[i] = (mag[i] - mag[2]) - SunMinusV[i];
+            return new SpectralCurve(TwilightBandNm, offsets);
+        }
+
+        /// <summary>
+        /// Colour of the twilight sky relative to sunlight, as a factor equal to 1 at Johnson V,
+        /// from the UBVRI colours Patat et al. (2006) measured at Paranal: bluer than the Sun in U
+        /// and B, redder in I. Interpolated in magnitudes between bands, held flat beyond them.
+        /// </summary>
+        public static double TwilightSkyShape(double wavelengthMeters)
+        {
+            return Math.Pow(10.0, -0.4 * TwilightMinusSunMag.At(wavelengthMeters));
+        }
+
         /// <summary>Adds a surface brightness to a running total held as a flux ratio. +Infinity contributes nothing.</summary>
         public static double AddMagnitude(double fluxSum, double magPerArcsec2)
         {
@@ -149,23 +211,23 @@ namespace ExoInstruments.Core
         /// already. Folding one extinction factor into all four would erase that distinction. See
         /// the caller in SolarSystemCameraTexture.GatherSkyBackground.
         ///
-        /// spectrumTeffK sets the spectral shape the summed sky is integrated with. The night sky
-        /// is not one source: moonlight, zodiacal light and twilight are all scattered sunlight
-        /// and genuinely have the solar shape (SourceSpectra.SolarPhotosphereTemperatureK), while
-        /// airglow is line emission with no continuum shape this pipeline could integrate. Pass 0
-        /// to integrate flat and assume nothing.
+        /// spectrumTeffK sets the spectral shape the term is integrated with. The night sky is not
+        /// one source: zodiacal light is sunlight reflected by dust and keeps the solar shape
+        /// (SourceSpectra.SolarPhotosphereTemperatureK), moonlight and twilight are sunlight the
+        /// air has recoloured (pass MoonlitSkyShape or TwilightSkyShape as relativeShape), and
+        /// airglow has its own measured spectrum (see Airglow). Pass 0 to integrate flat.
         /// </summary>
         public static double ElectronsPerPixelPerSecond(
             double vMagPerArcsec2, double plateScaleArcsecPerPixel,
             SystemResponse response, double apertureAreaCm2,
-            double transmission, double spectrumTeffK)
+            double transmission, double spectrumTeffK, Func<double, double> relativeShape = null)
         {
             if (response == null) return 0.0;
             if (double.IsPositiveInfinity(vMagPerArcsec2) || double.IsNaN(vMagPerArcsec2)) return 0.0;
             double pixelSolidAngleArcsec2 = plateScaleArcsecPerPixel * plateScaleArcsecPerPixel;
             if (pixelSolidAngleArcsec2 <= 0.0) return 0.0;
 
-            double width = response.EffectiveWidthAngstromForTemperatureNoExtinction(spectrumTeffK);
+            double width = response.EffectiveWidthAngstromForTemperatureNoExtinction(spectrumTeffK, relativeShape);
 
             double perArcsec2 = PhotonFluxModel.CollectedElectrons(
                 vMagPerArcsec2, width, apertureAreaCm2, 1.0) * Math.Max(0.0, transmission);

@@ -211,8 +211,8 @@ namespace ExoInstruments.Core
         // Sky electrons in one pixel over the exposure, summed from the published surface brightnesses in
         // SkyBrightnessModel and attenuated per term. This mirrors SolarSystemCameraTexture.GatherSkyBackground
         // deliberately, so the transit and imaging halves agree about how bright the night sky is. The terms
-        // are summed in two spectral groups because they do not share a spectrum: moonlight and zodiacal light
-        // are sunlight scattered off something and carry the solar shape, while airglow is atmospheric line
+        // are integrated separately because they do not share a spectrum: zodiacal light carries the solar
+        // shape, moonlight the bluer shape of sunlight the air has scattered, while airglow is atmospheric line
         // emission with no continuum this pipeline could integrate and is integrated flat. Twilight is not
         // included: a transit run is scheduled inside the observing window ImagingObservingConditions defines,
         // which already requires the Sun below astronomical twilight, where SkyBrightnessModel's own twilight
@@ -251,26 +251,30 @@ namespace ExoInstruments.Core
                             * transmission;
 
             // Zodiacal light originates outside the atmosphere: simply attenuated by it.
-            double fluxSolar = Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
+            double fluxZodiacalAttenuated = Math.Pow(10.0, -0.4 * SkyBrightnessModel.ZodiacalVMagPerArcsec2) * transmission;
 
             // Moonlight is sunlight scattered WITHIN the atmosphere, so the extinction along the
             // line of sight is already inside the measured surface brightness Krisciunas & Schaefer
             // calibrated against, and is not applied a second time.
-            fluxSolar = SkyBrightnessModel.AddMagnitude(
-                fluxSolar, SkyBrightnessModel.MoonlightVMagPerArcsec2(moonSkyExcess));
+            double fluxMoon = SkyBrightnessModel.AddMagnitude(
+                0.0, SkyBrightnessModel.MoonlightVMagPerArcsec2(moonSkyExcess));
 
-            summedVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat + fluxSolar);
+            summedVMagPerArcsec2 = SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat + fluxZodiacalAttenuated + fluxMoon);
 
             // The response is used in its no-extinction form because transmission has been applied
             // per term above; folding one factor into all of them would erase the distinction.
+            double sun = SourceSpectra.SolarPhotosphereTemperatureK;
             double perSecond =
                   SkyBrightnessModel.ElectronsPerPixelPerSecond(
                       SkyBrightnessModel.FluxToMagPerArcsec2(fluxFlat),
                       plateScale, response, areaCm2, 1.0, 0.0)
                 + SkyBrightnessModel.ElectronsPerPixelPerSecond(
-                      SkyBrightnessModel.FluxToMagPerArcsec2(fluxSolar),
-                      plateScale, response, areaCm2, 1.0,
-                      SourceSpectra.SolarPhotosphereTemperatureK);
+                      SkyBrightnessModel.FluxToMagPerArcsec2(fluxZodiacalAttenuated),
+                      plateScale, response, areaCm2, 1.0, sun)
+                + SkyBrightnessModel.ElectronsPerPixelPerSecond(
+                      SkyBrightnessModel.FluxToMagPerArcsec2(fluxMoon),
+                      plateScale, response, areaCm2, 1.0, sun,
+                      SkyBrightnessModel.MoonlitSkyShape(instrument.SiteAltitudeMeters));
 
             return perSecond * exposureSeconds;
         }

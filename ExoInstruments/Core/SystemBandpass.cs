@@ -326,6 +326,16 @@ namespace ExoInstruments.Core
             return LookUp(teffK, tableWidthAngstromNoExtinction, EffectiveWidthAngstromFlatNoExtinction);
         }
 
+        /// <summary>
+        /// The same blackbody reshaped by relativeShape, a factor equal to 1 at Johnson V: sunlight after the sky has
+        /// scattered it (see SkyBrightnessModel). Not tabulated, one quadrature per call.
+        /// </summary>
+        public double EffectiveWidthAngstromForTemperatureNoExtinction(double teffK, Func<double, double> relativeShape)
+        {
+            if (relativeShape == null) return EffectiveWidthAngstromForTemperatureNoExtinction(teffK);
+            return Integrate(teffK, false, 0.0, relativeShape);
+        }
+
         private double LookUp(double teffK, double[] table, double flatFallback)
         {
             if (teffK <= 0.0 || double.IsNaN(teffK)) return flatFallback;
@@ -345,7 +355,8 @@ namespace ExoInstruments.Core
 
         // Simpson's rule over the filter's top-hat support. Returns Angstrom, since that is the unit the V-band
         // photon flux density (948 photons/cm^2/s/Angstrom) is quoted per.
-        private double Integrate(double teffK, bool includeExtinction, double eBv = 0.0)
+        private double Integrate(double teffK, bool includeExtinction, double eBv = 0.0,
+                                 Func<double, double> relativeShape = null)
         {
             if (greyTransmission <= 0.0) return 0.0;
 
@@ -377,7 +388,9 @@ namespace ExoInstruments.Core
             {
                 double lambda = start + i * stepMeters;
                 double weight = (i == 0 || i == steps) ? 1.0 : (i % 2 == 1 ? 4.0 : 2.0);
-                sum += weight * Integrand(lambda, teffK, includeExtinction, eBv);
+                double value = Integrand(lambda, teffK, includeExtinction, eBv);
+                if (relativeShape != null) value *= relativeShape(lambda);
+                sum += weight * value;
             }
 
             double integralMeters = sum * stepMeters / 3.0;
@@ -430,9 +443,10 @@ namespace ExoInstruments.Core
         /// planetary quantities").
         ///
         /// Used as the spectral shape of every source in the frame that shines by reflected
-        /// sunlight: the planets and moons the camera photographs, and the moonlight, zodiacal
-        /// and twilight terms of the sky background, all of which are sunlight scattered off
-        /// something. This is a real improvement over treating them as flat: a solar spectrum is
+        /// sunlight: the planets and moons the camera photographs, and the zodiacal light. The
+        /// sky's moonlight and twilight start from it too, recoloured by the air that scattered
+        /// them (see SkyBrightnessModel). This is a real improvement over treating them as flat:
+        /// a solar spectrum is
         /// measurably not flat across a 7700 Angstrom band, and its shape is not in question the
         /// way an individual body's own colour is.
         ///
