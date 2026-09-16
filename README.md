@@ -505,6 +505,8 @@ source's terms, for non-commercial use, with the credit it asks for:
 | `GalaxyCatalog.galcat` | HyperLEDA (Makarov et al. 2014) | Non-commercial use |
 | `GalaxyImages.galimg` | DESI Legacy Imaging Surveys DR10, Pan-STARRS1 DR1, SDSS DR9 and DES DR2, through CDS hips2fits and STScI | CC BY 4.0 for the Legacy Surveys, each other survey's own terms, and ODbL 1.0 for the CDS HiPS |
 
+| LORRI textures and 3d model | linecraftman | All Rights Reserved |
+
 The full credits, the acknowledgement each survey asks for and what was changed in each file are in
 [NOTICE-sky-data.md](./NOTICE-sky-data.md), which ships with the mod and with every data release. No
 data provider endorses ExoInstruments.
